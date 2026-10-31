@@ -3,16 +3,34 @@
 Результат: `https://<домен>` с HTTPS, закрытый паролем, автоматически обновляется при каждом push в `main` после зелёных тестов.
 Стоимость: ВМ 2 vCPU / 4 ГБ / 30 ГБ SSD, прерываемая не нужна — около 1 500–2 500 ₽/мес (зависит от типа ядер); публичный IP ~ 200 ₽/мес.
 
-## Текущий стенд (развёрнут 31.10.2026)
+## Текущий стенд (перенесён 31.10.2026 в Timeweb Cloud)
 
 | | |
 | --- | --- |
-| Адрес | `https://crm.dobrov.pro` (Let's Encrypt, A-запись `crm` у регистратора R01 → 158.160.149.150); запасной вход `https://158.160.149.150` — самоподписанный сертификат, браузер предупредит |
+| Адрес | `https://crm.dobrov.pro` (A-запись `crm` у R01 → 177.177.212.28); запасной вход `https://177.177.212.28` — самоподписанный сертификат |
 | Вход | basic auth, логин `evgeniy@dobrov.pro`, пароль — у владельца стенда (не в репозитории) |
-| ВМ | `gsho-test`, облако cloud-drizzle-520 / каталог zadachi, ru-central1-d, Ubuntu 24.04, 2 vCPU (50 %), 4 ГБ, HDD 20 ГБ, статический IP 158.160.149.150; ≈ 2 300 ₽/мес |
-| SSH | `ssh -i gsho_admin ubuntu@158.160.149.150` (ключ `gsho_admin` — у владельца) |
+| Сервер | Timeweb Cloud, Новосибирск (nsk-1), Ubuntu 24.04, 2×3.3 ГГц, 4 ГБ, NVMe 50 ГБ, бэкапы Timeweb; ≈ 4 100 ₽/мес, оплата почасовая |
+| SSH | `ssh -i gsho_admin ubuntu@177.177.212.28` (ключ `gsho_admin` — у владельца) |
 
-Смена домена: A-запись `<имя> → 158.160.149.150`, затем на сервере в `/opt/gsho-costing/.env` заменить `DOMAIN=` и выполнить `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy`. Не меняйте DOMAIN до появления DNS-записи: 5 неудачных проверок за час — блокировка Let's Encrypt на час.
+Почему не Yandex Cloud: 31.10.2026 входящий трафик на ВМ из интернета перестал доходить (платформа работала в ограниченном режиме после октябрьских аварий дата-центров), смена публичного адреса не помогла. Скрипт `deploy/yandex-cloud-setup.sh` при этом универсальный: стенд на Timeweb поднят им же через cloud-init при создании сервера.
+
+Смена домена: A-запись `<имя> → IP сервера`, затем в `/opt/gsho-costing/.env` заменить `DOMAIN=` и выполнить `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy`. Не меняйте DOMAIN до появления DNS-записи: 5 неудачных проверок за час — блокировка Let's Encrypt на час.
+
+### Развёртывание на новом сервере одной вставкой (cloud-init)
+
+В панели провайдера при создании сервера (Ubuntu 22.04/24.04) вставьте в поле cloud-init:
+
+```yaml
+#cloud-config
+runcmd:
+  - - bash
+    - -c
+    - |
+      curl -fsSL https://raw.githubusercontent.com/falconitpro/gsho-costing/main/deploy/yandex-cloud-setup.sh -o /root/setup.sh
+      bash /root/setup.sh --domain crm.example.ru --user <логин> --password '<пароль>' > /var/log/gsho-setup.log 2>&1
+```
+
+Через 5–10 минут стенд работает; прогресс — `/var/log/gsho-setup.log`.
 
 ### Сертификат домена
 
