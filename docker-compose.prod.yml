@@ -2,10 +2,14 @@
 # Переменные (файл .env в корне): DOMAIN, POSTGRES_PASSWORD, ACME_EMAIL, BASIC_AUTH_USER, BASIC_AUTH_HASH
 services:
   frontend:
-    ports: []            # наружу смотрит только Caddy
+    build:
+      context: ./frontend
+      args:              # registry.npmjs.org (Cloudflare) из РФ-облаков часто недоступен
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com/}
+    ports: !reset []     # наружу смотрит только Caddy
     expose: ["80"]
   backend:
-    ports: []
+    ports: !reset []
     expose: ["8000"]
     restart: unless-stopped
   db:
