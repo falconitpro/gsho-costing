@@ -9,6 +9,11 @@ services:
     ports: !reset []     # наружу смотрит только Caddy
     expose: ["80"]
   backend:
+    build:
+      context: ./backend
+      args:              # deb.debian.org из Yandex Cloud не отвечает — зеркало Яндекса
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-http://mirror.yandex.ru/debian}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     ports: !reset []
     expose: ["8000"]
     restart: unless-stopped
