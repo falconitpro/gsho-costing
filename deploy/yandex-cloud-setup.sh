@@ -9,10 +9,27 @@ DOMAIN=""; EMAIL=""; PASSWORD=""; DEPLOY_KEY=""; REPO="https://github.com/falcon
 while [ $# -gt 0 ]; do case "$1" in
   --domain) DOMAIN="$2"; shift 2;; --email) EMAIL="$2"; shift 2;; --password) PASSWORD="$2"; shift 2;;
   --deploy-key) DEPLOY_KEY="$2"; shift 2;; --repo) REPO="$2"; shift 2;; *) echo "неизвестный параметр $1"; exit 1;; esac; done
-[ -n "$DOMAIN" ] && [ -n "$PASSWORD" ] || { echo "нужны --domain и --password"; exit 1; }
+if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "auto" ]; then   # без своего домена: <ip>.sslip.io (HTTPS тоже работает)
+  IP=$(curl -fsS -m 5 -H Metadata-Flavor:Google http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip || curl -fsS -m 5 https://ifconfig.me)
+  DOMAIN="$(echo "$IP" | tr . -).sslip.io"
+fi
+[ -n "$PASSWORD" ] || { echo "нужен --password"; exit 1; }
 
 echo "== Docker"
-if ! command -v docker >/dev/null; then curl -fsSL https://get.docker.com | sh; fi
+# download.docker.com и Docker Hub недоступны из части РФ-сетей: ставим docker из репозитория Ubuntu и включаем зеркала реестра
+if ! command -v docker >/dev/null; then
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io docker-compose-v2 git openssl >/dev/null \
+    || curl -fsSL https://get.docker.com | sh
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-buildx >/dev/null 2>&1 || true
+fi
+if [ ! -f /etc/docker/daemon.json ]; then
+  install -d /etc/docker
+  cat > /etc/docker/daemon.json <<'JSON'
+{ "registry-mirrors": ["https://mirror.gcr.io", "https://dockerhub.timeweb.cloud"] }
+JSON
+  systemctl restart docker || true
+fi
 systemctl enable --now docker
 
 echo "== пользователь deploy"
