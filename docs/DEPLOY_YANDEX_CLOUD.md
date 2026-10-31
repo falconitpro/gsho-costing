@@ -7,12 +7,12 @@
 
 | | |
 | --- | --- |
-| Адрес | `https://158-160-149-150.sslip.io` (HTTPS Let's Encrypt; своего домена пока нет — sslip.io превращает IP в имя) |
-| Вход | логин `berghaus`, пароль — у владельца стенда (не в репозитории) |
+| Адрес | `https://crm.dobrov.pro` (Let's Encrypt, A-запись `crm` у регистратора R01 → 158.160.149.150); запасной вход `https://158.160.149.150` — самоподписанный сертификат, браузер предупредит |
+| Вход | basic auth, логин `evgeniy@dobrov.pro`, пароль — у владельца стенда (не в репозитории) |
 | ВМ | `gsho-test`, облако cloud-drizzle-520 / каталог zadachi, ru-central1-d, Ubuntu 24.04, 2 vCPU (50 %), 4 ГБ, HDD 20 ГБ, статический IP 158.160.149.150; ≈ 2 300 ₽/мес |
 | SSH | `ssh -i gsho_admin ubuntu@158.160.149.150` (ключ `gsho_admin` — у владельца) |
 
-Переход на свой домен: A-запись `test.berghaus.ru → 158.160.149.150`, затем на сервере в `/opt/gsho-costing/.env` заменить `DOMAIN=` и выполнить `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy`.
+Смена домена: A-запись `<имя> → 158.160.149.150`, затем на сервере в `/opt/gsho-costing/.env` заменить `DOMAIN=` и выполнить `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy`. Не меняйте DOMAIN до появления DNS-записи: 5 неудачных проверок за час — блокировка Let's Encrypt на час.
 
 ### Особенности сети в Yandex Cloud (учтены в скриптах)
 
