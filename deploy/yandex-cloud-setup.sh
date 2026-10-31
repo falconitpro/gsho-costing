@@ -86,6 +86,23 @@ WantedBy=timers.target
 UNIT
 systemctl daemon-reload && systemctl enable --now gsho-autodeploy.timer
 git config --system --add safe.directory /opt/gsho-costing
+cat > /etc/systemd/system/gsho-cert.service <<UNIT
+[Unit]
+Description=GSHO certificate from Yandex Certificate Manager
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/gsho-costing/deploy/fetch-cert.sh
+UNIT
+cat > /etc/systemd/system/gsho-cert.timer <<UNIT
+[Unit]
+Description=GSHO certificate refresh daily
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=12h
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload && systemctl enable --now gsho-cert.timer
 
 echo "== запуск"
 sudo -u deploy bash -c "cd /opt/gsho-costing && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build"

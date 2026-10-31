@@ -19,6 +19,8 @@
 
 # Основной адрес: сертификат Let's Encrypt выпускается автоматически, когда DNS указывает на сервер
 {$DOMAIN} {
+	# если сертификат выдан Yandex Certificate Manager (deploy/fetch-cert.sh) — здесь появится директива tls
+	import /etc/caddy/site-tls/*.caddy
 	import app
 }
 

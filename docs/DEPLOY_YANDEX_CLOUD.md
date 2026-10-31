@@ -14,6 +14,16 @@
 
 Смена домена: A-запись `<имя> → 158.160.149.150`, затем на сервере в `/opt/gsho-costing/.env` заменить `DOMAIN=` и выполнить `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy`. Не меняйте DOMAIN до появления DNS-записи: 5 неудачных проверок за час — блокировка Let's Encrypt на час.
 
+### Сертификат домена
+
+Let's Encrypt с HTTP-проверкой со стенда не работает: его серверы проверки за рубежом не могут подключиться к ВМ («Timeout during connect»). Поэтому сертификат выпускает **Yandex Certificate Manager** (тот же Let's Encrypt, проверка через DNS):
+
+1. `yc certificate-manager certificate request --name crm-dobrov-pro --domains crm.dobrov.pro --challenge dns` → CNAME `_acme-challenge.crm` → `<id>.cm.yandexcloud.net.` у регистратора (R01). Запись постоянная — нужна и для автопродления.
+2. Сервисный аккаунт ВМ с ролью `certificate-manager.certificates.downloader`; `CM_CERT_ID=<id>` в `/opt/gsho-costing/.env`.
+3. Таймер `gsho-cert.timer` (2 раза в сутки) запускает `deploy/fetch-cert.sh`: скачивает сертификат по API, кладёт в `deploy/certs/`, подключает в Caddy и перезагружает его.
+
+Код стенд получает по SSH (deploy key «только чтение» в настройках репозитория): HTTPS-загрузка с GitHub из Yandex Cloud периодически зависает.
+
 ### Особенности сети в Yandex Cloud (учтены в скриптах)
 
 - `download.docker.com` недоступен → Docker ставится из репозитория Ubuntu (`docker.io`, `docker-compose-v2`), для Docker Hub включены зеркала (`mirror.gcr.io`, `dockerhub.timeweb.cloud`) в `/etc/docker/daemon.json`.

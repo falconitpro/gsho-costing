@@ -9,3 +9,6 @@ frontend/dist/
 .DS_Store
 scripts/start-local.log
 .env
+
+deploy/certs/
+deploy/caddy-tls/*.caddy

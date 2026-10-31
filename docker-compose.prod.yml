@@ -31,6 +31,8 @@ services:
       BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?set BASIC_AUTH_HASH (bcrypt)}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/caddy-tls:/etc/caddy/site-tls:ro
+      - ./deploy/certs:/certs:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on: [frontend, backend]
