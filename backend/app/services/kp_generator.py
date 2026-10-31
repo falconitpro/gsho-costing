@@ -24,6 +24,7 @@ import os
 ASSETS = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 DEFAULT_LOGO = os.path.join(ASSETS, "logo_main.png")
 DEFAULT_LOGO_MONO = os.path.join(ASSETS, "logo_mono.png")
+DEFAULT_LOGO_DARK_BG = os.path.join(ASSETS, "logo_dark_bg.png")   # версия «на тёмный фон» — для тёмных блоков титула
 
 ACCENT = RGBColor(0xFF, 0x31, 0x31)
 ACCENT_HEX = "FF3131"
@@ -128,9 +129,20 @@ def build_kp(data: KpData, path: str) -> str:
             doc.add_picture(logo, width=Mm(55))
         except Exception:   # pragma: no cover
             pass
+    # тёмный блок титула (бренд-бук): логотип «на тёмный фон» + заголовок
+    band = doc.add_table(rows=1, cols=1)
+    cell = band.rows[0].cells[0]
+    _set_cell_bg(cell, "000000")
+    cp = cell.paragraphs[0]
+    if os.path.exists(DEFAULT_LOGO_DARK_BG):
+        try:
+            cp.add_run().add_picture(DEFAULT_LOGO_DARK_BG, width=Mm(45))
+        except Exception:   # pragma: no cover
+            pass
+    cp2 = cell.add_paragraph()
+    _run(cp2, "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ", bold=True, color=RGBColor(0xFF, 0xFF, 0xFF), size=22)
+    cell.add_paragraph()
     p = doc.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    _run(p, "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ", bold=True, color=ACCENT, size=22)
     p = doc.add_paragraph()
     _run(p, f"№ {data.kp_no} от {data.kp_date} · действительно до {data.valid_until}", size=11)
     p = doc.add_paragraph()

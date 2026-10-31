@@ -22,7 +22,7 @@ def _data():
 def test_kp_builds_and_has_no_cost_leak(tmp_path):
     p = build_kp(_data(), str(tmp_path / "kp.docx"))
     doc = Document(p)
-    text = "\n".join(x.text for x in doc.paragraphs)
+    text = "\n".join(x.text for x in doc.paragraphs) + "\n".join(c.text for t in doc.tables for r in t.rows for c in r.cells)
     assert "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ" in text and "±5 %" in text
     assert any("120 000 000" in c.text for t in doc.tables for r in t.rows for c in r.cells)
 
