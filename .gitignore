@@ -8,3 +8,4 @@ frontend/dist/
 *.zip
 .DS_Store
 scripts/start-local.log
+.env

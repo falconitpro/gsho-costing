@@ -1,5 +1,11 @@
+# Тестовый стенд: HTTPS автоматически (Let's Encrypt), базовая авторизация на вход — пока на стенде dev-вход без пароля.
+# BASIC_AUTH_HASH — bcrypt-хеш пароля (создать: docker run --rm caddy:2 caddy hash-password --plaintext 'пароль').
 {$DOMAIN} {
     encode gzip
+    @protected not path /api/health
+    basic_auth @protected {
+        {$BASIC_AUTH_USER:berghaus} {$BASIC_AUTH_HASH}
+    }
     handle /api/* {
         reverse_proxy backend:8000
     }

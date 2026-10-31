@@ -2,6 +2,8 @@
 
 ## Развёртывание
 
+Облачный тестовый стенд (Yandex Cloud): см. `DEPLOY_YANDEX_CLOUD.md`. Локально:
+
 ```bash
 cp backend/.env.example backend/.env      # заполнить секреты
 docker compose up --build -d

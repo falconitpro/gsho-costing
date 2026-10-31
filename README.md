@@ -36,6 +36,10 @@ gsho-costing/
 
 `backend/app/templates/kp_template.docx` — корпоративный шаблон КП в бренд-буке (структура: титул, состав и стоимость, доп. оборудование, коммерческие условия, техника, подпись). Во второй очереди генератор КП переводится на этот DOCX с плейсхолдерами (docxtpl); `scripts/restyle_kp_template.py` переоформляет любой исходный DOCX заказчика в этот стиль, сохраняя структуру.
 
+## Тестовый стенд в облаке
+
+Развёртывание в Yandex Cloud с HTTPS, паролем и автодеплоем из GitHub — `docs/DEPLOY_YANDEX_CLOUD.md` (одна команда на сервере + два секрета в GitHub).
+
 ## Быстрый старт
 
 На Mac с Docker Desktop: двойной клик по `scripts/start-local.command` (первый запуск) и `scripts/rebuild.command` (обновить из GitHub и пересобрать).
