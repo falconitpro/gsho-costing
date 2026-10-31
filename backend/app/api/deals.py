@@ -7,7 +7,7 @@ import tempfile
 from datetime import date
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -121,7 +121,7 @@ def get_deal(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
 
 
 def _deal_dict(deal: Deal) -> dict:
-    return {"client_id": deal.client_id, "positions": [serialize(p) for p in deal.positions], "client_payments": deal.client_payments,
+    return {"client_id": deal.client_id, "positions": [{**serialize(p), "factory": p.factory_id} for p in deal.positions], "client_payments": deal.client_payments,
             "variants": deal.variants, "service_flag": deal.service_flag, "target_hours": deal.target_hours}
 
 
@@ -254,7 +254,7 @@ async def rfq_preview(deal_id: str, file: UploadFile = File(...), db: Session = 
 
 
 @router.post("/{deal_id}/rfq/import", status_code=201)
-async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: str = "", db: Session = Depends(get_db),
+async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: str = Form(""), db: Session = Depends(get_db),
                      user: CurrentUser = Depends(get_current_user)):
     """Разбирает файл, создаёт позицию, пополняет каталог и историю цен, кладёт файл в 01 Запрос и RFQ."""
     deal = get_deal_or_404(db, deal_id, user)

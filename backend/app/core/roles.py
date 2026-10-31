@@ -40,7 +40,7 @@ PRICE_VISIBLE_ROLES = {Role.CD, Role.FD, Role.GD, Role.MANAGER, Role.OBSERVER}
 COST_FIELDS = {
     "cost", "cost_total_rub", "cost_total_base_ccy", "items_rub", "items_fx", "margin_pct", "markup_pct",
     "profit_rub", "profit_before_finance_rub", "cash_gap", "cashflow", "finance_breakdown", "sensitivity",
-    "customs_value_rub", "total_rub", "positions", "calc_result", "approval", "fx_components",
+    "customs_value_rub", "total_rub", "calc_result", "approval", "fx_components",
     "logistics", "service_calc", "history_checks", "overhead_pct_override", "overhead_override_comment",
     "avg_margin_pct", "sum_margin_rub",
 }

@@ -416,7 +416,10 @@ class ExcelExporter:
         row += 1
         for c in self.meta.get("logistics_comments") or []:
             for j, k in enumerate(["item", "ref", "value", "history", "history_avg", "deviation_pct", "comment"]):
-                ws.cell(row, 1 + j, c.get(k))
+                v = c.get(k)
+                if isinstance(v, (list, dict)):
+                    v = "; ".join(f"{h.get('amount')} ({h.get('on')})" for h in v) if isinstance(v, list) else str(v)
+                ws.cell(row, 1 + j, v)
             row += 1
         _widths(ws, {1: 24, 2: 24, 3: 16, 4: 30, 5: 16, 6: 14, 7: 40, 8: 40})
 

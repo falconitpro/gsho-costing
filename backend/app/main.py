@@ -33,7 +33,7 @@ async def _daily_jobs() -> None:
                 today = date.today()
                 if not db.scalar(select(FxRate).where(FxRate.on == today, FxRate.source == "cbr")):
                     try:
-                        rates = adapters.fx_source().daily(today)
+                        rates = await asyncio.to_thread(adapters.fx_source().daily, today)
                         for cur, rate in rates.items():
                             if cur != "RUB":
                                 db.add(FxRate(on=today, currency=cur, rate=rate, source="cbr"))
