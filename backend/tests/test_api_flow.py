@@ -142,8 +142,11 @@ def test_low_margin_goes_to_fd_visa(client, tmp_path):
     _ok(client.patch(f"/api/deals/{did}", headers=H(MGR), json={"client_payments": schemes[1]["lines"]}))
     var = _ok(client.post(f"/api/deals/{did}/variants", headers=H(MGR), json={"name": "V", "position_ids": [pos["id"]]}), 201)
     _ok(client.post(f"/api/deals/{did}/send-to-calc", headers=H(MGR)))
-    _ok(client.post(f"/api/deals/{did}/logistics/batches", headers=H(LOG), json={"items": {"intl_freight": {"amount": 60000, "currency": "CNY"},
-                                                                                    "broker_rub": 200000, "rf_delivery_rub": 500000}, "position_ids": [pos["id"]]}), 201)
+    # отклонение от истории (первая сделка дала 150 000) выше 15 % → без комментария 422, с комментарием — принимается
+    items = {"intl_freight": {"amount": 60000, "currency": "CNY"}, "broker_rub": 200000, "rf_delivery_rub": 500000}
+    assert client.post(f"/api/deals/{did}/logistics/batches", headers=H(LOG), json={"items": items, "position_ids": [pos["id"]]}).status_code == 422
+    items["comments"] = {"intl_freight": "одна машина, сборная партия", "broker_rub": "упрощённое оформление", "rf_delivery_rub": "ближний регион"}
+    _ok(client.post(f"/api/deals/{did}/logistics/batches", headers=H(LOG), json={"items": items, "position_ids": [pos["id"]]}), 201)
     _ok(client.put(f"/api/deals/{did}/logistics/positions/{pos['id']}", headers=H(LOG), json={"hs_code": "8429519000", "util_fee_rub": 600000}))
     assert _ok(client.post(f"/api/deals/{did}/logistics/complete", headers=H(LOG)))["status"] == "calc_ready"
     _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "margin", "value": 1.0}))
