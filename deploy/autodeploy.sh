@@ -8,7 +8,12 @@ timeout 60 git fetch -q origin main || exit 0   # GitHub из РФ иногда 
 LOCAL=$(git rev-parse HEAD); REMOTE=$(git rev-parse origin/main)
 [ "$LOCAL" = "$REMOTE" ] && exit 0
 # статус проверок коммита (публичный репозиторий — без токена)
-RUNS=$(curl -fsS -m 20 -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/commits/$REMOTE/check-runs?per_page=50") || exit 0
+RUNS=""
+for i in 1 2 3 4 5; do   # api.github.com из Yandex Cloud отвечает через раз — повторяем
+  RUNS=$(curl -fsS -m 10 -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/commits/$REMOTE/check-runs?per_page=50" 2>/dev/null) && break
+  sleep 3
+done
+[ -n "$RUNS" ] || exit 0
 STATE=$(printf '%s' "$RUNS" | python3 -c '
 import json,sys
 runs=[r for r in json.load(sys.stdin).get("check_runs",[]) if r["name"]!="deploy"]
