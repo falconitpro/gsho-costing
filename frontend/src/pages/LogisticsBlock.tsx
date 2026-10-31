@@ -10,9 +10,11 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const canEdit = me.roles.some((r) => r.code === "logistician" || r.code === "gd") && ["logistics_calc", "service_calc", "rework"].includes(deal.status);
   const [err, setErr] = useState("");
   const [hs, setHs] = useState<{ code: string; description: string; duty_pct: number; vat_pct: number; certification: string[] }[]>([]);
-  const [batch, setBatch] = useState({ name: `Партия ${deal.batches.length + 1}`, route: "завод → Маньчжурия → Забайкальск → пункт поставки", transport_units: 1, transit_days: 14, customs_days: 5, allocation: "cost",
+  const batches = deal.batches || [];
+  const positions = deal.positions || [];
+  const [batch, setBatch] = useState({ name: `Партия ${batches.length + 1}`, route: "завод → Маньчжурия → Забайкальск → пункт поставки", transport_units: 1, transit_days: 14, customs_days: 5, allocation: "cost",
     intl_freight: 0, intl_currency: "CNY", insurance_pct: 0.3, broker_rub: 0, rf_delivery_rub: 0, comment_freight: "", comment_broker: "", comment_rf: "" });
-  const [forms, setForms] = useState<Record<string, PosForm>>(() => Object.fromEntries(deal.positions.map((p) => {
+  const [forms, setForms] = useState<Record<string, PosForm>>(() => Object.fromEntries(positions.map((p) => {
     const l = (p.logistics || {}) as Partial<PosForm>;
     return [p.id, { domestic_logistics: (l.domestic_logistics as Money) || { amount: 0, currency: "CNY" }, export_formalities: (l.export_formalities as Money) || { amount: 0, currency: "CNY" },
       hs_code: l.hs_code || "", duty_pct: l.duty_pct != null ? String(l.duty_pct) : "", vat_pct: l.vat_pct != null ? String(l.vat_pct) : "20", hs_manual_comment: "",
@@ -26,7 +28,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
       await api.post(`/api/deals/${deal.id}/logistics/batches`, { name: batch.name, route: batch.route, transport_units: batch.transport_units, transit_days: batch.transit_days, customs_days: batch.customs_days, allocation: batch.allocation,
         items: { intl_freight: { amount: batch.intl_freight, currency: batch.intl_currency }, insurance_pct: batch.insurance_pct, broker_rub: batch.broker_rub, rf_delivery_rub: batch.rf_delivery_rub,
           comments: { intl_freight: batch.comment_freight, broker_rub: batch.comment_broker, rf_delivery_rub: batch.comment_rf } },
-        position_ids: deal.positions.filter((p) => !p.batch_id).map((p) => p.id) });
+        position_ids: positions.filter((p) => !p.batch_id).map((p) => p.id) });
       setErr(""); reload();
     } catch (e) { onErr(e); }
   }
@@ -48,10 +50,10 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Партии и консолидация</h2>
         <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление, дн</th><th>Международная перевозка</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Распределение</th><th>Позиции</th></tr></thead>
-          <tbody>{deal.batches.map((b) => { const it = b.items as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; return (
+          <tbody>{batches.map((b) => { const it = b.items as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; return (
             <tr key={b.id}><td>{b.name}</td><td>{b.route}</td><td className="num">{b.transport_units}</td><td className="num">{b.transit_days} / {b.customs_days}</td>
               <td>{fr ? `${fmtRub(fr.amount)} ${fr.currency}` : "—"}</td><td>{it.insurance_pct != null ? `${it.insurance_pct} %` : "—"}</td><td className="num">{fmtRub(it.broker_rub as number)}</td><td className="num">{fmtRub(it.rf_delivery_rub as number)}</td>
-              <td>{b.allocation}</td><td>{deal.positions.filter((p) => p.batch_id === b.id).map((p) => p.model).join(", ")}</td></tr>); })}</tbody></table>
+              <td>{b.allocation}</td><td>{positions.filter((p) => p.batch_id === b.id).map((p) => p.model).join(", ")}</td></tr>); })}</tbody></table>
         {canEdit && (
           <div className="grid cols-3" style={{ marginTop: 10 }}>
             <label className="f">Название<input value={batch.name} onChange={(e) => setBatch({ ...batch, name: e.target.value })} /></label>
@@ -71,8 +73,9 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
         )}
       </div>
 
-      {deal.positions.map((p) => {
+      {positions.map((p) => {
         const f = forms[p.id];
+        if (!f) return null;
         const lp = p.logistics_params || {};
         return (
           <div className="card" key={p.id}>
@@ -90,7 +93,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
               <label className="f">Сертификация (ТР ТС 010/2011, ЭПБ, ПСМ), RUB<input type="number" value={f.certification_rub} disabled={!canEdit} onChange={(e) => upd(p.id, { certification_rub: Number(e.target.value) })} />
                 <input placeholder="комментарий к отклонению" disabled={!canEdit} value={f.comments.certification_rub || ""} onChange={(e) => upd(p.id, { comments: { ...f.comments, certification_rub: e.target.value } })} /></label>
             </div>
-            {canEdit && <div className="row" style={{ marginTop: 8 }}><button className="btn secondary" onClick={() => savePos(p.id)}>Сохранить позицию</button><span className="muted">партия: {deal.batches.find((b) => b.id === p.batch_id)?.name || "не распределена"}</span></div>}
+            {canEdit && <div className="row" style={{ marginTop: 8 }}><button className="btn secondary" onClick={() => savePos(p.id)}>Сохранить позицию</button><span className="muted">партия: {batches.find((b) => b.id === p.batch_id)?.name || "не распределена"}</span></div>}
           </div>
         );
       })}

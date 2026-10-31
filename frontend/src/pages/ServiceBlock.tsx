@@ -11,7 +11,8 @@ type Result = { rows: { month: number; hours_cum: number; regulations: string[];
 /** Блок сервисной службы (раздел 6): регламенты по интервалам, нормативы чел·ч, выезды, итог по периодам. */
 export default function ServiceBlock({ deal, me, reload }: { deal: Deal; me: Me; reload: () => void }) {
   const canEdit = me.roles.some((r) => r.code === "service_head" || r.code === "gd") && ["logistics_calc", "service_calc", "rework"].includes(deal.status);
-  const [pid, setPid] = useState(deal.positions[0]?.id || "");
+  const positions = deal.positions || [];
+  const [pid, setPid] = useState(positions[0]?.id || "");
   const [d, setD] = useState<Defaults | null>(null);
   const [regs, setRegs] = useState<Reg[]>([]);
   const [hpm, setHpm] = useState("");
@@ -27,7 +28,7 @@ export default function ServiceBlock({ deal, me, reload }: { deal: Deal; me: Me;
       setD(x); setHpm(String(x.hours_per_month));
       setRegs(x.regulations.length ? x.regulations : [{ name: "ТО-1", interval_hours: 250, operations: [{ name: "Осмотр, смазка", hours: 2, qualification: "mechanic", spare_part_rows: [] }] },
         { name: "ТО-2", interval_hours: 500, operations: [{ name: "Замена масла и фильтров двигателя", hours: 4, qualification: "engineer_2", spare_part_rows: [] }] }]);
-      const existing = (deal.positions.find((p) => p.id === pid)?.service_calc as { result?: Result } | undefined)?.result;
+      const existing = (positions.find((p) => p.id === pid)?.service_calc as { result?: Result } | undefined)?.result;
       setRes(existing || null);
     }).catch((e) => setErr(e.message));
   }, [pid, deal.id]);
@@ -46,7 +47,7 @@ export default function ServiceBlock({ deal, me, reload }: { deal: Deal; me: Me;
       {err && <div className="alert error">{err}</div>}
       <div className="card">
         <div className="row">
-          <label className="f">Позиция<select value={pid} onChange={(e) => setPid(e.target.value)}>{deal.positions.map((p) => <option key={p.id} value={p.id}>{p.model} × {p.qty}</option>)}</select></label>
+          <label className="f">Позиция<select value={pid} onChange={(e) => setPid(e.target.value)}>{positions.map((p) => <option key={p.id} value={p.id}>{p.model} × {p.qty}</option>)}</select></label>
           <label className="f">Целевая наработка, м·ч<input value={d?.target_hours ?? ""} disabled /></label>
           <label className="f">Интенсивность, м·ч/мес<input type="number" value={hpm} disabled={!canEdit} onChange={(e) => setHpm(e.target.value)} /></label>
           <label className="f">Бригада, чел<input type="number" value={crew} disabled={!canEdit} onChange={(e) => setCrew(Number(e.target.value))} /></label>

@@ -23,7 +23,8 @@ export default function DealCard({ me }: { me: Me }) {
   const isMgmt = has("cd", "fd", "gd");
 
   const load = () => api.get<Deal>(`/api/deals/${id}`).then(setDeal).catch((e) => setErr(e.message));
-  useEffect(() => { load(); }, [id]);
+  // перезагружаем карточку при смене пользователя: набор полей зависит от роли (серверная фильтрация)
+  useEffect(() => { setDeal(null); load(); }, [id, me.id]);
   useEffect(() => {
     if (tab === "feed") api.get<typeof feed>(`/api/deals/${id}/feed`).then(setFeed);
     if (tab === "versions") api.get<typeof versions>(`/api/deals/${id}/versions`).then(setVersions);
@@ -47,7 +48,7 @@ export default function DealCard({ me }: { me: Me }) {
     }
   }
   async function addVariant() {
-    await api.post(`/api/deals/${deal!.id}/variants`, { name: variantName, position_ids: deal!.positions.map((p) => p.id) });
+    await api.post(`/api/deals/${deal!.id}/variants`, { name: variantName, position_ids: (deal!.positions || []).map((p) => p.id) });
     setVariantName(""); load();
   }
   async function send() {
@@ -113,7 +114,7 @@ export default function DealCard({ me }: { me: Me }) {
             <h2 style={{ marginTop: 0 }}>Позиции</h2>
             <table>
               <thead><tr><th>Завод</th><th>Тип / модель</th><th className="num">Кол-во</th><th className="num">Цена за ед.</th><th>Валюта</th><th className="num">Опции</th><th>Базис</th><th className="num">Произв., дн</th><th>Справка по цене</th></tr></thead>
-              <tbody>{deal.positions.map((p) => {
+              <tbody>{(deal.positions || []).map((p) => {
                 const pr = (p.price_reference || {}) as { last_price?: number; deviation_pct?: number; comment?: string };
                 return (<tr key={p.id}><td>{p.factory_id.slice(0, 8)}…</td><td>{p.machine_type} <b>{p.model}</b></td><td className="num">{p.qty}</td>
                   <td className="num">{fmtRub(p.unit_price)}</td><td>{p.currency}</td><td className="num">{fmtRub(p.options_price)}</td><td>{p.basis}</td><td className="num">{p.production_days}</td>
@@ -135,7 +136,7 @@ export default function DealCard({ me }: { me: Me }) {
           )}
           <div className="card">
             <h2 style={{ marginTop: 0 }}>Варианты комплектации / условий</h2>
-            <ul>{deal.variants.map((v) => <li key={v.id}>{v.name} <span className="muted">({v.position_ids.length} поз.)</span>{v.price_rub != null && <> — цена {fmtRub(v.price_rub)} RUB</>}</li>)}</ul>
+            <ul>{(deal.variants || []).map((v) => <li key={v.id}>{v.name} <span className="muted">({v.position_ids.length} поз.)</span>{v.price_rub != null && <> — цена {fmtRub(v.price_rub)} RUB</>}</li>)}</ul>
             {editable && <div className="row"><input placeholder="Название варианта" value={variantName} onChange={(e) => setVariantName(e.target.value)} /><button className="btn secondary" onClick={addVariant} disabled={!variantName}>Добавить вариант (все позиции)</button></div>}
           </div>
         </>

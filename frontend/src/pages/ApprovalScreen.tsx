@@ -9,7 +9,7 @@ const SCEN = [["pessimistic", "Пессимистичный"], ["base", "Баз�
  *  денежный поток, комментарии, история цен, курсы. ФД видит то же и даёт визу. */
 export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: Me; reload: () => void }) {
   const [calc, setCalc] = useState<CalcResponse | null>(null);
-  const [vid, setVid] = useState<string>(deal.variants[0]?.id || "");
+  const [vid, setVid] = useState<string>((deal.variants || [])[0]?.id || "");
   const [mode, setMode] = useState<"amount" | "markup" | "margin">("amount");
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,7 +47,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
   async function toggleService() {
-    const v = deal.variants.find((x) => x.id === vid);
+    const v = (deal.variants || []).find((x) => x.id === vid);
     if (!v || base?.price_rub == null) return;
     await api.post(`/api/deals/${deal.id}/price`, { variant_id: vid, mode: "amount", value: base.price_rub, service_in_kp: !v.service_in_kp });
     reload(); load();
@@ -60,7 +60,8 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   if (err && !calc) return <div className="alert warn">{err}</div>;
   if (!calc || !scen) return <div className="muted">Загрузка расчёта…</div>;
 
-  const variant = deal.variants.find((v) => v.id === vid)!;
+  const variant = (deal.variants || []).find((v) => v.id === vid);
+  if (!variant) return <div className="muted">Нет вариантов</div>;
   const canPrice = isCD && ["calc_ready", "cd_approval", "rework", "fd_visa", "gd_visa", "approved"].includes(deal.status);
 
   return (
@@ -68,7 +69,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
       <div>
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Варианты</h2>
-          {deal.variants.map((v) => {
+          {(deal.variants || []).map((v) => {
             const b = calc.result.variants[v.id]?.base;
             return (
               <div key={v.id} onClick={() => setVid(v.id)} style={{ padding: 8, borderRadius: 6, cursor: "pointer", background: v.id === vid ? "var(--accent-soft)" : "transparent", marginBottom: 4 }}>
