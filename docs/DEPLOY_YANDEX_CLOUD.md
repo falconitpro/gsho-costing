@@ -3,6 +3,24 @@
 Результат: `https://<домен>` с HTTPS, закрытый паролем, автоматически обновляется при каждом push в `main` после зелёных тестов.
 Стоимость: ВМ 2 vCPU / 4 ГБ / 30 ГБ SSD, прерываемая не нужна — около 1 500–2 500 ₽/мес (зависит от типа ядер); публичный IP ~ 200 ₽/мес.
 
+## Текущий стенд (развёрнут 31.10.2026)
+
+| | |
+| --- | --- |
+| Адрес | `https://158-160-149-150.sslip.io` (HTTPS Let's Encrypt; своего домена пока нет — sslip.io превращает IP в имя) |
+| Вход | логин `berghaus`, пароль — у владельца стенда (не в репозитории) |
+| ВМ | `gsho-test`, облако cloud-drizzle-520 / каталог zadachi, ru-central1-d, Ubuntu 24.04, 2 vCPU (50 %), 4 ГБ, HDD 20 ГБ, статический IP 158.160.149.150; ≈ 2 300 ₽/мес |
+| SSH | `ssh -i gsho_admin ubuntu@158.160.149.150` (ключ `gsho_admin` — у владельца) |
+
+Переход на свой домен: A-запись `test.berghaus.ru → 158.160.149.150`, затем на сервере в `/opt/gsho-costing/.env` заменить `DOMAIN=` и выполнить `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy`.
+
+### Особенности сети в Yandex Cloud (учтены в скриптах)
+
+- `download.docker.com` недоступен → Docker ставится из репозитория Ubuntu (`docker.io`, `docker-compose-v2`), для Docker Hub включены зеркала (`mirror.gcr.io`, `dockerhub.timeweb.cloud`) в `/etc/docker/daemon.json`.
+- `registry.npmjs.org` (Cloudflare) не отвечает → фронт собирается через `registry.npmmirror.com` (переменная `NPM_REGISTRY` в `.env`, если понадобится другое зеркало).
+- Квоты пробного периода: SSD 10 ГБ, HDD 20 ГБ на зону — поэтому диск HDD 20 ГБ. Для боевого контура — запросить увеличение квоты и взять SSD.
+- Скрипт можно передать в метаданных ВМ (`user-data`, cloud-init) — тогда сервер настроится сам при первом запуске; `--domain auto` подставит `<ip>.sslip.io`.
+
 ## 1. Создать ВМ (консоль Yandex Cloud, 5 минут)
 
 Compute Cloud → Создать ВМ:
