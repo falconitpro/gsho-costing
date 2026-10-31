@@ -39,7 +39,7 @@ def test_parse_filled_rfq(tmp_path):
     p = fill_rfq_template(str(tmp_path / "rfq.xlsx"), FILLED, ZIP, option_names=OPTION_NAMES)
     r = parse_rfq(p)
     assert r.ok, [e.message for e in r.errors if e.severity == "error"]
-    assert r.header["requested_at"] == "2026-10-28"
+    assert r.header["requested_at"] == "2026-10-28" and r.header["factory_name"].startswith("Xuzhou")
     assert r.position["model"] == "XDR80T" and r.position["qty"] == 2 and r.position["currency"] == "CNY"
     assert r.position["unit_price"] == 2_300_000 and r.position["production_days"] == 120 and r.position["zip_price"] == 410000
     # опции: цена на 1 машину × количество
