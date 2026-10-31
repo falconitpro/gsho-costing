@@ -52,7 +52,7 @@ def test_full_flow(client, tmp_path):
     rfq = fill_rfq_template(str(tmp_path / "rfq.xlsx"), FILLED, ZIP, option_names=OPTION_NAMES)
     with open(rfq, "rb") as f:
         prev = _ok(client.post(f"/api/deals/{did}/rfq/preview", headers=H(MGR), files={"file": ("rfq.xlsx", f)}))
-    assert prev["template_version"] == "v1" and not prev["missing_required"]
+    assert prev["template_version"] == "v2" and not prev["missing_required"] and prev["filled_count"] >= 50
     with open(rfq, "rb") as f:
         imp = _ok(client.post(f"/api/deals/{did}/rfq/import", headers=H(MGR), files={"file": ("rfq.xlsx", f)}), 201)
     pos = imp["position"]
