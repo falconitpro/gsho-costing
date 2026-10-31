@@ -50,6 +50,7 @@ HASH=$(docker run --rm caddy:2 caddy hash-password --plaintext "$PASSWORD" | sed
 PGPASS=$(openssl rand -hex 16)
 cat > .env <<ENV
 DOMAIN=$DOMAIN${EXTRA_HOSTS:+, $EXTRA_HOSTS}
+FALLBACK_HOST=$(curl -fsS -m 5 -H Metadata-Flavor:Google http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip 2>/dev/null || echo localhost)
 ACME_EMAIL=$EMAIL
 POSTGRES_PASSWORD=$PGPASS
 BASIC_AUTH_USER=$AUTH_USER
