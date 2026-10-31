@@ -61,7 +61,11 @@ K
 
 Если репозиторий приватный, перед запуском добавьте на сервер deploy key GitHub или используйте `--repo https://<token>@github.com/falconitpro/gsho-costing.git`.
 
-## 4. Автодеплой из GitHub
+## 4. Автодеплой
+
+**Основной способ (включён на стенде): pull.** На сервере таймер `gsho-autodeploy.timer` раз в 2 минуты запускает `deploy/autodeploy.sh`: если в `main` новый коммит и все проверки GitHub Actions по нему зелёные — `deploy-remote.sh` (пересборка, seed). Секреты в GitHub не нужны, входящий доступ с серверов GitHub тоже. Журнал: `journalctl -u gsho-autodeploy -n 50`.
+
+**Альтернатива: push из GitHub Actions** (если сервер доступен из-за рубежа по SSH):
 
 GitHub → репозиторий → Settings → Secrets and variables → Actions → New repository secret:
 

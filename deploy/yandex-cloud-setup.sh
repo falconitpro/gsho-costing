@@ -65,6 +65,27 @@ chown -R deploy:deploy /opt/gsho-costing; chmod 600 .env backend/.env
 echo "== файрвол"
 if command -v ufw >/dev/null; then ufw allow OpenSSH >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw --force enable >/dev/null; fi
 
+echo "== автодеплой (pull, без секретов в GitHub)"
+cat > /etc/systemd/system/gsho-autodeploy.service <<UNIT
+[Unit]
+Description=GSHO costing pull autodeploy
+[Service]
+Type=oneshot
+User=deploy
+ExecStart=/bin/bash /opt/gsho-costing/deploy/autodeploy.sh
+UNIT
+cat > /etc/systemd/system/gsho-autodeploy.timer <<UNIT
+[Unit]
+Description=GSHO costing autodeploy every 2 min
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload && systemctl enable --now gsho-autodeploy.timer
+git config --system --add safe.directory /opt/gsho-costing
+
 echo "== запуск"
 sudo -u deploy bash -c "cd /opt/gsho-costing && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build"
 sleep 15
