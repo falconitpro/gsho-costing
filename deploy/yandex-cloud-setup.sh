@@ -29,7 +29,7 @@ if [ ! -d /opt/gsho-costing/.git ]; then sudo -u deploy git clone "$REPO" /opt/g
 cd /opt/gsho-costing
 
 echo "== секреты"
-HASH=$(docker run --rm caddy:2 caddy hash-password --plaintext "$PASSWORD")
+HASH=$(docker run --rm caddy:2 caddy hash-password --plaintext "$PASSWORD" | sed 's/\$/$$/g')   # $ → $$ для docker compose
 PGPASS=$(openssl rand -hex 16)
 cat > .env <<ENV
 DOMAIN=$DOMAIN

@@ -39,9 +39,9 @@ services:
     command:
       - |
         while true; do
-          d=$(date +%F)
-          pg_dump -h db -U gsho gsho | gzip > /backups/db-$d.sql.gz
-          tar czf /backups/files-$d.tgz -C /data storage
+          d=$$(date +%F)
+          pg_dump -h db -U gsho gsho | gzip > /backups/db-$$d.sql.gz
+          tar czf /backups/files-$$d.tgz -C /data storage
           find /backups -type f -mtime +90 -delete
           sleep 86400
         done
