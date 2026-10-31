@@ -73,6 +73,7 @@ Description=GSHO costing pull autodeploy
 Type=oneshot
 User=deploy
 ExecStart=/bin/bash /opt/gsho-costing/deploy/autodeploy.sh
+TimeoutStartSec=40min
 UNIT
 cat > /etc/systemd/system/gsho-autodeploy.timer <<UNIT
 [Unit]

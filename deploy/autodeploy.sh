@@ -4,7 +4,7 @@
 set -uo pipefail
 cd /opt/gsho-costing
 REPO=falconitpro/gsho-costing
-git fetch -q origin main || exit 0
+timeout 60 git fetch -q origin main || exit 0   # GitHub из РФ иногда «зависает» — не ждём вечно
 LOCAL=$(git rev-parse HEAD); REMOTE=$(git rev-parse origin/main)
 [ "$LOCAL" = "$REMOTE" ] && exit 0
 # статус проверок коммита (публичный репозиторий — без токена)
