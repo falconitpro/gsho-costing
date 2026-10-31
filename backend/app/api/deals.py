@@ -244,6 +244,26 @@ def delete_variant(deal_id: str, var_id: str, db: Session = Depends(get_db), use
 
 # ------------------------------------------------------------------ импорт RFQ
 
+@router.get("/rfq/template")
+def rfq_template_schema(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Все поля опросника из актуального шаблона RFQ (разделы, коды, названия RU/ZH, единицы, метка L) — для ручного ввода."""
+    from ..models import Template
+    from ..services.rfq_import import template_fields
+    from ..services.rfq_template import template_path
+    custom = db.scalar(select(Template).where(Template.kind == "rfq", Template.is_active.is_(True)).order_by(Template.version.desc()))
+    return template_fields(template_path(custom.file_path if custom else None))
+
+
+@router.get("/rfq/template/file")
+def rfq_template_file(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Пустой шаблон RFQ для отправки заводу."""
+    from fastapi.responses import FileResponse
+    from ..models import Template
+    from ..services.rfq_template import template_path
+    custom = db.scalar(select(Template).where(Template.kind == "rfq", Template.is_active.is_(True)).order_by(Template.version.desc()))
+    return FileResponse(template_path(custom.file_path if custom else None), filename="RFQ_RU-ZH.xlsx")
+
+
 @router.post("/{deal_id}/rfq/preview")
 async def rfq_preview(deal_id: str, file: UploadFile = File(...), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Предпросмотр распознанных полей с подсветкой пустых обязательных (ничего не сохраняет)."""
@@ -294,8 +314,11 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
         delivery_point=pos_data.get("delivery_point") or "", production_days=int(pos_data.get("production_days") or 90),
         delivery_days=int(pos_data.get("delivery_days") or 10), warranty_months=pos_data.get("warranty_months"),
         warranty_hours=pos_data.get("warranty_hours"), zip_price=pos_data.get("zip_price"),
-        tech_params={**parsed.tech_params, "_source_file": file.filename}, logistics_params=parsed.logistics_params, rfq_import_id=imp.id,
-        service_calc={"spare_parts": parsed.spare_parts},
+        tech_params={**parsed.tech_params, "_source_file": file.filename, "_rfq": {"title": parsed.title, "version": parsed.template_version,
+                     "sections": parsed.sections, "filled": parsed.filled_count, "total": len(parsed.fields),
+                     "fields": {c: f.as_dict() for c, f in parsed.fields.items()}}},
+        logistics_params=parsed.logistics_params, rfq_import_id=imp.id,
+        service_calc={"spare_parts": parsed.spare_parts, "zip_target_hours": parsed.zip_target_hours, "zip_currency": parsed.zip_currency},
     )
     pos.price_reference = _price_ref(db, pos, price_comment)
     if pos.price_reference.get("needs_comment") and not price_comment:
@@ -305,8 +328,17 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     db.add(pos)
     db.flush()
     _record_price(db, pos, deal)
-    # условия эксплуатации в шапку
-    deal.operating_conditions = {k: parsed.header.get(k) for k in ("temp_min", "temp_max", "operating_conditions")}
+    # шапка сделки из раздела 0 опросника (заполняем только пустое, менеджер мог ввести раньше)
+    deal.operating_conditions = {**(deal.operating_conditions or {}), **{k: parsed.header.get(k) for k in ("temp_min", "temp_max", "operating_conditions") if parsed.header.get(k) is not None}}
+    if not deal.kp_due and parsed.header.get("kp_due"):
+        try:
+            deal.kp_due = date.fromisoformat(str(parsed.header["kp_due"])[:10])
+        except ValueError:
+            pass
+    if parsed.header.get("priority") and deal.priority == "normal":
+        deal.priority = str(parsed.header["priority"])
+    if deal.service_flag and not deal.target_hours and parsed.zip_target_hours:
+        deal.target_hours = parsed.zip_target_hours
     # каталог оборудования: новая модель или различия с каталогом
     cat = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == factory.id, EquipmentModel.model == pos.model))
     catalog_diff = {}

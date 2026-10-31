@@ -1,107 +1,89 @@
-"""Генератор двуязычного RU-ZH шаблона RFQ (версия v1) — используется как шаблон по умолчанию и в тестах.
+"""Работа с файлом шаблона RFQ компании (backend/app/templates/rfq_template.xlsx).
 
-Структура листа «Техданные и КП»: Код | Параметр (RU) | 中文 | Значение | Ед. | L
-Лист «ЗИП на ТО»: Система/узел | Кат. № | Наименование | Периодичность, м·ч | Кол-во | Цена | Валюта
+`fill_rfq_template` заполняет копию шаблона значениями «от завода» (колонка «Значение (рус.)», лист ЗИП) —
+используется в тестах и для демо-файлов. `template_path` отдаёт актуальный шаблон (загруженный администратором
+через настройки или встроенный).
 """
 from __future__ import annotations
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+import os
+import shutil
+from typing import Any, Optional
 
-from .rfq_import import L_CODES
+from openpyxl import load_workbook
 
-RFQ_ROWS: list[tuple[str, str, str, str]] = [  # код, RU, ZH, ед.
-    ("0.1", "Срок подготовки КП", "报价期限", "дн"),
-    ("0.2", "Срок действия КП", "报价有效期", "дн"),
-    ("0.3", "Приоритет", "优先级", ""),
-    ("0.4", "Мин. температура эксплуатации", "最低工作温度", "°C"),
-    ("0.5", "Макс. температура эксплуатации", "最高工作温度", "°C"),
-    ("0.6", "Условия эксплуатации", "工作条件", ""),
-    ("0.7", "Завод-изготовитель (полное наименование)", "制造商全称", ""),
-    ("0.8", "Адрес завода", "制造商地址", ""),
-    ("1.1", "Тип машины", "设备类型", ""),
-    ("1.2", "Модель", "型号", ""),
-    ("1.3", "Грузоподъёмность", "载重量", "т"),
-    ("1.4", "Объём кузова/ковша", "斗容", "м³"),
-    ("1.5", "Длина", "长度", "мм"),
-    ("1.6", "Ширина", "宽度", "мм"),
-    ("1.7", "Высота", "高度", "мм"),
-    ("1.14", "Масса эксплуатационная", "工作质量", "кг"),
-    ("1.15", "Масса транспортная", "运输质量", "кг"),
-    ("1.16", "Масса полная", "总质量", "кг"),
-    ("2.1", "Модель двигателя", "发动机型号", ""),
-    ("2.2", "Мощность двигателя", "发动机功率", "кВт"),
-    ("2.3", "Экологический класс", "排放标准", ""),
-    ("2.4", "Топливо", "燃料", ""),
-    ("2.5", "Рабочий объём", "排量", "л"),
-    ("2.6", "Производитель двигателя", "发动机制造商", ""),
-    ("12.1", "Опция: кондиционер кабины", "选配：驾驶室空调", ""),
-    ("12.2", "Опция: система пожаротушения", "选配：灭火系统", ""),
-    ("12.3", "Опция: централизованная смазка", "选配：集中润滑", ""),
-    ("13.2", "Базис поставки (Incoterms)", "交货条件", ""),
-    ("13.3", "Пункт поставки", "交货地点", ""),
-    ("13.4", "Количество", "数量", ""),
-    ("13.5", "Цена за единицу", "单价", ""),
-    ("13.6", "Валюта", "货币", ""),
-    ("13.7", "Срок действия цены", "价格有效期", "дн"),
-    ("13.8", "Цена ЗИП на ТО за всё количество", "保养备件总价", ""),
-    ("14.1", "Срок производства от аванса", "预付款后生产周期", "дн"),
-    ("14.2", "Срок доставки до пункта поставки", "交货周期", "дн"),
-    ("14.3", "Упаковка", "包装", ""),
-    ("14.4", "Гарантия", "质保期", "мес"),
-    ("14.5", "Гарантия по наработке", "质保工时", "м·ч"),
-    ("14.7", "Комплект документации на русском языке", "俄文技术文件", ""),
-    ("14.8", "Обучение персонала заказчика", "客户人员培训", ""),
-    ("14.9", "Сертификат соответствия ТР ТС 010/2011", "海关联盟 TR CU 010/2011 合格证", ""),
-    ("14.10", "Экспертиза промышленной безопасности (ЭПБ)", "工业安全鉴定", ""),
-    ("14.11", "Паспорт самоходной машины (ПСМ)", "自行式机械护照", ""),
-    ("14.12", "Сертификат происхождения", "原产地证", ""),
-    ("14.21", "Прочие разрешительные документы", "其他许可文件", ""),
-]
+from .rfq_import import _find_main_header, _norm
 
-ZIP_HEADER = ["Система/узел", "Кат. №", "Наименование", "Периодичность, м·ч", "Кол-во", "Цена", "Валюта"]
+TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
+DEFAULT_TEMPLATE = os.path.join(TEMPLATES_DIR, "rfq_template.xlsx")
 
 
-def build_rfq_template(path: str, filled: dict | None = None, spare_parts: list[dict] | None = None) -> str:
-    """Создаёт шаблон; `filled` — словарь код → значение для заполненного заводом файла."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Техданные и КП"
-    ws["A1"] = "Запрос коммерческого предложения / 询价单"
-    ws["A1"].font = Font(bold=True, size=14)
-    ws["A2"] = "Версия шаблона"
-    ws["B2"] = "v1"
-    hdr = ["Код", "Параметр (RU)", "中文", "Значение", "Ед.", "L"]
-    for c, h in enumerate(hdr, 1):
-        cell = ws.cell(4, c, h)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="FF3131")
-    for i, (code, ru, zh, unit) in enumerate(RFQ_ROWS, 5):
-        ws.cell(i, 1, code)
-        ws.cell(i, 2, ru)
-        ws.cell(i, 3, zh)
-        ws.cell(i, 4, (filled or {}).get(code))
-        ws.cell(i, 5, unit)
-        ws.cell(i, 6, "L" if code in L_CODES else "")
-        ws.cell(i, 2).alignment = Alignment(wrap_text=True)
-    ws.column_dimensions["B"].width = 48
-    ws.column_dimensions["C"].width = 28
-    ws.column_dimensions["D"].width = 24
+def template_path(custom: Optional[str] = None) -> str:
+    return custom if custom and os.path.exists(custom) else DEFAULT_TEMPLATE
 
-    z = wb.create_sheet("ЗИП на ТО")
-    z["A1"] = "ЗИП на техническое обслуживание до наработки 10 000 м·ч / 10000 工时保养备件"
-    z["A1"].font = Font(bold=True, size=12)
-    for c, h in enumerate(ZIP_HEADER, 1):
-        cell = z.cell(3, c, h)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="FF3131")
-    for i, sp in enumerate(spare_parts or [], 4):
-        z.cell(i, 1, sp.get("system"))
-        z.cell(i, 2, sp.get("part_no"))
-        z.cell(i, 3, sp.get("name"))
-        z.cell(i, 4, sp.get("interval_hours"))
-        z.cell(i, 5, sp.get("qty_per_service", 1))
-        z.cell(i, 6, sp.get("unit_price"))
-        z.cell(i, 7, sp.get("currency", "CNY"))
-    wb.save(path)
-    return path
+
+def fill_rfq_template(dst: str, values: dict[str, Any], spare_parts: Optional[list[dict]] = None,
+                      comments: Optional[dict[str, str]] = None, option_names: Optional[dict[str, str]] = None,
+                      src: Optional[str] = None) -> str:
+    """values: код → значение (пишется в «Значение (рус.)»); option_names: код 12.x → наименование опции;
+    spare_parts: список {name|row, qty_per_service, interval_hours, unit_price, part_no, brand} по листу ЗИП."""
+    shutil.copyfile(template_path(src), dst)
+    wb = load_workbook(dst)
+    ws = next((w for w in wb.worksheets if "тех" in w.title.lower()), wb.worksheets[0])
+    hdr, cols, _ = _find_main_header(ws)
+    rows_by_code: dict[str, int] = {}
+    for r in range(hdr + 1, ws.max_row + 1):
+        c = ws.cell(r, cols["code"]).value
+        if c is not None:
+            rows_by_code[str(c).strip()] = r
+    def put(r: int, c: int, val: Any) -> None:
+        """Запись с учётом объединённых ячеек (у строк 12.x «Значение» объединено по ZH/RU)."""
+        for rng in ws.merged_cells.ranges:
+            if rng.min_row <= r <= rng.max_row and rng.min_col <= c <= rng.max_col:
+                ws.cell(rng.min_row, rng.min_col).value = val
+                return
+        ws.cell(r, c).value = val
+
+    for code, val in values.items():
+        r = rows_by_code.get(code)
+        if r:
+            put(r, cols["value_ru"], val)
+    for code, name in (option_names or {}).items():
+        r = rows_by_code.get(code)
+        if r:
+            put(r, cols["name_ru"], name)
+    for code, text in (comments or {}).items():
+        r = rows_by_code.get(code)
+        if r and "comment" in cols:
+            put(r, cols["comment"], text)
+
+    if spare_parts:
+        z = next((w for w in wb.worksheets if "зип" in w.title.lower()), None)
+        if z is not None:
+            # заголовки
+            hrow, zc = None, {}
+            for r in range(1, 20):
+                cells = {c: _norm(z.cell(r, c).value).replace("\n", " ") for c in range(1, 16)}
+                if any(v.startswith("наименование") for v in cells.values()) and any(v.startswith("цена") for v in cells.values()):
+                    hrow = r
+                    for c, v in cells.items():
+                        if v.startswith("наименование"): zc["name"] = c
+                        elif v.startswith("каталожный"): zc["part_no"] = c
+                        elif v.startswith("производитель"): zc["brand"] = c
+                        elif v.startswith("кол-во на"): zc["qty"] = c
+                        elif v.startswith("периодичность"): zc["interval"] = c
+                        elif v.startswith("цена"): zc["price"] = c
+                        elif v.startswith("наличие"): zc["lead"] = c
+                    break
+            if hrow:
+                name_rows = {_norm(z.cell(r, zc["name"]).value).split(" / ")[0]: r for r in range(hrow + 1, z.max_row + 1) if z.cell(r, zc["name"]).value}
+                for sp in spare_parts:
+                    r = sp.get("row") or name_rows.get(_norm(sp.get("name", "")).split(" / ")[0])
+                    if not r:
+                        continue
+                    for key, col in (("qty_per_service", "qty"), ("interval_hours", "interval"), ("unit_price", "price"),
+                                     ("part_no", "part_no"), ("brand", "brand"), ("lead_days", "lead")):
+                        if key in sp and col in zc:
+                            z.cell(r, zc[col]).value = sp[key]
+    wb.save(dst)
+    return dst

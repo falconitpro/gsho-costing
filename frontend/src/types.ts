@@ -24,7 +24,7 @@ export const COST_ITEMS: [number, string, string][] = [
 
 export interface Position {
   id: string; factory_id: string; model: string; machine_type: string; qty: number; unit_price: number; currency: string;
-  options_price: number; basis: string; production_days: number; delivery_days: number; batch_id: string | null;
+  options_price: number; options?: { code?: string; name?: string; value?: number | null }[]; basis: string; production_days: number; delivery_days: number; batch_id: string | null;
   logistics?: Record<string, unknown>; service_calc?: Record<string, unknown>; price_reference?: Record<string, unknown>;
   logistics_params?: Record<string, { name: string; value: unknown; unit: string }>;
   tech_params?: Record<string, { name: string; value: unknown; unit: string }>;

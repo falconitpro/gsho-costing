@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, ApiError, fmtRub } from "../api";
 import type { Deal, Me } from "../types";
+import Questionnaire from "../components/Questionnaire";
 
 type Money = { amount: number; currency: string };
 type PosForm = { domestic_logistics: Money; export_formalities: Money; hs_code: string; duty_pct: string; vat_pct: string; hs_manual_comment: string; util_fee_rub: number; certification_rub: number; volume_m3: string; comments: Record<string, string> };
@@ -79,7 +80,9 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
         const lp = p.logistics_params || {};
         return (
           <div className="card" key={p.id}>
-            <h2 style={{ marginTop: 0 }}>{p.machine_type} {p.model} × {p.qty} <span className="muted">· техданные (L): {Object.values(lp).map((x) => `${x.name}: ${x.value ?? "—"} ${x.unit || ""}`).join("; ") || "нет"}</span></h2>
+            <h2 style={{ marginTop: 0 }}>{p.machine_type} {p.model} × {p.qty} <span className="muted">· данных для логиста (L): {Object.keys(lp).length}</span></h2>
+            <details style={{ marginBottom: 10 }} open={Object.keys(lp).length > 0}><summary className="muted" style={{ cursor: "pointer" }}>Технические данные из опросника (метка L)</summary>
+              <div style={{ marginTop: 6 }}><Questionnaire position={p} onlyL /></div></details>
             <div className="grid cols-3">
               <label className="f">Внутрикитайская логистика завод → граница<div className="row"><input type="number" value={f.domestic_logistics.amount} disabled={!canEdit} onChange={(e) => upd(p.id, { domestic_logistics: { ...f.domestic_logistics, amount: Number(e.target.value) } })} /><span>CNY</span></div>
                 <input placeholder="комментарий к отклонению" disabled={!canEdit} value={f.comments.domestic_logistics || ""} onChange={(e) => upd(p.id, { comments: { ...f.comments, domestic_logistics: e.target.value } })} /></label>

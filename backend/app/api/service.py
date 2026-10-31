@@ -70,7 +70,8 @@ def calc(deal_id: str, pos_id: str, body: ServiceCalcIn, db: Session = Depends(g
     inp = ServiceInput(
         machine_type=pos.machine_type, model=pos.model, qty=pos.qty, target_hours=d["target_hours"],
         hours_per_month=body.hours_per_month or d["hours_per_month"], regulations=body.regulations,
-        spare_parts=[SparePartRow(**{k: v for k, v in sp.items() if k in SparePartRow.model_fields}) for sp in d["spare_parts"]],
+        spare_parts=[SparePartRow(**{k: (v if k != "qty_per_service" or v else 1.0) for k, v in sp.items() if k in SparePartRow.model_fields})
+                     for sp in d["spare_parts"] if sp.get("filled", True)],   # только строки, заполненные заводом
         rates_rub_per_hour=d["rates"], region=RegionNorms(**{k: v for k, v in region.items() if k in RegionNorms.model_fields}),
         crew_size=body.crew_size, visit_days_default=body.visit_days_default, visit_overrides=body.visit_overrides,
         commissioning_rub=body.commissioning_rub, training_rub=body.training_rub, unplanned_reserve_pct=d["unplanned_reserve_pct"],

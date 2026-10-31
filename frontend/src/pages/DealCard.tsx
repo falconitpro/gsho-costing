@@ -6,6 +6,7 @@ import ApprovalScreen from "./ApprovalScreen";
 import LogisticsBlock from "./LogisticsBlock";
 import ServiceBlock from "./ServiceBlock";
 import PositionForm from "./PositionForm";
+import Questionnaire from "../components/Questionnaire";
 
 type Tab = "main" | "positions" | "logistics" | "service" | "pricing" | "feed" | "versions";
 
@@ -148,6 +149,13 @@ export default function DealCard({ me }: { me: Me }) {
               {rfqPreview && <RfqPreview data={rfqPreview} />}
             </div>
           )}
+          {(deal.positions || []).map((p) => (
+            <div className="card" key={"q" + p.id}>
+              <h2 style={{ marginTop: 0 }}>Опросник: {p.machine_type} {p.model} × {p.qty}</h2>
+              <Questionnaire position={p} />
+              {Array.isArray(p.options) && p.options.length > 0 && <div className="muted" style={{ marginTop: 6 }}>Опции (на 1 машину): {p.options.map((o: { name?: string; value?: number | null }) => `${o.name}${o.value != null ? ` — ${fmtRub(o.value)} ${p.currency}` : " (цена не указана)"}`).join("; ")}</div>}
+            </div>
+          ))}
           <div className="card">
             <h2 style={{ marginTop: 0 }}>Варианты комплектации / условий</h2>
             <ul>{(deal.variants || []).map((v) => <li key={v.id}>{v.name} <span className="muted">({v.position_ids.length} поз.)</span>{v.price_rub != null && <> — цена {fmtRub(v.price_rub)} RUB</>}</li>)}</ul>

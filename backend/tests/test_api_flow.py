@@ -20,9 +20,9 @@ os.environ.setdefault("STORAGE_LOCAL_ROOT", tempfile.mkdtemp())
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.main import app  # noqa: E402
-from app.services.rfq_template import build_rfq_template  # noqa: E402
+from app.services.rfq_template import fill_rfq_template  # noqa: E402
 from scripts.seed import run as seed  # noqa: E402
-from tests.test_rfq_import import FILLED, ZIP  # noqa: E402
+from tests.test_rfq_import import FILLED, OPTION_NAMES, ZIP  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
 MGR, LOG, SVC, CD, FD = "manager@example.com", "logist@example.com", "service@example.com", "cd@example.com", "fd@example.com"
@@ -47,14 +47,19 @@ def test_full_flow(client, tmp_path):
                                                               "service_flag": True, "target_hours": 10000, "kp_due": "2026-11-15"}), 201)
     did = deal["id"]
     assert deal["number"].startswith("D-") and "calc_result" not in deal
-    rfq = build_rfq_template(str(tmp_path / "rfq.xlsx"), FILLED, ZIP)
+    schema = _ok(client.get("/api/deals/rfq/template", headers=H(MGR)))
+    assert len(schema["fields"]) >= 170 and any(f["is_l"] for f in schema["fields"])
+    rfq = fill_rfq_template(str(tmp_path / "rfq.xlsx"), FILLED, ZIP, option_names=OPTION_NAMES)
     with open(rfq, "rb") as f:
         prev = _ok(client.post(f"/api/deals/{did}/rfq/preview", headers=H(MGR), files={"file": ("rfq.xlsx", f)}))
     assert prev["template_version"] == "v1" and not prev["missing_required"]
     with open(rfq, "rb") as f:
         imp = _ok(client.post(f"/api/deals/{did}/rfq/import", headers=H(MGR), files={"file": ("rfq.xlsx", f)}), 201)
     pos = imp["position"]
-    assert pos["model"] == "XDR80T" and pos["qty"] == 2 and pos["currency"] == "CNY"
+    assert pos["model"] == "XDR80T" and pos["qty"] == 2 and pos["currency"] == "CNY" and pos["options_price"] == 86000
+    # весь опросник сохранён в карточке: заполненные поля по разделам + L-поля логисту
+    rfq_all = pos["tech_params"]["_rfq"]
+    assert rfq_all["total"] >= 170 and rfq_all["filled"] >= 50 and "1.8" in pos["tech_params"] and "1.5" in pos["logistics_params"]
     schemes = _ok(client.get("/api/refs/payment-schemes", headers=H(MGR)))
     _ok(client.patch(f"/api/deals/{did}", headers=H(MGR), json={"client_payments": schemes[0]["lines"]}))
     var = _ok(client.post(f"/api/deals/{did}/variants", headers=H(MGR), json={"name": "Базовый", "position_ids": [pos["id"]]}), 201)
@@ -87,10 +92,10 @@ def test_full_flow(client, tmp_path):
 
     # --- сервис
     dfl = _ok(client.get(f"/api/deals/{did}/service/positions/{pos['id']}/defaults", headers=H(SVC)))
-    assert dfl["target_hours"] == 10000 and len(dfl["spare_parts"]) == 3
+    assert dfl["target_hours"] == 10000 and len([x for x in dfl["spare_parts"] if x.get("filled")]) == 3
     res = _ok(client.post(f"/api/deals/{did}/service/positions/{pos['id']}/calc", headers=H(SVC), json={
         "regulations": [{"name": "ТО-1", "interval_hours": 250, "operations": [{"name": "Осмотр", "hours": 2, "qualification": "mechanic", "spare_part_rows": []}]},
-                        {"name": "ТО-2", "interval_hours": 500, "operations": [{"name": "Масло и фильтры", "hours": 4, "qualification": "engineer_2", "spare_part_rows": [4, 5]}]}],
+                        {"name": "ТО-2", "interval_hours": 500, "operations": [{"name": "Масло и фильтры", "hours": 4, "qualification": "engineer_2", "spare_part_rows": [9, 10]}]}],
         "show_in_kp": True}))
     assert res["executions"] == {"ТО-1": 40, "ТО-2": 20} and res["total_rub_part"] > 0
     assert _ok(client.post(f"/api/deals/{did}/service/complete", headers=H(SVC)))["status"] == "calc_ready"
