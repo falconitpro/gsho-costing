@@ -38,7 +38,7 @@ export default function App() {
     <BrowserRouter>
       <header className="top">
         <NavLink to="/deals" className="brand">
-          <img src="/logo.svg" alt="Berg-Haus" />
+          <img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" />
           <span>Себестоимость ГШО</span>
         </NavLink>
         {me && (

@@ -18,7 +18,12 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt, RGBColor
+from docx.shared import Mm, Pt, RGBColor
+import os
+
+ASSETS = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
+DEFAULT_LOGO = os.path.join(ASSETS, "logo_main.png")
+DEFAULT_LOGO_MONO = os.path.join(ASSETS, "logo_mono.png")
 
 ACCENT = RGBColor(0xFF, 0x31, 0x31)
 ACCENT_HEX = "FF3131"
@@ -116,10 +121,11 @@ def build_kp(data: KpData, path: str) -> str:
     style.element.rPr.rFonts.set(qn("w:eastAsia"), FONT)
     style.font.color.rgb = BLACK
 
-    # Титул
-    if data.logo_path:
+    # Титул: основной логотип (из настроек администратора или встроенный)
+    logo = data.logo_path or (DEFAULT_LOGO if os.path.exists(DEFAULT_LOGO) else None)
+    if logo:
         try:
-            doc.add_picture(data.logo_path, width=Pt(140))
+            doc.add_picture(logo, width=Mm(55))
         except Exception:   # pragma: no cover
             pass
     p = doc.add_paragraph()
@@ -185,9 +191,14 @@ def build_kp(data: KpData, path: str) -> str:
     doc.add_paragraph(data.signatures)
     doc.add_paragraph(data.requisites)
 
-    # Колонтитул
+    # Колонтитул: монохромный знак + номер КП
     footer = doc.sections[0].footer.paragraphs[0]
-    _run(footer, f"BergHaus · КП № {data.kp_no}", color=ACCENT, size=8)
+    if os.path.exists(DEFAULT_LOGO_MONO):
+        try:
+            footer.add_run().add_picture(DEFAULT_LOGO_MONO, height=Mm(6))
+        except Exception:   # pragma: no cover
+            pass
+    _run(footer, f"   Berghaus · КП № {data.kp_no}", color=ACCENT, size=8)
 
     doc.save(path)
     assert_no_cost_leak(path)
