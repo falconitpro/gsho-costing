@@ -7,3 +7,4 @@ frontend/node_modules/
 frontend/dist/
 *.zip
 .DS_Store
+scripts/start-local.log

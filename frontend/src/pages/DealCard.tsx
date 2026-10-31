@@ -157,7 +157,7 @@ export default function DealCard({ me }: { me: Me }) {
           <table><thead><tr><th>Версия</th><th>Причина</th><th>Дата</th><th>Excel-расчёт</th><th>КП</th></tr></thead>
             <tbody>{versions.map((v) => (
               <tr key={v.id}><td>v{v.version_no}</td><td>{v.reason}</td><td>{new Date(v.created_at).toLocaleString("ru-RU")}</td>
-                <td>{v.excel_path && <a href={`/api/files/${v.excel_path}`}>полный</a>} {v.excel_manager_path && <> · <a href={`/api/files/${v.excel_manager_path}`}>версия менеджера</a></>}</td>
+                <td>{v.excel_path && <><a href={`/api/files/${v.excel_path}`}>полный</a> · </>}{v.excel_manager_path && <a href={`/api/files/${v.excel_manager_path}`}>версия менеджера</a>}</td>
                 <td>{v.kp_path && <a href={`/api/files/${v.kp_path}`}>КП.docx</a>}</td></tr>))}</tbody></table>
         </div>
       )}

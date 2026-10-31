@@ -30,6 +30,8 @@ gsho-costing/
 
 ## Быстрый старт
 
+На Mac с Docker Desktop: двойной клик по `scripts/start-local.command` (первый запуск) и `scripts/rebuild.command` (обновить из GitHub и пересобрать).
+
 ```bash
 cp backend/.env.example backend/.env
 docker compose up --build -d
