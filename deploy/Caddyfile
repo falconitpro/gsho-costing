@@ -1,3 +1,8 @@
+{
+	# браузеры не передают SNI при входе по IP — отдаём сертификат запасного адреса
+	default_sni {$FALLBACK_HOST:localhost}
+}
+
 (app) {
 	encode gzip
 	@protected not path /api/health
