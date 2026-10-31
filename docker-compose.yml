@@ -1,0 +1,58 @@
+# Развёртывание на сервере в РФ (раздел 14 ТЗ): PostgreSQL + backend + frontend (nginx) + ежедневные копии.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: gsho
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gsho}
+      POSTGRES_DB: gsho
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gsho"]
+      interval: 10s
+      retries: 5
+
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://gsho:${POSTGRES_PASSWORD:-gsho}@db:5432/gsho
+    volumes:
+      - storage:/app/data/storage          # STORAGE_PROVIDER=local (dev / резерв)
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    depends_on: [backend]
+    ports:
+      - "80:80"
+
+  backup:
+    image: postgres:16
+    entrypoint: ["/bin/sh", "-c"]
+    # ежедневный дамп БД и архив файлов; хранение 90 дней
+    command:
+      - |
+        while true; do
+          d=$(date +%F)
+          pg_dump -h db -U gsho gsho | gzip > /backups/db-$d.sql.gz
+          tar czf /backups/files-$d.tgz -C /data storage
+          find /backups -type f -mtime +90 -delete
+          sleep 86400
+        done
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-gsho}
+    volumes:
+      - backups:/backups
+      - storage:/data/storage:ro
+    depends_on: [db]
+
+volumes:
+  pgdata:
+  storage:
+  backups:

@@ -1,0 +1,12 @@
+stages: [test, build]
+backend-tests:
+  stage: test
+  image: python:3.12
+  script:
+    - pip install -r backend/requirements.txt
+    - cd backend && python -m pytest -q
+frontend-build:
+  stage: build
+  image: node:20
+  script:
+    - cd frontend && npm install && npm run build

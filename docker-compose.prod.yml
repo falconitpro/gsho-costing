@@ -1,0 +1,24 @@
+# Тестовый/боевой стенд с HTTPS на домене: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Переменные: DOMAIN=test.example.ru  POSTGRES_PASSWORD=...  ACME_EMAIL=admin@example.ru
+services:
+  frontend:
+    ports: []            # наружу смотрит только Caddy
+    expose: ["80"]
+  backend:
+    ports: []
+    expose: ["8000"]
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [frontend, backend]
+volumes:
+  caddy_data:
+  caddy_config:

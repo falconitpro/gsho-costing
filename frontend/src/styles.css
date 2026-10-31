@@ -1,0 +1,66 @@
+:root {
+  --accent: #ff3131;
+  --accent-soft: #fff0f0;
+  --ink: #000;
+  --muted: #6b6b6b;
+  --line: #e4e4e4;
+  --bg: #fafafa;
+  --ok: #2e9e5b;
+  --warn: #e0a800;
+  --bad: #d32f2f;
+  --font: "Intro", "Arial", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: var(--font); color: var(--ink); background: var(--bg); font-size: 14px; }
+a { color: inherit; }
+header.top { display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: #fff; border-bottom: 3px solid var(--accent); position: sticky; top: 0; z-index: 5; }
+header.top .brand { font-weight: 800; letter-spacing: .5px; color: var(--accent); }
+header.top nav a { margin-right: 14px; text-decoration: none; padding: 6px 2px; border-bottom: 2px solid transparent; }
+header.top nav a.active { border-color: var(--accent); }
+header.top .spacer { flex: 1; }
+main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 12px; }
+h2 { font-size: 16px; margin: 18px 0 8px; }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+.grid { display: grid; gap: 14px; }
+.grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 900px) { .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; } }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--accent); color: #fff; font-weight: 600; font-size: 12px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
+.btn { background: var(--accent); color: #fff; border: 0; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; font-family: inherit; }
+.btn.secondary { background: #fff; color: var(--ink); border: 1px solid var(--ink); }
+.btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+input, select, textarea { font-family: inherit; font-size: 14px; padding: 7px 9px; border: 1px solid #bbb; border-radius: 6px; }
+label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #eee; }
+.badge.accent { background: var(--accent-soft); color: var(--accent); }
+.badge.ok { background: #e6f5ec; color: var(--ok); }
+.badge.warn { background: #fff6d6; color: #8a6d00; }
+.badge.bad { background: #fde7e7; color: var(--bad); }
+.margin-ind { font-size: 28px; font-weight: 800; }
+.margin-ind.ok { color: var(--ok); }
+.margin-ind.warn { color: var(--warn); }
+.margin-ind.bad { color: var(--bad); }
+.muted { color: var(--muted); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; overflow-x: auto; }
+.tabs button { background: none; border: 0; padding: 8px 12px; cursor: pointer; font-family: inherit; font-size: 14px; border-bottom: 2px solid transparent; white-space: nowrap; }
+.tabs button.active { border-color: var(--accent); font-weight: 700; }
+.alert { padding: 10px 12px; border-radius: 6px; margin: 8px 0; }
+.alert.error { background: #fde7e7; color: var(--bad); }
+.alert.warn { background: #fff6d6; }
+.alert.info { background: #eef4ff; }
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); gap: 10px; overflow-x: auto; }
+.board .col { background: #f1f1f1; border-radius: 8px; padding: 8px; min-height: 200px; }
+.board .col h3 { font-size: 13px; margin: 4px 0 8px; }
+.board .deal { background: #fff; border-radius: 6px; padding: 8px; margin-bottom: 8px; border-left: 3px solid var(--accent); }
+.board .deal.overdue { border-left-color: var(--bad); }
+.kpi { display: flex; flex-direction: column; }
+.kpi .v { font-size: 20px; font-weight: 700; }
+.kpi .l { font-size: 12px; color: var(--muted); }
+@media (max-width: 700px) { main { padding: 10px; } th, td { padding: 5px; font-size: 12px; } .margin-ind { font-size: 22px; } }

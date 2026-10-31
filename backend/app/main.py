@@ -1,0 +1,74 @@
+"""Точка входа FastAPI. Запуск: uvicorn app.main:app --reload"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+from datetime import date
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from .api import admin, auth, deals, logistics, pricing, references, service, tasks_files_planfact
+from .core.config import get_settings
+from .db import init_db
+
+log = logging.getLogger("gsho")
+settings = get_settings()
+
+
+async def _daily_jobs() -> None:
+    """Фоновые задания: курс ЦБ ежедневно, проверка просрочек раз в час.
+
+    В проде — отдельный воркер очереди (arq/Celery) и cron; здесь — простой цикл в процессе API.
+    """
+    from sqlalchemy import select
+    from . import adapters
+    from .db import SessionLocal
+    from .models import FxRate, IntegrationLog
+    while True:
+        try:
+            with SessionLocal() as db:
+                today = date.today()
+                if not db.scalar(select(FxRate).where(FxRate.on == today, FxRate.source == "cbr")):
+                    try:
+                        rates = adapters.fx_source().daily(today)
+                        for cur, rate in rates.items():
+                            if cur != "RUB":
+                                db.add(FxRate(on=today, currency=cur, rate=rate, source="cbr"))
+                        db.add(IntegrationLog(system="cbr", operation="daily", ok=True, details={"on": str(today)}))
+                    except Exception as e:
+                        db.add(IntegrationLog(system="cbr", operation="daily", ok=False, details={"error": str(e)[:300]}))
+                    db.commit()
+        except Exception as e:   # pragma: no cover
+            log.warning("daily job failed: %s", e)
+        await asyncio.sleep(3600)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.is_dev:
+        init_db()
+    task = asyncio.create_task(_daily_jobs())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="Модуль расчёта себестоимости и маржинальности поставок ГШО", version="0.1.0", lifespan=lifespan,
+              docs_url="/api/docs", openapi_url="/api/openapi.json")
+app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+for r in (auth.router, deals.router, logistics.router, service.router, pricing.router, references.router, admin.router, tasks_files_planfact.router):
+    app.include_router(r)
+
+
+@app.exception_handler(Exception)
+async def unhandled(request: Request, exc: Exception):   # pragma: no cover
+    log.exception("unhandled: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": "Внутренняя ошибка сервера"})
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "env": settings.env, "auth": settings.auth_provider, "storage": settings.storage_provider}
