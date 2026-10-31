@@ -41,6 +41,11 @@ def load_fx(db: Session, on: date) -> tuple[FxRates, dict[str, list[tuple[date, 
     return FxRates(as_of=on, rates=rates, source=source, note=note), history
 
 
+def _num(v, default: float = 0.0) -> float:
+    """JSON-поля могут содержать null — в ядро передаём число."""
+    return default if v is None else float(v)
+
+
 def _lines(raw: list[dict]) -> list[PaymentLine]:
     return [PaymentLine(**l) for l in raw] if raw else []
 
@@ -85,15 +90,15 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             res = sc["result"]
             service = ServiceSummary(cost_fx=Money(**res["total_fx_part"]), cost_rub=res["total_rub_part"], show_in_kp=sc.get("show_in_kp", False))
         positions.append(PositionInput(
-            id=p.id, factory=p.factory_id, model=p.model, machine_type=p.machine_type, qty=p.qty, unit_price=p.unit_price,
-            options_price=p.options_price or 0.0, currency=p.currency, production_days=p.production_days, delivery_days=p.delivery_days,
+            id=p.id, factory=p.factory_id, model=p.model, machine_type=p.machine_type or "", qty=p.qty, unit_price=p.unit_price,
+            options_price=_num(p.options_price), currency=p.currency, production_days=p.production_days, delivery_days=p.delivery_days,
             factory_payments=_lines(p.factory_payments) or PositionInput.model_fields["factory_payments"].default_factory(),
             domestic_logistics=Money(**lg.get("domestic_logistics", {"amount": 0, "currency": "CNY"})),
             export_formalities=Money(**lg.get("export_formalities", {"amount": 0, "currency": "CNY"})),
-            hs_code=lg.get("hs_code", ""), duty_pct=lg.get("duty_pct", 0.0), vat_pct=lg.get("vat_pct", 20.0),
-            util_fee_rub=lg.get("util_fee_rub", 0.0), certification_rub=lg.get("certification_rub", 0.0),
-            weight_kg=(p.logistics_params.get("1.15") or p.logistics_params.get("1.14") or {}).get("value") or 0.0,
-            volume_m3=lg.get("volume_m3", 0.0),
+            hs_code=lg.get("hs_code") or "", duty_pct=_num(lg.get("duty_pct")), vat_pct=_num(lg.get("vat_pct"), 20.0),
+            util_fee_rub=_num(lg.get("util_fee_rub")), certification_rub=_num(lg.get("certification_rub")),
+            weight_kg=_num(((p.logistics_params or {}).get("1.15") or (p.logistics_params or {}).get("1.14") or {}).get("value")) * p.qty,
+            volume_m3=_num(lg.get("volume_m3")),
             warranty_reserve_pct=p.warranty_reserve_pct if p.warranty_reserve_pct is not None else wr.get(p.machine_type, wr["default"]),
             service=service, batch_id=p.batch_id,
         ))
@@ -104,7 +109,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             id=b.id, route=b.route, transport_units=b.transport_units,
             intl_freight=Money(**it.get("intl_freight", {"amount": 0, "currency": "CNY"})),
             insurance_pct=it.get("insurance_pct"), insurance_amount=Money(**it.get("insurance_amount", {"amount": 0, "currency": "CNY"})),
-            broker_rub=it.get("broker_rub", 0.0), rf_delivery_rub=it.get("rf_delivery_rub", 0.0),
+            broker_rub=_num(it.get("broker_rub")), rf_delivery_rub=_num(it.get("rf_delivery_rub")),
             allocation=AllocationMethod(b.allocation), transit_days=b.transit_days, customs_days=b.customs_days,
         ))
     variants = [VariantInput(
