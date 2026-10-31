@@ -24,11 +24,11 @@ export default function DealCard({ me }: { me: Me }) {
 
   const load = () => api.get<Deal>(`/api/deals/${id}`).then(setDeal).catch((e) => setErr(e.message));
   // перезагружаем карточку при смене пользователя: набор полей зависит от роли (серверная фильтрация)
-  useEffect(() => { setDeal(null); load(); }, [id, me.id]);
+  useEffect(() => { setDeal(null); setFeed([]); setVersions([]); setTab("main"); load(); }, [id, me.id]);
   useEffect(() => {
     if (tab === "feed") api.get<typeof feed>(`/api/deals/${id}/feed`).then(setFeed);
     if (tab === "versions") api.get<typeof versions>(`/api/deals/${id}/versions`).then(setVersions);
-  }, [tab, id]);
+  }, [tab, id, me.id]);
 
   if (!deal) return <div className="muted">{err || "Загрузка…"}</div>;
   const editable = has("manager", "gd") && ["draft", "rework", "approved", "kp_sent"].includes(deal.status);
@@ -142,9 +142,9 @@ export default function DealCard({ me }: { me: Me }) {
         </>
       )}
 
-      {tab === "logistics" && <LogisticsBlock deal={deal} me={me} reload={load} />}
-      {tab === "service" && <ServiceBlock deal={deal} me={me} reload={load} />}
-      {tab === "pricing" && <ApprovalScreen deal={deal} me={me} reload={load} />}
+      {tab === "logistics" && <LogisticsBlock key={me.id} deal={deal} me={me} reload={load} />}
+      {tab === "service" && <ServiceBlock key={me.id} deal={deal} me={me} reload={load} />}
+      {tab === "pricing" && <ApprovalScreen key={me.id} deal={deal} me={me} reload={load} />}
 
       {tab === "feed" && (
         <div className="card">
