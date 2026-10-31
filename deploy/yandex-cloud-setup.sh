@@ -65,6 +65,21 @@ chown -R deploy:deploy /opt/gsho-costing; chmod 600 .env backend/.env
 echo "== файрвол"
 if command -v ufw >/dev/null; then ufw allow OpenSSH >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw --force enable >/dev/null; fi
 
+echo "== MSS clamping"
+# В Yandex Cloud полноразмерные пакеты (MTU 1500) по пути теряются: TLS-рукопожатие с цепочкой сертификатов «висит».
+cat > /etc/systemd/system/gsho-mss.service <<UNIT
+[Unit]
+Description=Clamp TCP MSS on eth0 (path MTU in Yandex Cloud)
+After=network-online.target docker.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c "iptables -t mangle -C POSTROUTING -o eth0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1360 2>/dev/null || iptables -t mangle -A POSTROUTING -o eth0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss 1360"
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload && systemctl enable --now gsho-mss.service
+
 echo "== автодеплой (pull, без секретов в GitHub)"
 cat > /etc/systemd/system/gsho-autodeploy.service <<UNIT
 [Unit]

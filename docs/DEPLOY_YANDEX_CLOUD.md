@@ -26,6 +26,7 @@ Let's Encrypt с HTTP-проверкой со стенда не работает
 
 ### Особенности сети в Yandex Cloud (учтены в скриптах)
 
+- **MTU:** полноразмерные пакеты с ВМ наружу теряются — HTTPS с настоящим сертификатом «висит» на рукопожатии. Лечится ограничением MSS до 1360 (`gsho-mss.service`, ставится скриптом).
 - `download.docker.com` недоступен → Docker ставится из репозитория Ubuntu (`docker.io`, `docker-compose-v2`), для Docker Hub включены зеркала (`mirror.gcr.io`, `dockerhub.timeweb.cloud`) в `/etc/docker/daemon.json`.
 - `registry.npmjs.org` (Cloudflare) не отвечает → фронт собирается через `registry.npmmirror.com` (переменная `NPM_REGISTRY` в `.env`, если понадобится другое зеркало).
 - Квоты пробного периода: SSD 10 ГБ, HDD 20 ГБ на зону — поэтому диск HDD 20 ГБ. Для боевого контура — запросить увеличение квоты и взять SSD.
