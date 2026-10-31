@@ -27,6 +27,8 @@ export interface Position {
   options_price: number; basis: string; production_days: number; delivery_days: number; batch_id: string | null;
   logistics?: Record<string, unknown>; service_calc?: Record<string, unknown>; price_reference?: Record<string, unknown>;
   logistics_params?: Record<string, { name: string; value: unknown; unit: string }>;
+  tech_params?: Record<string, { name: string; value: unknown; unit: string }>;
+  rfq_import_id?: string | null;
 }
 export interface Variant {
   id: string; name: string; position_ids: string[]; price_rub?: number | null; service_in_kp: boolean; client_payments: PaymentLine[];

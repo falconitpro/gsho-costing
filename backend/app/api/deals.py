@@ -71,6 +71,8 @@ class PositionIn(BaseModel):
     warranty_hours: Optional[float] = None
     zip_price: Optional[float] = None
     factory_payments: list[dict] = Field(default_factory=list)
+    tech_params: dict = Field(default_factory=dict)        # ручной ввод техданных (коды RFQ)
+    logistics_params: dict = Field(default_factory=dict)   # поля с меткой L
     price_comment: str = ""
 
 
@@ -158,6 +160,7 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
     data = body.model_dump()
     comment = data.pop("price_comment")
     pos = Position(deal_id=deal.id, **data)
+    pos.tech_params = {**pos.tech_params, "_source_file": "ручной ввод"}
     pos.price_reference = _price_ref(db, pos, comment)
     if pos.price_reference.get("needs_comment") and not comment:
         raise HTTPException(422, {"message": "Отклонение цены от истории выше порога — нужен комментарий", "price_reference": pos.price_reference})
@@ -190,11 +193,14 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
     pos = db.get(Position, pos_id)
     if pos is None or pos.deal_id != deal.id:
         raise HTTPException(404)
-    allowed = set(PositionIn.model_fields) - {"price_comment"}
+    allowed = set(PositionIn.model_fields) - {"price_comment", "tech_params", "logistics_params"}
     before = serialize(pos)
     for k, v in body.items():
         if k in allowed:
             setattr(pos, k, v)
+    for key in ("tech_params", "logistics_params"):
+        if isinstance(body.get(key), dict):
+            setattr(pos, key, {**(getattr(pos, key) or {}), **body[key]})
     if "unit_price" in body:
         pos.price_reference = _price_ref(db, pos, body.get("price_comment", ""))
         _record_price(db, pos, deal)

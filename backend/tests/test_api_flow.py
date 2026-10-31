@@ -136,8 +136,15 @@ def test_low_margin_goes_to_fd_visa(client, tmp_path):
     factories = _ok(client.get("/api/refs/factories", headers=H(MGR)))
     deal = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "Карьер №2"}), 201)
     did = deal["id"]
+    # ручной ввод позиции (без файла RFQ) с техданными: поля L попадают логисту
     pos = _ok(client.post(f"/api/deals/{did}/positions", headers=H(MGR), json={"factory_id": factories[0]["id"], "model": "TG-1000 LHD",
-                                                                              "machine_type": "ПДМ", "qty": 1, "unit_price": 1650000, "currency": "CNY"}), 201)
+                                                                              "machine_type": "ПДМ", "qty": 1, "unit_price": 1650000, "currency": "CNY",
+                                                                              "logistics_params": {"1.14": {"name": "Масса", "value": 24000, "unit": "кг", "is_l": True}},
+                                                                              "tech_params": {"1.3": {"name": "Грузоподъёмность", "value": 10, "unit": "т"}}}), 201)
+    assert pos["logistics_params"]["1.14"]["value"] == 24000 and pos["tech_params"]["_source_file"] == "ручной ввод"
+    upd = _ok(client.patch(f"/api/deals/{did}/positions/{pos['id']}", headers=H(MGR), json={"qty": 2, "tech_params": {"1.4": {"name": "Ковш", "value": 5, "unit": "м³"}}}))
+    assert upd["qty"] == 2 and "1.3" in upd["tech_params"] and "1.4" in upd["tech_params"]
+    _ok(client.patch(f"/api/deals/{did}/positions/{pos['id']}", headers=H(MGR), json={"qty": 1}))
     schemes = _ok(client.get("/api/refs/payment-schemes", headers=H(MGR)))
     _ok(client.patch(f"/api/deals/{did}", headers=H(MGR), json={"client_payments": schemes[1]["lines"]}))
     var = _ok(client.post(f"/api/deals/{did}/variants", headers=H(MGR), json={"name": "V", "position_ids": [pos["id"]]}), 201)

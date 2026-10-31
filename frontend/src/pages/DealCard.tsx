@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtRub } from "../api";
-import { STATUS_TITLES, type Deal, type Me } from "../types";
+import { STATUS_TITLES, type Deal, type Me, type Position } from "../types";
 import ApprovalScreen from "./ApprovalScreen";
 import LogisticsBlock from "./LogisticsBlock";
 import ServiceBlock from "./ServiceBlock";
+import PositionForm from "./PositionForm";
 
 type Tab = "main" | "positions" | "logistics" | "service" | "pricing" | "feed" | "versions";
 
@@ -17,6 +18,7 @@ export default function DealCard({ me }: { me: Me }) {
   const [rfqFile, setRfqFile] = useState<File | null>(null);
   const [priceComment, setPriceComment] = useState("");
   const [variantName, setVariantName] = useState("");
+  const [posForm, setPosForm] = useState<"new" | Position | null>(null);
   const [feed, setFeed] = useState<{ id: string; kind: string; subject: string; body: string; at: string; counterparty: string }[]>([]);
   const [versions, setVersions] = useState<{ id: string; version_no: number; reason: string; created_at: string; excel_path?: string; excel_manager_path: string; kp_path: string }[]>([]);
   const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
@@ -111,20 +113,30 @@ export default function DealCard({ me }: { me: Me }) {
       {tab === "positions" && (
         <>
           <div className="card">
-            <h2 style={{ marginTop: 0 }}>Позиции</h2>
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <h2 style={{ marginTop: 0 }}>Позиции</h2>
+              {editable && <button className="btn" onClick={() => setPosForm("new")}>+ Добавить вручную</button>}
+            </div>
             <table>
-              <thead><tr><th>Завод</th><th>Тип / модель</th><th className="num">Кол-во</th><th className="num">Цена за ед.</th><th>Валюта</th><th className="num">Опции</th><th>Базис</th><th className="num">Произв., дн</th><th>Справка по цене</th></tr></thead>
+              <thead><tr><th>Завод</th><th>Тип / модель</th><th className="num">Кол-во</th><th className="num">Цена за ед.</th><th>Валюта</th><th className="num">Опции</th><th>Базис</th><th className="num">Произв., дн</th><th>Справка по цене</th><th>Источник</th>{editable && <th />}</tr></thead>
               <tbody>{(deal.positions || []).map((p) => {
                 const pr = (p.price_reference || {}) as { last_price?: number; deviation_pct?: number; comment?: string };
                 return (<tr key={p.id}><td>{p.factory_id.slice(0, 8)}…</td><td>{p.machine_type} <b>{p.model}</b></td><td className="num">{p.qty}</td>
                   <td className="num">{fmtRub(p.unit_price)}</td><td>{p.currency}</td><td className="num">{fmtRub(p.options_price)}</td><td>{p.basis}</td><td className="num">{p.production_days}</td>
-                  <td>{pr.last_price ? <>посл. {fmtRub(pr.last_price)} ({pr.deviation_pct} %) {pr.comment && <span className="muted">— {pr.comment}</span>}</> : <span className="muted">нет истории</span>}</td></tr>);
+                  <td>{pr.last_price ? <>посл. {fmtRub(pr.last_price)} ({pr.deviation_pct} %) {pr.comment && <span className="muted">— {pr.comment}</span>}</> : <span className="muted">нет истории</span>}</td>
+                  <td>{(p as Position & { rfq_import_id?: string | null }).rfq_import_id ? <span className="badge accent">RFQ</span> : <span className="badge">вручную</span>}</td>
+                  {editable && <td className="row"><button className="btn ghost" onClick={() => setPosForm(p)}>изменить</button>
+                    <button className="btn ghost" onClick={() => { if (confirm(`Удалить позицию ${p.model}?`)) api.del(`/api/deals/${deal.id}/positions/${p.id}`).then(load); }}>удалить</button></td>}</tr>);
               })}</tbody>
             </table>
           </div>
+          {editable && posForm && (
+            <PositionForm dealId={deal.id} position={posForm === "new" ? undefined : posForm} onDone={() => { setPosForm(null); load(); }} onCancel={() => setPosForm(null)} />
+          )}
           {editable && (
             <div className="card">
               <h2 style={{ marginTop: 0 }}>Импорт RFQ (двуязычный шаблон RU-ZH)</h2>
+              <p className="muted">Позицию можно завести двумя способами: загрузить заполненный заводом файл RFQ или ввести поля вручную (кнопка «Добавить вручную»). Импортированные значения потом тоже можно править вручную.</p>
               <div className="row">
                 <input type="file" accept=".xlsx" onChange={(e) => setRfqFile(e.target.files?.[0] || null)} />
                 <button className="btn secondary" onClick={preview} disabled={!rfqFile}>Предпросмотр</button>
