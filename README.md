@@ -14,7 +14,7 @@ gsho-costing/
 │   │   ├── adapters/    SharePoint/Яндекс Диск/S3, Outlook/Яндекс 360, WeCom, ЦБ РФ — сменные по настройке
 │   │   ├── api/         REST (FastAPI) по блокам ролей
 │   │   └── main.py
-│   ├── tests/           pytest: ядро, workflow и права, RFQ, Excel, КП  (24 теста)
+│   ├── tests/           pytest: ядро, workflow и права, RFQ, Excel, КП  (26 тестов)
 │   ├── scripts/seed.py  dev-данные
 │   ├── migrations/      SQL: неизменяемость журнала и версий, индексы
 │   ├── requirements.txt, Dockerfile, .env.example
@@ -52,8 +52,8 @@ docker compose exec backend python -m scripts.seed
 6. Утверждение: версия расчёта, Excel (полный — в «04 Расчёт себестоимости», версия менеджера — без себестоимости), КП (DOCX, бренд-бук BergHaus, проверка на утечку себестоимости), черновик письма.
 7. **Менеджер**: «КП отправлено» → исход. После «Выиграна» — план/факт.
 
-## Что проверено, что нет
+## Что проверено
 
-Ядро расчёта, workflow, права, импорт RFQ, Excel и КП покрыты автотестами и прогнаны. Слой FastAPI/SQLAlchemy и фронтенд
-написаны по той же модели данных и проверены статически (среда подготовки не имела доступа к PyPI/npm); первый прогон на живой
-PostgreSQL и сборка фронта — первый шаг команды. Подробности и план — `docs/IMPLEMENTATION_PLAN.md`.
+CI на GitHub (`.github/workflows/ci.yml`) на каждый push: 26 автотестов backend — ядро расчёта, workflow и права, импорт RFQ,
+Excel, КП и сквозной сценарий API на живой PostgreSQL 16 (`tests/test_api_flow.py`) — плюс сборка фронтенда. Не проверено
+вручную: интерфейс в браузере против живого API и интеграции с Microsoft 365 / WeCom (адаптеры с заглушками). План — `docs/IMPLEMENTATION_PLAN.md`.
