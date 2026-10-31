@@ -19,6 +19,8 @@ export default function DealCard({ me }: { me: Me }) {
   const [priceComment, setPriceComment] = useState("");
   const [variantName, setVariantName] = useState("");
   const [posForm, setPosForm] = useState<"new" | Position | null>(null);
+  const [factories, setFactories] = useState<Record<string, string>>({});
+  useEffect(() => { api.get<{ id: string; name: string }[]>("/api/refs/factories").then((fs) => setFactories(Object.fromEntries(fs.map((f) => [f.id, f.name])))); }, [posForm]);
   const [feed, setFeed] = useState<{ id: string; kind: string; subject: string; body: string; at: string; counterparty: string }[]>([]);
   const [versions, setVersions] = useState<{ id: string; version_no: number; reason: string; created_at: string; excel_path?: string; excel_manager_path: string; kp_path: string }[]>([]);
   const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
@@ -121,7 +123,7 @@ export default function DealCard({ me }: { me: Me }) {
               <thead><tr><th>Завод</th><th>Тип / модель</th><th className="num">Кол-во</th><th className="num">Цена за ед.</th><th>Валюта</th><th className="num">Опции</th><th>Базис</th><th className="num">Произв., дн</th><th>Справка по цене</th><th>Источник</th>{editable && <th />}</tr></thead>
               <tbody>{(deal.positions || []).map((p) => {
                 const pr = (p.price_reference || {}) as { last_price?: number; deviation_pct?: number; comment?: string };
-                return (<tr key={p.id}><td>{p.factory_id.slice(0, 8)}…</td><td>{p.machine_type} <b>{p.model}</b></td><td className="num">{p.qty}</td>
+                return (<tr key={p.id}><td>{factories[p.factory_id] || p.factory_id.slice(0, 8)}</td><td>{p.machine_type} <b>{p.model}</b></td><td className="num">{p.qty}</td>
                   <td className="num">{fmtRub(p.unit_price)}</td><td>{p.currency}</td><td className="num">{fmtRub(p.options_price)}</td><td>{p.basis}</td><td className="num">{p.production_days}</td>
                   <td>{pr.last_price ? <>посл. {fmtRub(pr.last_price)} ({pr.deviation_pct} %) {pr.comment && <span className="muted">— {pr.comment}</span>}</> : <span className="muted">нет истории</span>}</td>
                   <td>{(p as Position & { rfq_import_id?: string | null }).rfq_import_id ? <span className="badge accent">RFQ</span> : <span className="badge">вручную</span>}</td>

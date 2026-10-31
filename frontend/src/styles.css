@@ -13,11 +13,19 @@
 * { box-sizing: border-box; }
 body { margin: 0; font-family: var(--font); color: var(--ink); background: var(--bg); font-size: 14px; }
 a { color: inherit; }
-header.top { display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: #fff; border-bottom: 3px solid var(--accent); position: sticky; top: 0; z-index: 5; }
-header.top .brand { font-weight: 800; letter-spacing: .5px; color: var(--accent); }
-header.top nav a { margin-right: 14px; text-decoration: none; padding: 6px 2px; border-bottom: 2px solid transparent; }
-header.top nav a.active { border-color: var(--accent); }
+header.top { display: flex; align-items: center; gap: 12px 20px; padding: 8px 16px; background: #fff; border-bottom: 3px solid var(--accent); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; min-height: 56px; }
+header.top .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font-weight: 700; white-space: nowrap; border: 0; }
+header.top .brand img { height: 32px; width: auto; display: block; }
+header.top .brand span { font-size: 13px; color: var(--muted); }
+header.top nav { display: flex; gap: 2px; flex-wrap: nowrap; overflow-x: auto; }
+header.top nav a { text-decoration: none; padding: 8px 10px; border-radius: 6px; white-space: nowrap; line-height: 1; border: 0; }
+header.top nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+header.top nav a:hover { background: #f3f3f3; }
 header.top .spacer { flex: 1; }
+header.top select { max-width: 260px; }
+header.top .me { display: inline-flex; flex-direction: column; line-height: 1.2; font-size: 13px; max-width: 260px; overflow: hidden; }
+header.top .me small { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 900px) { header.top .brand span { display: none; } header.top .me { display: none; } header.top select { max-width: 180px; } }
 main { padding: 16px; max-width: 1400px; margin: 0 auto; }
 h1 { font-size: 20px; margin: 0 0 12px; }
 h2 { font-size: 16px; margin: 18px 0 8px; }

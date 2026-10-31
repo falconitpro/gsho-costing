@@ -37,7 +37,10 @@ export default function App() {
   return (
     <BrowserRouter>
       <header className="top">
-        <span className="brand">BergHaus · Себестоимость ГШО</span>
+        <NavLink to="/deals" className="brand">
+          <img src="/logo.svg" alt="Berg-Haus" />
+          <span>Себестоимость ГШО</span>
+        </NavLink>
         {me && (
           <nav>
             <NavLink to="/deals">Сделки</NavLink>
@@ -56,7 +59,7 @@ export default function App() {
             ))}
           </select>
         )}
-        {me && <span className="muted">{me.display_name} · {me.roles.map((r) => r.title).join(", ")}</span>}
+        {me && <span className="me muted" title={me.roles.map((r) => r.title).join(", ")}>{me.display_name}<small>{me.roles.map((r) => r.title).join(", ")}</small></span>}
         {!me && devUsers.length === 0 && <a className="btn" href="/api/auth/login">Войти через Microsoft 365</a>}
       </header>
       <main>

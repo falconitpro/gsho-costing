@@ -28,6 +28,10 @@ gsho-costing/
 └── Makefile
 ```
 
+## Логотип
+
+В шапке интерфейса — `frontend/public/logo.svg` (сейчас заглушка в цветах бренд-бука). Официальные файлы логотипа из раздела 15 ТЗ положить туда же под тем же именем (SVG или PNG, высота ≥ 64 px); для КП логотип загружается через настройки (`POST /api/admin/templates/logo`).
+
 ## Быстрый старт
 
 На Mac с Docker Desktop: двойной клик по `scripts/start-local.command` (первый запуск) и `scripts/rebuild.command` (обновить из GitHub и пересобрать).

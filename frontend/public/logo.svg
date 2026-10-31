@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 48" width="260" height="48" role="img" aria-label="Berg-Haus">
+  <!-- Заглушка в цветах бренд-бука; заменить на официальный файл логотипа (раздел 15 ТЗ): положить сюда logo.svg / logo.png -->
+  <polygon points="4,44 24,6 44,44" fill="#FF3131"/>
+  <polygon points="24,44 38,18 52,44" fill="#000"/>
+  <text x="62" y="33" font-family="Intro, Arial, sans-serif" font-weight="800" font-size="26" letter-spacing="1" fill="#000">BERG<tspan fill="#FF3131">-</tspan>HAUS</text>
+</svg>
