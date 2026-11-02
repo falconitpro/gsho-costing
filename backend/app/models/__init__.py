@@ -606,7 +606,7 @@ class Task(TimestampMixin, Base):
     role: Mapped[str] = mapped_column(String(32))
     assignee_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"), index=True)
     title: Mapped[str] = mapped_column(String(255))
-    block: Mapped[str] = mapped_column(String(32), default="")
+    block: Mapped[str] = mapped_column(String(64), default="")   # «stage:<uuid>», «local_option_quote:<uuid>»
     due: Mapped[date] = mapped_column(Date)
     done_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     overdue_notified: Mapped[bool] = mapped_column(Boolean, default=False)

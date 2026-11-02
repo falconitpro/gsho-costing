@@ -63,9 +63,15 @@ def add_missing_columns() -> list[str]:
         for table in Base.metadata.sorted_tables:
             if not insp.has_table(table.name):
                 continue
-            existing = {c["name"] for c in insp.get_columns(table.name)}
+            cols = {c["name"]: c for c in insp.get_columns(table.name)}
+            existing = set(cols)
             for col in table.columns:
                 if col.name in existing:
+                    # расширение varchar (например, tasks.block 32 → 64): PostgreSQL меняет тип без перезаписи данных
+                    want, have = getattr(col.type, "length", None), getattr(cols[col.name]["type"], "length", None)
+                    if want and have and have < want and engine.dialect.name == "postgresql":
+                        conn.execute(text(f'ALTER TABLE {table.name} ALTER COLUMN "{col.name}" TYPE VARCHAR({want})'))
+                        added.append(f"{table.name}.{col.name}({have}→{want})")
                     continue
                 ddl = f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {col.type.compile(dialect=engine.dialect)}'
                 default = _sql_default(col)
