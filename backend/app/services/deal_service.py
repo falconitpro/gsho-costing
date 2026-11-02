@@ -6,7 +6,7 @@ import tempfile
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import adapters
@@ -19,9 +19,13 @@ from .excel_export import export_excel
 
 
 def next_number(db: Session, year: int) -> str:
-    # дубли заявок (D-2026-0003-2, задача 9) нумерацию не сдвигают
-    n = db.scalar(select(func.count(Deal.id)).where(Deal.number.like(f"D-{year}-%"), Deal.parent_deal_id.is_(None))) or 0
-    return f"D-{year}-{n + 1:04d}"
+    # следующий номер = максимальный основной номер года + 1; дубли (D-2026-0003-2, задача 9) не учитываются,
+    # пропуски в нумерации (например, после старой логики) не приводят к повтору номера
+    import re
+    prefix = f"D-{year}-"
+    pat = re.compile(rf"^D-{year}-(\d+)$")
+    nums = [int(m.group(1)) for (num,) in db.execute(select(Deal.number).where(Deal.number.like(f"{prefix}%"))).all() if (m := pat.match(num or ""))]
+    return f"{prefix}{(max(nums) if nums else 0) + 1:04d}"
 
 
 def audit(db: Session, user_id: str | None, deal_id: str | None, entity: str, entity_id: str, action: str,
