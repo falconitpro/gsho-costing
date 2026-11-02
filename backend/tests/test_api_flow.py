@@ -252,6 +252,11 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     pos = _ok(client.post(f"/api/deals/{did}/positions", headers=H(MGR), json={"factory_id": factories[0]["id"], "model": "ZL50", "machine_type": "Погрузчик",
                                                                               "qty": 1, "unit_price": 900000, "currency": "CNY"}), 201)
     pid = pos["id"]
+    # вторая позиция той же модели: справка по цене с историей (даты в JSON) — не падает
+    extra = _ok(client.post(f"/api/deals/{did}/positions", headers=H(MGR), json={"factory_id": factories[0]["id"], "model": "ZL50", "machine_type": "Погрузчик",
+                                                                                "qty": 1, "unit_price": 910000, "currency": "CNY"}), 201)
+    assert extra["price_reference"]["last_price"] == 900000 and extra["price_reference"]["history"]
+    _ok(client.delete(f"/api/deals/{did}/positions/{extra['id']}", headers=H(MGR)), 204)
     # таблица из общего шаблона (фиксированные параметры RFQ 1–11)
     tp = _ok(client.get(f"/api/deals/{did}/positions/{pid}/tech-params", headers=H(MGR)))
     assert len(tp["rows"]) > 20 and all(not r["value_ru"] for r in tp["rows"])
@@ -321,6 +326,8 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     assert client.post(f"/api/deals/{did}/offers/select", headers=H(MGR), json={"offer_ids": [o["id"] for o in offers]}).status_code == 403
     sel = _ok(client.post(f"/api/deals/{did}/offers/select", headers=H(CD), json={"offer_ids": [o["id"] for o in offers], "copy_calcs": True}))
     assert len(sel["created_deals"]) == 1 and sel["created_deals"][0]["number"] == deal["number"] + "-2"
+    nxt = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "x"}), 201)   # дубль не сдвигает нумерацию
+    assert int(nxt["number"].split("-")[2]) == int(deal["number"].split("-")[2]) + 1
     related = _ok(client.get(f"/api/deals/{did}/related", headers=H(MGR)))
     assert len(related) == 2
     new = _ok(client.get(f"/api/deals/{sel['created_deals'][0]['id']}", headers=H(MGR)))
