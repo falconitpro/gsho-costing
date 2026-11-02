@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from ..calc.types import COST_ITEMS
 from ..core.auth import CurrentUser, get_current_user, require_roles
 from ..core.config import get_settings
-from ..core.roles import Role, filter_payload
+from ..core.roles import Role
 from ..core.workflow import DealStatus, STATUS_TITLES, overdue
 from ..db import get_db
 from ..models import Attachment, Deal, DealVersion, PlanFactEntry, Task

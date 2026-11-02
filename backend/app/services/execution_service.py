@@ -16,7 +16,6 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..calc.types import PaymentEvent
 from ..core.roles import Role
 from ..core.workflow import add_business_days
 from ..models import Batch, Deal, ExecutionStage, LocalOption, PlanFactEntry, Position, Task
@@ -231,7 +230,6 @@ def set_actual(db: Session, deal: Deal, stage: ExecutionStage, actual_on: Option
 def create_stage_tasks(db: Session, deal: Deal, user_id: Optional[str]) -> int:
     """Задачи на этапы исполнения с ответственными: опции РФ (заказать/установить), ввод дат по ролям. Без дублей."""
     n = 0
-    today = date.today()
     existing = {t.block for t in db.scalars(select(Task).where(Task.deal_id == deal.id, Task.done_at.is_(None))).all()}
     from ..services.deal_service import _assignee
     from ..core.workflow import TaskSpec

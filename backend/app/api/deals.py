@@ -22,7 +22,7 @@ from ..models import Attachment, Client, Deal, DealVersion, EquipmentModel, Fact
 from ..services import settings_service
 from ..services.deal_service import apply_transition, audit, complete_tasks, ensure_folders, next_number, sla
 from ..services.rfq_import import parse_rfq, price_reference
-from .common import deal_payload, get_deal_or_404, serialize
+from .common import deal_payload, get_deal_or_404, payment_terms_set, serialize
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
 
@@ -149,7 +149,7 @@ def _deal_dict(deal: Deal) -> dict:
                            "local_options": [serialize(o) for o in (p.local_option_rows or [])]} for p in deal.positions],
             "client_payments": deal.client_payments, "variants": [serialize(v) for v in deal.variants], "has_alternatives": deal.has_alternatives,
             "service_flag": deal.service_flag, "target_hours": deal.target_hours,
-            "payment_terms_set": bool(deal.client_payments) or (bool(deal.variants) and all(v.client_payments for v in deal.variants if not v.is_default))}
+            "payment_terms_set": payment_terms_set(deal)}
 
 
 def ensure_default_variant(db: Session, deal: Deal) -> None:

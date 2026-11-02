@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session
 from ..core.roles import Role
 from ..core.workflow import DealStatus, add_business_days
 from ..models import (
-    Attachment, Batch, Deal, Factory, FactoryOffer, FactoryPriceHistory, FeedEntry, LocalOption, Position, PositionImage, PositionTechParam, Task, Variant,
+    Batch, Deal, Factory, FactoryOffer, FactoryPriceHistory, FeedEntry, LocalOption, Position, PositionImage, PositionTechParam, Task,
 )
-from .deal_service import audit, next_number, notify
-from .tech_params_service import _norm, has_cjk
+from .deal_service import audit, notify
+from .tech_params_service import _norm
 
 
 def _copy_columns(src, dst, skip: set[str]) -> None:

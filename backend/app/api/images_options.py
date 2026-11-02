@@ -13,10 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import adapters
-from ..adapters.storage import sha256_file
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
-from ..core.workflow import DealStatus, add_business_days
+from ..core.workflow import add_business_days
 from ..db import get_db
 from ..models import Attachment, LocalOption, Position, PositionImage, Task
 from ..services.deal_service import audit, ensure_folders, notify

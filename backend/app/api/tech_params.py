@@ -18,7 +18,7 @@ from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
 from ..core.workflow import DealStatus
 from ..db import get_db
-from ..models import Attachment, Factory, FactoryOffer, Position, PositionImage, PositionTechParam
+from ..models import Attachment, Factory, FactoryOffer, Position, PositionTechParam
 from ..services import offers_service, tech_params_service as tps
 from ..services.deal_service import audit, ensure_folders
 from .common import get_deal_or_404, serialize

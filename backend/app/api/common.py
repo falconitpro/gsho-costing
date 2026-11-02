@@ -11,6 +11,14 @@ from ..core.workflow import LOGISTICS_VISIBLE_FROM, DealStatus
 from ..models import Deal
 
 
+def payment_terms_set(deal: Deal) -> bool:
+    """Задача 1: условия оплаты клиента заданы КД явно. Без альтернатив — на сделке; с альтернативами — у каждого предложения."""
+    if deal.has_alternatives:
+        offers = [v for v in deal.variants if not v.is_default]
+        return bool(offers) and all(v.client_payments for v in offers)
+    return bool(deal.client_payments)
+
+
 def serialize(obj, exclude: set[str] | None = None) -> dict[str, Any]:
     """ORM → dict (столбцы таблицы)."""
     out = {}
@@ -65,7 +73,7 @@ def deal_payload(deal: Deal, user: CurrentUser, extra: dict[str, Any] | None = N
     data["variants"] = [serialize(v) for v in deal.variants]
     data["batches"] = [serialize(b) for b in deal.batches]
     data["offer"] = next((serialize(v) for v in deal.variants if v.is_default), None)   # задача 5: одно предложение без выбора вариантов
-    data["payment_terms_set"] = bool(deal.client_payments) or (bool(deal.variants) and all(v.client_payments for v in deal.variants if not v.is_default))
+    data["payment_terms_set"] = payment_terms_set(deal)
     if extra:
         data.update(extra)
     # менеджер видит цену только после утверждения

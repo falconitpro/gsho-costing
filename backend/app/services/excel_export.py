@@ -15,7 +15,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from ..calc.types import COST_ITEMS, DealCalcInput, DealCalcResult, ScenarioName
+from ..calc.types import COST_ITEMS, DealCalcInput, DealCalcResult
 
 ACCENT = "FF3131"
 HDR_FONT = Font(bold=True, color="FFFFFF")

@@ -5,9 +5,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from .roles import Role
 

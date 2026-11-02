@@ -26,7 +26,7 @@ from ..services.deal_calc import approval_flags, build_calc_input, run_calc
 from ..services.deal_service import apply_transition, audit, complete_tasks, create_version, ensure_folders, sla
 from ..services.kp_generator import KpData, KpVariant, build_kp
 from ..services.offers_service import kp_brand_check, kp_model_name
-from .common import get_deal_or_404, serialize
+from .common import get_deal_or_404, payment_terms_set, serialize
 
 router = APIRouter(prefix="/api/deals/{deal_id}", tags=["pricing"])
 CD = require_roles(Role.CD, Role.GD)
@@ -99,7 +99,7 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
 
 
 def _cd_deal_dict(deal: Deal) -> dict:
-    return {"payment_terms_set": bool(deal.client_payments) or (bool(deal.variants) and all(v.client_payments for v in deal.variants if not v.is_default)),
+    return {"payment_terms_set": payment_terms_set(deal),
             "positions": [{"model": p.model, "factory_payments": p.factory_payments,
                            "local_options": [{"name": o.name, "cost": o.cost, "supplier_lead_days": o.supplier_lead_days} for o in (p.local_option_rows or [])]}
                           for p in deal.positions]}

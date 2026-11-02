@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.roles import Role
 from ..core.workflow import add_business_days
-from ..models import ClientPriceHistory, Deal, DealVersion, EquipmentExecution, EquipmentModel, Factory, MachineType, Position, Task, User
+from ..models import ClientPriceHistory, Deal, DealVersion, EquipmentExecution, EquipmentModel, Factory, MachineType, Task, User
 from .deal_service import audit, notify
 from .tech_params_service import fingerprint, row_dicts
 

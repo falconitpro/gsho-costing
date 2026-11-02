@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..core.auth import SESSION_COOKIE, CurrentUser, OidcClient, get_current_user, issue_session, set_session_cookie
 from ..core.config import Settings, get_settings
-from ..core.roles import ROLE_TITLES, Role
+from ..core.roles import ROLE_TITLES
 from ..db import get_db
 from ..models import User
 from ..services.deal_service import audit
