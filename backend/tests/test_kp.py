@@ -50,7 +50,9 @@ def test_pdf_drawing_thumbnail_in_kp(tmp_path):
     baseline = len(Document(build_kp(_data(), str(tmp_path / "kp_base.docx"))).inline_shapes)   # логотип в шапке
     d = _data()
     d.images = {"XDR80T": [(str(pdf), "Габаритный чертёж")]}
-    out = Document(build_kp(d, str(tmp_path / "kp_pdf.docx")))
+    kp_path = build_kp(d, str(tmp_path / "kp_pdf.docx"))
+    assert kp_path.endswith("kp_pdf.docx") and pdf.read_bytes().startswith(b"%PDF")   # КП не перезаписал файл чертежа
+    out = Document(kp_path)
     assert len(out.inline_shapes) == baseline + 1
     assert any("Габаритный чертёж (стр. 1)" in p.text for p in out.paragraphs)
 
@@ -58,3 +60,15 @@ def test_pdf_drawing_thumbnail_in_kp(tmp_path):
 def test_pdf_thumbnail_without_file_is_none(tmp_path):
     from app.services.kp_generator import pdf_thumbnail
     assert pdf_thumbnail(str(tmp_path / "missing.pdf")) is None
+
+
+def test_kp_with_png_keeps_its_own_path(tmp_path):
+    """Регрессия: при изображениях в документе КП сохранялся под именем картинки."""
+    Image = pytest.importorskip("PIL.Image")
+    png = tmp_path / "scheme.png"
+    Image.new("RGB", (320, 200), (200, 30, 30)).save(png)
+    d = _data()
+    d.images = {"XDR80T": [(str(png), "Схема")]}
+    out = build_kp(d, str(tmp_path / "kp.docx"))
+    assert out.endswith("kp.docx")
+    assert png.read_bytes()[:4] == b"\x89PNG"
