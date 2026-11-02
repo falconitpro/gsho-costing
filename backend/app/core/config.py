@@ -47,6 +47,11 @@ class Settings:
     wecom_agent_id: str = field(default_factory=lambda: _env("WECOM_AGENT_ID", ""))
     wecom_secret: str = field(default_factory=lambda: _env("WECOM_SECRET", ""))
 
+    # Переводчик RU↔ZH (задача 4): console | yandex
+    translator_provider: str = field(default_factory=lambda: _env("TRANSLATOR_PROVIDER", "yandex"))
+    yandex_translate_api_key: str = field(default_factory=lambda: _env("YANDEX_TRANSLATE_API_KEY", ""))
+    yandex_folder_id: str = field(default_factory=lambda: _env("YANDEX_FOLDER_ID", ""))
+
     # Курсы ЦБ
     cbr_daily_url: str = field(default_factory=lambda: _env("CBR_DAILY_URL", "https://www.cbr.ru/scripts/XML_daily.asp"))
     cbr_dynamic_url: str = field(default_factory=lambda: _env("CBR_DYNAMIC_URL", "https://www.cbr.ru/scripts/XML_dynamic.asp"))

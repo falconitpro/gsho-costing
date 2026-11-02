@@ -390,6 +390,7 @@ class PositionCost(BaseModel):
     price_rub: Optional[float] = None    # распределённая цена
     events: dict[str, date] = Field(default_factory=dict)            # плановые даты событий позиции
     delivery_term: Optional[DeliveryTermResult] = None
+    factory_payment_dates: list[dict] = Field(default_factory=list)  # график заводу: no, event, on, amount, currency, amount_rub
 
 
 class CashGap(BaseModel):

@@ -61,10 +61,18 @@ def test_full_flow(client, tmp_path):
     rfq_all = pos["tech_params"]["_rfq"]
     assert rfq_all["total"] >= 170 and rfq_all["filled"] >= 50 and "1.8" in pos["tech_params"] and "1.5" in pos["logistics_params"]
     schemes = _ok(client.get("/api/refs/payment-schemes", headers=H(MGR)))
-    _ok(client.patch(f"/api/deals/{did}", headers=H(MGR), json={"client_payments": schemes[0]["lines"]}))
-    var = _ok(client.post(f"/api/deals/{did}/variants", headers=H(MGR), json={"name": "Базовый", "position_ids": [pos["id"]]}), 201)
+    # задача 1: условия оплаты менеджер не задаёт — только пожелания клиента; задача 5: вариантов не требуется (служебное предложение)
+    assert client.patch(f"/api/deals/{did}", headers=H(MGR), json={"client_payments": schemes[0]["lines"]}).status_code == 403
+    _ok(client.patch(f"/api/deals/{did}", headers=H(MGR), json={"client_payment_wishes": "30 % аванс, остальное после поставки"}))
+    assert client.post(f"/api/deals/{did}/variants", headers=H(MGR), json={"name": "Базовый", "position_ids": [pos["id"]]}).status_code == 409
     d = _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))
     assert d["checks"] == [], d["checks"]
+    assert d["offer"] and d["offer"]["position_ids"] == [pos["id"]] and d["payment_terms_set"] is False
+    var = d["offer"]
+    # задача 4: таблица теххарактеристик из RFQ, запрос заводу (файл), обязательные параметры
+    tp = _ok(client.get(f"/api/deals/{did}/positions/{pos['id']}/tech-params", headers=H(MGR)))
+    assert len(tp["rows"]) >= 50 and any(r["value_ru"] for r in tp["rows"]) and tp["missing_required"] == []
+    assert client.get(f"/api/deals/{did}/positions/{pos['id']}/tech-params/request/file", headers=H(MGR)).status_code == 200
     assert _ok(client.post(f"/api/deals/{did}/send-to-calc", headers=H(MGR)))["status"] == "logistics_calc"
     # задачи логиста и сервиса созданы
     assert any(t["deal_id"] == did for t in _ok(client.get("/api/tasks/my", headers=H(LOG))))
@@ -101,15 +109,26 @@ def test_full_flow(client, tmp_path):
     assert _ok(client.post(f"/api/deals/{did}/service/complete", headers=H(SVC)))["status"] == "calc_ready"
     assert client.get(f"/api/deals/{did}/calc", headers=H(SVC)).status_code == 403
 
-    # --- КД: расчёт, цена по целевой марже, утверждение без виз
+    # --- КД: расчёт, цена по целевой марже, условия оплаты (задача 1), утверждение без виз
     calc = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))
     base = calc["result"]["variants"][var["id"]]["base"]
     assert set(base["items_rub"]) == {"factory_price", "domestic_logistics", "export_formalities", "intl_freight", "insurance", "customs_duty",
-                                      "import_vat", "broker_util", "certification", "rf_delivery", "finance", "service", "warranty_reserve", "overhead"}
+                                      "import_vat", "broker_util", "certification", "rf_delivery", "finance", "service", "warranty_reserve", "overhead",
+                                      "local_completion"}
     assert base["items_rub"]["service"] > 0 and base["items_rub"]["customs_duty"] > 0 and base["cash_gap"]["amount_rub"] < 0
     assert calc["result"]["fx_components"] and calc["threshold_pct"] == 3.0
+    assert base["defaults_used"]["client_payments"] is True and any("типовой схеме" in w for w in calc["warnings"])
+    assert calc["terms"][var["id"]][0]["delivery_term"]["promised"] % 7 == 0           # задача 3: срок клиенту кратен неделе
     p = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "margin", "value": 8.0}))
     assert abs(p["result"]["base"]["margin_pct"] - 8.0) < 0.05 and p["approval_flags"]["margin_below_threshold"] is False
+    # без условий оплаты от КД утверждение не проходит
+    assert client.post(f"/api/deals/{did}/submit", headers=H(CD)).status_code == 422
+    terms = _ok(client.post(f"/api/deals/{did}/payment-terms", headers=H(CD), json={
+        "client_payments": calc["payment_terms"]["default_client"], "factory_payments": {pos["id"]: calc["payment_terms"]["default_factory"]},
+        "bank_guarantee": {"enabled": True, "mode": "one_time_pct", "value": 1.0}, "accept_wishes": True}))
+    assert terms["cd_checks"] == [] and terms["result"]["variants"][var["id"]]["base"]["guarantee_cost_rub"] > 0
+    dmg = _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))
+    assert dmg["payment_terms_set"] is True and dmg["client_payments"]                   # менеджер видит условия после ввода КД
     sub = _ok(client.post(f"/api/deals/{did}/submit", headers=H(CD)))
     assert sub["status"] == "approved", sub
     vers = _ok(client.get(f"/api/deals/{did}/versions", headers=H(CD)))
@@ -122,15 +141,46 @@ def test_full_flow(client, tmp_path):
     assert client.get(f"/api/files/{vers[0]['excel_path']}", headers=H(CD)).status_code == 200
     dm = _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))
     assert dm["variants"][0]["price_rub"] and "calc_result" not in dm     # после утверждения менеджер видит цену
-    # --- менеджер: КП отправлено, исход
+    # --- менеджер: КП отправлено (история цен клиентам, задача 8), исход → стадия контракта (задача 2)
     assert _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": ["mech@rudnik.example"]}))["status"] == "kp_sent"
-    assert _ok(client.post(f"/api/deals/{did}/outcome", headers=H(MGR), json={"outcome": "won", "reason": "лучшая цена"}))["status"] == "won"
-    # --- план/факт
+    card_cd = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(CD)))
+    assert card_cd["kp_history"] and card_cd["kp_history"][0]["deal_number"] == deal["number"] and card_cd["kp_history"][0]["versions"]
+    card_mgr = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(MGR)))
+    assert "kp_history" not in card_mgr and "last_kp" not in card_mgr                # историю КП видят только КД и ГД
+    # задача 7: занесение в каталог — менеджер предлагает, КД подтверждает
+    cand = _ok(client.get(f"/api/deals/{did}/catalog/candidates", headers=H(MGR)))
+    assert cand[0]["model"] == "XDR80T"
+    prop = _ok(client.post(f"/api/deals/{did}/catalog/propose", headers=H(MGR), json={"position_ids": [pos["id"]], "names": {pos["id"]: "XDR80T базовое"}}))
+    assert len(prop["created"]) == 1 and prop["created"][0]["status"] == "pending"
+    assert client.post(f"/api/catalog/executions/{prop['created'][0]['id']}/decision", headers=H(MGR), json={"approve": True}).status_code == 403
+    ex = _ok(client.post(f"/api/catalog/executions/{prop['created'][0]['id']}/decision", headers=H(CD), json={"approve": True, "brand_name": "BH-80"}))
+    assert ex["status"] == "approved"
+    tree = _ok(client.get("/api/catalog/tree", headers=H(MGR)))
+    assert any(e["name"] == "XDR80T базовое" for f in tree for t in f["types"] for m in t["models"] for e in m["executions"])
+    out = _ok(client.post(f"/api/deals/{did}/outcome", headers=H(MGR), json={"outcome": "won", "reason": "лучшая цена"}))
+    assert out["status"] == "contract"
+    st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(MGR)))
+    codes = {s["code"] for s in st["stages"]}
+    assert {"contract_signed", "factory_contract", "client_advance", "factory_advance", "readiness", "border", "declaration", "delivery", "client_final", "commissioning"} <= codes
+    assert client.post(f"/api/deals/{did}/execution/start", headers=H(MGR)).status_code == 409   # нет реквизитов контракта
+    _ok(client.patch(f"/api/deals/{did}/execution/contract", headers=H(MGR), json={"contract_number": "К-2026-11", "contract_signed_at": "2026-12-01"}))
+    assert _ok(client.post(f"/api/deals/{did}/execution/start", headers=H(MGR)))["status"] == "execution"
+    st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(FD)))
+    adv = next(s for s in st["stages"] if s["code"] == "client_advance")
+    assert adv["can_set"] and adv["amount"] > 0
+    assert client.post(f"/api/deals/{did}/execution/stages/{adv['id']}/actual", headers=H(MGR), json={"actual_on": "2026-12-10", "actual_amount": 1}).status_code == 403
+    r = _ok(client.post(f"/api/deals/{did}/execution/stages/{adv['id']}/actual", headers=H(FD), json={"actual_on": "2026-12-10", "actual_amount": adv["amount"]}))
+    assert next(s for s in r["stages"] if s["code"] == "client_advance")["done"]
+    # --- план/факт (стадия исполнения)
     _ok(client.post(f"/api/deals/{did}/fact", headers=H(LOG), json={"kind": "cost_item", "cost_item_code": "intl_freight", "amount": 2000000, "on": "2027-03-01"}), 201)
     assert client.post(f"/api/deals/{did}/fact", headers=H(LOG), json={"kind": "cost_item", "cost_item_code": "service", "amount": 1, "on": "2027-03-01"}).status_code == 403
     pf = _ok(client.get(f"/api/deals/{did}/plan-fact", headers=H(FD)))
     row = next(r for r in pf["rows"] if r["code"] == "intl_freight")
     assert row["fact"] == 2000000 and row["deviation_rub"] is not None
+    assert any(e["kind"] == "payment_in" for e in pf["entries"])                     # платёж ФД попал в план/факт
+    # закрытие — только КД
+    assert client.post(f"/api/deals/{did}/execution/close", headers=H(MGR), json={}).status_code == 403
+    assert _ok(client.post(f"/api/deals/{did}/execution/close", headers=H(CD), json={"reason": "исполнено"}))["status"] == "closed"
     # журнал
     audit = _ok(client.get(f"/api/deals/{did}/audit", headers=H(CD)))
     assert any(a["action"] == "status" for a in audit)
@@ -149,10 +199,9 @@ def test_low_margin_goes_to_fd_visa(client, tmp_path):
     assert pos["logistics_params"]["1.14"]["value"] == 24000 and pos["tech_params"]["_source_file"] == "ручной ввод"
     upd = _ok(client.patch(f"/api/deals/{did}/positions/{pos['id']}", headers=H(MGR), json={"qty": 2, "tech_params": {"1.4": {"name": "Ковш", "value": 5, "unit": "м³"}}}))
     assert upd["qty"] == 2 and "1.3" in upd["tech_params"] and "1.4" in upd["tech_params"]
-    _ok(client.patch(f"/api/deals/{did}/positions/{pos['id']}", headers=H(MGR), json={"qty": 1}))
-    schemes = _ok(client.get("/api/refs/payment-schemes", headers=H(MGR)))
-    _ok(client.patch(f"/api/deals/{did}", headers=H(MGR), json={"client_payments": schemes[1]["lines"]}))
-    var = _ok(client.post(f"/api/deals/{did}/variants", headers=H(MGR), json={"name": "V", "position_ids": [pos["id"]]}), 201)
+    _ok(client.patch(f"/api/deals/{did}/positions/{pos['id']}", headers=H(MGR), json={"qty": 1,
+        "production_term": {"value": 12, "unit": "weeks", "start_event": "factory_prepayment"}, "delivery_term": {"unit": "weeks", "start_event": "lc_opened"}}))
+    var = _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))["offer"]
     _ok(client.post(f"/api/deals/{did}/send-to-calc", headers=H(MGR)))
     # отклонение от истории (первая сделка дала 150 000) выше 15 % → без комментария 422, с комментарием — принимается
     items = {"intl_freight": {"amount": 60000, "currency": "CNY"}, "broker_rub": 200000, "rf_delivery_rub": 500000}
@@ -162,6 +211,10 @@ def test_low_margin_goes_to_fd_visa(client, tmp_path):
     _ok(client.put(f"/api/deals/{did}/logistics/positions/{pos['id']}", headers=H(LOG), json={"hs_code": "8429519000", "util_fee_rub": 600000}))
     assert _ok(client.post(f"/api/deals/{did}/logistics/complete", headers=H(LOG)))["status"] == "calc_ready"
     _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "margin", "value": 1.0}))
+    schemes = _ok(client.get("/api/refs/payment-schemes", headers=H(CD)))
+    calc = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))
+    assert calc["terms"][var["id"]][0]["delivery_term"]["unit"] == "weeks" and "аккредитива" in calc["terms"][var["id"]][0]["delivery_term"]["text"]
+    _ok(client.post(f"/api/deals/{did}/payment-terms", headers=H(CD), json={"client_payments": schemes[1]["lines"], "factory_payments": {pos["id"]: calc["payment_terms"]["default_factory"]}}))
     sub = _ok(client.post(f"/api/deals/{did}/submit", headers=H(CD)))
     assert sub["status"] == "fd_visa" and sub["approval_flags"]["margin_below_threshold"]
     assert client.post(f"/api/deals/{did}/visa", headers=H(CD), json={"approved": True}).status_code == 403
@@ -172,3 +225,125 @@ def test_low_margin_goes_to_fd_visa(client, tmp_path):
     assert any(t["deal_id"] == did and t["block"] == "logistics" for t in _ok(client.get("/api/tasks/my", headers=H(LOG))))
     board = _ok(client.get("/api/board", headers=H(FD)))
     assert any(d["id"] == did for d in board["rework"]["deals"])
+
+
+GD, ADM = "gd@example.com", "admin@example.com"
+
+
+def _png(path):
+    from PIL import Image
+    Image.new("RGB", (640, 480), (200, 30, 30)).save(path, "PNG")
+    return path
+
+
+def test_tech_params_offers_images_local_options(client, tmp_path):
+    """Задачи 4, 6, 9, 10: импорт таблицы клиента с предпросмотром, опции РФ, запрос нескольким заводам, ответ завода,
+    сравнение и отбор КД (дублирование заявки), изображения и выбор для КП, бренд подачи."""
+    from openpyxl import Workbook
+    clients = _ok(client.get("/api/refs/clients", headers=H(MGR)))
+    factories = _ok(client.get("/api/refs/factories", headers=H(MGR)))
+    deal = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "Разрез Восточный"}), 201)
+    did = deal["id"]
+    pos = _ok(client.post(f"/api/deals/{did}/positions", headers=H(MGR), json={"factory_id": factories[0]["id"], "model": "ZL50", "machine_type": "Погрузчик",
+                                                                              "qty": 1, "unit_price": 900000, "currency": "CNY"}), 201)
+    pid = pos["id"]
+    # таблица из общего шаблона (фиксированные параметры RFQ 1–11)
+    tp = _ok(client.get(f"/api/deals/{did}/positions/{pid}/tech-params", headers=H(MGR)))
+    assert len(tp["rows"]) > 20 and all(not r["value_ru"] for r in tp["rows"])
+    # файл клиента: №, параметр, требование → предпросмотр и применение
+    wb = Workbook(); ws = wb.active
+    ws.append(["Требования к погрузчику"]); ws.append([])
+    ws.append(["№", "Параметр", "Ед.", "Требование"])
+    first = tp["rows"][0]
+    ws.append([first["no"], first["name_ru"], first["unit"], "не менее 5 т"])
+    ws.append(["", "Кондиционер кабины", "", "обязательно"])
+    f = tmp_path / "client.xlsx"; wb.save(f)
+    with open(f, "rb") as fh:
+        prev = _ok(client.post(f"/api/deals/{did}/positions/{pid}/tech-params/import/preview", headers=H(MGR), files={"file": ("client.xlsx", fh)}))
+    mp = prev["sheets"][0]["mapping"]
+    assert mp["header_row"] == 2 and mp["columns"]["name_ru"] == 1 and mp["columns"]["customer_requirement_ru"] == 3
+    import json
+    with open(f, "rb") as fh:
+        res = _ok(client.post(f"/api/deals/{did}/positions/{pid}/tech-params/import/apply", headers=H(MGR), files={"file": ("client.xlsx", fh)},
+                              data={"mapping": json.dumps({"sheet": prev["sheets"][0]["name"], **mp}), "target": "requirements"}))
+    assert res["matched"] == 1 and res["added"] == 1
+    rows = res["rows"]
+    ac = next(r for r in rows if r["name_ru"] == "Кондиционер кабины")
+    assert next(r for r in rows if r["no"] == first["no"])["customer_requirement_ru"] == "не менее 5 т"
+    # задача 6: кондиционер реализуется в России → опция, задачи менеджеру/сервису/КД, не идёт заводу
+    opt = _ok(client.post(f"/api/deals/{did}/positions/{pid}/local-options", headers=H(MGR), json={"name": "Кондиционер кабины", "cost": 250000, "currency": "RUB",
+                                                                                                "supplier_lead_days": 20, "install_stage": "before_handover", "install_days": 3, "tech_param_id": ac["id"]}), 201)
+    tasks_svc = _ok(client.get("/api/tasks/my", headers=H(SVC)))
+    assert any(t["deal_id"] == did and "установки" in t["title"] for t in tasks_svc)
+    assert any(t["deal_id"] == did and "Утвердить стоимость" in t["title"] for t in _ok(client.get("/api/tasks/my", headers=H(CD))))
+    tp = _ok(client.get(f"/api/deals/{did}/positions/{pid}/tech-params", headers=H(MGR)))
+    assert next(r for r in tp["rows"] if r["id"] == ac["id"])["local_ru"] is True
+    # задача 10: изображение клиента, отправка заводу; выбор для КП — только КД
+    png = _png(tmp_path / "scheme.png")
+    with open(png, "rb") as fh:
+        img = _ok(client.post(f"/api/deals/{did}/positions/{pid}/images", headers=H(MGR), files={"file": ("scheme.png", fh, "image/png")},
+                              data={"kind": "scheme", "source": "client", "caption": "схема клиента"}), 201)
+    assert client.patch(f"/api/deals/{did}/positions/{pid}/images/{img['id']}", headers=H(MGR), json={"in_kp": True}).status_code == 403
+    _ok(client.patch(f"/api/deals/{did}/positions/{pid}/images/{img['id']}", headers=H(CD), json={"in_kp": True, "kp_order": 1}))
+    assert client.post(f"/api/deals/{did}/positions/{pid}/images", headers=H(FD), files={"file": ("x.png", b"123", "image/png")}).status_code == 403
+    # задача 9: запрос двум заводам (файл RU+ZH, строка опции РФ не включена), ответ второго завода, сравнение, отбор КД
+    req = _ok(client.post(f"/api/deals/{did}/positions/{pid}/tech-params/request", headers=H(MGR), json={"factory_ids": [factories[0]["id"], factories[1]["id"]],
+                                                                                                        "image_ids": [img["id"]], "via_wecom": True, "via_mail": False}))
+    assert len(req["sent"]) == 2 and all(x["offer_id"] for x in req["sent"])
+    offers = _ok(client.get(f"/api/deals/{did}/offers", headers=H(MGR)))
+    assert len(offers) == 2 and all(o["status"] == "requested" for o in offers)
+    second = next(o for o in offers if o["factory_id"] == factories[1]["id"])
+    wb = Workbook(); ws = wb.active
+    ws.append(["№", "参数", "数值（中文）", "备注"])
+    ws.append([first["no"], first["name_ru"], "5.5", "标准配置"])
+    f2 = tmp_path / "answer.xlsx"; wb.save(f2)
+    with open(f2, "rb") as fh:
+        prev2 = _ok(client.post(f"/api/deals/{did}/positions/{pid}/tech-params/import/preview", headers=H(MGR), files={"file": ("answer.xlsx", fh)}))
+    mp2 = prev2["sheets"][0]["mapping"]
+    assert mp2["columns"].get("value_zh") == 2
+    with open(f2, "rb") as fh:
+        ans = _ok(client.post(f"/api/deals/{did}/positions/{pid}/tech-params/import/apply", headers=H(MGR), files={"file": ("answer.xlsx", fh)},
+                              data={"mapping": json.dumps({"sheet": prev2["sheets"][0]["name"], **mp2}), "target": "factory_answer", "offer_id": second["id"]}))
+    assert ans["matched"] == 1 and ans["offer_id"] == second["id"]
+    _ok(client.post(f"/api/deals/{did}/offers", headers=H(MGR), json={"factory_id": factories[1]["id"], "model": "LW500", "unit_price": 850000, "currency": "CNY",
+                                                                     "production_term": {"value": 10, "unit": "weeks"}, "source_position_id": pid}))
+    cmp_ = _ok(client.get(f"/api/deals/{did}/offers/compare?position_id={pid}", headers=H(MGR)))
+    assert len(cmp_["offers"]) == 2 and all(r["name_ru"] != "Кондиционер кабины" for r in cmp_["rows"])
+    row0 = next(r for r in cmp_["rows"] if r["no"] == first["no"])
+    assert [c["status"] for c in row0["cells"]].count("empty") == 1 and any(c["value"] == "5.5" for c in row0["cells"])
+    _ok(client.post(f"/api/deals/{did}/offers/submit-compare", headers=H(MGR)))
+    assert any(t["deal_id"] == did and "Отобрать заводы" in t["title"] for t in _ok(client.get("/api/tasks/my", headers=H(CD))))
+    assert client.post(f"/api/deals/{did}/offers/select", headers=H(MGR), json={"offer_ids": [o["id"] for o in offers]}).status_code == 403
+    sel = _ok(client.post(f"/api/deals/{did}/offers/select", headers=H(CD), json={"offer_ids": [o["id"] for o in offers], "copy_calcs": True}))
+    assert len(sel["created_deals"]) == 1 and sel["created_deals"][0]["number"] == deal["number"] + "-2"
+    related = _ok(client.get(f"/api/deals/{did}/related", headers=H(MGR)))
+    assert len(related) == 2
+    new = _ok(client.get(f"/api/deals/{sel['created_deals'][0]['id']}", headers=H(MGR)))
+    assert new["parent_deal_id"] == did and new["positions"][0]["model"] == "LW500" and new["positions"][0]["factory_id"] == factories[1]["id"]
+    assert new["positions"][0]["local_options"] and len(new["positions"][0]["images"]) >= 1 and new["offer"]
+    assert any(r["value_ru"] == "5.5" for r in new["positions"][0]["tech_param_rows"])
+    # бренд компании: без наименования в каталоге — 422; задать можно через каталог
+    assert client.patch(f"/api/deals/{did}/kp-settings", headers=H(CD), json={"kp_brand": "company"}).status_code == 422
+    assert client.patch(f"/api/deals/{did}/kp-settings", headers=H(MGR), json={"kp_images_mode": "both"}).status_code == 403
+    assert _ok(client.patch(f"/api/deals/{did}/kp-settings", headers=H(CD), json={"kp_images_mode": "both"}))["kp_images_mode"] == "both"
+
+
+def test_access_levels_admin(client):
+    """Задача 11: матрица прав в интерфейсе — правило по роли, исключение для сотрудника, защита ГД, предпросмотр."""
+    assert client.get("/api/admin/access", headers=H(CD)).status_code == 403
+    m = _ok(client.get("/api/admin/access", headers=H(GD)))
+    assert any(g["code"] == "client_price_history" for g in m["groups"]) and any(r["role"] == "gd" for r in m["roles"])
+    me = _ok(client.get("/api/auth/me", headers=H(MGR)))
+    assert me["perms"]["client_price_history"] == 0 and me["perms"]["tech_params"] == 2
+    _ok(client.put("/api/admin/access/manager/client_price_history", headers=H(ADM), json={"level": 1}))
+    assert _ok(client.get("/api/auth/me", headers=H(MGR)))["perms"]["client_price_history"] == 1
+    assert client.put("/api/admin/access/gd/access_admin", headers=H(ADM), json={"level": 0}).status_code == 422
+    users = m["users"]
+    mgr = next(u for u in users if "manager" in u["roles"])
+    ov = _ok(client.post("/api/admin/access/overrides", headers=H(GD), json={"user_id": mgr["id"], "group": "client_price_history", "level": 0, "comment": "стажёр"}), 201)
+    assert _ok(client.get("/api/auth/me", headers=H(MGR)))["perms"]["client_price_history"] == 0
+    pv = _ok(client.get(f"/api/admin/access/preview?user_id={mgr['id']}", headers=H(GD)))
+    assert "kp_history" in pv["denied_fields"]
+    _ok(client.delete(f"/api/admin/access/overrides/{ov['id']}", headers=H(GD)), 204)
+    _ok(client.put("/api/admin/access/manager/client_price_history", headers=H(ADM), json={"level": 0}))
+    assert _ok(client.get("/api/auth/me", headers=H(MGR)))["perms"]["client_price_history"] == 0

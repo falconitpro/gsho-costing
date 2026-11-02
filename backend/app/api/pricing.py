@@ -13,17 +13,19 @@ from sqlalchemy.orm import Session
 
 from .. import adapters
 from ..calc import calc_deal, solve_price
-from ..core.auth import CurrentUser, require_roles
-from ..core.roles import Role
+from ..calc.types import EVENT_TITLES, PaymentEvent
+from ..core.auth import CurrentUser, get_current_user, require_roles
+from ..core.roles import Role, filter_payload
 from ..core.workflow import (
-    ApprovalStep, DealState, DealStatus, cd_submit_price, price_changed_after_visa, rework as wf_rework, visa_decision,
+    ApprovalStep, DealState, DealStatus, cd_checks, cd_submit_price, price_changed_after_visa, rework as wf_rework, visa_decision,
 )
 from ..db import get_db
-from ..models import Approval, Attachment, Deal, DealVersion, FactoryPriceHistory, Variant
+from ..models import Approval, Attachment, ClientPriceHistory, Deal, DealVersion, Factory, FactoryPriceHistory, FeedEntry, Position, Variant
 from ..services import settings_service
 from ..services.deal_calc import approval_flags, build_calc_input, run_calc
 from ..services.deal_service import apply_transition, audit, complete_tasks, create_version, ensure_folders, sla
 from ..services.kp_generator import KpData, KpVariant, build_kp
+from ..services.offers_service import kp_brand_check, kp_model_name
 from .common import get_deal_or_404, serialize
 
 router = APIRouter(prefix="/api/deals/{deal_id}", tags=["pricing"])
@@ -47,19 +49,25 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     price_hist = db.scalars(select(FactoryPriceHistory).where(FactoryPriceHistory.deal_id != deal.id,
                                                               FactoryPriceHistory.model.in_([p.model for p in deal.positions]))
                             .order_by(FactoryPriceHistory.on.desc()).limit(20)).all()
-    prev_kp = db.scalars(select(Deal).where(Deal.client_id == deal.client_id, Deal.id != deal.id,
-                                            Deal.status.in_([DealStatus.KP_SENT, DealStatus.WON, DealStatus.LOST])).limit(10)).all()
+    # история цен клиентам (задачи 7, 8): по отправленным версиям КП; видят только КД/ГД (серверная фильтрация ключа)
     client_kp_history = []
-    for d in prev_kp:
-        for v in d.variants:
-            client_kp_history.append({"deal": d.number, "variant": v.name, "price_rub": v.price_rub, "status": d.status.value,
-                                      "models": [p.model for p in d.positions if p.id in v.position_ids]})
+    for h in db.scalars(select(ClientPriceHistory).where(ClientPriceHistory.client_id == deal.client_id, ClientPriceHistory.deal_id != deal.id)
+                        .order_by(ClientPriceHistory.on.desc()).limit(30)).all():
+        client_kp_history.append({"deal": h.deal_number, "variant": h.variant_name, "version_no": h.version_no, "price_rub": h.total_rub,
+                                  "unit_price_rub": h.unit_price_rub, "status": h.outcome or "kp_sent", "models": [h.model], "on": h.on.isoformat()})
     warn_lower = []
     for v in deal.variants:
         models = {p.model for p in deal.positions if p.id in v.position_ids}
         for h in client_kp_history:
             if h["price_rub"] and v.price_rub and set(h["models"]) & models and v.price_rub < h["price_rub"]:
-                warn_lower.append(f"Вариант «{v.name}»: цена ниже предыдущего КП этому клиенту ({h['deal']}, {h['price_rub']:,.0f} RUB)")
+                warn_lower.append(f"Предложение «{v.name}»: цена ниже предыдущего КП этому клиенту ({h['deal']}, {h['price_rub']:,.0f} RUB)")
+    base_any = next(iter(res.variants.values()), {}).get("base") if res.variants else None
+    if base_any and base_any.defaults_used.get("client_payments"):
+        warn_lower.append("Условия оплаты клиента не заданы — расчёт по типовой схеме (30 % после подписания, 70 % аккредитивом после CMR).")
+    if base_any and base_any.defaults_used.get("factory_payments"):
+        warn_lower.append("График оплаты заводу не задан КД — расчёт по типовой схеме (30 % в течение 14 раб. дней после контракта, 70 % после готовности).")
+    factories = {f.id: f.name for f in db.scalars(select(Factory)).all()}
+    warn_lower += kp_brand_check(deal, factories)
     comments = []
     for p in deal.positions:
         for k, c in ((p.logistics or {}).get("checks") or {}).items():
@@ -67,13 +75,83 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
                 comments.append({"from": "логист", "item": k, "ref": p.model, "comment": c["comment"]})
         if (p.price_reference or {}).get("comment"):
             comments.append({"from": "менеджер", "item": "цена завода", "ref": p.model, "comment": p.price_reference["comment"]})
-    return {
+    checks = cd_checks(_cd_deal_dict(deal))
+    terms = {}
+    for vid, scen in res.variants.items():
+        terms[vid] = [{"position_id": pc.position_id, "model": next((p.model for p in deal.positions if p.id == pc.position_id), ""),
+                       "delivery_term": pc.delivery_term.model_dump(mode="json") if pc.delivery_term else None,
+                       "events": {k: v.isoformat() for k, v in pc.events.items()}} for pc in scen["base"].positions]
+    data = {
         "input": inp.model_dump(mode="json"), "result": res.model_dump(mode="json"),
         "approval_flags": approval_flags(res), "threshold_pct": inp.thresholds.margin_threshold_pct,
         "factory_price_history": [serialize(h) for h in price_hist], "client_kp_history": client_kp_history,
-        "warnings": res.warnings + warn_lower, "comments": comments,
-        "status": deal.status.value, "scenario_override": deal.scenario_override,
+        "warnings": res.warnings + warn_lower, "comments": comments, "cd_checks": checks, "terms": terms,
+        "status": deal.status.value, "scenario_override": deal.scenario_override, "kp_brand": deal.kp_brand, "kp_images_mode": deal.kp_images_mode,
+        "payment_terms": {"client_payments": deal.client_payments, "client_payment_wishes": deal.client_payment_wishes, "bank_guarantee": deal.bank_guarantee,
+                          "default_client": settings_service.get(db, "default_client_payment_scheme"),
+                          "default_factory": settings_service.get(db, "default_factory_payment_scheme"),
+                          "advance_guarantee_default": settings_service.get(db, "advance_guarantee_cost"),
+                          "positions": [{"id": p.id, "model": p.model, "factory_payments": p.factory_payments, "factory_payments_offer": p.factory_payments_offer,
+                                         "delivery_term": p.delivery_term, "production_term": p.production_term} for p in deal.positions]},
+        "events": {e.value: t for e, t in EVENT_TITLES.items()},
     }
+    return filter_payload(data, user)
+
+
+def _cd_deal_dict(deal: Deal) -> dict:
+    return {"payment_terms_set": bool(deal.client_payments) or (bool(deal.variants) and all(v.client_payments for v in deal.variants if not v.is_default)),
+            "positions": [{"model": p.model, "factory_payments": p.factory_payments,
+                           "local_options": [{"name": o.name, "cost": o.cost, "supplier_lead_days": o.supplier_lead_days} for o in (p.local_option_rows or [])]}
+                          for p in deal.positions]}
+
+
+class PaymentTermsIn(BaseModel):
+    """Задача 1: условия оплаты задаёт КД (ГД — те же права). Пустые списки = вернуться к типовой схеме."""
+    client_payments: Optional[list[dict]] = None                 # уровень сделки (без альтернатив)
+    variant_payments: Optional[dict[str, list[dict]]] = None     # по предложениям (с альтернативами)
+    factory_payments: Optional[dict[str, list[dict]]] = None     # position_id → график заводу
+    bank_guarantee: Optional[dict] = None                        # {enabled, mode: one_time_pct|annual_pct|fixed, value}
+    delivery_terms: Optional[dict[str, dict]] = None             # position_id → {unit, start_event} (задача 3, правка КД)
+    accept_wishes: bool = False                                  # отметка «пожелания клиента приняты»
+
+
+@router.post("/payment-terms")
+def payment_terms(deal_id: str, body: PaymentTermsIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    deal = get_deal_or_404(db, deal_id, user)
+    if not user.can("payment_terms", 2):
+        raise HTTPException(403, "Условия оплаты задаёт коммерческий директор")
+    before = {"client_payments": deal.client_payments, "bank_guarantee": deal.bank_guarantee}
+    if body.client_payments is not None:
+        deal.client_payments = body.client_payments
+    if body.variant_payments:
+        for v in deal.variants:
+            if v.id in body.variant_payments:
+                v.client_payments = body.variant_payments[v.id]
+    if body.factory_payments:
+        for p in deal.positions:
+            if p.id in body.factory_payments:
+                p.factory_payments = body.factory_payments[p.id]
+    if body.bank_guarantee is not None:
+        deal.bank_guarantee = body.bank_guarantee
+    changed_terms = False
+    if body.delivery_terms:
+        for p in deal.positions:
+            if p.id in body.delivery_terms:
+                if (p.delivery_term or {}) != body.delivery_terms[p.id]:
+                    changed_terms = True
+                p.delivery_term = body.delivery_terms[p.id]
+    if body.accept_wishes:
+        db.add(FeedEntry(deal_id=deal.id, kind="system", subject="Пожелания клиента по оплате приняты КД", body=deal.client_payment_wishes or "", user_id=user.id))
+    # изменение условий после визы сбрасывает визы (как цена)
+    reset = price_changed_after_visa(DealState(status=deal.status, service_flag=deal.service_flag))
+    if reset and (body.client_payments is not None or body.variant_payments or body.factory_payments or changed_terms):
+        for a in db.scalars(select(Approval).where(Approval.deal_id == deal.id, Approval.reset_at.is_(None))).all():
+            a.reset_at = datetime.now(timezone.utc)
+        apply_transition(db, deal, reset, user.id)
+    audit(db, user.id, deal.id, "deal", deal.id, "payment_terms", before, body.model_dump(exclude_none=True))
+    db.commit()
+    inp, res = run_calc(db, deal)
+    return filter_payload({"ok": True, "result": res.model_dump(mode="json"), "cd_checks": cd_checks(_cd_deal_dict(deal)), "status": deal.status.value}, user)
 
 
 class PriceIn(BaseModel):
@@ -166,10 +244,13 @@ def submit(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     """КД задал цену по каждому варианту → коммерческая виза; далее ФД/ГД по условиям или утверждение."""
     deal = get_deal_or_404(db, deal_id, user)
     if any(v.price_rub is None for v in deal.variants if v.in_kp):
-        raise HTTPException(422, "Задайте цену по каждому варианту")
+        raise HTTPException(422, "Задайте цену по каждому предложению")
+    errors = cd_checks(_cd_deal_dict(deal))
+    if errors:
+        raise HTTPException(422, {"message": "Перед утверждением задайте условия оплаты и оцените опции РФ", "errors": errors})
     inp, res = run_calc(db, deal)
     flags = approval_flags(res)
-    st = DealState(status=deal.status, service_flag=deal.service_flag)
+    st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution)
     try:
         tr = cd_submit_price(st, flags, date.today(), sla(db), _ladder(db))
     except Exception as e:
@@ -180,6 +261,8 @@ def submit(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     apply_transition(db, deal, tr, user.id)
     if tr.status == DealStatus.APPROVED:
         _finalize_approval(db, deal, user.id)
+    elif tr.status == DealStatus.CONTRACT:
+        _finalize_contract_change(db, deal, user.id)
     db.commit()
     return {"status": deal.status.value, "approval_flags": flags, "reasons": res.approval.reasons}
 
@@ -200,7 +283,7 @@ def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: Curren
         raise HTTPException(422, "Отказ требует комментария")
     inp, res = run_calc(db, deal)
     flags = approval_flags(res)
-    st = DealState(status=deal.status, service_flag=deal.service_flag)
+    st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution)
     try:
         tr = visa_decision(st, by, body.approved, flags, date.today(), sla(db), _ladder(db), cd_insists=body.cd_insists)
     except Exception as e:
@@ -211,10 +294,20 @@ def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: Curren
     apply_transition(db, deal, tr, user.id)
     if tr.status == DealStatus.APPROVED:
         _finalize_approval(db, deal, user.id)
+    elif tr.status == DealStatus.CONTRACT:
+        _finalize_contract_change(db, deal, user.id)
     elif tr.new_version:
         create_version(db, deal, "rework", user.id)
     db.commit()
     return {"status": deal.status.value}
+
+
+def _finalize_contract_change(db: Session, deal: Deal, user_id: str) -> None:
+    """Задача 2: изменённые условия контракта утверждены — новая версия расчёта, этапы исполнения пересобираются."""
+    ver = create_version(db, deal, "contract_change", user_id)
+    deal.approved_version_id = ver.id
+    from ..services.execution_service import rebuild_stages
+    rebuild_stages(db, deal)
 
 
 class ReworkIn(BaseModel):
@@ -263,6 +356,9 @@ def _finalize_approval(db: Session, deal: Deal, user_id: str) -> DealVersion:
 def _build_kp_file(db: Session, deal: Deal, ver: DealVersion) -> str:
     s = settings_service.get_all(db)
     res = ver.calc_result
+    factories = {f.id: f for f in db.scalars(select(Factory)).all()}
+    company = deal.kp_brand == "company"
+    single = not deal.has_alternatives
     variants = []
     for v in deal.variants:
         if not v.in_kp or v.price_rub is None:
@@ -270,21 +366,48 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion) -> str:
         poss = [p for p in deal.positions if p.id in v.position_ids]
         qty = sum(p.qty for p in poss)
         base = res["variants"][v.id]["base"]
-        pay = v.client_payments or deal.client_payments or []
+        pay = v.client_payments or deal.client_payments or s.get("default_client_payment_scheme") or []
+        terms = []
+        for pc in base.get("positions", []):
+            dt = pc.get("delivery_term") or {}
+            p = next((x for x in poss if x.id == pc["position_id"]), None)
+            if p and dt.get("text"):
+                terms.append(f"{_kp_model(p, company, db, factories)}: {dt['text']}")
+        local_opts = [o.name for p in poss for o in (p.local_option_rows or [])]
         variants.append(KpVariant(
-            name=v.name, model_factory="; ".join(f"{p.model} / {p.factory_id}" for p in poss), qty=qty,
-            configuration="; ".join(o.get("name", "") for p in poss for o in (p.options or [])) or "базовая",
-            basis=poss[0].basis if poss else "", delivery_days=base["delivery_days"],
+            name="Предложение" if single else v.name,
+            model_factory="; ".join(_kp_model(p, company, db, factories) + ("" if company else f" / {factories[p.factory_id].name if p.factory_id in factories else ''}") for p in poss),
+            qty=qty, configuration=("; ".join(o.get("name", "") for p in poss for o in (p.options or [])) or "базовая") + (f"; доукомплектование в РФ: {', '.join(local_opts)}" if local_opts else ""),
+            basis=poss[0].basis if poss else "", delivery_days=base["delivery_days"], delivery_term_text="; ".join(terms) if terms else f"{base['delivery_days']} дн.",
             unit_price_rub=v.price_rub / max(qty, 1), total_rub=v.price_rub, vat_pct=20.0,
-            payment_terms="; ".join(f"{l.get('share_pct')} % — {l.get('event')}" for l in pay),
+            payment_terms="; ".join(_pay_text(l) for l in pay),
             warranty="; ".join(f"{p.warranty_months or '—'} мес. / {p.warranty_hours or '—'} м·ч" for p in poss),
             service_line=("включено в цену" if v.service_in_kp else None) if deal.service_flag else None,
         ))
-    tech = {}
+    tech: dict[str, list[tuple[str, str, str]]] = {}
+    images: dict[str, list[tuple[str, str]]] = {}
+    attach_files: list[str] = []
+    st = adapters.storage()
     for p in deal.positions:
-        rows = [(f.get("name", ""), f.get("value", ""), f.get("unit", "")) for code, f in sorted((p.tech_params or {}).items())
-                if not code.startswith("_") and 1 <= int(code.split(".")[0]) <= 11 and f.get("value") not in (None, "")]
-        tech[f"{p.model} ({p.machine_type})"] = rows
+        title = _kp_model(p, company, db, factories) + (f" ({p.machine_type})" if p.machine_type else "")
+        rows = [(r.name_ru, r.value_ru or "", r.unit or "") for r in sorted(p.tech_param_rows or [], key=lambda r: r.no) if (r.value_ru or "").strip()]
+        if not rows:   # совместимость: опросник RFQ по кодам
+            rows = [(f.get("name", ""), f.get("value", ""), f.get("unit", "")) for code, f in sorted((p.tech_params or {}).items())
+                    if not code.startswith("_") and 1 <= int(code.split(".")[0]) <= 11 and f.get("value") not in (None, "")]
+        tech[title] = rows
+        # задача 10: изображения, отмеченные КД/ГД «В КП»; способ вложения — документ / письмо / оба
+        for img in sorted((i for i in (p.image_rows or []) if i.in_kp), key=lambda i: i.kp_order):
+            att = db.get(Attachment, img.attachment_id)
+            if not att:
+                continue
+            try:
+                local = st.download(att.storage_path, os.path.join(tempfile.mkdtemp(), att.file_name))
+            except Exception:
+                continue
+            if deal.kp_images_mode in ("document", "both"):
+                images.setdefault(title, []).append((local, img.caption))
+            if deal.kp_images_mode in ("attachment", "both"):
+                attach_files.append(local)
     delivery_terms = [(f.get("name", ""), str(f.get("value", ""))) for p in deal.positions for code, f in (p.logistics_params or {}).items()
                       if code.startswith("14.") and f.get("value") not in (None, "")]
     service_block = None
@@ -295,13 +418,37 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion) -> str:
                              "visits": f"{sum(r['visits'] for r in sc['result']['rows'])} выездов", "price": "включено в цену"}
     today = date.today()
     from datetime import timedelta
+    forbidden = [factories[p.factory_id].name for p in deal.positions if p.factory_id in factories] + \
+                [factories[p.factory_id].name_zh for p in deal.positions if p.factory_id in factories and factories[p.factory_id].name_zh] if company else []
     data = KpData(
         kp_no=f"КП-{deal.number[2:]}", kp_date=today.strftime("%d.%m.%Y"), valid_until=(today + timedelta(days=s["kp_validity_days"])).strftime("%d.%m.%Y"),
         client=deal.client.name, site=deal.site, manager=deal.manager_id, manager_contact="", intro_text=s.get("kp_intro_text") or
         "Уважаемые коллеги! Благодарим за запрос и направляем коммерческое предложение на поставку горношахтного оборудования.",
         variants=variants, tech_specs=tech, service_block=service_block, delivery_terms=delivery_terms,
-        payment_and_warranty="Условия оплаты и гарантии — согласно таблице вариантов.", fx_clause_pct=s["kp_fx_clause_pct"],
+        payment_and_warranty="Условия оплаты и гарантии — согласно таблице предложения.", fx_clause_pct=s["kp_fx_clause_pct"],
         signatures="Коммерческий директор ________________", requisites=s.get("company_requisites", ""),
+        single_offer=single, images=images, brand_company=company, forbidden_words=[w for w in forbidden if w],
     )
+    ver.kp_meta = {"kp_brand": deal.kp_brand, "kp_images_mode": deal.kp_images_mode, "images_in_document": sum(len(v) for v in images.values()),
+                   "attachments": [os.path.basename(f) for f in attach_files]}
     tmpdir = tempfile.mkdtemp()
     return build_kp(data, os.path.join(tmpdir, f"{deal.number}_КП_v{ver.version_no}.docx"))
+
+
+def _kp_model(p: Position, company: bool, db: Session, factories: dict) -> str:
+    if company:
+        return kp_model_name(p, db) or p.model
+    return p.model
+
+
+def _pay_text(l: dict) -> str:
+    ev = l.get("event")
+    try:
+        title = EVENT_TITLES[PaymentEvent(ev)]
+    except Exception:
+        title = str(ev)
+    share = f"{l.get('share_pct')} %" if l.get("share_pct") is not None else f"{l.get('amount')}"
+    off = l.get("offset_days") or 0
+    kind = "раб. дн." if l.get("offset_kind") == "working" else "дн."
+    via = " (аккредитив)" if l.get("via") == "lc" else ""
+    return f"{share} — {title}" + (f" + {off} {kind}" if off else "") + via

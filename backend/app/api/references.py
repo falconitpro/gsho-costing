@@ -75,10 +75,14 @@ def client_card(client_id: str, db: Session = Depends(get_db), user: CurrentUser
                         margins.append(m)
                         sums += scen["base"].get("price_rub") or 0
     data = serialize(c)
+    from ..services.catalog_service import client_kp_history
+    kp_history = client_kp_history(db, c.id) if user.can("client_price_history") else []
+    totals = {"kp_count": len(kp_history), "won": sum(1 for h in kp_history if h["outcome"] == "won"),
+              "sum_rub": round(sum((h["latest"]["total_rub"] or 0) for h in kp_history), 2)}
     data.update({"funnel": funnel, "deals": [{"id": d.id, "number": d.number, "status": d.status.value, "outcome": d.outcome,
                                              "outcome_reason": d.outcome_reason} for d in deals],
-                 "last_kp": last_kp[:10], "avg_margin_pct": round(sum(margins) / len(margins), 2) if margins else None,
-                 "sum_won_rub": sums})
+                 "last_kp": last_kp[:10], "kp_history": kp_history, "kp_totals": totals,
+                 "avg_margin_pct": round(sum(margins) / len(margins), 2) if margins else None, "sum_won_rub": sums})
     return filter_payload(data, user)
 
 
@@ -108,6 +112,9 @@ def create_factory(body: FactoryIn, db: Session = Depends(get_db), user: Current
 
 @router.get("/factories/{factory_id}/prices")
 def factory_prices(factory_id: str, model: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """История цен и сроков завода (задача 7): видят менеджер, КД, ГД (настраивается в уровнях доступа)."""
+    if not user.can("factory_price_history"):
+        raise HTTPException(403, "История цен завода закрыта для роли")
     stmt = select(FactoryPriceHistory).where(FactoryPriceHistory.factory_id == factory_id).order_by(FactoryPriceHistory.on.desc())
     if model:
         stmt = stmt.where(FactoryPriceHistory.model == model)

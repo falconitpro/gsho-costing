@@ -178,6 +178,7 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
         # 1. Цена завода — по графику платежей заводу, курс прогнозный на дату каждого платежа
         total_fx = p.unit_price * p.qty + p.options_price
         items_fx["factory_price"] = Money(amount=total_fx, currency=p.currency)
+        factory_dates: list[dict] = []
         for line in p.factory_payments:
             on = _payment_date(line, ev, inp, cal)
             amt = _line_amount(line, total_fx)
@@ -185,6 +186,8 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
             rub = amt * k
             items["factory_price"] += rub
             flows.append(Flow(on=on, amount_rub=-rub, kind="factory", ref=f"{p.id}/{line.no}", fx_amount=amt, currency=p.currency))
+            factory_dates.append({"no": line.no, "event": line.event.value, "on": on, "amount": round(amt, 2), "currency": p.currency,
+                                  "amount_rub": round(rub, 2), "default": p.factory_payments_default})
 
         ship = ev[PaymentEvent.SHIPMENT]
         # 2–3. Логистика позиции (оплата при отгрузке)
@@ -279,7 +282,8 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
 
         pos_costs.append(PositionCost(position_id=p.id, scenario=s, items_rub=items, items_fx=items_fx,
                                       customs_value_rub=round(customs_value, 2), total_rub=0.0,
-                                      events={e.value: d for e, d in ev.items()}, delivery_term=dterm))
+                                      events={e.value: d for e, d in ev.items()}, delivery_term=dterm,
+                                      factory_payment_dates=factory_dates))
         items_fx_all[p.id] = items_fx
 
     # --- уровень варианта: притоки клиента, стоимость денег, накладные

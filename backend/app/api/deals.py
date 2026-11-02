@@ -38,6 +38,8 @@ class DealCreate(BaseModel):
     base_currency: str = "CNY"
     service_flag: bool = False
     target_hours: Optional[float] = None
+    client_payment_wishes: str = ""          # задача 1: пожелания клиента по оплате (условия задаёт КД)
+    has_alternatives: bool = False           # задача 5: альтернативные предложения в одном КП
 
 
 class DealUpdate(BaseModel):
@@ -49,9 +51,11 @@ class DealUpdate(BaseModel):
     operating_conditions: Optional[dict] = None
     service_flag: Optional[bool] = None
     target_hours: Optional[float] = None
-    client_payments: Optional[list[dict]] = None
-    bank_guarantee: Optional[dict] = None
+    client_payments: Optional[list[dict]] = None       # только КД/ГД (задача 1)
+    bank_guarantee: Optional[dict] = None              # только КД/ГД
     base_currency: Optional[str] = None
+    client_payment_wishes: Optional[str] = None
+    has_alternatives: Optional[bool] = None
 
 
 class PositionIn(BaseModel):
@@ -67,13 +71,30 @@ class PositionIn(BaseModel):
     delivery_point: str = ""
     production_days: int = 90
     delivery_days: int = 10
+    production_term: dict = Field(default_factory=dict)    # задача 3: {value, unit, fixed_date, start_event}
+    delivery_term: dict = Field(default_factory=dict)      # задача 3: {unit, start_event}
     warranty_months: Optional[int] = None
     warranty_hours: Optional[float] = None
     zip_price: Optional[float] = None
-    factory_payments: list[dict] = Field(default_factory=list)
+    factory_payments: list[dict] = Field(default_factory=list)   # менеджер: условия завода как справка (factory_payments_offer); график задаёт КД
     tech_params: dict = Field(default_factory=dict)        # ручной ввод техданных (коды RFQ)
     logistics_params: dict = Field(default_factory=dict)   # поля с меткой L
+    execution_id: Optional[str] = None                     # задача 7: исполнение из каталога
     price_comment: str = ""
+
+
+def _production_days(term: dict, fallback: int) -> int:
+    """Срок производства в календарных днях (производное поле для совместимости и справок)."""
+    unit, value = term.get("unit"), term.get("value")
+    if unit == "date" and term.get("fixed_date"):
+        return fallback
+    if not value:
+        return fallback
+    if unit == "weeks":
+        return int(round(float(value) * 7))
+    if unit == "working_days":
+        return int(round(float(value) * 7 / 5))
+    return int(round(float(value)))
 
 
 class VariantIn(BaseModel):
@@ -123,8 +144,26 @@ def get_deal(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
 
 
 def _deal_dict(deal: Deal) -> dict:
-    return {"client_id": deal.client_id, "positions": [{**serialize(p), "factory": p.factory_id} for p in deal.positions], "client_payments": deal.client_payments,
-            "variants": deal.variants, "service_flag": deal.service_flag, "target_hours": deal.target_hours}
+    return {"client_id": deal.client_id,
+            "positions": [{**serialize(p), "factory": p.factory_id, "tech_param_rows": [serialize(r) for r in (p.tech_param_rows or [])],
+                           "local_options": [serialize(o) for o in (p.local_option_rows or [])]} for p in deal.positions],
+            "client_payments": deal.client_payments, "variants": [serialize(v) for v in deal.variants], "has_alternatives": deal.has_alternatives,
+            "service_flag": deal.service_flag, "target_hours": deal.target_hours,
+            "payment_terms_set": bool(deal.client_payments) or (bool(deal.variants) and all(v.client_payments for v in deal.variants if not v.is_default))}
+
+
+def ensure_default_variant(db: Session, deal: Deal) -> None:
+    """Задача 5: без альтернатив система ведёт один служебный вариант со всеми позициями (не показывается как выбор)."""
+    default = next((v for v in deal.variants if v.is_default), None)
+    if deal.has_alternatives:
+        return
+    if default is None:
+        default = Variant(deal_id=deal.id, name="Предложение", position_ids=[p.id for p in deal.positions], is_default=True)
+        db.add(default)
+        db.flush()
+        deal.variants.append(default)
+    else:
+        default.position_ids = [p.id for p in deal.positions]
 
 
 def _editable_by_manager(deal: Deal, user: CurrentUser) -> None:
@@ -139,11 +178,32 @@ def _editable_by_manager(deal: Deal, user: CurrentUser) -> None:
 @router.patch("/{deal_id}")
 def update_deal(deal_id: str, body: DealUpdate, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
-    _editable_by_manager(deal, user)
+    data = body.model_dump(exclude_none=True)
+    if ("client_payments" in data or "bank_guarantee" in data):
+        if not user.can("payment_terms", 2):
+            raise HTTPException(403, "Условия оплаты и БГ задаёт коммерческий директор")
+    else:
+        _editable_by_manager(deal, user)
     before = serialize(deal)
-    for k, v in body.model_dump(exclude_none=True).items():
+    for k, v in data.items():
         setattr(deal, k, v)
-    audit(db, user.id, deal.id, "deal", deal.id, "update", {k: before[k] for k in body.model_dump(exclude_none=True)}, body.model_dump(exclude_none=True, mode="json"))
+    if "has_alternatives" in data:
+        if deal.has_alternatives:
+            for v in deal.variants:
+                if v.is_default:
+                    v.is_default, v.name = False, v.name if v.name != "Предложение" else "Предложение А"
+        else:
+            # выключение альтернатив: оставляем основным первое предложение с ценой (или первое), остальные удаляем
+            keep = next((v for v in deal.variants if v.price_rub is not None), deal.variants[0] if deal.variants else None)
+            for v in list(deal.variants):
+                if v is not keep:
+                    db.delete(v)
+            if keep:
+                keep.is_default, keep.position_ids = True, [p.id for p in deal.positions]
+            db.flush()
+            db.refresh(deal)
+            ensure_default_variant(db, deal)
+    audit(db, user.id, deal.id, "deal", deal.id, "update", {k: before.get(k) for k in data}, body.model_dump(exclude_none=True, mode="json"))
     db.commit()
     db.refresh(deal)
     return deal_payload(deal, user)
@@ -159,6 +219,11 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
         raise HTTPException(400, "Завод не найден")
     data = body.model_dump()
     comment = data.pop("price_comment")
+    # задача 1: график оплаты заводу задаёт КД; введённое менеджером — справка «условия завода»
+    data["factory_payments_offer"] = data.pop("factory_payments") or []
+    if user.can("payment_terms", 2):
+        data["factory_payments"] = data["factory_payments_offer"]
+    data["production_days"] = _production_days(data.get("production_term") or {}, data.get("production_days") or 90)
     pos = Position(deal_id=deal.id, **data)
     pos.tech_params = {**pos.tech_params, "_source_file": "ручной ввод"}
     pos.price_reference = _price_ref(db, pos, comment)
@@ -167,6 +232,9 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
     db.add(pos)
     db.flush()
     _record_price(db, pos, deal)
+    from ..services.tech_params_service import init_position_rows
+    init_position_rows(db, pos, user.id)   # задача 4/7: перечень теххарактеристик из исполнения каталога или шаблона по типу
+    ensure_default_variant(db, deal)
     audit(db, user.id, deal.id, "position", pos.id, "create", after=data)
     db.commit()
     return serialize(pos)
@@ -181,9 +249,10 @@ def _price_ref(db: Session, pos: Position, comment: str) -> dict:
     return ref
 
 
-def _record_price(db: Session, pos: Position, deal: Deal) -> None:
-    db.add(FactoryPriceHistory(factory_id=pos.factory_id, model=pos.model, unit_price=pos.unit_price, currency=pos.currency,
-                               basis=pos.basis, on=date.today(), deal_id=deal.id, source="rfq"))
+def _record_price(db: Session, pos: Position, deal: Deal, source: str = "rfq") -> None:
+    db.add(FactoryPriceHistory(factory_id=pos.factory_id, model=pos.model, execution_id=pos.execution_id, unit_price=pos.unit_price,
+                               currency=pos.currency, basis=pos.basis, production_term=pos.production_term or {"value": pos.production_days, "unit": "calendar_days"},
+                               factory_payments=pos.factory_payments_offer or pos.factory_payments or [], on=date.today(), deal_id=deal.id, source=source))
 
 
 @router.patch("/{deal_id}/positions/{pos_id}")
@@ -193,17 +262,26 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
     pos = db.get(Position, pos_id)
     if pos is None or pos.deal_id != deal.id:
         raise HTTPException(404)
-    allowed = set(PositionIn.model_fields) - {"price_comment", "tech_params", "logistics_params"}
+    allowed = set(PositionIn.model_fields) - {"price_comment", "tech_params", "logistics_params", "factory_payments"}
     before = serialize(pos)
     for k, v in body.items():
         if k in allowed:
             setattr(pos, k, v)
+    if "factory_payments" in body:
+        pos.factory_payments_offer = body["factory_payments"] or []
+        if user.can("payment_terms", 2):
+            pos.factory_payments = pos.factory_payments_offer
+    if "production_term" in body:
+        pos.production_days = _production_days(pos.production_term or {}, body.get("production_days") or pos.production_days or 90)
     for key in ("tech_params", "logistics_params"):
         if isinstance(body.get(key), dict):
             setattr(pos, key, {**(getattr(pos, key) or {}), **body[key]})
     if "unit_price" in body:
         pos.price_reference = _price_ref(db, pos, body.get("price_comment", ""))
         _record_price(db, pos, deal)
+    if "execution_id" in body and body["execution_id"]:
+        from ..services.tech_params_service import init_position_rows
+        init_position_rows(db, pos, user.id, replace=True)
     audit(db, user.id, deal.id, "position", pos.id, "update", {k: before.get(k) for k in body}, body)
     db.commit()
     return serialize(pos)
@@ -217,6 +295,9 @@ def delete_position(deal_id: str, pos_id: str, db: Session = Depends(get_db), us
     if pos and pos.deal_id == deal.id:
         audit(db, user.id, deal.id, "position", pos.id, "delete", before=serialize(pos))
         db.delete(pos)
+        db.flush()
+        for v in deal.variants:
+            v.position_ids = [x for x in (v.position_ids or []) if x != pos_id]
         db.commit()
 
 
@@ -224,7 +305,12 @@ def delete_position(deal_id: str, pos_id: str, db: Session = Depends(get_db), us
 def add_variant(deal_id: str, body: VariantIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
     _editable_by_manager(deal, user)
-    v = Variant(deal_id=deal.id, **body.model_dump())
+    if not deal.has_alternatives:
+        raise HTTPException(409, "Предложения добавляются только при включённой отметке «Альтернативные предложения»")
+    data = body.model_dump()
+    if data.get("client_payments") and not user.can("payment_terms", 2):
+        data["client_payments"] = []
+    v = Variant(deal_id=deal.id, **data)
     db.add(v)
     db.flush()
     audit(db, user.id, deal.id, "variant", v.id, "create", after=body.model_dump())
@@ -325,9 +411,13 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
         db.commit()
         raise HTTPException(422, {"message": "Отклонение цены завода от истории выше порога — укажите комментарий (price_comment)",
                                   "price_reference": pos.price_reference, "preview": parsed.to_dict()})
+    pos.production_term = {"value": pos.production_days, "unit": "calendar_days", "start_event": "factory_contract"}
     db.add(pos)
     db.flush()
     _record_price(db, pos, deal)
+    from ..services.tech_params_service import rows_from_rfq
+    rows_from_rfq(db, pos, parsed, user.id)   # задача 4: таблица теххарактеристик из ответа завода в шаблоне RFQ
+    ensure_default_variant(db, deal)
     # шапка сделки из раздела 0 опросника (заполняем только пустое, менеджер мог ввести раньше)
     deal.operating_conditions = {**(deal.operating_conditions or {}), **{k: parsed.header.get(k) for k in ("temp_min", "temp_max", "operating_conditions") if parsed.header.get(k) is not None}}
     if not deal.kp_due and parsed.header.get("kp_due"):
@@ -423,6 +513,10 @@ def kp_sent_ep(deal_id: str, body: KpSentIn, db: Session = Depends(get_db), user
                      subject=f"КП по сделке {deal.number}", body=f"Отправлено через {body.sent_via}", user_id=user.id))
     complete_tasks(db, deal, block="kp")
     apply_transition(db, deal, tr, user.id)
+    # задачи 7, 8: история цен клиентам по отправленной версии КП; предложение занести оборудование в каталог
+    from ..services.catalog_service import record_client_prices, propose_catalog_task
+    record_client_prices(db, deal, user.id)
+    propose_catalog_task(db, deal, user.id)
     db.commit()
     return {"status": deal.status.value}
 
@@ -430,20 +524,81 @@ def kp_sent_ep(deal_id: str, body: KpSentIn, db: Session = Depends(get_db), user
 class OutcomeIn(BaseModel):
     outcome: str
     reason: str
+    won_variant_id: Optional[str] = None   # задача 5: какое предложение выбрал клиент
 
 
 @router.post("/{deal_id}/outcome")
 def outcome_ep(deal_id: str, body: OutcomeIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
     _editable_by_manager(deal, user)
+    if body.outcome == "won" and deal.has_alternatives and not body.won_variant_id:
+        raise HTTPException(422, "Укажите, какое предложение выбрал клиент (won_variant_id)")
     try:
-        tr = wf_close(DealState(status=deal.status, service_flag=deal.service_flag), body.outcome, body.reason)
+        tr = wf_close(DealState(status=deal.status, service_flag=deal.service_flag), body.outcome, body.reason, date.today(), sla(db))
     except Exception as e:
         raise HTTPException(409, str(e))
     deal.outcome, deal.outcome_reason = body.outcome, body.reason
+    if body.won_variant_id:
+        deal.won_variant_id = body.won_variant_id
+    elif not deal.has_alternatives:
+        deal.won_variant_id = next((v.id for v in deal.variants if v.is_default), None)
     apply_transition(db, deal, tr, user.id)
+    from ..services.catalog_service import update_client_price_outcome
+    update_client_price_outcome(db, deal)
+    closed_related: list[str] = []
+    if body.outcome == "won":
+        from ..services.execution_service import rebuild_stages
+        rebuild_stages(db, deal)
+        # задача 9: связанные заявки по тому же запросу клиента закрываются автоматически
+        if deal.request_group_id:
+            from ..core.workflow import OPEN_STATUSES
+            for d in db.scalars(select(Deal).where(Deal.request_group_id == deal.request_group_id, Deal.id != deal.id)).all():
+                if d.status in OPEN_STATUSES:
+                    before = d.status.value
+                    d.status, d.outcome, d.outcome_reason = DealStatus.LOST, "lost", f"Клиент выбрал другое предложение ({deal.number})"
+                    audit(db, user.id, d.id, "deal", d.id, "status", {"status": before}, {"status": "lost"}, d.outcome_reason)
+                    db.add(FeedEntry(deal_id=d.id, kind="system", subject="Заявка закрыта", body=d.outcome_reason, user_id=user.id))
+                    complete_tasks(db, d)
+                    update_client_price_outcome(db, d)
+                    closed_related.append(d.number)
     db.commit()
-    return {"status": deal.status.value}
+    return {"status": deal.status.value, "closed_related": closed_related}
+
+
+class DuplicateIn(BaseModel):
+    offer_id: Optional[str] = None       # задача 9: ответ завода, который переносится в новую заявку
+    copy_calcs: bool = True              # копировать расчёты логиста и сервиса (помечаются «проверить»)
+    comment: str = ""
+
+
+@router.post("/{deal_id}/duplicate", status_code=201)
+def duplicate(deal_id: str, body: DuplicateIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Задача 9: «Дублировать заявку» — новая сделка того же клиента с копией требований, теххарактеристик, изображений,
+    выбранного ответа завода и (по умолчанию) расчётов логиста и сервиса. Номер — производный (D-2026-0042-2)."""
+    deal = get_deal_or_404(db, deal_id, user)
+    if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):
+        raise HTTPException(403)
+    from ..services.offers_service import duplicate_deal
+    new = duplicate_deal(db, deal, user.id, offer_id=body.offer_id, copy_calcs=body.copy_calcs, comment=body.comment)
+    db.commit()
+    db.refresh(new)
+    return deal_payload(new, user)
+
+
+@router.get("/{deal_id}/related")
+def related(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Связанные заявки по одному запросу клиента (задача 9)."""
+    deal = get_deal_or_404(db, deal_id, user)
+    if not deal.request_group_id:
+        return []
+    out = []
+    for d in db.scalars(select(Deal).where(Deal.request_group_id == deal.request_group_id).order_by(Deal.number)).all():
+        row = {"id": d.id, "number": d.number, "status": d.status.value, "outcome": d.outcome, "parent_deal_id": d.parent_deal_id,
+               "factories": sorted({p.factory_id for p in d.positions}), "models": [p.model for p in d.positions], "current": d.id == deal.id}
+        if user.can("price"):
+            row["price_rub"] = next((v.price_rub for v in d.variants if v.price_rub is not None), None)
+        out.append(row)
+    return out
 
 
 # ------------------------------------------------------------------ лента, версии, вложения, журнал

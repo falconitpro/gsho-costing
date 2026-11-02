@@ -50,6 +50,7 @@ class KpVariant:
     payment_terms: str
     warranty: str
     service_line: Optional[str] = None     # «включено в цену» или сумма
+    delivery_term_text: str = ""           # задача 3: «105 календарных дней с даты открытия аккредитива» по позициям
 
 
 @dataclass
@@ -71,6 +72,10 @@ class KpData:
     signatures: str = ""
     requisites: str = ""
     logo_path: Optional[str] = None
+    single_offer: bool = True                                  # задача 5: одно предложение — без слова «Вариант»
+    images: dict[str, list[tuple[str, str]]] = field(default_factory=dict)   # задача 10: позиция → [(путь, подпись)]
+    brand_company: bool = False                                # задача 9: подача под брендом компании (без названия завода)
+    forbidden_words: list[str] = field(default_factory=list)   # названия заводов, которых не должно быть в КП под брендом компании
 
 
 def _set_cell_bg(cell, hex_color: str) -> None:
@@ -141,15 +146,15 @@ def build_kp(data: KpData, path: str) -> str:
     # Обращение
     doc.add_paragraph(data.intro_text)
 
-    # Таблица вариантов
-    _heading(doc, "Варианты предложения")
-    header = ["Показатель"] + [v.name for v in data.variants]
+    # Таблица предложения (одно предложение) или вариантов (альтернативы, задача 5)
+    _heading(doc, "Предложение" if data.single_offer else "Варианты предложения")
+    header = ["Показатель"] + (["Значение"] if data.single_offer else [v.name for v in data.variants])
     rows = [
-        ["Модель и завод"] + [v.model_factory for v in data.variants],
+        ["Модель" if data.brand_company else "Модель и завод"] + [v.model_factory for v in data.variants],
         ["Количество"] + [str(v.qty) for v in data.variants],
         ["Комплектация и опции"] + [v.configuration for v in data.variants],
         ["Базис поставки"] + [v.basis for v in data.variants],
-        ["Срок поставки"] + [f"{v.delivery_days} дн." for v in data.variants],
+        ["Срок поставки"] + [v.delivery_term_text or f"{v.delivery_days} дн." for v in data.variants],
         ["Цена за единицу, RUB без НДС"] + [f"{v.unit_price_rub:,.0f}".replace(",", " ") for v in data.variants],
         ["Условия оплаты"] + [v.payment_terms for v in data.variants],
         ["Гарантия"] + [v.warranty for v in data.variants],
@@ -161,12 +166,15 @@ def build_kp(data: KpData, path: str) -> str:
                 [f"{v.total_rub * (1 + v.vat_pct / 100):,.0f}".replace(",", " ") for v in data.variants])
     _table(doc, header, rows, accent_last_row=True)
 
-    # Техспецификация
+    # Техспецификация (+ изображения и чертежи по выбору КД, задача 10)
     _heading(doc, "Техническая спецификация")
     for pos, params in data.tech_specs.items():
         p = doc.add_paragraph()
         _run(p, pos, bold=True, size=11)
-        _table(doc, ["Параметр", "Значение", "Ед."], [[a, str(b), c] for a, b, c in params])
+        if params:
+            _table(doc, ["Параметр", "Значение", "Ед."], [[a, str(b), c] for a, b, c in params])
+        for path, caption in data.images.get(pos, []):
+            _add_image(doc, path, caption)
 
     # Сервис
     if data.service_block:
@@ -202,12 +210,41 @@ def build_kp(data: KpData, path: str) -> str:
     _run(footer, f"   Berghaus · КП № {data.kp_no}", color=ACCENT, size=8)
 
     doc.save(path)
-    assert_no_cost_leak(path)
+    assert_no_cost_leak(path, data.forbidden_words if data.brand_company else None, data.brand_company)
     return path
 
 
-def assert_no_cost_leak(path: str) -> None:
-    """Отдельная проверка генератора: в КП нет себестоимости, маржи и сценариев."""
+def _add_image(doc, path: str, caption: str) -> None:
+    """Вставка изображения с уменьшением до разумного размера (PDF/DWG в документ не вставляются — только вложением к письму)."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff"):
+        return
+    src = path
+    try:
+        from PIL import Image
+        im = Image.open(path)
+        im.thumbnail((1600, 1600))
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        src = os.path.splitext(path)[0] + "_kp.jpg"
+        im.save(src, "JPEG", quality=85)
+    except Exception:   # без PIL или неподдерживаемый формат — как есть
+        src = path
+    try:
+        doc.add_picture(src, width=Mm(140))
+        if caption:
+            p = doc.add_paragraph()
+            _run(p, caption, size=9, color=BLACK)
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    except Exception:   # pragma: no cover
+        pass
+
+
+CJK_RE = __import__("re").compile(r"[\u4e00-\u9fff]")
+
+
+def assert_no_cost_leak(path: str, forbidden: Optional[list[str]] = None, brand_company: bool = False) -> None:
+    """Отдельная проверка генератора: в КП нет себестоимости, маржи и сценариев; под брендом компании — нет названий завода и китайского текста."""
     doc = Document(path)
     texts = [p.text for p in doc.paragraphs]
     for t in doc.tables:
@@ -217,3 +254,9 @@ def assert_no_cost_leak(path: str) -> None:
     leaked = [w for w in STOP_WORDS if w in blob]
     if leaked:
         raise RuntimeError(f"КП содержит закрытые данные: {leaked}")
+    if forbidden:
+        found = [w for w in forbidden if w and w.lower() in blob]
+        if found:
+            raise RuntimeError(f"КП под брендом компании содержит название завода: {found}")
+    if brand_company and CJK_RE.search(blob):
+        raise RuntimeError("КП под брендом компании содержит китайский текст — проверьте значения и подписи")

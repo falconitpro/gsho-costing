@@ -32,8 +32,27 @@ def init_db() -> None:
     """Создание схемы (dev и тестовый стенд): новые таблицы — create_all, новые столбцы существующих таблиц —
     ALTER TABLE … ADD COLUMN (без удаления и изменения типов). В проде — alembic upgrade head."""
     from . import models  # noqa: F401
+    sync_enums()
     Base.metadata.create_all(engine)
     add_missing_columns()
+
+
+def sync_enums() -> None:
+    """Новые значения перечислений (deal_status: contract, execution, closed) — ALTER TYPE … ADD VALUE (PostgreSQL)."""
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import Enum as SAEnum
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        for table in Base.metadata.sorted_tables:
+            for col in table.columns:
+                if isinstance(col.type, SAEnum) and col.type.name:
+                    exists = conn.execute(text("SELECT 1 FROM pg_type WHERE typname = :n"), {"n": col.type.name}).first()
+                    if not exists:
+                        continue
+                    labels = {r[0] for r in conn.execute(text("SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid WHERE t.typname = :n"), {"n": col.type.name})}
+                    for v in col.type.enums:
+                        if v not in labels:
+                            conn.execute(text(f"ALTER TYPE {col.type.name} ADD VALUE IF NOT EXISTS '{v}'"))
 
 
 def add_missing_columns() -> list[str]:

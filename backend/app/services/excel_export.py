@@ -179,6 +179,19 @@ class ExcelExporter:
             for j, s in enumerate(SCEN_ORDER):
                 ws.cell(row, 2 + j, self.res.variants[v.id][s].delivery_days)
             row += 1
+            # задача 3: срок поставки клиенту по позициям (с резервом и округлением до недели), задача 1: БГ на аванс и типовые схемы
+            for pc in base.positions:
+                if pc.delivery_term:
+                    dt = pc.delivery_term
+                    ws.cell(row, 1, f"Срок клиенту, {pc.position_id}: расчёт {dt.calc_days} → +{dt.reserve_pct:g} % = {dt.with_reserve} → {dt.text}")
+                    row += 1
+            ws.cell(row, 1, "Банковская гарантия на аванс, RUB")
+            for j, s in enumerate(SCEN_ORDER):
+                ws.cell(row, 2 + j, self.res.variants[v.id][s].guarantee_cost_rub).number_format = NUM
+            row += 1
+            if base.defaults_used.get("client_payments") or base.defaults_used.get("factory_payments"):
+                ws.cell(row, 1, "Внимание: применена типовая схема оплаты (" + ", ".join(k for k, used in base.defaults_used.items() if used) + ") — условия КД не заданы")
+                row += 1
             if base.sensitivity:
                 sn = base.sensitivity
                 ws.cell(row, 1, "Чувствительность: Δ маржи при курсе +1 %, п.п. / RUB")
@@ -289,8 +302,18 @@ class ExcelExporter:
         row += 1
         for p in self.inp.positions:
             for l in p.factory_payments:
-                for j, val in enumerate([p.id, l.no, l.share_pct, l.event.value, l.offset_days, l.fixed_rate]):
+                for j, val in enumerate([p.id, l.no, l.share_pct, l.event.value, f"{l.offset_days} {'раб.' if l.offset_kind == 'working' else 'кал.'}", l.fixed_rate]):
                     ws.cell(row, 1 + j, val)
+                row += 1
+        row += 1
+        _hdr(ws, row, ["Вариант (базовый сценарий)", "№", "Событие-основание", "Дата", "Сумма, RUB", "Аккредитив"])
+        row += 1
+        for v in self.inp.variants:
+            for pd in self.res.variants[v.id]["base"].payment_dates:
+                for j, val in enumerate([v.name, pd["no"], pd["event"], pd["on"], pd["amount_rub"], "да" if pd.get("via") == "lc" else ""]):
+                    c = ws.cell(row, 1 + j, val)
+                    if j == 3:
+                        c.number_format = "DD.MM.YYYY"
                 row += 1
         row += 1
         for v in self.inp.variants:
