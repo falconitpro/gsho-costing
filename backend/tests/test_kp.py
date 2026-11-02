@@ -47,10 +47,11 @@ def test_pdf_drawing_thumbnail_in_kp(tmp_path):
     from app.services.kp_generator import pdf_thumbnail
     thumb = pdf_thumbnail(str(pdf), max_px=600)
     assert thumb and thumb.endswith(".png")
+    baseline = len(Document(build_kp(_data(), str(tmp_path / "kp_base.docx"))).inline_shapes)   # логотип в шапке
     d = _data()
     d.images = {"XDR80T": [(str(pdf), "Габаритный чертёж")]}
     out = Document(build_kp(d, str(tmp_path / "kp_pdf.docx")))
-    assert len(out.inline_shapes) == 1
+    assert len(out.inline_shapes) == baseline + 1
     assert any("Габаритный чертёж (стр. 1)" in p.text for p in out.paragraphs)
 
 
