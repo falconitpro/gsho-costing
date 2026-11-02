@@ -351,6 +351,6 @@ def offers_select(deal_id: str, body: SelectIn, db: Session = Depends(get_db), u
         created = offers_service.select_offers(db, deal, body.offer_ids, user.id, body.copy_calcs)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    audit(db, user.id, deal.id, "factory_offer", ",".join(body.offer_ids), "select", after={"created": [d.number for d in created]})
+    audit(db, user.id, deal.id, "deal", deal.id, "select_offers", after={"offer_ids": body.offer_ids, "created": [d.number for d in created]})
     db.commit()
     return {"selected": body.offer_ids, "created_deals": [{"id": d.id, "number": d.number} for d in created]}

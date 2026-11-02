@@ -636,7 +636,7 @@ class AuditLog(Base):
     user_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
     deal_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
     entity: Mapped[str] = mapped_column(String(64))
-    entity_id: Mapped[str] = mapped_column(String(36))
+    entity_id: Mapped[str] = mapped_column(String(128))   # id, «роль/группа», имя файла
     action: Mapped[str] = mapped_column(String(32))
     before: Mapped[Optional[dict]] = mapped_column(JSONType)
     after: Mapped[Optional[dict]] = mapped_column(JSONType)
