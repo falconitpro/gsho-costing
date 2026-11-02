@@ -173,8 +173,8 @@ def build_kp(data: KpData, path: str) -> str:
         _run(p, pos, bold=True, size=11)
         if params:
             _table(doc, ["Параметр", "Значение", "Ед."], [[a, str(b), c] for a, b, c in params])
-        for path, caption in data.images.get(pos, []):
-            _add_image(doc, path, caption)
+        for img_path, caption in data.images.get(pos, []):   # не `path`: это путь файла КП (параметр build_kp)
+            _add_image(doc, img_path, caption)
 
     # Сервис
     if data.service_block:
