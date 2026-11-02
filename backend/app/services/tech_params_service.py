@@ -218,8 +218,10 @@ def guess_mapping(rows: list[list]) -> dict:
             v = _norm(cell)
             if not v:
                 continue
-            for key, aliases in HEADER_ALIASES.items():
-                if key not in cols and any(v.startswith(a) or v == a for a in aliases):
+            # самое длинное (конкретное) совпадение: «数值（中文）» → value_zh, а не value_ru по «数值»
+            hits = [(len(a), key) for key, aliases in HEADER_ALIASES.items() for a in map(_norm, aliases) if v == a or v.startswith(a)]
+            for _, key in sorted(hits, reverse=True):
+                if key not in cols:
                     cols[key] = j
                     break
         if len(cols) > best:
