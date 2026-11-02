@@ -79,7 +79,7 @@ def client_card(client_id: str, db: Session = Depends(get_db), user: CurrentUser
                                              "outcome_reason": d.outcome_reason} for d in deals],
                  "last_kp": last_kp[:10], "avg_margin_pct": round(sum(margins) / len(margins), 2) if margins else None,
                  "sum_won_rub": sums})
-    return filter_payload(data, user.roles)
+    return filter_payload(data, user)
 
 
 @router.get("/factories")

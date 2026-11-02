@@ -21,15 +21,30 @@ class Money(BaseModel):
 
 
 class PaymentEvent(str, Enum):
-    """События-основания платежей (раздел 9 ТЗ)."""
+    """События-основания платежей (раздел 9 ТЗ; задачи 1–3)."""
 
-    CONTRACT = "contract"            # подписание договора
-    READINESS = "readiness"          # уведомление о готовности
-    SHIPMENT = "shipment"            # отгрузка
-    DECLARATION = "declaration"      # выпуск декларации (пошлина, НДС, брокер)
-    DELIVERY = "delivery"            # поставка на объект
-    COMMISSIONING = "commissioning"  # ввод в эксплуатацию
-    RUNTIME = "runtime"              # наработка N м·ч
+    CONTRACT = "contract"                        # подписание контракта с клиентом
+    CLIENT_PREPAYMENT = "client_prepayment"      # поступление аванса клиента
+    LC_OPENED = "lc_opened"                      # открытие аккредитива клиентом
+    FACTORY_CONTRACT = "factory_contract"        # подписание контракта с заводом
+    FACTORY_PREPAYMENT = "factory_prepayment"    # предоплата заводу
+    READINESS = "readiness"                      # уведомление о готовности на заводе
+    SHIPMENT = "shipment"                        # отгрузка
+    BORDER = "border"                            # пересечение границы КНР–РФ (CMR с отметкой таможни)
+    DECLARATION = "declaration"                  # выпуск декларации (пошлина, НДС, брокер)
+    DELIVERY = "delivery"                        # поставка клиенту (на объект)
+    COMMISSIONING = "commissioning"              # ввод в эксплуатацию (ПНР)
+    RUNTIME = "runtime"                          # наработка N м·ч
+
+
+EVENT_TITLES = {
+    PaymentEvent.CONTRACT: "подписание контракта", PaymentEvent.CLIENT_PREPAYMENT: "аванс клиента",
+    PaymentEvent.LC_OPENED: "открытие аккредитива", PaymentEvent.FACTORY_CONTRACT: "контракт с заводом",
+    PaymentEvent.FACTORY_PREPAYMENT: "предоплата заводу", PaymentEvent.READINESS: "готовность на заводе",
+    PaymentEvent.SHIPMENT: "отгрузка", PaymentEvent.BORDER: "пересечение границы (CMR)",
+    PaymentEvent.DECLARATION: "выпуск ДТ", PaymentEvent.DELIVERY: "поставка клиенту",
+    PaymentEvent.COMMISSIONING: "ПНР", PaymentEvent.RUNTIME: "наработка",
+}
 
 
 class GuaranteeKind(str, Enum):
@@ -46,11 +61,63 @@ class PaymentLine(BaseModel):
     amount: Optional[float] = None          # сумма в валюте графика
     event: PaymentEvent = PaymentEvent.CONTRACT
     offset_days: int = 0
+    offset_kind: Literal["calendar", "working"] = "calendar"   # смещение в календарных или рабочих днях (задача 1)
+    via: Literal["transfer", "lc"] = "transfer"                 # аккредитив: раскрытие после подачи документов
     runtime_hours: Optional[float] = None   # для события RUNTIME
     guarantee: GuaranteeKind = GuaranteeKind.NONE
-    guarantee_pct: float = 0.0              # % от суммы платежа, покрываемый гарантией
+    guarantee_pct: float = 0.0              # % от суммы платежа, покрываемый гарантией (явная гарантия, если задана)
     guarantee_months: int = 0
     fixed_rate: Optional[float] = None      # «курс зафиксирован» (раздел 8) — RUB за единицу валюты
+
+
+# Типовые схемы (задача 1): применяются, пока КД не задал условия явно
+DEFAULT_CLIENT_PAYMENTS = [
+    {"no": 1, "share_pct": 30, "event": "contract", "offset_days": 0},
+    {"no": 2, "share_pct": 70, "event": "border", "offset_days": 5, "offset_kind": "working", "via": "lc"},
+]
+DEFAULT_FACTORY_PAYMENTS = [
+    {"no": 1, "share_pct": 30, "event": "factory_contract", "offset_days": 14, "offset_kind": "working"},
+    {"no": 2, "share_pct": 70, "event": "readiness", "offset_days": 14, "offset_kind": "working"},
+]
+
+
+class AdvanceGuarantee(BaseModel):
+    """Банковская гарантия на аванс (задача 1): учитывается, если в условиях клиента есть предоплата."""
+
+    enabled: bool = True
+    mode: Literal["one_time_pct", "annual_pct", "fixed"] = "annual_pct"
+    value: float = 3.0               # % (разовый или годовой) либо сумма в RUB
+
+
+class ProductionTerm(BaseModel):
+    """Срок производства (задача 3): значение + единица + точка отсчёта, либо конкретная дата."""
+
+    value: Optional[float] = None
+    unit: Literal["calendar_days", "working_days", "weeks", "date"] = "calendar_days"
+    fixed_date: Optional[date] = None
+    start_event: Literal["factory_contract", "factory_prepayment"] = "factory_contract"
+
+
+class DeliveryTerm(BaseModel):
+    """Срок поставки клиенту (задача 3): единица и точка отсчёта; значение рассчитывается с резервом и округлением."""
+
+    unit: Literal["calendar_days", "working_days", "weeks"] = "calendar_days"
+    start_event: Literal["client_contract", "client_prepayment", "lc_opened"] = "client_contract"
+
+
+class LocalOptionInput(BaseModel):
+    """Опция, реализуемая в России (задача 6)."""
+
+    id: str
+    name: str
+    qty: int = 1
+    cost: float = 0.0
+    currency: Currency = "RUB"
+    supplier_lead_days: int = 30
+    needs_install: bool = True
+    install_stage: Literal["before_handover", "during_commissioning"] = "during_commissioning"
+    install_days: int = 0
+    install_cost_rub: float = 0.0
 
 
 class ScenarioName(str, Enum):
@@ -119,10 +186,12 @@ class FinanceSettings(BaseModel):
     deposit_rate_pct: Optional[float] = None  # доход от размещения, если ФД включил
     conversion_fee_pct: float = 0.5          # % от суммы каждого валютного платежа
     transfer_fee_rub: float = 3000.0         # фикс за перевод
-    guarantee_rate_pct: float = 3.0          # % годовых от суммы гарантии
+    guarantee_rate_pct: float = 3.0          # % годовых от суммы гарантии (явные гарантии в строках графика)
+    advance_guarantee: AdvanceGuarantee = Field(default_factory=AdvanceGuarantee)   # БГ на аванс (задача 1)
     vat_offset_days: int = 90                # срок до зачёта ввозного НДС
     import_vat_in_cost: bool = False         # включать ли сумму ввозного НДС в статью 7 (иначе — только стоимость денег до зачёта через ст. 11)
     cashflow_bucket_days: int = 7            # недельные корзины
+    local_options_order_reserve_days: int = 14   # запас при заказе опций РФ (задача 6)
 
 
 class OverheadStep(BaseModel):
@@ -163,14 +232,16 @@ class PositionInput(BaseModel):
     unit_price: float
     options_price: float = 0.0            # за всё количество
     currency: Currency = "CNY"
-    production_days: int = 90             # 14.1
+    production_days: int = 90             # 14.1 (календарные дни; при заданном production_term — пересчитывается от него)
+    production_term: Optional[ProductionTerm] = None     # задача 3
+    delivery_term: DeliveryTerm = Field(default_factory=DeliveryTerm)
     delivery_days: int = 10               # 14.2 — до пункта поставки (базиса)
     factory_payments: list[PaymentLine] = Field(
-        default_factory=lambda: [
-            PaymentLine(no=1, share_pct=30, event=PaymentEvent.CONTRACT, offset_days=5),
-            PaymentLine(no=2, share_pct=70, event=PaymentEvent.READINESS, offset_days=0),
-        ]
+        default_factory=lambda: [PaymentLine(**l) for l in DEFAULT_FACTORY_PAYMENTS]
     )
+    factory_payments_default: bool = False   # график заводу взят из типовой схемы (КД не задал)
+    local_options: list[LocalOptionInput] = Field(default_factory=list)   # задача 6
+    actual_events: dict[str, date] = Field(default_factory=dict)          # фактические даты событий позиции (задача 2)
     # Логистика (уровень позиции)
     domestic_logistics: Money = Field(default_factory=lambda: Money(amount=0, currency="CNY"))
     export_formalities: Money = Field(default_factory=lambda: Money(amount=0, currency="CNY"))
@@ -207,6 +278,9 @@ class BatchInput(BaseModel):
     allocation: AllocationMethod = AllocationMethod.COST
     transit_days: int = 14
     customs_days: int = 5
+    rf_delivery_days: int = 5             # доставка по РФ после выпуска ДТ (задача 3)
+    border_planned: Optional[date] = None   # плановая дата CMR, если логист задал (иначе — расчётная)
+    actual_events: dict[str, date] = Field(default_factory=dict)   # shipment | border | declaration | delivery (задача 2)
 
 
 class VariantInput(BaseModel):
@@ -216,11 +290,9 @@ class VariantInput(BaseModel):
     price_rub: Optional[float] = None          # цена продажи без НДС, назначает КД
     service_in_kp: bool = False
     client_payments: list[PaymentLine] = Field(
-        default_factory=lambda: [
-            PaymentLine(no=1, share_pct=30, event=PaymentEvent.CONTRACT, offset_days=10),
-            PaymentLine(no=2, share_pct=70, event=PaymentEvent.DELIVERY, offset_days=10),
-        ]
+        default_factory=lambda: [PaymentLine(**l) for l in DEFAULT_CLIENT_PAYMENTS]
     )
+    client_payments_default: bool = False   # условия клиента взяты из типовой схемы (КД не задал)
     overhead_pct_override: Optional[float] = None   # КД переопределил с комментарием → виза ГД
     overhead_override_comment: str = ""
 
@@ -228,7 +300,13 @@ class VariantInput(BaseModel):
 class DealCalcInput(BaseModel):
     deal_no: str
     calc_date: date
-    contract_date: date                        # плановая дата подписания договора (события отсчитываются от неё)
+    contract_date: date                        # плановая (или фактическая) дата подписания контракта с клиентом
+    factory_contract_date: Optional[date] = None   # контракт с заводом: факт или contract_date + factory_contract_lag_days
+    factory_contract_lag_days: int = 10
+    lc_opening_days: int = 14                  # плановый срок открытия аккредитива после подписания (календарные дни)
+    delivery_reserve_pct: float = 10.0         # резерв к сроку поставки клиенту (задача 3)
+    deal_actual_events: dict[str, date] = Field(default_factory=dict)   # contract | factory_contract | client_prepayment | lc_opened
+    rf_holidays: list[date] = Field(default_factory=list)              # дополнительные праздники/переносы
     base_currency: Currency = "CNY"
     client_vat_pct: float = 20.0
     fx: FxRates
@@ -262,6 +340,7 @@ COST_ITEMS: list[tuple[int, str, str]] = [
     (12, "service", "Сервис до наработки"),
     (13, "warranty_reserve", "Гарантийный резерв"),
     (14, "overhead", "Накладные компании"),
+    (15, "local_completion", "Доукомплектование в РФ"),
 ]
 COST_KEYS = [k for _, k, _ in COST_ITEMS]
 
@@ -286,14 +365,31 @@ class FxComponent(BaseModel):
     fixed: bool = False
 
 
+class DeliveryTermResult(BaseModel):
+    """Срок поставки клиенту по позиции (задача 3): расчётные дни, резерв, округление до целой недели."""
+
+    start_event: str
+    start_on: date
+    delivery_on: date
+    calc_days: int                       # расчётное время в единицах срока (без резерва)
+    unit: str
+    reserve_pct: float
+    with_reserve: float
+    promised: int                        # после резерва и округления вверх до целой недели
+    text: str                            # «105 календарных дней с даты подписания контракта»
+    install_days: int = 0                # добавлено за установку опций РФ до передачи клиенту
+
+
 class PositionCost(BaseModel):
     position_id: str
     scenario: ScenarioName
-    items_rub: dict[str, float]          # 14 статей в RUB
+    items_rub: dict[str, float]          # 15 статей в RUB
     items_fx: dict[str, Money]           # статьи в валюте ввода (1–5, 12)
     customs_value_rub: float
     total_rub: float
     price_rub: Optional[float] = None    # распределённая цена
+    events: dict[str, date] = Field(default_factory=dict)            # плановые даты событий позиции
+    delivery_term: Optional[DeliveryTermResult] = None
 
 
 class CashGap(BaseModel):
@@ -333,6 +429,9 @@ class VariantScenarioResult(BaseModel):
     delivery_days: int
     positions: list[PositionCost]
     sensitivity: Optional[Sensitivity] = None
+    payment_dates: list[dict] = Field(default_factory=list)   # график клиента: no, event, on, amount_rub, via
+    guarantee_cost_rub: float = 0.0
+    defaults_used: dict[str, bool] = Field(default_factory=dict)   # client_payments / factory_payments по типовой схеме
 
 
 class ApprovalNeed(BaseModel):

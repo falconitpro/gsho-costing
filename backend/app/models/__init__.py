@@ -51,6 +51,34 @@ class User(TimestampMixin, Base):
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
+# ------------------------------------------------------------------ уровни доступа (задача 11)
+
+class AccessRule(Base):
+    """Уровень доступа роли к группе полей: 0 — не видит, 1 — видит, 2 — редактирует. Пусто = стартовая матрица."""
+    __tablename__ = "access_rules"
+    __table_args__ = (UniqueConstraint("role", "field_group", name="uq_access_rule"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    role: Mapped[str] = mapped_column(String(32), index=True)
+    field_group: Mapped[str] = mapped_column(String(64))
+    level: Mapped[int] = mapped_column(Integer, default=0)
+    changed_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AccessUserOverride(Base):
+    """Исключение для сотрудника: открыть или закрыть группу относительно его ролей (приоритет над ролью)."""
+    __tablename__ = "access_user_overrides"
+    __table_args__ = (UniqueConstraint("user_id", "field_group", name="uq_access_override"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    field_group: Mapped[str] = mapped_column(String(64))
+    level: Mapped[int] = mapped_column(Integer, default=0)
+    valid_to: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 # ------------------------------------------------------------------ справочники
 
 class Client(TimestampMixin, Base):
@@ -79,20 +107,54 @@ class Factory(TimestampMixin, Base):
     rating: Mapped[Optional[float]] = mapped_column(Float)
 
 
+class MachineType(TimestampMixin, Base):
+    """Справочник типов машин (задача 7): каталог, шаблоны теххарактеристик, нормативы по типу."""
+    __tablename__ = "machine_types"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    name_zh: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(16), default="approved")   # approved | pending (предложен менеджером)
+    proposed_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
 class EquipmentModel(TimestampMixin, Base):
-    """Каталог оборудования: единый источник для логиста, сервиса и КП."""
+    """Каталог оборудования: производитель → тип машины → модель → исполнение. Единый источник для логиста, сервиса и КП."""
     __tablename__ = "equipment_models"
     __table_args__ = (UniqueConstraint("factory_id", "model", name="uq_factory_model"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     factory_id: Mapped[str] = mapped_column(ForeignKey("factories.id"))
-    machine_type: Mapped[str] = mapped_column(String(255))                   # 1.1
+    machine_type: Mapped[str] = mapped_column(String(255))                   # 1.1 (текст, совместимость)
+    machine_type_id: Mapped[Optional[str]] = mapped_column(ForeignKey("machine_types.id"))
     model: Mapped[str] = mapped_column(String(255))                          # 1.2
+    brand_name: Mapped[str] = mapped_column(String(255), default="")         # собственное наименование для подачи под брендом компании
     names: Mapped[dict] = mapped_column(JSONType, default=dict)              # {"ru":..., "en":..., "zh":...}
     tech_params: Mapped[dict] = mapped_column(JSONType, default=dict)        # разделы RFQ 1–11 по кодам
     logistics_params: Mapped[dict] = mapped_column(JSONType, default=dict)   # поля с меткой L
     default_hs_code: Mapped[Optional[str]] = mapped_column(String(10))
     maintenance_regulations: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     default_hours_per_month: Mapped[Optional[float]] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(16), default="approved")      # approved | pending | archived
+    proposed_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    approved_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class EquipmentExecution(TimestampMixin, Base):
+    """Исполнение модели: полный набор теххарактеристик (формат таблицы задачи 4), опции РФ и изображения."""
+    __tablename__ = "equipment_executions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    model_id: Mapped[str] = mapped_column(ForeignKey("equipment_models.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    brand_name: Mapped[str] = mapped_column(String(255), default="")
+    tech_params: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # строки PositionTechParam без значений сделки
+    local_options: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    images: Mapped[list[dict]] = mapped_column(JSONType, default=list)        # {attachment_id, caption, kind, source}
+    fingerprint: Mapped[str] = mapped_column(String(64), default="", index=True)   # хеш набора характеристик (без дублей)
+    status: Mapped[str] = mapped_column(String(16), default="pending")        # pending | approved | archived
+    source_deal_id: Mapped[Optional[str]] = mapped_column(String(36))
+    source_position_id: Mapped[Optional[str]] = mapped_column(String(36))
+    proposed_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    approved_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class FactoryPriceHistory(Base):
@@ -100,13 +162,45 @@ class FactoryPriceHistory(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     factory_id: Mapped[str] = mapped_column(ForeignKey("factories.id"), index=True)
     model: Mapped[str] = mapped_column(String(255), index=True)
+    execution_id: Mapped[Optional[str]] = mapped_column(String(36))
     configuration: Mapped[str] = mapped_column(Text, default="")
     unit_price: Mapped[float] = mapped_column(Float)
     currency: Mapped[str] = mapped_column(String(3))
     basis: Mapped[str] = mapped_column(String(32), default="")
+    production_term: Mapped[dict] = mapped_column(JSONType, default=dict)    # {value, unit, start_event} (задача 3)
+    factory_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     on: Mapped[date] = mapped_column(Date)
     deal_id: Mapped[Optional[str]] = mapped_column(String(36))
-    source: Mapped[str] = mapped_column(String(16), default="rfq")   # rfq | fact | price_list
+    source: Mapped[str] = mapped_column(String(16), default="rfq")   # rfq | offer | fact | price_list
+
+
+class ClientPriceHistory(Base):
+    """История цен, предложенных клиентам (задача 7/8): по каждой отправленной версии КП. Видят КД и ГД."""
+    __tablename__ = "client_price_history"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), index=True)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    deal_number: Mapped[str] = mapped_column(String(32), default="")
+    version_id: Mapped[Optional[str]] = mapped_column(String(36))
+    version_no: Mapped[int] = mapped_column(Integer, default=0)
+    kp_no: Mapped[str] = mapped_column(String(64), default="")
+    variant_id: Mapped[Optional[str]] = mapped_column(String(36))
+    variant_name: Mapped[str] = mapped_column(String(255), default="")
+    factory_id: Mapped[Optional[str]] = mapped_column(String(36))
+    factory_name: Mapped[str] = mapped_column(String(255), default="")
+    model: Mapped[str] = mapped_column(String(255), default="")
+    execution_id: Mapped[Optional[str]] = mapped_column(String(36))
+    qty: Mapped[int] = mapped_column(Integer, default=1)
+    unit_price_rub: Mapped[Optional[float]] = mapped_column(Float)
+    total_rub: Mapped[Optional[float]] = mapped_column(Float)
+    payment_terms: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    delivery_term: Mapped[str] = mapped_column(String(255), default="")
+    kp_brand: Mapped[str] = mapped_column(String(16), default="factory")   # factory | company
+    kp_path: Mapped[str] = mapped_column(String(512), default="")
+    manager_id: Mapped[Optional[str]] = mapped_column(String(36))
+    on: Mapped[date] = mapped_column(Date, index=True)
+    outcome: Mapped[Optional[str]] = mapped_column(String(16))              # обновляется при смене результата сделки
+    chosen: Mapped[Optional[bool]] = mapped_column(Boolean)                  # какое предложение выбрал клиент
 
 
 class LogisticsHistory(Base):
@@ -164,6 +258,32 @@ class PaymentScheme(Base):
     lines: Mapped[list[dict]] = mapped_column(JSONType)              # PaymentLine[]
 
 
+class Glossary(TimestampMixin, Base):
+    """Глоссарий переводов RU ↔ ZH (задача 4): параметры, единицы, значения, фразы."""
+    __tablename__ = "glossary"
+    __table_args__ = (UniqueConstraint("term_ru", "kind", name="uq_glossary_term"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    term_ru: Mapped[str] = mapped_column(String(512), index=True)
+    term_zh: Mapped[str] = mapped_column(String(512), default="", index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="param")    # param | unit | value | phrase
+    status: Mapped[str] = mapped_column(String(16), default="confirmed")   # confirmed | machine
+    changed_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class TechParamTemplate(Base):
+    """Шаблон перечня теххарактеристик по типу машины (задача 4). Обязательность задают КД/ГД."""
+    __tablename__ = "tech_param_templates"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    machine_type_id: Mapped[Optional[str]] = mapped_column(ForeignKey("machine_types.id"), index=True)   # NULL = общий шаблон
+    no: Mapped[int] = mapped_column(Integer)
+    code: Mapped[str] = mapped_column(String(16), default="")      # код RFQ (1.5 …), если параметр из фиксированного перечня
+    name_ru: Mapped[str] = mapped_column(String(512))
+    name_zh: Mapped[str] = mapped_column(String(512), default="")
+    unit: Mapped[str] = mapped_column(String(64), default="")
+    required: Mapped[bool] = mapped_column(Boolean, default=False)
+    section: Mapped[str] = mapped_column(String(255), default="")
+
+
 class Template(Base):
     __tablename__ = "templates"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -208,8 +328,9 @@ class Deal(TimestampMixin, Base):
     operating_conditions: Mapped[dict] = mapped_column(JSONType, default=dict)   # 0.4–0.6
     service_flag: Mapped[bool] = mapped_column(Boolean, default=False)
     target_hours: Mapped[Optional[float]] = mapped_column(Float)
-    client_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)
-    bank_guarantee: Mapped[dict] = mapped_column(JSONType, default=dict)
+    client_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # задаёт КД (задача 1); пусто = типовая схема
+    client_payment_wishes: Mapped[str] = mapped_column(Text, default="")             # пожелания клиента по оплате (менеджер)
+    bank_guarantee: Mapped[dict] = mapped_column(JSONType, default=dict)             # {mode: one_time_pct|annual_pct|fixed, value} — переопределение КД
     scenario_override: Mapped[dict] = mapped_column(JSONType, default=dict)    # ΔK/Δt сделки (КД, с комментарием)
     logistics_done: Mapped[bool] = mapped_column(Boolean, default=False)
     service_done: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -219,6 +340,21 @@ class Deal(TimestampMixin, Base):
     outcome: Mapped[Optional[str]] = mapped_column(String(16))
     outcome_reason: Mapped[str] = mapped_column(Text, default="")
     plan_fact_closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # задача 5: альтернативные предложения в одном КП (по умолчанию одно предложение без выбора вариантов)
+    has_alternatives: Mapped[bool] = mapped_column(Boolean, default=False)
+    won_variant_id: Mapped[Optional[str]] = mapped_column(String(36))
+    # задача 9: несколько заводов по одному запросу клиента, дублирование заявки, бренд подачи
+    parent_deal_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    request_group_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    kp_brand: Mapped[str] = mapped_column(String(16), default="factory")           # factory | company
+    kp_images_mode: Mapped[str] = mapped_column(String(16), default="document")     # document | attachment | both (задача 10)
+    # задача 2: заключение и исполнение контракта
+    contract_number: Mapped[str] = mapped_column(String(128), default="")
+    contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
+    factory_contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
+    execution_closed_at: Mapped[Optional[date]] = mapped_column(Date)
+    contract_terms_changed: Mapped[bool] = mapped_column(Boolean, default=False)
+    in_execution: Mapped[bool] = mapped_column(Boolean, default=False)              # сделка была в исполнении (возврат после повторной визы)
 
     client = relationship("Client")
     positions = relationship("Position", back_populates="deal", cascade="all, delete-orphan")
@@ -242,24 +378,147 @@ class Position(TimestampMixin, Base):
     options_price: Mapped[float] = mapped_column(Float, default=0)
     basis: Mapped[str] = mapped_column(String(32), default="FCA")             # 13.2
     delivery_point: Mapped[str] = mapped_column(String(255), default="")       # 13.3
-    production_days: Mapped[int] = mapped_column(Integer, default=90)          # 14.1
+    production_days: Mapped[int] = mapped_column(Integer, default=90)          # 14.1 (календарные дни, производное от срока ниже)
     delivery_days: Mapped[int] = mapped_column(Integer, default=10)            # 14.2
+    # задача 3: срок производства с единицами и точкой отсчёта; срок поставки клиенту — единица и точка отсчёта
+    production_term: Mapped[dict] = mapped_column(JSONType, default=dict)      # {value, unit: calendar_days|working_days|weeks|date, date, start_event: factory_contract|factory_prepayment}
+    delivery_term: Mapped[dict] = mapped_column(JSONType, default=dict)        # {unit: calendar_days|working_days|weeks, start_event: client_contract|client_prepayment|lc_opened}
     warranty_months: Mapped[Optional[int]] = mapped_column(Integer)            # 14.4
     warranty_hours: Mapped[Optional[float]] = mapped_column(Float)             # 14.5
     zip_price: Mapped[Optional[float]] = mapped_column(Float)                  # 13.8
-    factory_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    factory_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # задаёт КД (задача 1); пусто = типовая схема
+    factory_payments_offer: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # условия завода из RFQ/ответа (справка для КД)
     tech_params: Mapped[dict] = mapped_column(JSONType, default=dict)          # все поля RFQ позиции (по кодам)
     logistics_params: Mapped[dict] = mapped_column(JSONType, default=dict)     # метка L
     price_reference: Mapped[dict] = mapped_column(JSONType, default=dict)      # «Справка по цене»: last, on, deviation, comment
     rfq_import_id: Mapped[Optional[str]] = mapped_column(ForeignKey("rfq_imports.id"))
+    execution_id: Mapped[Optional[str]] = mapped_column(String(36))            # исполнение из каталога (задача 7)
+    offer_id: Mapped[Optional[str]] = mapped_column(String(36))                # ответ завода, из которого взята позиция (задача 9)
     # блок логиста (уровень позиции)
     logistics: Mapped[dict] = mapped_column(JSONType, default=dict)            # domestic, export, hs_code, duty, vat, util, cert + comments
     batch_id: Mapped[Optional[str]] = mapped_column(ForeignKey("batches.id"))
     # блок сервиса
     service_calc: Mapped[dict] = mapped_column(JSONType, default=dict)         # ServiceInput + ServiceResult
     warranty_reserve_pct: Mapped[Optional[float]] = mapped_column(Float)
+    # задача 2: фактические даты событий позиции (готовность, отгрузка, ПНР …) — пересчёт платежей от факта
+    actual_events: Mapped[dict] = mapped_column(JSONType, default=dict)        # {event: "YYYY-MM-DD"}
 
     deal = relationship("Deal", back_populates="positions")
+    tech_param_rows = relationship("PositionTechParam", cascade="all, delete-orphan", order_by="PositionTechParam.no")
+    local_option_rows = relationship("LocalOption", cascade="all, delete-orphan")
+    image_rows = relationship("PositionImage", cascade="all, delete-orphan")
+
+
+class PositionTechParam(TimestampMixin, Base):
+    """Строка таблицы теххарактеристик позиции (задача 4): № / параметр / ед. / требования заказчика / значение / комментарий."""
+    __tablename__ = "position_tech_params"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    position_id: Mapped[str] = mapped_column(ForeignKey("positions.id"), index=True)
+    no: Mapped[int] = mapped_column(Integer, default=1)
+    code: Mapped[str] = mapped_column(String(16), default="")
+    name_ru: Mapped[str] = mapped_column(String(512))
+    name_zh: Mapped[str] = mapped_column(String(512), default="")
+    unit: Mapped[str] = mapped_column(String(64), default="")
+    customer_requirement_ru: Mapped[str] = mapped_column(Text, default="")
+    customer_requirement_zh: Mapped[str] = mapped_column(Text, default="")
+    value_ru: Mapped[str] = mapped_column(Text, default="")
+    value_zh: Mapped[str] = mapped_column(Text, default="")
+    comment_ru: Mapped[str] = mapped_column(Text, default="")
+    comment_zh: Mapped[str] = mapped_column(Text, default="")
+    required: Mapped[bool] = mapped_column(Boolean, default=False)
+    local_ru: Mapped[bool] = mapped_column(Boolean, default=False)           # реализуется в России (задача 6) — не идёт заводу
+    source: Mapped[str] = mapped_column(String(16), default="manual")        # manual | client_import | factory_answer | catalog | rfq
+    translation_status: Mapped[str] = mapped_column(String(16), default="none")   # none | glossary | machine | verified
+    filled_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class LocalOption(TimestampMixin, Base):
+    """Опция, реализуемая в России (задача 6): закупка, установка, статья «Доукомплектование в РФ»."""
+    __tablename__ = "local_options"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    position_id: Mapped[str] = mapped_column(ForeignKey("positions.id"), index=True)
+    tech_param_id: Mapped[Optional[str]] = mapped_column(String(36))
+    name: Mapped[str] = mapped_column(String(255))
+    qty: Mapped[int] = mapped_column(Integer, default=1)
+    supplier: Mapped[str] = mapped_column(String(255), default="")
+    quote_attachment_id: Mapped[Optional[str]] = mapped_column(String(36))
+    cost: Mapped[float] = mapped_column(Float, default=0.0)                   # за единицу
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    supplier_lead_days: Mapped[int] = mapped_column(Integer, default=30)
+    needs_install: Mapped[bool] = mapped_column(Boolean, default=True)
+    install_stage: Mapped[str] = mapped_column(String(32), default="during_commissioning")   # before_handover | during_commissioning
+    installer: Mapped[str] = mapped_column(String(32), default="service")    # service | contractor
+    install_days: Mapped[int] = mapped_column(Integer, default=0)
+    install_cost_rub: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(16), default="estimate")      # estimate | approved | ordered | received | installed
+    cost_approved_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    ordered_at: Mapped[Optional[date]] = mapped_column(Date)
+    installed_at: Mapped[Optional[date]] = mapped_column(Date)
+    comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class PositionImage(Base):
+    """Изображения и чертежи позиции (задача 10); выбор для КП делает КД/ГД."""
+    __tablename__ = "position_images"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    position_id: Mapped[str] = mapped_column(ForeignKey("positions.id"), index=True)
+    attachment_id: Mapped[str] = mapped_column(ForeignKey("attachments.id"))
+    kind: Mapped[str] = mapped_column(String(16), default="photo")           # photo | render | drawing | scheme
+    source: Mapped[str] = mapped_column(String(16), default="own")           # client | factory | own
+    caption: Mapped[str] = mapped_column(String(512), default="")
+    has_factory_logo: Mapped[bool] = mapped_column(Boolean, default=False)
+    in_kp: Mapped[bool] = mapped_column(Boolean, default=False)
+    kp_order: Mapped[int] = mapped_column(Integer, default=0)
+    send_to_factory: Mapped[bool] = mapped_column(Boolean, default=False)    # приложить к запросу заводу
+    uploaded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FactoryOffer(TimestampMixin, Base):
+    """Ответ завода на запрос клиента (задача 9): кандидат для сравнения «параметр × завод» и отбора КД/ГД."""
+    __tablename__ = "factory_offers"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    source_position_id: Mapped[Optional[str]] = mapped_column(String(36))    # позиция-запрос клиента, по которой собирались ответы
+    factory_id: Mapped[str] = mapped_column(ForeignKey("factories.id"))
+    model: Mapped[str] = mapped_column(String(255), default="")
+    unit_price: Mapped[Optional[float]] = mapped_column(Float)
+    currency: Mapped[str] = mapped_column(String(3), default="CNY")
+    basis: Mapped[str] = mapped_column(String(32), default="FCA")
+    production_term: Mapped[dict] = mapped_column(JSONType, default=dict)
+    factory_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    params: Mapped[list[dict]] = mapped_column(JSONType, default=list)       # строки теххарактеристик с value_ru/value_zh/comment
+    images: Mapped[list[str]] = mapped_column(JSONType, default=list)        # attachment ids
+    request_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    answer_received_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="requested")     # requested | answered | selected | rejected
+    selected_deal_id: Mapped[Optional[str]] = mapped_column(String(36))      # заявка, в которую перенесён ответ
+    selected_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class ExecutionStage(TimestampMixin, Base):
+    """Этап исполнения контракта (задача 2): плановая и фактическая дата, ответственный, сумма для платёжных этапов."""
+    __tablename__ = "execution_stages"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    position_id: Mapped[Optional[str]] = mapped_column(String(36))
+    batch_id: Mapped[Optional[str]] = mapped_column(String(36))
+    local_option_id: Mapped[Optional[str]] = mapped_column(String(36))
+    code: Mapped[str] = mapped_column(String(32))                             # contract_signed, factory_contract, client_advance, lc_opened, …
+    title: Mapped[str] = mapped_column(String(255))
+    sort: Mapped[int] = mapped_column(Integer, default=0)
+    planned_on: Mapped[Optional[date]] = mapped_column(Date)
+    actual_on: Mapped[Optional[date]] = mapped_column(Date)
+    amount: Mapped[Optional[float]] = mapped_column(Float)
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    actual_amount: Mapped[Optional[float]] = mapped_column(Float)
+    responsible_roles: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    event: Mapped[str] = mapped_column(String(32), default="")                # событие расчёта, которое закрывает этап
+    done_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    note: Mapped[str] = mapped_column(Text, default="")
 
 
 class Batch(TimestampMixin, Base):
@@ -275,6 +534,10 @@ class Batch(TimestampMixin, Base):
     ready_to: Mapped[Optional[date]] = mapped_column(Date)
     transit_days: Mapped[int] = mapped_column(Integer, default=14)
     customs_days: Mapped[int] = mapped_column(Integer, default=5)
+    rf_delivery_days: Mapped[int] = mapped_column(Integer, default=5)      # доставка по РФ после выпуска ДТ (задача 3)
+    border_planned: Mapped[Optional[date]] = mapped_column(Date)           # плановая дата пересечения границы КНР–РФ (CMR) (задача 1)
+    border_actual: Mapped[Optional[date]] = mapped_column(Date)            # факт: CMR с отметкой таможни — вводит логист
+    actual_events: Mapped[dict] = mapped_column(JSONType, default=dict)    # {shipment|border|declaration|delivery: "YYYY-MM-DD"} (задача 2)
     allocation: Mapped[str] = mapped_column(String(8), default="cost")
     items: Mapped[dict] = mapped_column(JSONType, default=dict)            # freight, insurance, broker, rf_delivery + comments
     payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # график платежей перевозчику/брокеру
@@ -296,6 +559,7 @@ class Variant(TimestampMixin, Base):
     overhead_pct_override: Mapped[Optional[float]] = mapped_column(Float)
     overhead_override_comment: Mapped[str] = mapped_column(Text, default="")
     in_kp: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)       # служебный вариант «одно предложение» (задача 5)
 
     deal = relationship("Deal", back_populates="variants")
 
@@ -307,12 +571,13 @@ class DealVersion(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
     version_no: Mapped[int] = mapped_column(Integer)
-    reason: Mapped[str] = mapped_column(String(32))                 # approval | rework | visa_reset
+    reason: Mapped[str] = mapped_column(String(32))                 # approval | rework | visa_reset | contract_change
     calc_input: Mapped[dict] = mapped_column(JSONType)              # DealCalcInput (включая курс ЦБ на дату)
     calc_result: Mapped[dict] = mapped_column(JSONType)             # DealCalcResult
     excel_path: Mapped[str] = mapped_column(String(512), default="")
     excel_manager_path: Mapped[str] = mapped_column(String(512), default="")
     kp_path: Mapped[str] = mapped_column(String(512), default="")
+    kp_meta: Mapped[dict] = mapped_column(JSONType, default=dict)   # бренд подачи, вложенные изображения, способ вложения (задачи 9, 10)
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

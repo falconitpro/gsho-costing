@@ -94,7 +94,7 @@ def list_deals(status: Optional[str] = None, db: Session = Depends(get_db), user
         row = serialize(d, exclude={"client_payments", "bank_guarantee", "operating_conditions", "scenario_override"})
         row["client_name"] = d.client.name if d.client else None
         out.append(row)
-    return filter_payload(out, user.roles)
+    return filter_payload(out, user)
 
 
 def _visible(user: CurrentUser, d: Deal) -> bool:
@@ -461,10 +461,10 @@ def versions(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     out = []
     for v in rows:
         d = serialize(v, exclude={"calc_input", "calc_result"})
-        if user.has(Role.MANAGER) and not user.has(Role.CD, Role.FD, Role.GD):
-            d.pop("excel_path", None)                         # менеджеру — только версия без себестоимости
+        if not user.can("cost_files"):
+            d.pop("excel_path", None)                         # без права на папку 04 — только версия без себестоимости
         out.append(d)
-    return filter_payload(out, user.roles)
+    return filter_payload(out, user)
 
 
 @router.get("/{deal_id}/versions/{ver_id}")
@@ -473,14 +473,14 @@ def version_detail(deal_id: str, ver_id: str, db: Session = Depends(get_db), use
     v = db.get(DealVersion, ver_id)
     if v is None or v.deal_id != deal.id:
         raise HTTPException(404)
-    return filter_payload(serialize(v), user.roles)
+    return filter_payload(serialize(v), user)
 
 
 @router.get("/{deal_id}/attachments")
 def attachments(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
     rows = db.scalars(select(Attachment).where(Attachment.deal_id == deal.id)).all()
-    if not user.has(Role.CD, Role.FD, Role.GD):
+    if not user.can("cost_files"):
         rows = [r for r in rows if r.folder != "04_cost"]
     return [serialize(r) for r in rows]
 

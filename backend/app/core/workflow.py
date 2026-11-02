@@ -64,12 +64,9 @@ class SlaDefaults:
 
 
 def add_business_days(start: date, days: int) -> date:
-    d = start
-    while days > 0:
-        d += timedelta(days=1)
-        if d.weekday() < 5:
-            days -= 1
-    return d
+    """Рабочие дни по производственному календарю РФ (calc/calendar.py)."""
+    from ..calc.calendar import add_business_days as _add
+    return _add(start, days)
 
 
 @dataclass

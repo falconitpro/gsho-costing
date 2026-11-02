@@ -213,3 +213,105 @@ def audit_all(limit: int = 200, db: Session = Depends(get_db), user: CurrentUser
 @router.get("/integrations/log")
 def integrations_log(limit: int = 100, db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN)):
     return [serialize(r) for r in db.scalars(select(IntegrationLog).order_by(IntegrationLog.at.desc()).limit(limit)).all()]
+
+
+# ------------------------------------------------------------------ уровни доступа (задача 11)
+
+def _access_admin(user: CurrentUser = Depends(ADMIN)) -> CurrentUser:
+    if not user.can("access_admin", 2):
+        raise HTTPException(403, "Уровни доступа меняют администратор и ГД")
+    return user
+
+
+@router.get("/access")
+def access_matrix(db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
+    """Матрица «роль × группа полей» (стартовые и действующие уровни) и исключения для сотрудников."""
+    from ..models import AccessUserOverride
+    from ..services import access_service
+    data = access_service.matrix(db)
+    rows = db.scalars(select(AccessUserOverride).order_by(AccessUserOverride.created_at.desc())).all()
+    users = {u.id: u for u in db.scalars(select(User)).all()}
+    data["overrides"] = [{**serialize(o), "user_name": users[o.user_id].display_name if o.user_id in users else o.user_id,
+                          "user_roles": users[o.user_id].roles if o.user_id in users else []} for o in rows]
+    data["users"] = [{"id": u.id, "display_name": u.display_name, "roles": u.roles, "is_active": u.is_active} for u in users.values()]
+    return data
+
+
+class AccessRuleIn(BaseModel):
+    level: int
+
+
+@router.put("/access/{role}/{group}")
+def access_set_rule(role: str, group: str, body: AccessRuleIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
+    from ..services import access_service
+    try:
+        before = access_service.rules(db).get(role, {}).get(group)
+        access_service.set_rule(db, role, group, body.level, user.id)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    audit(db, user.id, None, "access_rule", f"{role}/{group}", "update", {"level": before}, {"level": body.level})
+    db.commit()
+    return {"role": role, "group": group, "level": body.level}
+
+
+class AccessOverrideIn(BaseModel):
+    user_id: str
+    group: str
+    level: int
+    valid_to: Optional[str] = None     # ISO-дата/время; пусто = бессрочно
+    comment: str = ""
+
+
+@router.post("/access/overrides", status_code=201)
+def access_set_override(body: AccessOverrideIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
+    from datetime import datetime
+    from ..services import access_service
+    u = db.get(User, body.user_id)
+    if u is None:
+        raise HTTPException(404, "Пользователь не найден")
+    valid_to = None
+    if body.valid_to:
+        try:
+            valid_to = datetime.fromisoformat(body.valid_to)
+        except ValueError:
+            raise HTTPException(422, "valid_to: дата в формате ГГГГ-ММ-ДД")
+    try:
+        row = access_service.set_override(db, u, body.group, body.level, valid_to, body.comment, user.id)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    db.flush()
+    audit(db, user.id, None, "access_override", row.id, "set", after=body.model_dump())
+    db.commit()
+    return serialize(row)
+
+
+@router.delete("/access/overrides/{override_id}", status_code=204)
+def access_delete_override(override_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
+    from ..models import AccessUserOverride
+    row = db.get(AccessUserOverride, override_id)
+    if row is None:
+        return
+    audit(db, user.id, None, "access_override", row.id, "delete", before=serialize(row))
+    db.delete(row)
+    db.commit()
+
+
+@router.get("/access/preview")
+def access_preview(role: Optional[str] = None, user_id: Optional[str] = None, db: Session = Depends(get_db),
+                   user: CurrentUser = Depends(_access_admin)):
+    """Как видит роль X / сотрудник Y: итоговые уровни по группам и закрытые ключи."""
+    from ..core.roles import LEVEL_TITLES, FIELD_GROUPS, denied_fields_for, effective_perms
+    from ..services import access_service
+    if user_id:
+        u = db.get(User, user_id)
+        if u is None:
+            raise HTTPException(404)
+        perms = access_service.perms_for(db, u)
+        who = u.display_name
+    elif role:
+        perms = effective_perms({Role(role)}, access_service.rules(db))
+        who = role
+    else:
+        raise HTTPException(422, "Укажите role или user_id")
+    return {"who": who, "perms": [{"group": g, "title": FIELD_GROUPS[g][0], "level": lvl, "level_title": LEVEL_TITLES[lvl]} for g, lvl in perms.items()],
+            "denied_fields": sorted(denied_fields_for(perms))}

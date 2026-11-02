@@ -92,7 +92,7 @@ def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depen
     if not can_see_deal(user, deal):
         raise HTTPException(404)
     restricted = (att and att.folder == "04_cost") or (ver and path == ver.excel_path)
-    if restricted and not user.has(Role.CD, Role.FD, Role.GD):
+    if restricted and not user.can("cost_files"):
         raise HTTPException(403, "Папка «04 Расчёт себестоимости» недоступна для роли")
     full = os.path.join(s.storage_local_root, path)
     if not os.path.isfile(full):

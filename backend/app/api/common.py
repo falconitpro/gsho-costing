@@ -62,4 +62,4 @@ def deal_payload(deal: Deal, user: CurrentUser, extra: dict[str, Any] | None = N
             DealStatus.CD_APPROVAL, DealStatus.FD_VISA, DealStatus.GD_VISA, DealStatus.REWORK):
         for v in data["variants"]:
             v.pop("price_rub", None)
-    return filter_payload(data, user.roles)
+    return filter_payload(data, user)
