@@ -159,6 +159,13 @@ def init_position_rows(db: Session, pos: Position, user_id: Optional[str], repla
     return rows
 
 
+def _fmt_value(v: Any) -> str:
+    """Число без «.0» (45.0 → «45»), остальное — как есть."""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
 def rows_from_rfq(db: Session, pos: Position, parsed, user_id: Optional[str]) -> None:
     """Импорт RFQ (шаблон завода): строки разделов 1–11 с требованиями и значениями RU/ZH."""
     from .rfq_import import REQUIRED_CODES
@@ -173,8 +180,11 @@ def rows_from_rfq(db: Session, pos: Position, parsed, user_id: Optional[str]) ->
         v_ru, v_zh = f.value_ru, f.value_zh
         value_ru = "" if v_ru is None else str(v_ru).strip()
         value_zh = "" if v_zh is None else str(v_zh).strip()
+        if not value_ru and value_zh and not has_cjk(value_zh):
+            # завод вписал значение по-русски в столбец «Значение (кит.)» — это русское значение, текст сохраняем полностью («5 050 ± 50»)
+            value_ru, value_zh = value_zh, ""
         if not value_ru and f.value not in (None, "") and not has_cjk(f.value):
-            value_ru = str(f.value)
+            value_ru = _fmt_value(f.value)
         db.add(PositionTechParam(position_id=pos.id, no=no, code=code, name_ru=f.name_ru, name_zh=f.name_zh, unit=(f.unit or "").split(" / ")[0],
                                  customer_requirement_ru="" if f.requirement is None else str(f.requirement), customer_requirement_zh="" if f.requirement_zh is None else str(f.requirement_zh),
                                  value_ru=value_ru, value_zh=value_zh, comment_ru="" if f.comment is None else str(f.comment),

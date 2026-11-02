@@ -30,7 +30,8 @@ def test_real_template_schema():
     l_codes = {c for c, f in r.fields.items() if f.is_l}
     assert {"0.7", "1.1", "1.5", "1.14", "2.6", "13.5", "14.1", "14.18", "14.21"} <= l_codes and "1.8" not in l_codes
     assert r.zip_target_hours == 10000 and len(r.spare_parts) >= 45
-    assert not r.ok and set(r.missing_required) >= {"0.7", "1.1", "1.2", "13.4", "13.5"}   # пустой шаблон — обязательные не заполнены
+    assert not r.ok and set(r.missing_required) >= {"0.7", "1.1", "1.2", "13.5"}   # пустой шаблон — обязательные не заполнены
+    assert "13.4" not in r.missing_required           # количество задано в требованиях заказчика шаблона — берётся оттуда
     tf = template_fields(DEFAULT_TEMPLATE)
     assert any(f["code"] == "8.5.1" for f in tf["fields"]) and "13.5" in tf["required"]
 
@@ -72,3 +73,39 @@ def test_price_reference():
     ref = price_reference(2_300_000, "CNY", hist, 10.0)
     assert ref["last_price"] == 2_100_000 and ref["deviation_pct"] == 9.52 and not ref["needs_comment"]
     assert price_reference(2_400_000, "CNY", hist, 10.0)["needs_comment"]
+
+
+def test_parse_shifted_rows_and_values_in_zh_column(tmp_path):
+    """Реальный файл завода: в разделе 0 вставлена строка (нумерация сдвинута), значения на русском в столбце «Значение (кит.)»,
+    количество и базис — только в «Требованиях заказчика», размеры вида «5 050 ± 50»."""
+    from openpyxl import load_workbook
+    from app.services.rfq_import import _parse_number
+    from app.services.rfq_template import DEFAULT_TEMPLATE
+    from app.services.rfq_import import _find_main_header
+    src = tmp_path / "factory.xlsx"
+    wb = load_workbook(DEFAULT_TEMPLATE)
+    ws = next(w for w in wb.worksheets if "тех" in w.title.lower())
+    hdr, cols, _ = _find_main_header(ws)
+    rows = {str(ws.cell(r, cols["code"]).value).strip(): r for r in range(hdr + 1, ws.max_row + 1) if ws.cell(r, cols["code"]).value}
+    # сдвиг раздела 0: «Приоритет» удалён, «Условия эксплуатации» поднята — имитируем перестановкой названий
+    names = {c: ws.cell(rows[c], cols["name_ru"]).value for c in ("0.3", "0.4", "0.5", "0.6", "0.7", "0.8")}
+    for new, old in (("0.3", "0.4"), ("0.4", "0.5"), ("0.5", "0.6"), ("0.6", "0.7"), ("0.7", "0.8")):
+        ws.cell(rows[new], cols["name_ru"]).value = names[old]
+    ws.cell(rows["0.8"], cols["name_ru"]).value = None
+    zh = cols["value_zh"]
+    ws.cell(rows["0.6"], zh).value = "Shandong Shili Mining Machinery Co., Ltd."     # завод — в строке 0.6 файла
+    ws.cell(rows["0.7"], zh).value = "Вэйфан, Шаньдун"                               # адрес — в строке 0.7 файла
+    for code, val in (("1.1", "Пассажиро-грузовая машина"), ("1.2", "FL-0.5(C)"), ("1.5", "5 050 ± 50"), ("13.1", "CNY"), ("13.5", 290000), ("14.1", 45)):
+        ws.cell(rows[code], zh).value = val
+    ws.cell(rows["13.4"], cols["req_ru"]).value = 1
+    ws.cell(rows["13.2"], cols["req_ru"]).value = "DDP"
+    for r_ in range(hdr + 1, ws.max_row + 1):                                        # в файле завода нет отметок «L»
+        ws.cell(r_, cols["code"] - 1).value = None
+    wb.save(src)
+    r = parse_rfq(str(src))
+    assert r.ok, [e.message for e in r.errors if e.severity == "error"]
+    assert r.header["factory_name"] == "Shandong Shili Mining Machinery Co., Ltd." and r.header["factory_address"] == "Вэйфан, Шаньдун"
+    assert r.position["qty"] == 1 and r.position["basis"] == "DDP" and r.position["length_mm"] == 5050
+    assert any(e.severity == "info" and "по названию" in e.message for e in r.errors)
+    assert r.logistics_params.get("1.5", {}).get("value") == 5050                    # отметки «L» взяты из шаблона компании
+    assert _parse_number("≥ 200") == 200 and _parse_number("95,6 (при 2 400 об/мин)") == 95.6 and _parse_number("200–1000") is None
