@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api import admin, auth, deals, logistics, pricing, references, service, tasks_files_planfact
+from .api import admin, auth, catalog, deals, execution, images_options, logistics, pricing, references, service, tasks_files_planfact, tech_params
 from .core.config import get_settings
 from .db import init_db
 
@@ -59,7 +59,8 @@ app = FastAPI(title="Модуль расчёта себестоимости и �
               docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-for r in (auth.router, deals.router, logistics.router, service.router, pricing.router, references.router, admin.router, tasks_files_planfact.router):
+for r in (auth.router, deals.router, logistics.router, service.router, pricing.router, references.router, admin.router, tasks_files_planfact.router,
+          execution.router, tech_params.router, catalog.router, images_options.router):
     app.include_router(r)
 
 

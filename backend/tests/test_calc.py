@@ -129,8 +129,9 @@ def test_full_prepayment_reduces_cash_gap_but_adds_guarantee_cost():
     res = calc_deal(sample_deal(price_a=p, price_b=p))
     v1, v2 = res.variants["V1"]["base"], res.variants["V2"]["base"]
     assert v2.cash_gap.amount_rub > v1.cash_gap.amount_rub      # разрыв меньше (ближе к нулю)
-    assert v2.finance_breakdown["guarantees"] > 0 == v1.finance_breakdown["guarantees"]
-    assert v2.items_rub["finance"] < v1.items_rub["finance"]
+    # БГ на аванс (задача 1): есть у обоих вариантов (30 % и 100 % предоплаты), у 100 % — больше
+    assert v2.finance_breakdown["guarantees"] > v1.finance_breakdown["guarantees"] > 0
+    assert v2.finance_breakdown["money_cost"] < v1.finance_breakdown["money_cost"]   # стоимость денег ниже при полной предоплате
 
 
 def test_overhead_override_requires_gd_visa():

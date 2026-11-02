@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 
 from ..calc import calc_deal
 from ..calc.types import (
-    AllocationMethod, BatchInput, DealCalcInput, ExpertPoint, FinanceSettings, FxForecastSettings, FxRates, Money,
-    OverheadStep, PaymentLine, PositionInput, ScenarioName, ScenarioParams, ServiceSummary, Thresholds, VariantInput,
+    AdvanceGuarantee, AllocationMethod, BatchInput, DealCalcInput, DeliveryTerm, ExpertPoint, FinanceSettings, FxForecastSettings,
+    FxRates, LocalOptionInput, Money, OverheadStep, PaymentLine, PositionInput, ProductionTerm, ScenarioName, ScenarioParams,
+    ServiceSummary, Thresholds, VariantInput,
 )
-from ..models import Deal, FxRate
+from ..models import Deal, ExecutionStage, FxRate, LocalOption
 from . import settings_service
 
 
@@ -47,7 +48,35 @@ def _num(v, default: float = 0.0) -> float:
 
 
 def _lines(raw: list[dict]) -> list[PaymentLine]:
-    return [PaymentLine(**l) for l in raw] if raw else []
+    return [PaymentLine(**{k: v for k, v in l.items() if k in PaymentLine.model_fields}) for l in raw] if raw else []
+
+
+def _date(v) -> date | None:
+    if not v:
+        return None
+    return v if isinstance(v, date) else date.fromisoformat(str(v)[:10])
+
+
+def _dates(d: dict | None) -> dict[str, date]:
+    return {k: _date(v) for k, v in (d or {}).items() if _date(v)}
+
+
+def _production_term(raw: dict | None) -> ProductionTerm | None:
+    if not raw:
+        return None
+    data = {k: v for k, v in raw.items() if k in ProductionTerm.model_fields}
+    if data.get("fixed_date"):
+        data["fixed_date"] = _date(data["fixed_date"])
+    if data.get("unit") != "date" and not data.get("value"):
+        return None
+    return ProductionTerm(**data)
+
+
+def _local_options(rows: list[LocalOption]) -> list[LocalOptionInput]:
+    return [LocalOptionInput(id=o.id, name=o.name, qty=o.qty or 1, cost=_num(o.cost), currency=o.currency or "RUB",
+                             supplier_lead_days=o.supplier_lead_days or 0, needs_install=bool(o.needs_install),
+                             install_stage=o.install_stage or "during_commissioning", install_days=o.install_days or 0,
+                             install_cost_rub=_num(o.install_cost_rub)) for o in rows]
 
 
 def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> DealCalcInput:
@@ -71,11 +100,15 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
         use_historical_volatility=ov.get("use_historical_volatility", s["use_historical_volatility"]),
         vol_multiplier_pessimistic=s["vol_multipliers"]["pessimistic"], vol_multiplier_optimistic=s["vol_multipliers"]["optimistic"],
     )
+    ag = {**(s.get("advance_guarantee_cost") or {}), **{k: v for k, v in (deal.bank_guarantee or {}).items() if k in ("enabled", "mode", "value")}}
     finance = FinanceSettings(
         financing_rate_pct=s["financing_rate_pct"], deposit_rate_pct=s["deposit_rate_pct"], conversion_fee_pct=s["conversion_fee_pct"],
         transfer_fee_rub=s["transfer_fee_rub"], guarantee_rate_pct=s["guarantee_rate_pct"], vat_offset_days=s["vat_offset_days"],
-        import_vat_in_cost=s["import_vat_in_cost"],
+        import_vat_in_cost=s["import_vat_in_cost"], advance_guarantee=AdvanceGuarantee(**{k: v for k, v in ag.items() if k in AdvanceGuarantee.model_fields}),
+        local_options_order_reserve_days=int(s.get("local_options_order_reserve_days") or 14),
     )
+    default_factory = _lines(s.get("default_factory_payment_scheme") or [])
+    default_client = _lines(s.get("default_client_payment_scheme") or [])
     thresholds = Thresholds(margin_threshold_pct=s["margin_threshold_pct"], cash_gap_limit_rub=s["cash_gap_limit_rub"],
                             gd_deal_limit_rub=s["gd_deal_limit_rub"], factory_price_deviation_pct=s["price_deviation_pct"],
                             logistics_deviation_pct=s["logistics_deviation_pct"], plan_fact_deviation_pct=s["plan_fact_deviation_pct"])
@@ -89,10 +122,15 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
         if deal.service_flag and sc.get("result"):
             res = sc["result"]
             service = ServiceSummary(cost_fx=Money(**res["total_fx_part"]), cost_rub=res["total_rub_part"], show_in_kp=sc.get("show_in_kp", False))
+        fp = _lines(p.factory_payments)
+        dterm = {k: v for k, v in (p.delivery_term or {}).items() if k in DeliveryTerm.model_fields}
         positions.append(PositionInput(
             id=p.id, factory=p.factory_id, model=p.model, machine_type=p.machine_type or "", qty=p.qty, unit_price=p.unit_price,
-            options_price=_num(p.options_price), currency=p.currency, production_days=p.production_days, delivery_days=p.delivery_days,
-            factory_payments=_lines(p.factory_payments) or PositionInput.model_fields["factory_payments"].default_factory(),
+            options_price=_num(p.options_price), currency=p.currency, production_days=p.production_days or 90, delivery_days=p.delivery_days,
+            production_term=_production_term(p.production_term), delivery_term=DeliveryTerm(**dterm),
+            factory_payments=fp or default_factory or PositionInput.model_fields["factory_payments"].default_factory(),
+            factory_payments_default=not fp, local_options=_local_options(p.local_option_rows or []),
+            actual_events=_dates(p.actual_events),
             domestic_logistics=Money(**lg.get("domestic_logistics", {"amount": 0, "currency": "CNY"})),
             export_formalities=Money(**lg.get("export_formalities", {"amount": 0, "currency": "CNY"})),
             hs_code=lg.get("hs_code") or "", duty_pct=_num(lg.get("duty_pct")), vat_pct=_num(lg.get("vat_pct"), 20.0),
@@ -111,15 +149,34 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             insurance_pct=it.get("insurance_pct"), insurance_amount=Money(**it.get("insurance_amount", {"amount": 0, "currency": "CNY"})),
             broker_rub=_num(it.get("broker_rub")), rf_delivery_rub=_num(it.get("rf_delivery_rub")),
             allocation=AllocationMethod(b.allocation), transit_days=b.transit_days, customs_days=b.customs_days,
+            rf_delivery_days=b.rf_delivery_days if b.rf_delivery_days is not None else int(s.get("rf_delivery_days_default") or 5),
+            border_planned=b.border_actual or b.border_planned,
+            actual_events={**_dates(b.actual_events), **({"border": b.border_actual} if b.border_actual else {})},
         ))
-    variants = [VariantInput(
-        id=v.id, name=v.name, position_ids=v.position_ids, price_rub=v.price_rub, service_in_kp=v.service_in_kp,
-        client_payments=_lines(v.client_payments or deal.client_payments) or VariantInput.model_fields["client_payments"].default_factory(),
-        overhead_pct_override=v.overhead_pct_override, overhead_override_comment=v.overhead_override_comment or "",
-    ) for v in deal.variants]
+    variants = []
+    for v in deal.variants:
+        cp = _lines(v.client_payments or deal.client_payments)
+        variants.append(VariantInput(
+            id=v.id, name=v.name, position_ids=v.position_ids, price_rub=v.price_rub, service_in_kp=v.service_in_kp,
+            client_payments=cp or default_client or VariantInput.model_fields["client_payments"].default_factory(),
+            client_payments_default=not cp,
+            overhead_pct_override=v.overhead_pct_override, overhead_override_comment=v.overhead_override_comment or "",
+        ))
 
+    deal_actual = {}
+    if deal.contract_signed_at:
+        deal_actual["contract"] = deal.contract_signed_at
+    if deal.factory_contract_signed_at:
+        deal_actual["factory_contract"] = deal.factory_contract_signed_at
+    # фактические даты аванса клиента и открытия аккредитива — из этапов исполнения (вносит ФД, задача 2)
+    for st in db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.actual_on.is_not(None),
+                                                      ExecutionStage.code.in_(["client_advance", "lc_opened"]))).all():
+        deal_actual["client_prepayment" if st.code == "client_advance" else "lc_opened"] = st.actual_on
     return DealCalcInput(
-        deal_no=deal.number, calc_date=calc_date, contract_date=deal.kp_due or (calc_date + timedelta(days=14)),
+        deal_no=deal.number, calc_date=calc_date, contract_date=deal.contract_signed_at or deal.kp_due or (calc_date + timedelta(days=14)),
+        factory_contract_date=deal.factory_contract_signed_at, factory_contract_lag_days=int(s.get("factory_contract_lag_days") or 10),
+        lc_opening_days=int(s.get("lc_opening_days") or 14), delivery_reserve_pct=float(s.get("delivery_reserve_pct") or 10.0),
+        deal_actual_events=deal_actual, rf_holidays=[d for d in (_date(x) for x in (s.get("rf_holidays") or [])) if d],
         base_currency=deal.base_currency, fx=fx, fx_history=history, fx_settings=fx_settings, finance=finance,
         overhead_scale=[OverheadStep(**o) for o in s["overhead_scale"]], thresholds=thresholds, scenarios=scenarios,
         positions=positions, batches=batches, variants=variants, commissioning_days=s["commissioning_days"],

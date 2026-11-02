@@ -4,6 +4,7 @@
   STORAGE_PROVIDER   = local | sharepoint | yandex_disk | s3
   MAIL_PROVIDER      = console | outlook | yandex_smtp
   MESSENGER_PROVIDER = console | wecom
+  TRANSLATOR_PROVIDER= console | yandex   (задача 4; ключ — YANDEX_TRANSLATE_API_KEY, каталог — YANDEX_FOLDER_ID)
   AUTH_PROVIDER      = dev | entra | yandex | keycloak   (см. core/auth.py)
 """
 from __future__ import annotations
@@ -13,6 +14,7 @@ from .fx_source import CbrFxSource
 from .mail import ConsoleMail, MailAdapter, OutlookGraphMail, YandexSmtpMail
 from .messenger import ConsoleMessenger, MessengerAdapter, WeComMessenger
 from .storage import LocalStorage, S3Storage, SharePointStorage, StorageAdapter, YandexDiskStorage
+from .translator import TranslatorAdapter, make_translator
 
 
 def storage(s: Settings | None = None) -> StorageAdapter:
@@ -38,3 +40,8 @@ def messenger(s: Settings | None = None) -> MessengerAdapter:
 def fx_source(s: Settings | None = None) -> CbrFxSource:
     s = s or get_settings()
     return CbrFxSource(s.cbr_daily_url, s.cbr_dynamic_url)
+
+
+def translator(s: Settings | None = None) -> TranslatorAdapter:
+    s = s or get_settings()
+    return make_translator(s.translator_provider, s.yandex_translate_api_key, s.yandex_folder_id)

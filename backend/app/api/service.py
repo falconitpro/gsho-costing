@@ -66,7 +66,7 @@ def calc(deal_id: str, pos_id: str, body: ServiceCalcIn, db: Session = Depends(g
     if pos is None or pos.deal_id != deal.id:
         raise HTTPException(404)
     d = defaults(deal_id, pos_id, db, user)
-    region = s_region = d["region_norms"]
+    region = d["region_norms"]
     inp = ServiceInput(
         machine_type=pos.machine_type, model=pos.model, qty=pos.qty, target_hours=d["target_hours"],
         hours_per_month=body.hours_per_month or d["hours_per_month"], regulations=body.regulations,

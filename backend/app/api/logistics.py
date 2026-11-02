@@ -35,6 +35,9 @@ class BatchIn(BaseModel):
     ready_to: Optional[date] = None
     transit_days: int = 14
     customs_days: int = 5
+    rf_delivery_days: int = 5                      # доставка по РФ после выпуска ДТ (задача 3)
+    border_planned: Optional[date] = None          # плановая дата пересечения границы КНР–РФ (CMR) (задача 1)
+    border_actual: Optional[date] = None           # факт: CMR с отметкой таможни
     allocation: str = "cost"
     items: dict = Field(default_factory=dict)      # intl_freight{amount,currency}, insurance_pct|insurance_amount, broker_rub, rf_delivery_rub, comments{}
     payments: list[dict] = Field(default_factory=list)

@@ -4,6 +4,20 @@
 Все ответы проходят серверную фильтрацию полей по ролям (раздел 2 ТЗ): менеджер не получает себестоимость, маржу,
 расчёты логиста и сервиса; логист и сервис — цену и финансовый блок. Интерактивная документация: `/docs` (Swagger UI).
 
+## Каталог, справочники и администрирование (новое)
+
+| Метод | Путь | Роль | Описание |
+| --- | --- | --- | --- |
+| GET | `/catalog/tree`, `/catalog/executions/{id}`, `/catalog/pending` | любая; pending — КД/ГД | Каталог производитель → тип → модель → исполнение, история цен по правам |
+| POST | `/catalog/executions/{id}/decision`; PATCH `/catalog/executions/{id}`, `/catalog/models/{id}` | КД, ГД | Подтверждение занесения, наименование под брендом компании |
+| GET/POST | `/refs/machine-types`, `POST …/{id}/approve` | любая / КД, ГД | Типы машин (заводятся по ходу работы) |
+| GET/PUT | `/refs/tech-param-templates?machine_type_id=` | любая / КД, ГД | Шаблоны теххарактеристик и обязательность |
+| GET/POST/DELETE | `/refs/glossary`, `POST …/{id}/confirm` | по праву `glossary` | Глоссарий RU↔ZH |
+| POST | `/deals/{id}/payment-terms` | КД, ГД | Условия оплаты клиента и завода, БГ на аванс, точка отсчёта срока поставки (задачи 1, 3) |
+| GET/PUT/POST/DELETE | `/admin/access`, `…/{role}/{group}`, `…/overrides`, `…/preview` | администратор, ГД | Уровни доступа (задача 11) |
+
+Группы доступа и уровни (0 — не видит, 1 — видит, 2 — редактирует) перечислены в `core/roles.FIELD_GROUPS`; `GET /auth/me` возвращает `perms` текущего пользователя.
+
 ## Вход и профиль
 
 | Метод | Путь | Роль | Описание |
@@ -21,7 +35,18 @@
 | GET | `/deals?status=` | по видимости | Список сделок (менеджер — свои; логист — с «на расчёте логистики»; сервис — с флагом) |
 | POST | `/deals` | менеджер, ГД | Создать сделку (номер авто `D-ГГГГ-NNNN`) |
 | GET | `/deals/{id}` | по видимости | Карточка с позициями, вариантами, партиями и списком проверок перед отправкой |
-| PATCH | `/deals/{id}` | менеджер сделки | Шапка, условия эксплуатации, флаг сервиса, условия оплаты клиента |
+| PATCH | `/deals/{id}` | менеджер сделки; КД/ГД — `client_payments`, `bank_guarantee` | Шапка, условия эксплуатации, флаг сервиса, пожелания клиента по оплате (`client_payment_wishes`), отметка «Альтернативные предложения» (`has_alternatives`) |
+| POST | `/deals/{id}/duplicate` | менеджер, КД, ГД | Дублировать заявку (задача 9): `offer_id`, `copy_calcs` |
+| GET | `/deals/{id}/related` | по видимости | Связанные заявки по одному запросу клиента |
+| GET/PUT | `/deals/{id}/positions/{pid}/tech-params` | менеджер (КД, ГД) | Таблица теххарактеристик (задача 4); `…/verify/{row}` — подтвердить машинный перевод |
+| POST | `…/tech-params/import/preview`, `…/import/apply` (multipart: `mapping`, `target`, `selected_rows`, `offer_id`) | менеджер | Импорт файла клиента / ответа завода с предпросмотром и сопоставлением |
+| POST | `…/tech-params/request` | менеджер | Двуязычный запрос одному или нескольким заводам (WeCom + e-mail, вложения клиента); `GET …/request/file` — скачать файл |
+| GET/POST | `/deals/{id}/offers`, `GET …/compare`, `POST …/submit-compare`, `POST …/select` | менеджер; отбор — КД/ГД | Ответы заводов, сравнение «параметр × завод», отбор для КП (задача 9) |
+| POST/GET/PATCH/DELETE | `/deals/{id}/positions/{pid}/images[/{iid}]` | менеджер, КД, ГД; `in_kp`/`kp_order` — КД/ГД | Изображения и чертежи (задача 10) |
+| PATCH | `/deals/{id}/kp-settings` | КД, ГД | Бренд подачи КП и способ вложения изображений |
+| POST/PATCH/DELETE | `/deals/{id}/positions/{pid}/local-options[/{oid}]` | менеджер, сервис, КД, ГД, закупки | Опции, реализуемые в России (задача 6) |
+| GET/POST | `/deals/{id}/catalog/candidates`, `…/propose` | менеджер | Предложить занесение в каталог (задача 7) |
+| GET | `/deals/{id}/execution/stages`; PATCH `…/contract`; POST `…/start`, `…/stages/{sid}/actual`, `…/terms-changed`, `…/close` | по ролям этапа; платежи — ФД; закрытие — КД | Стадия контракта и исполнения (задача 2) |
 | POST | `/deals/{id}/positions` | менеджер | Добавить позицию вручную; сверка цены с историей (422 с `price_reference`, если нужен комментарий) |
 | PATCH/DELETE | `/deals/{id}/positions/{pid}` | менеджер | Изменить/удалить позицию |
 | POST | `/deals/{id}/variants`, DELETE `…/{vid}` | менеджер | Варианты комплектации/условий |

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from ..calc.types import COST_ITEMS
 from ..core.auth import CurrentUser, get_current_user, require_roles
 from ..core.config import get_settings
-from ..core.roles import Role, filter_payload
+from ..core.roles import Role
 from ..core.workflow import DealStatus, STATUS_TITLES, overdue
 from ..db import get_db
 from ..models import Attachment, Deal, DealVersion, PlanFactEntry, Task
@@ -92,7 +92,7 @@ def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depen
     if not can_see_deal(user, deal):
         raise HTTPException(404)
     restricted = (att and att.folder == "04_cost") or (ver and path == ver.excel_path)
-    if restricted and not user.has(Role.CD, Role.FD, Role.GD):
+    if restricted and not user.can("cost_files"):
         raise HTTPException(403, "Папка «04 Расчёт себестоимости» недоступна для роли")
     full = os.path.join(s.storage_local_root, path)
     if not os.path.isfile(full):
@@ -118,15 +118,17 @@ class FactIn(BaseModel):
 FACT_ROLES = {
     "cost_item": {"logistician": {"domestic_logistics", "export_formalities", "intl_freight", "insurance", "customs_duty", "import_vat",
                                   "broker_util", "certification", "rf_delivery"},
-                  "service_head": {"service"}, "fd": {"finance", "warranty_reserve", "overhead", "factory_price"}, "manager": {"factory_price"}},
+                  "service_head": {"service", "local_completion"}, "fd": {"finance", "warranty_reserve", "overhead", "factory_price", "local_completion"},
+                  "manager": {"factory_price", "local_completion"}, "cd": {"local_completion"}, "purchasing": {"local_completion"}},
 }
 
 
 @router.post("/deals/{deal_id}/fact", status_code=201)
 def add_fact(deal_id: str, body: FactIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
-    if deal.status != DealStatus.WON:
-        raise HTTPException(409, "Факт вносится после статуса «Выиграна»")
+    from ..core.workflow import POST_WIN_STATUSES
+    if deal.status not in POST_WIN_STATUSES:
+        raise HTTPException(409, "Факт вносится после выигрыша (стадии контракта и исполнения)")
     if deal.plan_fact_closed and not user.has(Role.FD):
         raise HTTPException(403, "План/факт закрыт — редактирует только ФД")
     if body.kind == "cost_item":
@@ -137,8 +139,8 @@ def add_fact(deal_id: str, body: FactIn, db: Session = Depends(get_db), user: Cu
             allowed = {k for _, k, _ in COST_ITEMS}
         if body.cost_item_code not in allowed:
             raise HTTPException(403, f"Статья {body.cost_item_code} вносится другой ролью")
-    elif body.kind in ("payment_in", "payment_out", "fx") and not user.has(Role.MANAGER, Role.FD, Role.GD):
-        raise HTTPException(403, "Платежи вносит менеджер")
+    elif body.kind in ("payment_in", "payment_out", "fx") and not user.can("execution_payments", 2):
+        raise HTTPException(403, "Фактические платежи вносит финансовый директор")
     thr = settings_service.get(db, "plan_fact_deviation_pct")
     e = PlanFactEntry(deal_id=deal.id, entered_by=user.id, **body.model_dump())
     db.add(e)
@@ -156,7 +158,8 @@ def plan_fact(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = D
         raise HTTPException(409, "Нет утверждённой версии")
     facts = db.scalars(select(PlanFactEntry).where(PlanFactEntry.deal_id == deal.id)).all()
     thr = settings_service.get(db, "plan_fact_deviation_pct")
-    won_variant = next((v for v in deal.variants if v.in_kp and v.price_rub), deal.variants[0] if deal.variants else None)
+    from ..services.execution_service import won_variant as _won
+    won_variant = _won(deal)
     if won_variant is None:
         raise HTTPException(409, "Нет вариантов")
     res = ver.calc_result["variants"][won_variant.id]

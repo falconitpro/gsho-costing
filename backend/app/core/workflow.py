@@ -5,9 +5,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from .roles import Role
 
@@ -23,9 +23,19 @@ class DealStatus(str, Enum):
     REWORK = "rework"                     # На доработке
     APPROVED = "approved"                 # Утверждено
     KP_SENT = "kp_sent"                   # КП отправлено
-    WON = "won"
+    WON = "won"                           # Выиграна (переходный статус: сразу → «Заключение контракта», задача 2)
     LOST = "lost"
     CANCELLED = "cancelled"
+    CONTRACT = "contract"                 # Заключение контракта (задача 2)
+    EXECUTION = "execution"               # Исполнение контракта
+    CLOSED = "closed"                     # Закрыта после исполнения (закрывает КД)
+
+
+# Стадии после выигрыша (задача 2)
+POST_WIN_STATUSES = {DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED}
+# Статусы, в которых сделка ещё открыта (для автозакрытия связанных заявок, задача 9)
+OPEN_STATUSES = {DealStatus.DRAFT, DealStatus.LOGISTICS_CALC, DealStatus.SERVICE_CALC, DealStatus.CALC_READY, DealStatus.CD_APPROVAL,
+                 DealStatus.FD_VISA, DealStatus.GD_VISA, DealStatus.REWORK, DealStatus.APPROVED, DealStatus.KP_SENT}
 
 
 STATUS_TITLES = {
@@ -42,13 +52,16 @@ STATUS_TITLES = {
     DealStatus.WON: "Выиграна",
     DealStatus.LOST: "Проиграна",
     DealStatus.CANCELLED: "Отменена",
+    DealStatus.CONTRACT: "Заключение контракта",
+    DealStatus.EXECUTION: "Исполнение контракта",
+    DealStatus.CLOSED: "Закрыта",
 }
 
 # Статусы, начиная с которых логист видит сделку
 LOGISTICS_VISIBLE_FROM = {
     DealStatus.LOGISTICS_CALC, DealStatus.SERVICE_CALC, DealStatus.CALC_READY, DealStatus.CD_APPROVAL,
     DealStatus.FD_VISA, DealStatus.GD_VISA, DealStatus.REWORK, DealStatus.APPROVED, DealStatus.KP_SENT,
-    DealStatus.WON, DealStatus.LOST, DealStatus.CANCELLED,
+    DealStatus.WON, DealStatus.LOST, DealStatus.CANCELLED, DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED,
 }
 
 
@@ -64,12 +77,9 @@ class SlaDefaults:
 
 
 def add_business_days(start: date, days: int) -> date:
-    d = start
-    while days > 0:
-        d += timedelta(days=1)
-        if d.weekday() < 5:
-            days -= 1
-    return d
+    """Рабочие дни по производственному календарю РФ (calc/calendar.py)."""
+    from ..calc.calendar import add_business_days as _add
+    return _add(start, days)
 
 
 @dataclass
@@ -99,6 +109,7 @@ class DealState:
     manager_id: Optional[str] = None
     logistician_id: Optional[str] = None
     service_head_id: Optional[str] = None
+    in_execution: bool = False   # задача 2: сделка уже на стадии контракта/исполнения (повторная виза возвращает туда)
 
 
 @dataclass
@@ -129,12 +140,35 @@ def manager_checks(deal: dict[str, Any]) -> list[str]:
                            ("unit_price", "цена"), ("currency", "валюта")):
             if not p.get(key):
                 errors.append(f"Позиция {i}: не заполнено поле «{title}».")
-    if not deal.get("client_payments"):
-        errors.append("Не заданы условия оплаты клиента.")
-    if not deal.get("variants"):
-        errors.append("Нужен хотя бы один вариант комплектации.")
+        # задача 4: обязательные теххарактеристики должны быть заполнены (значение завода)
+        missing = [r.get("name_ru") or r.get("code") or "?" for r in (p.get("tech_param_rows") or [])
+                   if r.get("required") and not r.get("local_ru") and not (r.get("value_ru") or r.get("value_zh"))]
+        if missing:
+            errors.append(f"Позиция {i}: не заполнены обязательные теххарактеристики: {', '.join(missing[:5])}"
+                          + (" …" if len(missing) > 5 else "") + ".")
+    # задача 1: условия оплаты задаёт КД — менеджер их не вводит; задача 5: варианты только при альтернативных предложениях
+    if deal.get("has_alternatives") and len([v for v in (deal.get("variants") or []) if not _is_default_variant(v)]) < 2:
+        errors.append("Включены альтернативные предложения — нужно минимум два предложения.")
     if deal.get("service_flag") and not deal.get("target_hours"):
         errors.append("Активен флаг сервиса — укажите целевую наработку.")
+    return errors
+
+
+def _is_default_variant(v: Any) -> bool:
+    return bool(v.get("is_default")) if isinstance(v, dict) else bool(getattr(v, "is_default", False))
+
+
+def cd_checks(deal: dict[str, Any]) -> list[str]:
+    """Проверки перед утверждением КД (задачи 1, 6): условия оплаты заданы явно, опции РФ оценены."""
+    errors: list[str] = []
+    if not deal.get("payment_terms_set"):
+        errors.append("Условия оплаты клиента не заданы КД (расчёт идёт по типовой схеме).")
+    for p in deal.get("positions") or []:
+        if not p.get("factory_payments"):
+            errors.append(f"Позиция {p.get('model') or '?'}: график оплаты заводу не задан КД (типовая схема).")
+        for o in p.get("local_options") or []:
+            if not o.get("cost") or not o.get("supplier_lead_days"):
+                errors.append(f"Опция РФ «{o.get('name')}»: не заданы стоимость и срок поставки поставщика.")
     return errors
 
 
@@ -242,6 +276,11 @@ def visa_decision(state: DealState, by: Role, approved: bool, flags: dict[str, b
 
 
 def approve(state: DealState, today: date, sla: SlaDefaults, by: Role) -> TransitionResult:
+    if state.in_execution:
+        # задача 2: повторная визация после изменения условий контракта → возврат на стадию контракта
+        res = TransitionResult(status=DealStatus.CONTRACT, new_version=True, audit=f"Изменённые условия контракта утверждены ({by.value})")
+        res.notifications.append(Notification("approved", [Role.MANAGER], ["outlook", "wecom"], "Изменённые условия контракта утверждены"))
+        return res
     res = TransitionResult(status=DealStatus.APPROVED, new_version=True, audit=f"Утверждено ({by.value})")
     res.tasks.append(TaskSpec(Role.MANAGER, "Отправить КП клиенту", add_business_days(today, sla.manager_rework_days), "kp"))
     res.notifications.append(Notification("approved", [Role.MANAGER], ["outlook", "wecom"], "Сделка утверждена, КП готово"))
@@ -275,16 +314,52 @@ def kp_sent(state: DealState) -> TransitionResult:
     return TransitionResult(status=DealStatus.KP_SENT, audit="КП отправлено")
 
 
-def close(state: DealState, outcome: str, reason: str) -> TransitionResult:
+def close(state: DealState, outcome: str, reason: str, today: Optional[date] = None, sla: Optional[SlaDefaults] = None) -> TransitionResult:
+    """Исход сделки. «Выиграна» сразу переводит сделку в стадию «Заключение контракта» (задача 2)."""
     if state.status not in (DealStatus.KP_SENT, DealStatus.APPROVED):
         raise WorkflowError("Исход указывается после отправки КП.")
-    status = {"won": DealStatus.WON, "lost": DealStatus.LOST, "cancelled": DealStatus.CANCELLED}.get(outcome)
+    status = {"won": DealStatus.CONTRACT, "lost": DealStatus.LOST, "cancelled": DealStatus.CANCELLED}.get(outcome)
     if status is None or not reason:
         raise WorkflowError("Укажите исход (won/lost/cancelled) и причину.")
-    res = TransitionResult(status=status, audit=f"Исход: {status.value} — {reason}")
-    if status == DealStatus.WON:
-        res.notifications.append(Notification("won", [Role.FD], ["app"], "Сделка выиграна: режим план/факт"))
+    res = TransitionResult(status=status, audit=f"Исход: {outcome} — {reason}")
+    if status == DealStatus.CONTRACT:
+        today = today or date.today()
+        sla = sla or SlaDefaults()
+        res.tasks.append(TaskSpec(Role.MANAGER, "Заключить контракт: внести номер и дату подписания", add_business_days(today, 5), "contract"))
+        res.notifications.append(Notification("won", [Role.FD], ["app", "outlook"], "Сделка выиграна: стадия заключения контракта, далее — факт платежей"))
+        res.notifications.append(Notification("won", [Role.CD], ["app"], "Сделка выиграна: заключение контракта"))
     return res
+
+
+# ------------------------------------------------------------------ стадия контракта и исполнения (задача 2)
+
+def start_execution(state: DealState, contract_signed: bool, today: date) -> TransitionResult:
+    if state.status != DealStatus.CONTRACT:
+        raise WorkflowError("Перейти к исполнению можно только со стадии «Заключение контракта».")
+    if not contract_signed:
+        raise WorkflowError("Укажите номер контракта и дату подписания с клиентом.")
+    res = TransitionResult(status=DealStatus.EXECUTION, audit="Контракт подписан — исполнение")
+    res.notifications.append(Notification("execution", [Role.LOGISTICIAN, Role.SERVICE_HEAD, Role.FD], ["app", "outlook"],
+                                          "Контракт подписан: начато исполнение, вносите фактические даты этапов"))
+    return res
+
+
+def contract_terms_changed(state: DealState, reason: str, today: date, sla: SlaDefaults) -> TransitionResult:
+    """Условия контракта отличаются от утверждённого КП → новая версия расчёта, сброс виз, повторная визация с КД."""
+    if state.status not in (DealStatus.CONTRACT, DealStatus.EXECUTION):
+        raise WorkflowError("Изменение условий контракта фиксируется на стадии контракта или исполнения.")
+    if not reason:
+        raise WorkflowError("Укажите, что изменилось в условиях контракта.")
+    res = TransitionResult(status=DealStatus.CD_APPROVAL, new_version=True, audit=f"Условия контракта изменены: {reason} — визы сброшены")
+    res.tasks.append(TaskSpec(Role.CD, f"Повторное утверждение: {reason}", add_business_days(today, sla.cd_days), "pricing"))
+    res.notifications.append(Notification("visa_required", [Role.CD], ["outlook", "wecom", "app"], "Условия контракта изменились — повторная визация"))
+    return res
+
+
+def close_execution(state: DealState, reason: str = "") -> TransitionResult:
+    if state.status != DealStatus.EXECUTION:
+        raise WorkflowError("Закрыть можно только сделку на исполнении.")
+    return TransitionResult(status=DealStatus.CLOSED, audit=f"Сделка закрыта после исполнения{(': ' + reason) if reason else ''}")
 
 
 def overdue(due: date, today: date) -> bool:

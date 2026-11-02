@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..core.auth import SESSION_COOKIE, CurrentUser, OidcClient, get_current_user, issue_session, set_session_cookie
 from ..core.config import Settings, get_settings
-from ..core.roles import ROLE_TITLES, Role
+from ..core.roles import ROLE_TITLES
 from ..db import get_db
 from ..models import User
 from ..services.deal_service import audit
@@ -58,7 +58,8 @@ def logout(response: Response):
 @router.get("/me")
 def me(user: CurrentUser = Depends(get_current_user)):
     return {"id": user.id, "email": user.email, "display_name": user.display_name,
-            "roles": [{"code": r.value, "title": ROLE_TITLES[r]} for r in sorted(user.roles, key=lambda r: r.value)]}
+            "roles": [{"code": r.value, "title": ROLE_TITLES[r]} for r in sorted(user.roles, key=lambda r: r.value)],
+            "perms": user.perms}
 
 
 @router.get("/dev-users")

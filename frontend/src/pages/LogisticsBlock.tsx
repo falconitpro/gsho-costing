@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, ApiError, fmtRub } from "../api";
+import { api, ApiError, fmtDate, fmtRub } from "../api";
 import type { Deal, Me } from "../types";
 import Questionnaire from "../components/Questionnaire";
 
@@ -13,7 +13,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const [hs, setHs] = useState<{ code: string; description: string; duty_pct: number; vat_pct: number; certification: string[] }[]>([]);
   const batches = deal.batches || [];
   const positions = deal.positions || [];
-  const [batch, setBatch] = useState({ name: `Партия ${batches.length + 1}`, route: "завод → Маньчжурия → Забайкальск → пункт поставки", transport_units: 1, transit_days: 14, customs_days: 5, allocation: "cost",
+  const [batch, setBatch] = useState({ name: `Партия ${batches.length + 1}`, route: "завод → Маньчжурия → Забайкальск → пункт поставки", transport_units: 1, transit_days: 14, customs_days: 5, rf_delivery_days: 5, border_planned: "", allocation: "cost",
     intl_freight: 0, intl_currency: "CNY", insurance_pct: 0.3, broker_rub: 0, rf_delivery_rub: 0, comment_freight: "", comment_broker: "", comment_rf: "" });
   const [forms, setForms] = useState<Record<string, PosForm>>(() => Object.fromEntries(positions.map((p) => {
     const l = (p.logistics || {}) as Partial<PosForm>;
@@ -26,7 +26,8 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
 
   async function createBatch() {
     try {
-      await api.post(`/api/deals/${deal.id}/logistics/batches`, { name: batch.name, route: batch.route, transport_units: batch.transport_units, transit_days: batch.transit_days, customs_days: batch.customs_days, allocation: batch.allocation,
+      await api.post(`/api/deals/${deal.id}/logistics/batches`, { name: batch.name, route: batch.route, transport_units: batch.transport_units, transit_days: batch.transit_days, customs_days: batch.customs_days,
+        rf_delivery_days: batch.rf_delivery_days, border_planned: batch.border_planned || null, allocation: batch.allocation,
         items: { intl_freight: { amount: batch.intl_freight, currency: batch.intl_currency }, insurance_pct: batch.insurance_pct, broker_rub: batch.broker_rub, rf_delivery_rub: batch.rf_delivery_rub,
           comments: { intl_freight: batch.comment_freight, broker_rub: batch.comment_broker, rf_delivery_rub: batch.comment_rf } },
         position_ids: positions.filter((p) => !p.batch_id).map((p) => p.id) });
@@ -50,9 +51,9 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
       {err && <div className="alert error">{err}</div>}
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Партии и консолидация</h2>
-        <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление, дн</th><th>Международная перевозка</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Распределение</th><th>Позиции</th></tr></thead>
+        <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление / по РФ, дн</th><th>CMR план / факт</th><th>Международная перевозка</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Распределение</th><th>Позиции</th></tr></thead>
           <tbody>{batches.map((b) => { const it = b.items as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; return (
-            <tr key={b.id}><td>{b.name}</td><td>{b.route}</td><td className="num">{b.transport_units}</td><td className="num">{b.transit_days} / {b.customs_days}</td>
+            <tr key={b.id}><td>{b.name}</td><td>{b.route}</td><td className="num">{b.transport_units}</td><td className="num">{b.transit_days} / {b.customs_days} / {b.rf_delivery_days ?? 5}</td><td>{fmtDate(b.border_planned)} / {b.border_actual ? <b>{fmtDate(b.border_actual)}</b> : "—"}</td>
               <td>{fr ? `${fmtRub(fr.amount)} ${fr.currency}` : "—"}</td><td>{it.insurance_pct != null ? `${it.insurance_pct} %` : "—"}</td><td className="num">{fmtRub(it.broker_rub as number)}</td><td className="num">{fmtRub(it.rf_delivery_rub as number)}</td>
               <td>{b.allocation}</td><td>{positions.filter((p) => p.batch_id === b.id).map((p) => p.model).join(", ")}</td></tr>); })}</tbody></table>
         {canEdit && (
@@ -62,6 +63,8 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
             <label className="f">Транспортных единиц<input type="number" value={batch.transport_units} onChange={(e) => setBatch({ ...batch, transport_units: Number(e.target.value) })} /></label>
             <label className="f">Транзит, дн<input type="number" value={batch.transit_days} onChange={(e) => setBatch({ ...batch, transit_days: Number(e.target.value) })} /></label>
             <label className="f">Оформление, дн<input type="number" value={batch.customs_days} onChange={(e) => setBatch({ ...batch, customs_days: Number(e.target.value) })} /></label>
+            <label className="f">Доставка по РФ после выпуска ДТ, дн<input type="number" value={batch.rf_delivery_days} onChange={(e) => setBatch({ ...batch, rf_delivery_days: Number(e.target.value) })} /></label>
+            <label className="f">Плановая дата пересечения границы (CMR), если известна<input type="date" value={batch.border_planned} onChange={(e) => setBatch({ ...batch, border_planned: e.target.value })} /></label>
             <label className="f">Распределение общих статей<select value={batch.allocation} onChange={(e) => setBatch({ ...batch, allocation: e.target.value })}><option value="cost">по стоимости</option><option value="weight">по весу</option><option value="volume">по объёму</option></select></label>
             <label className="f">Международная перевозка<div className="row"><input type="number" value={batch.intl_freight} onChange={(e) => setBatch({ ...batch, intl_freight: Number(e.target.value) })} />
               <select value={batch.intl_currency} onChange={(e) => setBatch({ ...batch, intl_currency: e.target.value })}><option>CNY</option><option>USD</option><option>RUB</option></select></div>

@@ -44,6 +44,28 @@ DEFAULTS: dict[str, Any] = {
     "kp_fx_clause_pct": 5.0,
     "kp_validity_days": 30,
     "commissioning_days": 30,
+    # задача 1: типовые схемы оплаты (пока КД не задал условия) и БГ на аванс
+    "default_client_payment_scheme": [
+        {"no": 1, "share_pct": 30, "event": "contract", "offset_days": 0},
+        {"no": 2, "share_pct": 70, "event": "border", "offset_days": 5, "offset_kind": "working", "via": "lc"},
+    ],
+    "default_factory_payment_scheme": [
+        {"no": 1, "share_pct": 30, "event": "factory_contract", "offset_days": 14, "offset_kind": "working"},
+        {"no": 2, "share_pct": 70, "event": "readiness", "offset_days": 14, "offset_kind": "working"},
+    ],
+    "advance_guarantee_cost": {"enabled": True, "mode": "annual_pct", "value": 3.0},
+    "lc_opening_days": 14,
+    "factory_contract_lag_days": 10,
+    "rf_holidays": [],                 # дополнительные нерабочие дни/переносы, ISO-даты
+    # задача 3: сроки
+    "delivery_reserve_pct": 10.0,
+    "rf_delivery_days_default": 5,
+    # задача 6: опции РФ
+    "local_options_order_reserve_days": 14,
+    # задача 4: переводчик
+    "translator_provider": "yandex",   # yandex | console
+    # задача 9: бренд подачи КП по умолчанию
+    "kp_brand_default": "factory",
     "approval_ladder": [
         {"name": "Коммерческая", "role": "cd", "condition": "always", "sla_days": 1},
         {"name": "Финансовая", "role": "fd", "condition": "margin_below_threshold|cash_gap_above_limit", "sla_days": 1},

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
-import type { Position } from "../types";
+import { DELIVERY_START, PRODUCTION_START, TERM_UNITS, type Position } from "../types";
 import { collectFields, cmpCode, type RfqFieldData } from "../components/Questionnaire";
 
 type Factory = { id: string; name: string };
+type Tree = { factory_id: string; factory: string; types: { machine_type: string; models: { id: string; model: string; executions: { id: string; name: string; params: number }[] }[] }[] }[];
 type Schema = { title: string; sections: { no: number; title: string }[]; fields: RfqFieldData[]; required: string[]; numeric: string[] };
 
 /** Коды опросника → поля позиции (как в импорте RFQ). */
@@ -23,12 +24,17 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
   const [open, setOpen] = useState<Record<number, boolean>>({ 0: true, 1: true, 13: true, 14: true });
   const [priceComment, setPriceComment] = useState("");
   const [advance, setAdvance] = useState({ pct: 30, days: 5 });
+  const [prod, setProd] = useState<{ value: string; unit: string; fixed_date: string; start_event: string }>({ value: String(position?.production_term?.value ?? position?.production_days ?? 90), unit: position?.production_term?.unit || "calendar_days", fixed_date: position?.production_term?.fixed_date || "", start_event: position?.production_term?.start_event || "factory_contract" });
+  const [dterm, setDterm] = useState<{ unit: string; start_event: string }>({ unit: position?.delivery_term?.unit || "calendar_days", start_event: position?.delivery_term?.start_event || "client_contract" });
+  const [tree, setTree] = useState<Tree>([]);
+  const [execId, setExecId] = useState(position?.execution_id || "");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.get<Schema>("/api/deals/rfq/template").then(setSchema);
     api.get<Factory[]>("/api/refs/factories").then(setFactories);
+    api.get<Tree>("/api/catalog/tree").then(setTree).catch(() => setTree([]));
   }, []);
   useEffect(() => {
     if (!position) return;
@@ -77,7 +83,10 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
         factory_id: fid, model: vals["1.2"], machine_type: vals["1.1"] || "", qty, unit_price: num("13.5"), currency: CURRENCIES.includes(cur) ? cur : "CNY",
         options, options_price: optPerUnit * qty, basis: vals["13.2"] || "FCA", delivery_point: vals["13.3"] || "",
         production_days: num("14.1") || 90, delivery_days: num("14.2") || 10, warranty_months: num("14.4"), warranty_hours: num("14.5"), zip_price: num("13.8"),
-        factory_payments: [{ no: 1, share_pct: advance.pct, event: "contract", offset_days: advance.days }, { no: 2, share_pct: 100 - advance.pct, event: "readiness", offset_days: 0 }],
+        production_term: prod.unit === "date" ? { unit: "date", fixed_date: prod.fixed_date || null, start_event: prod.start_event } : { value: Number(prod.value) || num("14.1") || 90, unit: prod.unit, start_event: prod.start_event },
+        delivery_term: dterm,
+        factory_payments: [{ no: 1, share_pct: advance.pct, event: "factory_contract", offset_days: advance.days }, { no: 2, share_pct: 100 - advance.pct, event: "readiness", offset_days: 0 }],
+        execution_id: execId || null,
         price_comment: priceComment, tech_params, logistics_params,
       };
       if (position) await api.patch(`/api/deals/${dealId}/positions/${position.id}`, body);
@@ -137,7 +146,24 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
         );
       })}
       <div className="grid cols-3" style={{ marginTop: 10 }}>
-        <label className="f">Оплата заводу: аванс, % / через дней после договора (остаток — по готовности)
+        <label className="f">Исполнение из каталога (заполняет теххарактеристики; затем их можно изменить)
+          <select value={execId} onChange={(e) => { setExecId(e.target.value); const found = tree.flatMap((f) => f.types.flatMap((t) => t.models.flatMap((m) => m.executions.map((x) => ({ f, t, m, x }))))).find((z) => z.x.id === e.target.value);
+            if (found) { setFactoryId(found.f.factory_id); set("0.7", found.f.factory); set("1.1", found.t.machine_type); set("1.2", found.m.model); } }}>
+            <option value="">— не использовать —</option>
+            {tree.map((f) => f.types.map((t) => t.models.map((m) => m.executions.map((x) => <option key={x.id} value={x.id}>{f.factory} › {t.machine_type} › {m.model} › {x.name} ({x.params} парам.)</option>))))}
+          </select></label>
+        <label className="f">Срок производства (задача 3): значение, единица, точка отсчёта
+          <div className="row">
+            {prod.unit !== "date" ? <input type="number" value={prod.value} style={{ width: 80 }} onChange={(e) => setProd({ ...prod, value: e.target.value })} /> : <input type="date" value={prod.fixed_date} onChange={(e) => setProd({ ...prod, fixed_date: e.target.value })} />}
+            <select value={prod.unit} onChange={(e) => setProd({ ...prod, unit: e.target.value })}>{Object.entries(TERM_UNITS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+            {prod.unit !== "date" && <select value={prod.start_event} onChange={(e) => setProd({ ...prod, start_event: e.target.value })}>{Object.entries(PRODUCTION_START).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>}
+          </div></label>
+        <label className="f">Срок поставки клиенту: единицы и точка отсчёта (значение считает система: +10 %, до целой недели; КД может изменить)
+          <div className="row">
+            <select value={dterm.unit} onChange={(e) => setDterm({ ...dterm, unit: e.target.value })}>{["calendar_days", "working_days", "weeks"].map((k) => <option key={k} value={k}>{TERM_UNITS[k]}</option>)}</select>
+            <select value={dterm.start_event} onChange={(e) => setDterm({ ...dterm, start_event: e.target.value })}>{Object.entries(DELIVERY_START).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+          </div></label>
+        <label className="f">Условия оплаты завода (справка для КД): аванс, % / через дней после контракта с заводом (остаток — по готовности)
           <div className="row"><input type="number" value={advance.pct} onChange={(e) => setAdvance({ ...advance, pct: Number(e.target.value) })} /><input type="number" value={advance.days} onChange={(e) => setAdvance({ ...advance, days: Number(e.target.value) })} /></div></label>
         <label className="f">Комментарий к цене (если отклонение от истории выше порога)<input value={priceComment} onChange={(e) => setPriceComment(e.target.value)} /></label>
       </div>
