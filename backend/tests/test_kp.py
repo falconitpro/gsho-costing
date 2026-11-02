@@ -1,7 +1,7 @@
 import pytest
 from docx import Document
 
-from app.services.kp_generator import KpData, KpVariant, assert_no_cost_leak, build_kp
+from app.services.kp_generator import KpData, KpVariant, build_kp
 
 
 def _data():

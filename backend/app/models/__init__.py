@@ -354,7 +354,8 @@ class Deal(TimestampMixin, Base):
     factory_contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
     execution_closed_at: Mapped[Optional[date]] = mapped_column(Date)
     contract_terms_changed: Mapped[bool] = mapped_column(Boolean, default=False)
-    in_execution: Mapped[bool] = mapped_column(Boolean, default=False)              # сделка была в исполнении (возврат после повторной визы)
+    in_execution: Mapped[bool] = mapped_column(Boolean, default=False)              # сделка на стадии контракта/исполнения (возврат после повторной визы)
+    execution_started: Mapped[bool] = mapped_column(Boolean, default=False)         # контракт подписан, исполнение начато (повторная виза возвращает в исполнение)
 
     client = relationship("Client")
     positions = relationship("Position", back_populates="deal", cascade="all, delete-orphan")

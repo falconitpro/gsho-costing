@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..core.roles import Role
 from ..core.workflow import add_business_days
-from ..models import ClientPriceHistory, Deal, DealVersion, EquipmentExecution, EquipmentModel, Factory, MachineType, Task, User
+from ..models import ClientPriceHistory, Deal, DealVersion, EquipmentExecution, EquipmentModel, Factory, MachineType, Position, Task, User
 from .deal_service import audit, notify
 from .tech_params_service import fingerprint, row_dicts
 
@@ -158,6 +158,10 @@ def approve_execution(db: Session, ex: EquipmentExecution, user_id: str, approve
         mt = db.get(MachineType, model.machine_type_id) if model.machine_type_id else None
         if mt and mt.status == "pending":
             mt.status = "approved"
+    if approve and ex.source_position_id:   # позиция-источник привязывается к исполнению: бренд компании, история цен
+        src = db.get(Position, ex.source_position_id)
+        if src and not src.execution_id:
+            src.execution_id = ex.id
     if ex.source_deal_id:
         for t in db.scalars(select(Task).where(Task.deal_id == ex.source_deal_id, Task.block == "catalog_approve", Task.done_at.is_(None))).all():
             still = db.scalar(select(EquipmentExecution.id).where(EquipmentExecution.source_deal_id == ex.source_deal_id, EquipmentExecution.status == "pending",

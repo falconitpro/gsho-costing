@@ -110,6 +110,7 @@ class DealState:
     logistician_id: Optional[str] = None
     service_head_id: Optional[str] = None
     in_execution: bool = False   # задача 2: сделка уже на стадии контракта/исполнения (повторная виза возвращает туда)
+    execution_started: bool = False   # исполнение уже начато — повторная виза возвращает в «Исполнение», а не в «Контракт»
 
 
 @dataclass
@@ -278,7 +279,8 @@ def visa_decision(state: DealState, by: Role, approved: bool, flags: dict[str, b
 def approve(state: DealState, today: date, sla: SlaDefaults, by: Role) -> TransitionResult:
     if state.in_execution:
         # задача 2: повторная визация после изменения условий контракта → возврат на стадию контракта
-        res = TransitionResult(status=DealStatus.CONTRACT, new_version=True, audit=f"Изменённые условия контракта утверждены ({by.value})")
+        back = DealStatus.EXECUTION if state.execution_started else DealStatus.CONTRACT
+        res = TransitionResult(status=back, new_version=True, audit=f"Изменённые условия контракта утверждены ({by.value})")
         res.notifications.append(Notification("approved", [Role.MANAGER], ["outlook", "wecom"], "Изменённые условия контракта утверждены"))
         return res
     res = TransitionResult(status=DealStatus.APPROVED, new_version=True, audit=f"Утверждено ({by.value})")

@@ -82,7 +82,7 @@ def test_full_flow(client, tmp_path):
 
     # --- логист: партия, статьи, ТН ВЭД
     batch = _ok(client.post(f"/api/deals/{did}/logistics/batches", headers=H(LOG), json={
-        "name": "Партия 1", "transport_units": 2, "transit_days": 18, "customs_days": 6,
+        "name": "Партия 1", "transport_units": 2, "transit_days": 18, "customs_days": 6, "border_planned": "2027-03-20", "rf_delivery_days": 7,
         "items": {"intl_freight": {"amount": 150000, "currency": "CNY"}, "insurance_pct": 0.3, "broker_rub": 450000, "rf_delivery_rub": 1500000},
         "position_ids": [pos["id"]]}), 201)
     assert batch["items"]["checks"]["intl_freight"]["history_avg"] is None     # истории ещё нет
@@ -165,6 +165,11 @@ def test_full_flow(client, tmp_path):
     assert client.post(f"/api/deals/{did}/execution/start", headers=H(MGR)).status_code == 409   # нет реквизитов контракта
     _ok(client.patch(f"/api/deals/{did}/execution/contract", headers=H(MGR), json={"contract_number": "К-2026-11", "contract_signed_at": "2026-12-01"}))
     assert _ok(client.post(f"/api/deals/{did}/execution/start", headers=H(MGR)))["status"] == "execution"
+    st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(FD)))
+    assert next(s for s in st["stages"] if s["code"] == "contract_signed")["done"]           # дата подписания из реквизитов = факт этапа
+    # изменение условий контракта в исполнении → повторная виза → возврат в исполнение
+    assert _ok(client.post(f"/api/deals/{did}/execution/terms-changed", headers=H(CD), json={"reason": "аванс 40 %"}))["status"] == "cd_approval"
+    assert _ok(client.post(f"/api/deals/{did}/submit", headers=H(CD)))["status"] == "execution"
     st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(FD)))
     adv = next(s for s in st["stages"] if s["code"] == "client_advance")
     assert adv["can_set"] and adv["amount"] > 0
@@ -271,7 +276,7 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     ac = next(r for r in rows if r["name_ru"] == "Кондиционер кабины")
     assert next(r for r in rows if r["no"] == first["no"])["customer_requirement_ru"] == "не менее 5 т"
     # задача 6: кондиционер реализуется в России → опция, задачи менеджеру/сервису/КД, не идёт заводу
-    opt = _ok(client.post(f"/api/deals/{did}/positions/{pid}/local-options", headers=H(MGR), json={"name": "Кондиционер кабины", "cost": 250000, "currency": "RUB",
+    _ok(client.post(f"/api/deals/{did}/positions/{pid}/local-options", headers=H(MGR), json={"name": "Кондиционер кабины", "cost": 250000, "currency": "RUB",
                                                                                                 "supplier_lead_days": 20, "install_stage": "before_handover", "install_days": 3, "tech_param_id": ac["id"]}), 201)
     tasks_svc = _ok(client.get("/api/tasks/my", headers=H(SVC)))
     assert any(t["deal_id"] == did and "установки" in t["title"] for t in tasks_svc)
@@ -324,6 +329,13 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     assert any(r["value_ru"] == "5.5" for r in new["positions"][0]["tech_param_rows"])
     # бренд компании: без наименования в каталоге — 422; задать можно через каталог
     assert client.patch(f"/api/deals/{did}/kp-settings", headers=H(CD), json={"kp_brand": "company"}).status_code == 422
+    # после занесения в каталог с наименованием бренда позиция привязана к исполнению → подача под брендом компании доступна
+    prop = _ok(client.post(f"/api/deals/{did}/catalog/propose", headers=H(MGR), json={"position_ids": [pid], "names": {pid: "ZL50 базовое"}}))
+    _ok(client.post(f"/api/catalog/executions/{prop['created'][0]['id']}/decision", headers=H(GD), json={"approve": True, "brand_name": "BH-50"}))
+    assert _ok(client.patch(f"/api/deals/{did}/kp-settings", headers=H(CD), json={"kp_brand": "company"}))["kp_brand"] == "company"
+    cmp2 = _ok(client.get(f"/api/deals/{did}/offers/compare?position_id={pid}", headers=H(MGR)))
+    row0 = next(r for r in cmp2["rows"] if r["no"] == first["no"])                      # «5.5» против «не менее 5 т» — соответствует
+    assert [c["status"] for c in row0["cells"]].count("match") == 1
     assert client.patch(f"/api/deals/{did}/kp-settings", headers=H(MGR), json={"kp_images_mode": "both"}).status_code == 403
     assert _ok(client.patch(f"/api/deals/{did}/kp-settings", headers=H(CD), json={"kp_images_mode": "both"}))["kp_images_mode"] == "both"
 

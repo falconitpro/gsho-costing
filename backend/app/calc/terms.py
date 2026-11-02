@@ -14,6 +14,18 @@ from .calendar import WorkCalendar
 from .types import DeliveryTerm, DeliveryTermResult, ProductionTerm
 
 UNIT_TITLES = {"calendar_days": "календарных дней", "working_days": "рабочих дней", "weeks": "недель"}
+_PLURAL = {"calendar_days": ("календарный день", "календарных дня", "календарных дней"),
+           "working_days": ("рабочий день", "рабочих дня", "рабочих дней"), "weeks": ("неделя", "недели", "недель")}
+
+
+def _plural(n: int, unit: str) -> str:
+    one, few, many = _PLURAL.get(unit, (UNIT_TITLES.get(unit, unit),) * 3)
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
 START_TITLES = {"client_contract": "с даты подписания контракта", "client_prepayment": "с даты поступления аванса",
                 "lc_opened": "с даты открытия аккредитива"}
 
@@ -59,7 +71,7 @@ def client_delivery_term(term: DeliveryTerm, start_on: date, delivery_on: date, 
         base = cal_days
     with_reserve = base * (1 + reserve_pct / 100.0)
     promised = _round_up_week(with_reserve, term.unit)
-    text = f"{promised} {UNIT_TITLES[term.unit]} {START_TITLES[term.start_event]}"
+    text = f"{promised} {_plural(promised, term.unit)} {START_TITLES[term.start_event]}"
     return DeliveryTermResult(start_event=term.start_event, start_on=start_on, delivery_on=delivery_on,
                               calc_days=int(round(base)), unit=term.unit, reserve_pct=reserve_pct,
                               with_reserve=round(with_reserve, 2), promised=promised, text=text, install_days=install_days)
