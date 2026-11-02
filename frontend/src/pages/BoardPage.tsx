@@ -7,7 +7,7 @@ type Col = { title: string; deals: { id: string; number: string; client: string;
 export default function BoardPage() {
   const [cols, setCols] = useState<Record<string, Col>>({});
   useEffect(() => { api.get<Record<string, Col>>("/api/board").then(setCols); }, []);
-  const order = ["draft", "logistics_calc", "service_calc", "calc_ready", "cd_approval", "fd_visa", "gd_visa", "rework", "approved", "kp_sent", "won", "lost", "cancelled"];
+  const order = ["draft", "logistics_calc", "service_calc", "calc_ready", "cd_approval", "fd_visa", "gd_visa", "rework", "approved", "kp_sent", "won", "contract", "execution", "closed", "lost", "cancelled"];
   return (
     <>
       <h1>Доска сделок</h1>

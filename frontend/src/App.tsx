@@ -8,6 +8,8 @@ import TasksPage from "./pages/TasksPage";
 import BoardPage from "./pages/BoardPage";
 import SettingsPage from "./pages/SettingsPage";
 import ClientsPage from "./pages/ClientsPage";
+import AccessPage from "./pages/AccessPage";
+import CatalogPage from "./pages/CatalogPage";
 
 export const MeContext = { current: null as Me | null };
 
@@ -33,6 +35,7 @@ export default function App() {
   }, []);
 
   const has = (...roles: string[]) => !!me && me.roles.some((r) => roles.includes(r.code));
+  const perm = (g: string, level = 1) => !!me && (me.perms?.[g] ?? 0) >= level;
 
   return (
     <BrowserRouter>
@@ -47,7 +50,9 @@ export default function App() {
             <NavLink to="/tasks">Мои задачи</NavLink>
             {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
             <NavLink to="/clients">Клиенты</NavLink>
+            <NavLink to="/catalog">Каталог</NavLink>
             {has("admin", "fd", "gd") && <NavLink to="/settings">Настройки</NavLink>}
+            {perm("access_admin", 2) && <NavLink to="/access">Уровни доступа</NavLink>}
           </nav>
         )}
         <span className="spacer" />
@@ -73,6 +78,8 @@ export default function App() {
             <Route path="/board" element={<BoardPage />} />
             <Route path="/clients" element={<ClientsPage me={me} />} />
             <Route path="/settings" element={<SettingsPage me={me} />} />
+            <Route path="/catalog" element={<CatalogPage me={me} />} />
+            {perm("access_admin", 2) && <Route path="/access" element={<AccessPage me={me} />} />}
           </Routes>
         )}
       </main>
