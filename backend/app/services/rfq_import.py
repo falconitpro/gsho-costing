@@ -351,5 +351,5 @@ def price_reference(unit_price: float, currency: str, history: list[dict], thres
         "last_price": last["unit_price"], "on": str(last["on"]), "currency": currency,
         "deviation_pct": None if dev is None else round(dev, 2),
         "needs_comment": dev is not None and abs(dev) > threshold_pct,
-        "history": sorted(same, key=lambda h: h["on"], reverse=True)[:5],
+        "history": [{**h, "on": str(h["on"])} for h in sorted(same, key=lambda h: h["on"], reverse=True)[:5]],   # JSON: даты строками
     }

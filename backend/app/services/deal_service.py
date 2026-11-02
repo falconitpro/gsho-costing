@@ -19,7 +19,8 @@ from .excel_export import export_excel
 
 
 def next_number(db: Session, year: int) -> str:
-    n = db.scalar(select(func.count(Deal.id)).where(Deal.number.like(f"D-{year}-%"))) or 0
+    # дубли заявок (D-2026-0003-2, задача 9) нумерацию не сдвигают
+    n = db.scalar(select(func.count(Deal.id)).where(Deal.number.like(f"D-{year}-%"), Deal.parent_deal_id.is_(None))) or 0
     return f"D-{year}-{n + 1:04d}"
 
 
