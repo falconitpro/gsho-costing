@@ -306,7 +306,7 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
                               data={"mapping": json.dumps({"sheet": prev2["sheets"][0]["name"], **mp2}), "target": "factory_answer", "offer_id": second["id"]}))
     assert ans["matched"] == 1 and ans["offer_id"] == second["id"]
     _ok(client.post(f"/api/deals/{did}/offers", headers=H(MGR), json={"factory_id": factories[1]["id"], "model": "LW500", "unit_price": 850000, "currency": "CNY",
-                                                                     "production_term": {"value": 10, "unit": "weeks"}, "source_position_id": pid}))
+                                                                     "production_term": {"value": 10, "unit": "weeks"}, "source_position_id": pid}), 201)
     cmp_ = _ok(client.get(f"/api/deals/{did}/offers/compare?position_id={pid}", headers=H(MGR)))
     assert len(cmp_["offers"]) == 2 and all(r["name_ru"] != "Кондиционер кабины" for r in cmp_["rows"])
     row0 = next(r for r in cmp_["rows"] if r["no"] == first["no"])
