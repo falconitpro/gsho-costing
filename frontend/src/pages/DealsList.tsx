@@ -3,8 +3,25 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate } from "../api";
 import { STATUS_TITLES, type Deal, type Me } from "../types";
 
+type Row = Deal & { group?: string; parent_number?: string; related_count?: number };
+
+/** Задача 9: связанные заявки (исходная и её дубли) идут подряд — дубли сразу под исходной, с отступом. */
+function grouped(deals: Row[]): Row[] {
+  const byGroup = new Map<string, Row[]>();
+  for (const d of deals) { const g = d.group || d.id; if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g)!.push(d); }
+  const out: Row[] = [], seen = new Set<string>();
+  for (const d of deals) {
+    const g = d.group || d.id;
+    if (seen.has(g)) continue;
+    seen.add(g);
+    const members = byGroup.get(g)!;
+    out.push(...members.filter((m) => !m.parent_number), ...members.filter((m) => m.parent_number).sort((a, b) => a.number.localeCompare(b.number, "ru", { numeric: true })));
+  }
+  return out;
+}
+
 export default function DealsList({ me }: { me: Me }) {
-  const [deals, setDeals] = useState<Deal[]>([]);
+  const [deals, setDeals] = useState<Row[]>([]);
   const [clients, setClients] = useState<{ id: string; name: string; sites: { name: string }[] }[]>([]);
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState({ client_id: "", site: "", contact: "", kp_due: "", priority: "normal", service_flag: false, target_hours: "" });
@@ -13,7 +30,7 @@ export default function DealsList({ me }: { me: Me }) {
   const isManager = me.roles.some((r) => r.code === "manager" || r.code === "gd");
 
   useEffect(() => {
-    api.get<Deal[]>("/api/deals").then(setDeals);
+    api.get<Row[]>("/api/deals").then(setDeals);
     api.get<typeof clients>("/api/refs/clients").then(setClients);
   }, []);
 
@@ -60,9 +77,11 @@ export default function DealsList({ me }: { me: Me }) {
         <table>
           <thead><tr><th>Номер</th><th>Клиент</th><th>Объект</th><th>Статус</th><th>Срок КП</th><th>Приоритет</th><th>Версия</th></tr></thead>
           <tbody>
-            {deals.map((d) => (
-              <tr key={d.id}>
-                <td><Link to={`/deals/${d.id}`}>{d.number}</Link></td><td>{d.client_name}</td><td>{d.site}</td>
+            {grouped(deals).map((d) => (
+              <tr key={d.id} style={d.parent_number ? { background: "#fafafa" } : undefined}>
+                <td style={d.parent_number ? { paddingLeft: 22 } : undefined}>{d.parent_number && <span className="muted">↳ </span>}<Link to={`/deals/${d.id}`}>{d.number}</Link>
+                  {!d.parent_number && (d.related_count || 0) > 0 && <span className="badge" title="связанные заявки по одному запросу клиента" style={{ marginLeft: 6 }}>+{d.related_count} связ.</span>}
+                  {d.parent_number && <div className="muted" style={{ fontSize: 11 }}>дубль {d.parent_number}</div>}</td><td>{d.client_name}</td><td>{d.site}</td>
                 <td><span className="badge accent">{STATUS_TITLES[d.status] || d.status}</span></td>
                 <td>{fmtDate(d.kp_due)}</td><td>{d.priority}</td><td>{d.current_version_no}</td>
               </tr>

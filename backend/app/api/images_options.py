@@ -71,6 +71,47 @@ async def upload_image(deal_id: str, pos_id: str, file: UploadFile = File(...), 
     return {**serialize(img), "file_name": att.file_name, "url": f"/api/files/{att.storage_path}"}
 
 
+@router.post("/offers/{offer_id}/images", status_code=201)
+async def upload_offer_image(deal_id: str, offer_id: str, file: UploadFile = File(...), caption: str = Form(""), kind: str = Form("photo"),
+                             db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Задача 10: фото и чертежи из ответа завода — к ответу-кандидату (задача 9). При отборе завода попадают в позицию
+    с источником «завод» и отметкой «есть логотип завода» (на проверку перед вложением в КП)."""
+    from ..models import FactoryOffer
+    deal = get_deal_or_404(db, deal_id, user)
+    if not user.can("images", 2):
+        raise HTTPException(403, "Файлы загружают менеджер, КД и ГД")
+    offer = db.get(FactoryOffer, offer_id)
+    if offer is None or offer.deal_id != deal.id:
+        raise HTTPException(404, "Ответ завода не найден")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in IMAGE_EXT:
+        raise HTTPException(422, f"Формат {ext or '?'} не поддерживается: {', '.join(sorted(IMAGE_EXT))}")
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, file.filename or f"image{ext}")
+    with open(path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    try:
+        ensure_folders(db, deal)
+        stored = adapters.storage().upload(path, deal.storage_folder, "01_rfq", f"img_завод_{file.filename}".replace("/", "-"))
+    except Exception as e:
+        raise HTTPException(502, f"Хранилище недоступно: {e}")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+    att = Attachment(deal_id=deal.id, folder="01_rfq", entity="factory_offer", entity_id=offer.id, file_name=file.filename or "image",
+                     storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=user.id)
+    db.add(att)
+    db.flush()
+    offer.images = [*(offer.images or []), att.id]
+    # ответ завода этой позиции — сразу в блок изображений позиции (на проверку логотипа)
+    pos = db.get(Position, offer.source_position_id) if offer.source_position_id else None
+    if pos and pos.factory_id == offer.factory_id:
+        db.add(PositionImage(deal_id=deal.id, position_id=pos.id, attachment_id=att.id, kind=kind if kind in IMAGE_KINDS else "photo",
+                             source="factory", caption=caption, has_factory_logo=True, uploaded_by=user.id))
+    audit(db, user.id, deal.id, "factory_offer", offer.id, "image", after={"file": file.filename})
+    db.commit()
+    return {"offer_id": offer.id, "attachment_id": att.id, "file_name": att.file_name, "url": f"/api/files/{att.storage_path}", "images": len(offer.images)}
+
+
 @router.get("/positions/{pos_id}/images")
 def list_images(deal_id: str, pos_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)

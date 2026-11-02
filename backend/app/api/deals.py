@@ -56,6 +56,7 @@ class DealUpdate(BaseModel):
     base_currency: Optional[str] = None
     client_payment_wishes: Optional[str] = None
     has_alternatives: Optional[bool] = None
+    keep_variant_id: Optional[str] = None             # задача 5: какое предложение оставить при выключении альтернатив
 
 
 class PositionIn(BaseModel):
@@ -111,9 +112,18 @@ def list_deals(status: Optional[str] = None, db: Session = Depends(get_db), user
         q = q.where(Deal.status == DealStatus(status))
     deals = [d for d in db.scalars(q).all() if _visible(user, d)]
     out = []
+    numbers = {d.id: d.number for d in deals}
+    children: dict[str, int] = {}
+    for d in deals:
+        if d.parent_deal_id:
+            children[d.parent_deal_id] = children.get(d.parent_deal_id, 0) + 1
     for d in deals:
         row = serialize(d, exclude={"client_payments", "bank_guarantee", "operating_conditions", "scenario_override"})
         row["client_name"] = d.client.name if d.client else None
+        # задача 9: группировка связанных заявок в списке
+        row["group"] = d.parent_deal_id or d.id
+        row["parent_number"] = numbers.get(d.parent_deal_id, "") if d.parent_deal_id else ""
+        row["related_count"] = children.get(d.parent_deal_id or d.id, 0)   # у исходной — число дублей; у дубля — исходная + другие дубли
         out.append(row)
     return filter_payload(out, user)
 
@@ -184,6 +194,14 @@ def update_deal(deal_id: str, body: DealUpdate, db: Session = Depends(get_db), u
             raise HTTPException(403, "Условия оплаты и БГ задаёт коммерческий директор")
     else:
         _editable_by_manager(deal, user)
+    keep_id = data.pop("keep_variant_id", None)
+    if data.get("has_alternatives") is False and deal.has_alternatives:
+        offers = [v for v in deal.variants if not v.is_default]
+        if len(offers) > 1 and not any(v.id == keep_id for v in offers):
+            # задача 5: предупреждение и выбор, какое предложение остаётся основным (остальные будут удалены)
+            raise HTTPException(409, {"message": "Выключение альтернатив удалит предложения. Выберите, какое оставить основным.",
+                                      "choose_variant": [{"id": v.id, "name": v.name, "price_rub": v.price_rub, "positions": len(v.position_ids or [])}
+                                                         for v in offers]})
     before = serialize(deal)
     for k, v in data.items():
         setattr(deal, k, v)
@@ -194,7 +212,8 @@ def update_deal(deal_id: str, body: DealUpdate, db: Session = Depends(get_db), u
                     v.is_default, v.name = False, v.name if v.name != "Предложение" else "Предложение А"
         else:
             # выключение альтернатив: оставляем основным первое предложение с ценой (или первое), остальные удаляем
-            keep = next((v for v in deal.variants if v.price_rub is not None), deal.variants[0] if deal.variants else None)
+            keep = next((v for v in deal.variants if v.id == keep_id), None) \
+                or next((v for v in deal.variants if v.price_rub is not None), deal.variants[0] if deal.variants else None)
             for v in list(deal.variants):
                 if v is not keep:
                     db.delete(v)

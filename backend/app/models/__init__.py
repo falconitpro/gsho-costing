@@ -708,6 +708,17 @@ class NotificationLog(Base):
     error: Mapped[str] = mapped_column(Text, default="")
 
 
+class ImportMapping(TimestampMixin, Base):
+    """Задача 4: запомненное сопоставление столбцов импорта таблицы для клиента / завода (повторные загрузки)."""
+    __tablename__ = "import_mappings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    scope: Mapped[str] = mapped_column(String(80), index=True)          # client:<id> | factory:<id>
+    target: Mapped[str] = mapped_column(String(32))                     # requirements | factory_answer
+    header_sig: Mapped[list] = mapped_column(JSONType, default=list)   # нормализованные заголовки — по ним узнаём «тот же формат»
+    mapping: Mapped[dict] = mapped_column(JSONType, default=dict)      # {header_row, first_row, columns}
+    updated_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+
 class IntegrationLog(Base):
     """Журнал обменов с внешними системами (Graph, WeCom, ЦБ)."""
     __tablename__ = "integration_log"

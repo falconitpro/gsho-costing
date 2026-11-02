@@ -277,6 +277,12 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
         res = _ok(client.post(f"/api/deals/{did}/positions/{pid}/tech-params/import/apply", headers=H(MGR), files={"file": ("client.xlsx", fh)},
                               data={"mapping": json.dumps({"sheet": prev["sheets"][0]["name"], **mp}), "target": "requirements"}))
     assert res["matched"] == 1 and res["added"] == 1
+    # задача 4: сопоставление запомнено для клиента — повторный файл того же формата
+    with open(f, "rb") as fh:
+        again = _ok(client.post(f"/api/deals/{did}/positions/{pid}/tech-params/import/preview", headers=H(MGR), files={"file": ("client.xlsx", fh)}))
+    assert again["sheets"][0]["mapping"]["source"] == "saved" and again["sheets"][0]["mapping"]["columns"]["customer_requirement_ru"] == 3
+    # RFQ на основе таблицы: требования заказчика вписаны по кодам
+    assert client.get(f"/api/deals/{did}/positions/{pid}/rfq/file", headers=H(MGR)).status_code == 200
     rows = res["rows"]
     ac = next(r for r in rows if r["name_ru"] == "Кондиционер кабины")
     assert next(r for r in rows if r["no"] == first["no"])["customer_requirement_ru"] == "не менее 5 т"
@@ -297,8 +303,13 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     _ok(client.patch(f"/api/deals/{did}/positions/{pid}/images/{img['id']}", headers=H(CD), json={"in_kp": True, "kp_order": 1}))
     assert client.post(f"/api/deals/{did}/positions/{pid}/images", headers=H(FD), files={"file": ("x.png", b"123", "image/png")}).status_code == 403
     # задача 9: запрос двум заводам (файл RU+ZH, строка опции РФ не включена), ответ второго завода, сравнение, отбор КД
+    # файлы клиента без подтверждения проверки — 422 (задача 10)
+    r = client.post(f"/api/deals/{did}/positions/{pid}/tech-params/request", headers=H(MGR), json={"factory_ids": [factories[0]["id"]], "image_ids": [img["id"]]})
+    assert r.status_code == 422 and "client_files" in r.json()["detail"]
     req = _ok(client.post(f"/api/deals/{did}/positions/{pid}/tech-params/request", headers=H(MGR), json={"factory_ids": [factories[0]["id"], factories[1]["id"]],
-                                                                                                        "image_ids": [img["id"]], "via_wecom": True, "via_mail": False}))
+                                                                                                        "image_ids": [img["id"]], "via_wecom": True, "via_mail": False,
+                                                                                                        "client_files_checked": True}))
+    assert req["sent"][0]["wecom"].startswith("не отправлено")
     assert len(req["sent"]) == 2 and all(x["offer_id"] for x in req["sent"])
     offers = _ok(client.get(f"/api/deals/{did}/offers", headers=H(MGR)))
     assert len(offers) == 2 and all(o["status"] == "requested" for o in offers)
@@ -317,6 +328,10 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     assert ans["matched"] == 1 and ans["offer_id"] == second["id"]
     _ok(client.post(f"/api/deals/{did}/offers", headers=H(MGR), json={"factory_id": factories[1]["id"], "model": "LW500", "unit_price": 850000, "currency": "CNY",
                                                                      "production_term": {"value": 10, "unit": "weeks"}, "source_position_id": pid}), 201)
+    # задача 10: фото из ответа второго завода — к кандидату
+    with open(png, "rb") as fh:
+        oi = _ok(client.post(f"/api/deals/{did}/offers/{second['id']}/images", headers=H(MGR), files={"file": ("lw500.png", fh, "image/png")}), 201)
+    assert oi["images"] == 1
     cmp_ = _ok(client.get(f"/api/deals/{did}/offers/compare?position_id={pid}", headers=H(MGR)))
     assert len(cmp_["offers"]) == 2 and all(r["name_ru"] != "Кондиционер кабины" for r in cmp_["rows"])
     row0 = next(r for r in cmp_["rows"] if r["no"] == first["no"])
@@ -332,7 +347,13 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     assert len(related) == 2
     new = _ok(client.get(f"/api/deals/{sel['created_deals'][0]['id']}", headers=H(MGR)))
     assert new["parent_deal_id"] == did and new["positions"][0]["model"] == "LW500" and new["positions"][0]["factory_id"] == factories[1]["id"]
-    assert new["positions"][0]["local_options"] and len(new["positions"][0]["images"]) >= 1 and new["offer"]
+    assert new["positions"][0]["local_options"] and len(new["positions"][0]["images"]) >= 2 and new["offer"]   # своё + фото завода
+    assert any(i["source"] == "factory" and i["has_factory_logo"] for i in new["positions"][0]["images"])
+    lst = _ok(client.get("/api/deals", headers=H(MGR)))                                    # задача 9: группировка в списке
+    dup = next(x for x in lst if x["id"] == new["id"])
+    assert dup["group"] == did and dup["parent_number"] == deal["number"] and dup["related_count"] >= 1
+    brd = _ok(client.get("/api/board", headers=H(CD)))
+    assert any(x["id"] == new["id"] and x["group"] == did for col in brd.values() for x in col["deals"])
     assert any(r["value_ru"] == "5.5" for r in new["positions"][0]["tech_param_rows"])
     # бренд компании: без наименования в каталоге — 422; задать можно через каталог
     assert client.patch(f"/api/deals/{did}/kp-settings", headers=H(CD), json={"kp_brand": "company"}).status_code == 422
@@ -340,6 +361,32 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     prop = _ok(client.post(f"/api/deals/{did}/catalog/propose", headers=H(MGR), json={"position_ids": [pid], "names": {pid: "ZL50 базовое"}}))
     _ok(client.post(f"/api/catalog/executions/{prop['created'][0]['id']}/decision", headers=H(GD), json={"approve": True, "brand_name": "BH-50"}))
     assert _ok(client.patch(f"/api/deals/{did}/kp-settings", headers=H(CD), json={"kp_brand": "company"}))["kp_brand"] == "company"
+    # задача 7: справка цен при вводе позиции — менеджер видит цены завода, цены клиентам — нет
+    ref_m = _ok(client.get(f"/api/catalog/price-reference?factory_id={factories[0]['id']}&model=ZL50", headers=H(MGR)))
+    assert ref_m["factory_prices"] and ref_m["client_prices"] is None
+    assert _ok(client.get(f"/api/catalog/price-reference?factory_id={factories[0]['id']}&model=ZL50", headers=H(GD)))["client_prices"] is not None
+    # объединение дублей исполнений: ссылки позиции переходят, дубль в архив
+    rows_now = _ok(client.get(f"/api/deals/{did}/positions/{pid}/tech-params", headers=H(MGR)))["rows"]
+    rows_now[0]["value_ru"] = "6"                                                          # другой набор параметров → новое исполнение
+    _ok(client.put(f"/api/deals/{did}/positions/{pid}/tech-params", headers=H(MGR), json=rows_now))
+    prop2 = _ok(client.post(f"/api/deals/{did}/catalog/propose", headers=H(MGR), json={"position_ids": [pid], "names": {pid: "ZL50 дубль"}}))
+    dupe = prop2["created"][0]["id"]
+    _ok(client.post(f"/api/catalog/executions/{dupe}/decision", headers=H(CD), json={"approve": True}))
+    assert client.post(f"/api/catalog/executions/{dupe}/merge", headers=H(MGR), json={"into_id": prop["created"][0]["id"]}).status_code == 403
+    mg = _ok(client.post(f"/api/catalog/executions/{dupe}/merge", headers=H(CD), json={"into_id": prop["created"][0]["id"]}))
+    assert mg["into"] == prop["created"][0]["id"]
+    assert any(e["id"] == dupe for e in _ok(client.get("/api/catalog/archive", headers=H(CD)))["executions"])
+    # задача 5: альтернативы — выключение при двух предложениях требует выбрать, какое оставить
+    _ok(client.patch(f"/api/deals/{did}", headers=H(MGR), json={"has_alternatives": True}))
+    _ok(client.post(f"/api/deals/{did}/variants", headers=H(MGR), json={"name": "Предложение Б", "position_ids": [pid]}), 201)
+    dd = _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))
+    offers_ab = [v for v in dd["variants"] if not v.get("is_default")]
+    assert len(offers_ab) == 2
+    r = client.patch(f"/api/deals/{did}", headers=H(MGR), json={"has_alternatives": False})
+    assert r.status_code == 409 and len(r.json()["detail"]["choose_variant"]) == 2
+    keep = offers_ab[1]["id"]
+    dd = _ok(client.patch(f"/api/deals/{did}", headers=H(MGR), json={"has_alternatives": False, "keep_variant_id": keep}))
+    assert [v["id"] for v in dd["variants"]] == [keep] and dd["offer"]["id"] == keep
     cmp2 = _ok(client.get(f"/api/deals/{did}/offers/compare?position_id={pid}", headers=H(MGR)))
     row0 = next(r for r in cmp2["rows"] if r["no"] == first["no"])                      # «5.5» против «не менее 5 т» — соответствует
     assert [c["status"] for c in row0["cells"]].count("match") == 1

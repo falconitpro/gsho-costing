@@ -157,7 +157,14 @@ export function OffersBlock({ dealId, position, me, onChanged }: { dealId: strin
           <thead><tr><th>№</th><th>Параметр</th><th>Требование</th>{cmp.offers.map((o) => (
             <th key={o.offer_id}>{canSelect && o.status !== "selected" && <input type="checkbox" checked={sel.has(o.offer_id)} onChange={(e) => { const s = new Set(sel); e.target.checked ? s.add(o.offer_id) : s.delete(o.offer_id); setSel(s); }} />} {o.factory}
               <div style={{ fontWeight: 400, fontSize: 11 }}>{o.model || "—"}{o.unit_price != null && <> · {fmtRub(o.unit_price)} {o.currency}</>}{o.production_term?.value != null && <> · {String(o.production_term.value)} {String(o.production_term.unit || "")}</>}
-                <div><span className={"badge " + (o.status === "selected" ? "ok" : o.answered ? "" : "warn")}>{o.status === "selected" ? "отобран" : o.status === "rejected" ? "не выбран" : o.answered ? "ответ получен" : "ожидание"}</span>{o.images > 0 && ` · ${o.images} изобр.`}</div></div></th>))}</tr></thead>
+                <div><span className={"badge " + (o.status === "selected" ? "ok" : o.answered ? "" : "warn")}>{o.status === "selected" ? "отобран" : o.status === "rejected" ? "не выбран" : o.answered ? "ответ получен" : "ожидание"}</span>{o.images > 0 && ` · ${o.images} изобр.`}</div>
+                {can(me, "images", 2) && o.status !== "selected" && (
+                  <label style={{ cursor: "pointer", textDecoration: "underline" }} title="фото и чертежи, приложенные заводом к ответу">+ фото/чертежи завода
+                    <input type="file" multiple hidden accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.dwg,.dxf,.svg" onChange={async (e) => {
+                      const files: File[] = Array.from((e.target as HTMLInputElement).files || []);
+                      try { for (const f of files) await api.upload(`/api/deals/${dealId}/offers/${o.offer_id}/images`, f); setMsg(`${o.factory}: загружено файлов ${files.length}`); load(); onChanged(); }
+                      catch (er) { setMsg((er as Error).message); }
+                    }} /></label>)}</div></th>))}</tr></thead>
           <tbody>{cmp.rows.map((r) => (
             <tr key={r.no + r.name_ru}><td>{r.no}</td><td>{r.name_ru}{r.required && <span style={{ color: "var(--accent)" }}> *</span>} <span className="muted">{r.unit}</span></td><td className="muted">{r.requirement}</td>
               {r.cells.map((c, j) => <td key={j} style={{ background: color[c.status] }} title={c.comment}>{c.value || "—"}</td>)}</tr>))}</tbody>
