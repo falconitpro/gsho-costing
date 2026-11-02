@@ -186,6 +186,8 @@ def test_full_flow(client, tmp_path):
     # закрытие — только КД
     assert client.post(f"/api/deals/{did}/execution/close", headers=H(MGR), json={}).status_code == 403
     assert _ok(client.post(f"/api/deals/{did}/execution/close", headers=H(CD), json={"reason": "исполнено"}))["status"] == "closed"
+    card = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(CD)))
+    assert card["funnel"]["won"] >= 1 and card["sum_won_rub"] > 0                       # закрытая выигранная сделка считается выигранной
     # журнал
     audit = _ok(client.get(f"/api/deals/{did}/audit", headers=H(CD)))
     assert any(a["action"] == "status" for a in audit)
