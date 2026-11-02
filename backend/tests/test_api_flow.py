@@ -186,6 +186,8 @@ def test_full_flow(client, tmp_path):
     # закрытие — только КД
     assert client.post(f"/api/deals/{did}/execution/close", headers=H(MGR), json={}).status_code == 403
     assert _ok(client.post(f"/api/deals/{did}/execution/close", headers=H(CD), json={"reason": "исполнено"}))["status"] == "closed"
+    card = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(CD)))
+    assert card["funnel"]["won"] >= 1 and card["sum_won_rub"] > 0                       # закрытая выигранная сделка считается выигранной
     # журнал
     audit = _ok(client.get(f"/api/deals/{did}/audit", headers=H(CD)))
     assert any(a["action"] == "status" for a in audit)
@@ -343,6 +345,9 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     assert len(sel["created_deals"]) == 1 and sel["created_deals"][0]["number"] == deal["number"] + "-2"
     nxt = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "x"}), 201)   # дубль не сдвигает нумерацию
     assert int(nxt["number"].split("-")[2]) == int(deal["number"].split("-")[2]) + 1
+    # пропуск в нумерации (старые данные) не даёт повторного номера
+    nxt2 = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "y"}), 201)
+    assert nxt2["number"] != nxt["number"] and int(nxt2["number"].split("-")[2]) == int(nxt["number"].split("-")[2]) + 1
     related = _ok(client.get(f"/api/deals/{did}/related", headers=H(MGR)))
     assert len(related) == 2
     new = _ok(client.get(f"/api/deals/{sel['created_deals'][0]['id']}", headers=H(MGR)))

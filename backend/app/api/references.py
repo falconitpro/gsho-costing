@@ -57,8 +57,11 @@ def client_card(client_id: str, db: Session = Depends(get_db), user: CurrentUser
     deals = db.scalars(select(Deal).where(Deal.client_id == c.id).order_by(Deal.created_at.desc())).all()
     if user.has(Role.MANAGER) and not user.has(Role.CD, Role.FD, Role.GD):
         deals = [d for d in deals if d.manager_id == user.id]
-    funnel = {"requests": len(deals), "kp_sent": sum(d.status in (DealStatus.KP_SENT, DealStatus.WON, DealStatus.LOST) for d in deals),
-              "won": sum(d.status == DealStatus.WON for d in deals)}
+    # задача 2: выигранная сделка дальше идёт «Контракт → Исполнение → Закрыта»; выигрыш определяем по исходу или по этим стадиям
+    won_statuses = (DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED)
+    is_won = lambda d: d.outcome == "won" or d.status in won_statuses  # noqa: E731
+    funnel = {"requests": len(deals), "kp_sent": sum(d.status in (DealStatus.KP_SENT, DealStatus.LOST) or is_won(d) for d in deals),
+              "won": sum(is_won(d) for d in deals)}
     margins, sums = [], 0.0
     last_kp = []
     for d in deals:
@@ -66,7 +69,7 @@ def client_card(client_id: str, db: Session = Depends(get_db), user: CurrentUser
             if v.price_rub:
                 last_kp.append({"deal": d.number, "variant": v.name, "price_rub": v.price_rub, "on": d.updated_at.isoformat() if d.updated_at else None,
                                 "status": d.status.value, "models": [p.model for p in d.positions if p.id in v.position_ids]})
-        if d.status == DealStatus.WON and d.approved_version_id:
+        if is_won(d) and d.approved_version_id:
             ver = db.get(DealVersion, d.approved_version_id)
             if ver:
                 for vid, scen in ver.calc_result["variants"].items():
