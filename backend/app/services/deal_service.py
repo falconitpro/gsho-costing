@@ -25,8 +25,9 @@ def next_number(db: Session, year: int) -> str:
 
 def audit(db: Session, user_id: str | None, deal_id: str | None, entity: str, entity_id: str, action: str,
           before: Any = None, after: Any = None, comment: str = "") -> None:
+    from fastapi.encoders import jsonable_encoder   # даты и Decimal в JSONB (плановая дата CMR в партии и т. п.)
     db.add(AuditLog(user_id=user_id, deal_id=deal_id, entity=entity, entity_id=entity_id, action=action,
-                    before=before, after=after, comment=comment))
+                    before=jsonable_encoder(before), after=jsonable_encoder(after), comment=comment))
 
 
 def sla(db: Session) -> SlaDefaults:

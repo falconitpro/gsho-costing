@@ -403,7 +403,11 @@ def send_request(db: Session, deal, pos: Position, factory: Factory, file_path: 
             result["wecom"] = adapters.messenger().send_to_external(factory.wecom_external_ids[0], text, deal.number)
         except Exception as e:
             result["wecom"] = f"ошибка: {e}"
+    elif via_wecom:
+        result["wecom"] = "не отправлено: в карточке завода нет контакта WeCom"
     emails = [c.get("email") for c in (factory.contacts or []) if c.get("email")]
+    if via_mail and not emails:
+        result["mail"] = "не отправлено: в карточке завода нет e-mail"
     if via_mail and emails:
         try:
             from ..adapters.mail import OutgoingMail

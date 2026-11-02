@@ -10,7 +10,7 @@
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -97,8 +97,13 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
     for pc in base.positions:
         for k, dv in pc.events.items():
             ev_deal[k] = max(ev_deal.get(k, dv), dv)
-    upsert("contract_signed", deal.contract_signed_at or ev_deal.get("contract"))
-    upsert("factory_contract", deal.factory_contract_signed_at or ev_deal.get("factory_contract"))
+    # даты подписания, введённые в реквизитах контракта, — это факт этапа (этап закрывается, задача менеджера снимается)
+    st_c = upsert("contract_signed", deal.contract_signed_at or ev_deal.get("contract"))
+    if deal.contract_signed_at and not st_c.actual_on:
+        st_c.actual_on = deal.contract_signed_at
+    st_f = upsert("factory_contract", deal.factory_contract_signed_at or ev_deal.get("factory_contract"))
+    if deal.factory_contract_signed_at and not st_f.actual_on:
+        st_f.actual_on = deal.factory_contract_signed_at
     client_lines = base.payment_dates
     adv = [l for l in client_lines if l["event"] in ADVANCE_EVENTS]
     if adv:
@@ -151,6 +156,11 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
         if id(st) not in keep and st.actual_on is None:
             db.delete(st)
     db.flush()
+    # задачи по этапам, у которых уже есть факт (например, дата подписания из реквизитов), закрываются
+    done_blocks = {f"stage:{s.id}" for s in by_key.values() if id(s) in keep and s.actual_on}
+    if done_blocks:
+        for t in db.scalars(select(Task).where(Task.deal_id == deal.id, Task.done_at.is_(None), Task.block.in_(done_blocks))).all():
+            t.done_at = datetime.now(timezone.utc)
     return sorted((s for s in by_key.values() if id(s) in keep), key=lambda s: ((s.actual_on or s.planned_on or date.max), s.sort))
 
 
@@ -220,7 +230,6 @@ def set_actual(db: Session, deal: Deal, stage: ExecutionStage, actual_on: Option
                              currency=stage.currency or "RUB", on=actual_on, comment=note or stage.title, entered_by=user.id))
     # задачи по этапу закрываем
     for t in db.scalars(select(Task).where(Task.deal_id == deal.id, Task.done_at.is_(None), Task.block == f"stage:{stage.id}")).all():
-        from datetime import datetime, timezone
         t.done_at = datetime.now(timezone.utc)
     audit(db, user.id, deal.id, "execution_stage", stage.id, "actual", after={"actual_on": str(actual_on), "amount": actual_amount, "note": note})
     db.flush()

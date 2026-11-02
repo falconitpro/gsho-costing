@@ -7,7 +7,7 @@ from app.calc.cashflow import Flow, build_cashflow
 from app.calc.fx_forecast import FxHistory, forecast_rate
 from app.calc.service import MaintenanceRegulation, ServiceInput, ServiceOperation, SparePartRow
 from app.calc.types import (
-    COST_KEYS, DEFAULT_SCENARIOS, FinanceSettings, FxForecastSettings, FxRates, ScenarioName,
+    COST_KEYS, DEFAULT_SCENARIOS, FinanceSettings, FxForecastSettings, FxRates,
 )
 from tests.fixtures import sample_deal, synthetic_cny_history
 

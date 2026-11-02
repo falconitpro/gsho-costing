@@ -86,7 +86,7 @@ def start(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depen
         tr = start_execution(DealState(status=deal.status, service_flag=deal.service_flag), bool(deal.contract_number and deal.contract_signed_at), date.today())
     except Exception as e:
         raise HTTPException(409, str(e))
-    deal.in_execution = True
+    deal.in_execution, deal.execution_started = True, True
     complete_tasks(db, deal, block="contract")
     apply_transition(db, deal, tr, user.id)
     ex.rebuild_stages(db, deal)

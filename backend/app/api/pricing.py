@@ -67,7 +67,7 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     if base_any and base_any.defaults_used.get("factory_payments"):
         warn_lower.append("График оплаты заводу не задан КД — расчёт по типовой схеме (30 % в течение 14 раб. дней после контракта, 70 % после готовности).")
     factories = {f.id: f.name for f in db.scalars(select(Factory)).all()}
-    warn_lower += kp_brand_check(deal, factories)
+    warn_lower += kp_brand_check(deal, factories, db)
     comments = []
     for p in deal.positions:
         for k, c in ((p.logistics or {}).get("checks") or {}).items():
@@ -250,7 +250,7 @@ def submit(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
         raise HTTPException(422, {"message": "Перед утверждением задайте условия оплаты и оцените опции РФ", "errors": errors})
     inp, res = run_calc(db, deal)
     flags = approval_flags(res)
-    st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution)
+    st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution, execution_started=deal.execution_started)
     try:
         tr = cd_submit_price(st, flags, date.today(), sla(db), _ladder(db))
     except Exception as e:
@@ -261,7 +261,7 @@ def submit(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     apply_transition(db, deal, tr, user.id)
     if tr.status == DealStatus.APPROVED:
         _finalize_approval(db, deal, user.id)
-    elif tr.status == DealStatus.CONTRACT:
+    elif tr.status in (DealStatus.CONTRACT, DealStatus.EXECUTION):
         _finalize_contract_change(db, deal, user.id)
     db.commit()
     return {"status": deal.status.value, "approval_flags": flags, "reasons": res.approval.reasons}
@@ -283,7 +283,7 @@ def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: Curren
         raise HTTPException(422, "Отказ требует комментария")
     inp, res = run_calc(db, deal)
     flags = approval_flags(res)
-    st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution)
+    st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution, execution_started=deal.execution_started)
     try:
         tr = visa_decision(st, by, body.approved, flags, date.today(), sla(db), _ladder(db), cd_insists=body.cd_insists)
     except Exception as e:
@@ -294,7 +294,7 @@ def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: Curren
     apply_transition(db, deal, tr, user.id)
     if tr.status == DealStatus.APPROVED:
         _finalize_approval(db, deal, user.id)
-    elif tr.status == DealStatus.CONTRACT:
+    elif tr.status in (DealStatus.CONTRACT, DealStatus.EXECUTION):
         _finalize_contract_change(db, deal, user.id)
     elif tr.new_version:
         create_version(db, deal, "rework", user.id)

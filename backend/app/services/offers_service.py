@@ -2,6 +2,7 @@
 отбор КД/ГД, дублирование заявки, бренд подачи КП."""
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
@@ -107,6 +108,32 @@ def duplicate_deal(db: Session, deal: Deal, user_id: str, offer_id: Optional[str
 
 # ------------------------------------------------------------------ ответы заводов и сравнение
 
+_NUM = re.compile(r"-?\d+(?:[.,]\d+)?")
+
+
+def _req_status(val: str, req: str) -> str:
+    """Соответствие значения требованию: текстовое совпадение или числовое («не менее 3200», «≤ 5», «3000–3500», «5 т»)."""
+    nv, nr = _norm(val), _norm(req)
+    if nv == nr or nr in nv:
+        return "match"
+    if nv and any(nv == _norm(alt) for alt in re.split(r"/|,|;| или | or ", req)):   # «L4 / L5» → «L5»
+        return "match"
+    nums_v = [float(x.replace(",", ".")) for x in _NUM.findall(val)]
+    nums_r = [float(x.replace(",", ".")) for x in _NUM.findall(req)]
+    if not nums_v or not nums_r:
+        return "mismatch"
+    v = nums_v[0]
+    if len(nums_r) >= 2 and any(ch in req for ch in "–-…"):           # диапазон
+        lo, hi = min(nums_r[0], nums_r[1]), max(nums_r[0], nums_r[1])
+        return "match" if lo <= v <= hi else "mismatch"
+    r = nums_r[0]
+    if any(k in nr for k in ("не менее", "минимум", "от ", ">=", "≥", "min")):
+        return "match" if v >= r else "mismatch"
+    if any(k in nr for k in ("не более", "максимум", "до ", "<=", "≤", "max")):
+        return "match" if v <= r else "mismatch"
+    return "match" if abs(v - r) < 1e-9 else "mismatch"
+
+
 def compare(db: Session, deal: Deal, source_position: Optional[Position]) -> dict:
     """Таблица «параметр × завод»: соответствие требованиям заказчика (match / mismatch / empty), цена, срок, условия оплаты."""
     offers = db.scalars(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id).order_by(FactoryOffer.created_at)).all()
@@ -129,7 +156,7 @@ def compare(db: Session, deal: Deal, source_position: Optional[Position]) -> dic
         for o in offers:
             v = by_offer[o.id].get(key) or {}
             val = (v.get("value_ru") or v.get("value_zh") or "").strip()
-            status = "empty" if not val else ("unknown" if not req else ("match" if _norm(val) == _norm(req) or _norm(req) in _norm(val) else "mismatch"))
+            status = "empty" if not val else ("unknown" if not req else _req_status(val, req))
             cells.append({"value": val, "value_zh": v.get("value_zh") or "", "comment": v.get("comment_ru") or "", "status": status})
         rows.append({"no": r.get("no"), "name_ru": r.get("name_ru"), "unit": r.get("unit"), "requirement": req, "required": r.get("required"), "cells": cells})
     return {"offers": cols, "rows": rows}
@@ -181,13 +208,13 @@ def select_offers(db: Session, deal: Deal, offer_ids: list[str], user_id: str, c
     return created
 
 
-def kp_brand_check(deal: Deal, factories: dict[str, str]) -> list[str]:
+def kp_brand_check(deal: Deal, factories: dict[str, str], db: Optional[Session] = None) -> list[str]:
     """Предупреждения перед КП под брендом компании: нет собственного наименования, файлы с логотипом завода."""
     warnings: list[str] = []
     if deal.kp_brand != "company":
         return warnings
     for p in deal.positions:
-        if not kp_model_name(p, None):
+        if not kp_model_name(p, db):
             warnings.append(f"{p.model}: не задано наименование под брендом компании в каталоге")
         for img in p.image_rows or []:
             if img.in_kp and (img.has_factory_logo or img.source == "factory"):

@@ -50,7 +50,6 @@ def test_payment_events_border_lc_and_advance_guarantee():
     base = res.variants["V1"]["base"]
     pays = {p["no"]: p for p in base.payment_dates}
     pos = base.positions[0]
-    border = pos.events["border"]
     assert pays[1]["on"] == inp.contract_date and pays[2]["via"] == "lc"
     assert pays[2]["on"] > max(pc.events["border"] for pc in base.positions)       # 5 рабочих дней после CMR
     # БГ на аванс: 30 % × 3 % годовых × срок до поставки
