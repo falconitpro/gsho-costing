@@ -9,5 +9,6 @@ httpx>=0.27
 python-multipart>=0.0.9
 openpyxl>=3.1
 python-docx>=1.1
+Pillow>=10          # уменьшение изображений для КП (задача 10)
 boto3>=1.34          # адаптер S3 (Yandex Object Storage / MinIO)
 pytest>=8
