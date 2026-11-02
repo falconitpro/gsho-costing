@@ -32,3 +32,29 @@ def test_leak_detector(tmp_path):
     d.intro_text = "Себестоимость сделки составляет 100 млн"
     with pytest.raises(RuntimeError):
         build_kp(d, str(tmp_path / "leak.docx"))
+
+
+def test_pdf_drawing_thumbnail_in_kp(tmp_path):
+    """Задача 10: PDF-чертёж вставляется в документ КП миниатюрой первой страницы."""
+    fitz = pytest.importorskip("fitz")
+    pdf = tmp_path / "drawing.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=420)
+    page.draw_rect(fitz.Rect(40, 40, 555, 380), color=(0, 0, 0), width=2)
+    page.insert_text((60, 80), "General arrangement", fontsize=18)
+    doc.save(str(pdf))
+    doc.close()
+    from app.services.kp_generator import pdf_thumbnail
+    thumb = pdf_thumbnail(str(pdf), max_px=600)
+    assert thumb and thumb.endswith(".png")
+    baseline = len(Document(build_kp(_data(), str(tmp_path / "kp_base.docx"))).inline_shapes)   # логотип в шапке
+    d = _data()
+    d.images = {"XDR80T": [(str(pdf), "Габаритный чертёж")]}
+    out = Document(build_kp(d, str(tmp_path / "kp_pdf.docx")))
+    assert len(out.inline_shapes) == baseline + 1
+    assert any("Габаритный чертёж (стр. 1)" in p.text for p in out.paragraphs)
+
+
+def test_pdf_thumbnail_without_file_is_none(tmp_path):
+    from app.services.kp_generator import pdf_thumbnail
+    assert pdf_thumbnail(str(tmp_path / "missing.pdf")) is None

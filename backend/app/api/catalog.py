@@ -112,6 +112,79 @@ def model_patch(model_id: str, body: ModelPatch, db: Session = Depends(get_db), 
     return serialize(m)
 
 
+class MergeIn(BaseModel):
+    into_id: str
+
+
+@router.post("/catalog/executions/{exec_id}/merge")
+def execution_merge(exec_id: str, body: MergeIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_editor)):
+    """Объединение дублей исполнений: ссылки позиций и истории цен переносятся в целевое исполнение, дубль — в архив."""
+    from ..models import ClientPriceHistory, Position
+    src, dst = db.get(EquipmentExecution, exec_id), db.get(EquipmentExecution, body.into_id)
+    if src is None or dst is None or src.id == dst.id:
+        raise HTTPException(404 if src is None or dst is None else 422, "Исполнение не найдено" if src is None or dst is None else "Нельзя объединить с самим собой")
+    moved = 0
+    for model in (Position, FactoryPriceHistory, ClientPriceHistory):
+        for row in db.scalars(select(model).where(model.execution_id == src.id)).all():
+            row.execution_id, moved = dst.id, moved + 1
+    if not dst.brand_name and src.brand_name:
+        dst.brand_name = src.brand_name
+    src.status = "archived"
+    audit(db, user.id, None, "equipment_execution", src.id, "merge", after={"into": dst.id, "moved_refs": moved})
+    db.commit()
+    return {"merged": src.id, "into": dst.id, "moved_refs": moved}
+
+
+@router.post("/catalog/models/{model_id}/merge")
+def model_merge(model_id: str, body: MergeIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_editor)):
+    """Объединение дублей моделей (например, «XDR-80T» и «XDR80T»): исполнения и история цен завода переходят к целевой модели."""
+    from ..models import ClientPriceHistory
+    src, dst = db.get(EquipmentModel, model_id), db.get(EquipmentModel, body.into_id)
+    if src is None or dst is None or src.id == dst.id:
+        raise HTTPException(404 if src is None or dst is None else 422, "Модель не найдена" if src is None or dst is None else "Нельзя объединить с самой собой")
+    ex_moved = 0
+    for ex in db.scalars(select(EquipmentExecution).where(EquipmentExecution.model_id == src.id)).all():
+        ex.model_id, ex_moved = dst.id, ex_moved + 1
+    hist = 0
+    for h in db.scalars(select(FactoryPriceHistory).where(FactoryPriceHistory.factory_id == src.factory_id, FactoryPriceHistory.model == src.model)).all():
+        h.factory_id, h.model, hist = dst.factory_id, dst.model, hist + 1
+    for h in db.scalars(select(ClientPriceHistory).where(ClientPriceHistory.factory_id == src.factory_id, ClientPriceHistory.model == src.model)).all():
+        h.model = dst.model
+    if not dst.brand_name and src.brand_name:
+        dst.brand_name = src.brand_name
+    src.status = "archived"
+    audit(db, user.id, None, "equipment_model", src.id, "merge", after={"into": dst.id, "executions": ex_moved, "factory_prices": hist})
+    db.commit()
+    return {"merged": src.id, "into": dst.id, "executions": ex_moved, "factory_prices": hist}
+
+
+@router.get("/catalog/archive")
+def catalog_archive(db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_editor)):
+    """Архив каталога (объединённые и архивированные модели/исполнения) — для восстановления."""
+    return {"models": [serialize(m) for m in db.scalars(select(EquipmentModel).where(EquipmentModel.status == "archived")).all()],
+            "executions": [serialize(e) for e in db.scalars(select(EquipmentExecution).where(EquipmentExecution.status == "archived")).all()]}
+
+
+@router.get("/catalog/price-reference")
+def price_reference(factory_id: str, model: str, execution_id: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Справка при вводе позиции: последние цены и сроки производства завода (менеджер, КД, ГД) и цены клиентам (КД, ГД)."""
+    from ..models import ClientPriceHistory
+    out: dict = {"factory_prices": None, "client_prices": None}
+    if user.can("factory_price_history"):
+        q = select(FactoryPriceHistory).where(FactoryPriceHistory.factory_id == factory_id, FactoryPriceHistory.model == model)
+        out["factory_prices"] = [{"on": h.on, "unit_price": h.unit_price, "currency": h.currency, "basis": h.basis, "production_term": h.production_term,
+                                  "source": h.source, "deal_id": h.deal_id}
+                                 for h in db.scalars(q.order_by(FactoryPriceHistory.on.desc()).limit(5)).all()]
+    if user.can("client_price_history"):
+        q = select(ClientPriceHistory).where(ClientPriceHistory.model == model)
+        if execution_id:
+            q = q.where(ClientPriceHistory.execution_id == execution_id)
+        out["client_prices"] = [{"on": h.on, "client_id": h.client_id, "deal_number": h.deal_number, "unit_price_rub": h.unit_price_rub, "qty": h.qty,
+                                 "outcome": h.outcome, "kp_brand": h.kp_brand}
+                                for h in db.scalars(q.order_by(ClientPriceHistory.on.desc()).limit(5)).all()]
+    return out
+
+
 # ------------------------------------------------------------------ типы машин
 
 class MachineTypeIn(BaseModel):

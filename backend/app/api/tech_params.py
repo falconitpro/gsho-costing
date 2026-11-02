@@ -134,15 +134,28 @@ def verify_translation(deal_id: str, pos_id: str, row_id: str, db: Session = Dep
 
 # ------------------------------------------------------------------ импорт файла клиента / ответа завода
 
+def _mapping_scope(db: Session, deal, pos: Position, target: str, offer_id: str) -> str:
+    """Чьё сопоставление запоминаем: файл клиента — клиент сделки; ответ завода — завод (кандидата или позиции)."""
+    if target == "factory_answer" or offer_id:
+        fid = pos.factory_id
+        if offer_id:
+            o = db.get(FactoryOffer, offer_id)
+            fid = o.factory_id if o else fid
+        return f"factory:{fid}"
+    return f"client:{deal.client_id}"
+
+
 @router.post("/positions/{pos_id}/tech-params/import/preview")
-async def import_preview(deal_id: str, pos_id: str, file: UploadFile = File(...), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Предпросмотр: листы, строки, предложенное сопоставление столбцов и строка заголовков (пользователь уточняет)."""
+async def import_preview(deal_id: str, pos_id: str, file: UploadFile = File(...), target: str = Form("requirements"), offer_id: str = Form(""),
+                         db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Предпросмотр: листы, строки, сопоставление столбцов и строка заголовков (пользователь уточняет).
+    Если файл того же формата уже загружался от этого клиента/завода — подставляется запомненное сопоставление (mapping.source = saved)."""
     deal = get_deal_or_404(db, deal_id, user)
     _can_edit(user, deal)
-    _pos(db, deal, pos_id)
+    pos = _pos(db, deal, pos_id)
     path = _tmp(file)
     try:
-        return tps.preview(path, file.filename or "")
+        return tps.preview(path, file.filename or "", db, _mapping_scope(db, deal, pos, target, offer_id), "factory_answer" if offer_id else target)
     except Exception as e:
         raise HTTPException(422, f"Не удалось прочитать файл: {e}")
     finally:
@@ -187,6 +200,14 @@ async def import_apply(deal_id: str, pos_id: str, file: UploadFile = File(...), 
             res["offer_id"] = offer.id
         else:
             res = tps.apply_import(db, pos, path, file.filename or "", mp, user.id, target=target, selected_rows=sel, add_unmatched=add_unmatched)
+        # запоминаем сопоставление для следующих файлов этого клиента/завода
+        try:
+            sheets = tps.read_table(path, file.filename or "")
+            sheet = next((x for x in sheets if x["name"] == mp.get("sheet")), sheets[0])
+            tgt = "factory_answer" if offer_id else target
+            tps.remember_mapping(db, _mapping_scope(db, deal, pos, tgt, offer_id), tgt, sheet["rows"], mp, user.id)
+        except Exception as e:
+            audit(db, user.id, deal.id, "tech_params", pos.id, "mapping_not_saved", comment=str(e)[:300])
         # файл — в папку сделки
         try:
             ensure_folders(db, deal)
@@ -210,6 +231,7 @@ class RequestIn(BaseModel):
     via_wecom: bool = True
     via_mail: bool = True
     request_images: bool = True
+    client_files_checked: bool = False                     # задача 10: менеджер проверил файлы клиента на его данные
 
 
 @router.post("/positions/{pos_id}/tech-params/request")
@@ -220,6 +242,10 @@ def send_request(deal_id: str, pos_id: str, body: RequestIn, db: Session = Depen
     _can_edit(user, deal)
     pos = _pos(db, deal, pos_id)
     ids = body.factory_ids or [pos.factory_id]
+    client_files = [i for i in (pos.image_rows or []) if i.id in body.image_ids and i.source == "client"]
+    if client_files and not body.client_files_checked:
+        raise HTTPException(422, {"message": "На файлах клиента могут быть его название, логотип и контакты. Проверьте файлы перед отправкой заводу.",
+                                  "client_files": [i.caption or i.id for i in client_files]})
     image_paths: list[str] = []
     s = adapters.storage()
     for img in pos.image_rows or []:
@@ -261,6 +287,23 @@ def request_file(deal_id: str, pos_id: str, factory_id: str = "", db: Session = 
     path, _ = tps.build_request_xlsx(db, pos, factory, deal.number, user.id)
     db.commit()
     return FileResponse(path, filename=os.path.basename(path))
+
+
+@router.get("/positions/{pos_id}/rfq/file")
+def rfq_with_requirements(deal_id: str, pos_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Шаблон RFQ, заполненный требованиями заказчика из таблицы позиции (строки «реализуется в России» помечены),
+    — завод заполняет значения, цены и логистику; ответ загружается обычным импортом RFQ."""
+    from fastapi.responses import FileResponse
+    from ..models import Template
+    from ..services.rfq_template import fill_rfq_requirements
+    deal = get_deal_or_404(db, deal_id, user)
+    pos = _pos(db, deal, pos_id)
+    if not user.can("tech_params"):
+        raise HTTPException(403)
+    custom = db.scalar(select(Template).where(Template.kind == "rfq", Template.is_active.is_(True)).order_by(Template.version.desc()))
+    dst = os.path.join(tempfile.mkdtemp(), f"{deal.number}_RFQ_{pos.model or 'позиция'}.xlsx")
+    fill_rfq_requirements(dst, tps.row_dicts(pos), src=custom.file_path if custom else None)
+    return FileResponse(dst, filename=os.path.basename(dst))
 
 
 # ------------------------------------------------------------------ ответы заводов: кандидаты, сравнение, отбор (задача 9)

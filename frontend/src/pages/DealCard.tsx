@@ -28,6 +28,8 @@ export default function DealCard({ me }: { me: Me }) {
   const [posForm, setPosForm] = useState<"new" | Position | null>(null);
   const [factories, setFactories] = useState<Record<string, string>>({});
   const [wishes, setWishes] = useState("");
+  const [altChoice, setAltChoice] = useState<{ id: string; name: string; price_rub: number | null; positions: number }[] | null>(null);
+  const [altKeep, setAltKeep] = useState("");
   useEffect(() => { api.get<{ id: string; name: string }[]>("/api/refs/factories").then((fs) => setFactories(Object.fromEntries(fs.map((f) => [f.id, f.name])))); }, [posForm]);
   const [feed, setFeed] = useState<{ id: string; kind: string; subject: string; body: string; at: string; counterparty: string }[]>([]);
   const [versions, setVersions] = useState<{ id: string; version_no: number; reason: string; created_at: string; excel_path?: string; excel_manager_path: string; kp_path: string; kp_meta?: Record<string, unknown> }[]>([]);
@@ -140,8 +142,26 @@ export default function DealCard({ me }: { me: Me }) {
               <tr><td>Объект</td><td>{deal.site}</td></tr><tr><td>Дата запроса</td><td>{fmtDate(deal.requested_at)}</td></tr>
               <tr><td>Базовая валюта</td><td>{deal.base_currency}</td></tr>
               <tr><td>Сервис до наработки</td><td>{deal.service_flag ? `да, ${deal.target_hours} м·ч` : "нет"}</td></tr>
-              <tr><td>Альтернативные предложения в КП</td><td><label className="row"><input type="checkbox" checked={!!deal.has_alternatives} disabled={!editable} onChange={(e) => { if (!e.target.checked && !confirm("Выключить альтернативы? Останется одно предложение.")) return; api.patch(`/api/deals/${deal.id}`, { has_alternatives: e.target.checked }).then(load); }} />
-                {deal.has_alternatives ? "да — несколько предложений (А/Б) в одном КП" : "нет — одна сделка, одно КП"}</label></td></tr>
+              <tr><td>Альтернативные предложения в КП</td><td><label className="row"><input type="checkbox" checked={!!deal.has_alternatives} disabled={!editable} onChange={(e) => {
+                  setErr("");
+                  api.patch(`/api/deals/${deal.id}`, { has_alternatives: e.target.checked }).then(() => { setAltChoice(null); load(); }).catch((er) => {
+                    const d = (er as ApiError).detail as { choose_variant?: { id: string; name: string; price_rub: number | null; positions: number }[] };
+                    if (d?.choose_variant) { setAltChoice(d.choose_variant); setAltKeep(d.choose_variant[0]?.id || ""); } else setErr((er as Error).message);
+                  });
+                }} />
+                {deal.has_alternatives ? "да — несколько предложений (А/Б) в одном КП" : "нет — одна сделка, одно КП"}</label>
+                {altChoice && (   // задача 5: выключение альтернатив — выбор, какое предложение остаётся основным
+                  <div className="alert warn" style={{ marginTop: 6 }}>
+                    Останется одно предложение, остальные будут удалены вместе с их ценой и условиями. Какое оставить основным?
+                    {altChoice.map((v) => (
+                      <label key={v.id} className="row" style={{ marginTop: 4 }}><input type="radio" name="alt-keep" checked={altKeep === v.id} onChange={() => setAltKeep(v.id)} />
+                        {v.name} <span className="muted">· позиций {v.positions}{v.price_rub != null && can(me, "price") ? ` · ${fmtRub(v.price_rub)} RUB` : ""}</span></label>))}
+                    <div className="row" style={{ marginTop: 6 }}>
+                      <button className="btn" disabled={!altKeep} onClick={() => api.patch(`/api/deals/${deal.id}`, { has_alternatives: false, keep_variant_id: altKeep }).then(() => { setAltChoice(null); load(); }).catch((er) => setErr((er as Error).message))}>Выключить альтернативы</button>
+                      <button className="btn ghost" onClick={() => setAltChoice(null)}>отмена</button>
+                    </div>
+                  </div>
+                )}</td></tr>
               {deal.kp_brand && <tr><td>Подача КП</td><td>{deal.kp_brand === "company" ? "под брендом компании" : "под маркой завода"}</td></tr>}
             </tbody></table>
           </div>

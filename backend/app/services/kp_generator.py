@@ -214,9 +214,33 @@ def build_kp(data: KpData, path: str) -> str:
     return path
 
 
+def pdf_thumbnail(path: str, max_px: int = 1600) -> Optional[str]:
+    """Миниатюра первой страницы PDF-чертежа (PyMuPDF); без библиотеки или при ошибке — None."""
+    try:
+        import fitz   # PyMuPDF
+        with fitz.open(path) as pdf:
+            if pdf.page_count == 0:
+                return None
+            page = pdf.load_page(0)
+            zoom = max(0.2, min(4.0, max_px / max(page.rect.width, page.rect.height)))
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+            out = os.path.splitext(path)[0] + "_p1.png"
+            pix.save(out)
+            return out
+    except Exception:
+        return None
+
+
 def _add_image(doc, path: str, caption: str) -> None:
-    """Вставка изображения с уменьшением до разумного размера (PDF/DWG в документ не вставляются — только вложением к письму)."""
+    """Вставка изображения с уменьшением до разумного размера. PDF-чертёж — миниатюрой первой страницы;
+    DWG/DXF в документ не вставляются (только вложением к письму)."""
     ext = os.path.splitext(path)[1].lower()
+    if ext == ".pdf":
+        thumb = pdf_thumbnail(path)
+        if not thumb:
+            return
+        path, caption = thumb, (caption + " (стр. 1)") if caption else "Чертёж, стр. 1"
+        ext = ".png"
     if ext not in (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff"):
         return
     src = path

@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import adapters
-from ..models import EquipmentExecution, Factory, Glossary, MachineType, Position, PositionTechParam, TechParamTemplate
+from ..models import EquipmentExecution, Factory, Glossary, ImportMapping, IntegrationLog, MachineType, Position, PositionTechParam, TechParamTemplate
 from .rfq_import import template_fields
 from .rfq_template import template_path
 
@@ -79,7 +79,15 @@ def translate(db: Session, texts: list[str], src: str, dst: str, kind: str = "pa
         else:
             todo.append(i)
     if todo:
-        tr = adapters.translator().translate([str(texts[i]) for i in todo], src, dst)
+        tr_adapter = adapters.translator()
+        try:
+            tr = tr_adapter.translate([str(texts[i]) for i in todo], src, dst)
+            db.add(IntegrationLog(system="translator", operation=f"{src}->{dst}", ok=True,
+                                  details={"provider": getattr(tr_adapter, "name", ""), "count": len(todo), "translated": sum(1 for x in tr if x)}))
+        except Exception as e:   # переводчик недоступен — строки остаются для ручного перевода, ошибка в журнале интеграций
+            tr = [None] * len(todo)
+            db.add(IntegrationLog(system="translator", operation=f"{src}->{dst}", ok=False,
+                                  details={"provider": getattr(tr_adapter, "name", ""), "count": len(todo), "error": str(e)[:500]}))
         existing = {(_norm(g.term_ru), g.kind) for g in db.scalars(select(Glossary)).all()}
         for i, res in zip(todo, tr):
             if res:
@@ -229,11 +237,46 @@ def guess_mapping(rows: list[list]) -> dict:
     return {"header_row": best_row, "first_row": best_row + 1 if best else 0, "columns": best_cols}
 
 
-def preview(path: str, filename: str = "") -> dict:
+def header_sig(rows: list[list], header_row: int) -> list[str]:
+    if header_row is None or header_row >= len(rows):
+        return []
+    return [_norm(c) for c in rows[header_row]]
+
+
+def saved_mapping(db: Optional[Session], scope: str, target: str, rows: list[list]) -> Optional[dict]:
+    """Запомненное сопоставление для клиента/завода, если заголовки файла совпадают с прошлой загрузкой."""
+    if db is None or not scope:
+        return None
+    for m in db.scalars(select(ImportMapping).where(ImportMapping.scope == scope, ImportMapping.target == target)
+                        .order_by(ImportMapping.updated_at.desc())).all():
+        hr = int((m.mapping or {}).get("header_row") or 0)
+        if m.header_sig and header_sig(rows, hr) == m.header_sig:
+            return {**m.mapping, "source": "saved"}
+    return None
+
+
+def remember_mapping(db: Session, scope: str, target: str, rows: list[list], mapping: dict, user_id: Optional[str]) -> None:
+    if not scope:
+        return
+    hr = int(mapping.get("header_row") or 0)
+    sig = header_sig(rows, hr)
+    if not any(sig):
+        return
+    data = {"header_row": hr, "first_row": int(mapping.get("first_row") or hr + 1),
+            "columns": {k: int(v) for k, v in (mapping.get("columns") or {}).items() if v is not None and v != ""}}
+    m = next((x for x in db.scalars(select(ImportMapping).where(ImportMapping.scope == scope, ImportMapping.target == target)).all()
+              if x.header_sig == sig), None)
+    if m is None:
+        db.add(ImportMapping(scope=scope, target=target, header_sig=sig, mapping=data, updated_by=user_id))
+    else:
+        m.mapping, m.updated_by = data, user_id
+
+
+def preview(path: str, filename: str = "", db: Optional[Session] = None, scope: str = "", target: str = "requirements") -> dict:
     sheets = read_table(path, filename)
     out = []
     for s in sheets:
-        g = guess_mapping(s["rows"])
+        g = saved_mapping(db, scope, target, s["rows"]) or {**guess_mapping(s["rows"]), "source": "guess"}
         out.append({"name": s["name"], "rows": s["rows"][:200], "total_rows": len(s["rows"]), "mapping": g})
     return {"sheets": out, "columns": [{"key": k, "title": COLUMN_TITLES[k]} for k in COLUMNS + ["value_zh"]]}
 
@@ -344,6 +387,8 @@ def apply_import(db: Session, pos: Position, path: str, filename: str, mapping: 
                 r.value_ru, r.translation_status = text, status
             else:
                 r.comment_ru = text or r.comment_ru
+                if status == "machine":           # машинный перевод комментария тоже требует проверки человеком
+                    r.translation_status = "machine"
     db.flush()
     db.refresh(pos)
     return {"matched": matched, "added": added, "unmatched": unmatched, "conflicts": conflicts, "rows": row_dicts(pos)}

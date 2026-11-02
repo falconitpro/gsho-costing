@@ -87,3 +87,41 @@ def fill_rfq_template(dst: str, values: dict[str, Any], spare_parts: Optional[li
                             z.cell(r, zc[col]).value = sp[key]
     wb.save(dst)
     return dst
+
+
+LOCAL_RU_NOTE = "Реализуется в России — не заполнять / 在俄罗斯实现，无需填写"
+
+
+def fill_rfq_requirements(dst: str, rows: list[dict], src: Optional[str] = None) -> str:
+    """Задача 4: RFQ на основе таблицы позиции — требования заказчика (RU/ZH) по кодам; строки «в РФ» помечены и не заполняются заводом."""
+    shutil.copyfile(template_path(src), dst)
+    wb = load_workbook(dst)
+    ws = next((w for w in wb.worksheets if "тех" in w.title.lower()), wb.worksheets[0])
+    hdr, cols, _ = _find_main_header(ws)
+    rows_by_code: dict[str, int] = {}
+    for r in range(hdr + 1, ws.max_row + 1):
+        c = ws.cell(r, cols["code"]).value
+        if c is not None:
+            rows_by_code[str(c).strip()] = r
+
+    def put(r: int, c: Optional[int], val: Any) -> None:
+        if not c or val in (None, ""):
+            return
+        for rng in ws.merged_cells.ranges:
+            if rng.min_row <= r <= rng.max_row and rng.min_col <= c <= rng.max_col:
+                ws.cell(rng.min_row, rng.min_col).value = val
+                return
+        ws.cell(r, c).value = val
+
+    for row in rows:
+        r = rows_by_code.get(str(row.get("code") or "").strip())
+        if not r:
+            continue
+        if row.get("local_ru"):
+            put(r, cols.get("req_ru"), LOCAL_RU_NOTE)
+            put(r, cols.get("comment"), LOCAL_RU_NOTE)
+            continue
+        put(r, cols.get("req_ru"), row.get("customer_requirement_ru"))
+        put(r, cols.get("req_zh"), row.get("customer_requirement_zh"))
+    wb.save(dst)
+    return dst

@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, fmtDate, fmtRub } from "../api";
 import { DELIVERY_START, PRODUCTION_START, TERM_UNITS, type Position } from "../types";
 import { collectFields, cmpCode, type RfqFieldData } from "../components/Questionnaire";
 
 type Factory = { id: string; name: string };
 type Tree = { factory_id: string; factory: string; types: { machine_type: string; models: { id: string; model: string; executions: { id: string; name: string; params: number }[] }[] }[] }[];
+type PriceRef = {
+  factory_prices: { on: string; unit_price: number; currency: string; basis: string; production_term: { value?: number; unit?: string }; source: string }[] | null;
+  client_prices: { on: string; deal_number: string; unit_price_rub: number | null; qty: number; outcome: string | null; kp_brand: string }[] | null;
+};
 type Schema = { title: string; sections: { no: number; title: string }[]; fields: RfqFieldData[]; required: string[]; numeric: string[] };
 
 /** Коды опросника → поля позиции (как в импорте RFQ). */
@@ -30,6 +34,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
   const [execId, setExecId] = useState(position?.execution_id || "");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [ref, setRef] = useState<PriceRef | null>(null);
 
   useEffect(() => {
     api.get<Schema>("/api/deals/rfq/template").then(setSchema);
@@ -51,6 +56,14 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
     for (const arr of m.values()) arr.sort((a, b) => cmpCode(a.code, b.code));
     return m;
   }, [schema]);
+
+  // задача 7: справка при вводе позиции — последние цены и сроки завода (менеджер, КД, ГД), цены клиентам (КД, ГД)
+  const refModel = vals["1.2"] || "";
+  useEffect(() => {
+    if (!factoryId || !refModel) { setRef(null); return; }
+    const t = setTimeout(() => api.get<PriceRef>(`/api/catalog/price-reference?factory_id=${factoryId}&model=${encodeURIComponent(refModel)}${execId ? `&execution_id=${execId}` : ""}`).then(setRef).catch(() => setRef(null)), 400);
+    return () => clearTimeout(t);
+  }, [factoryId, refModel, execId]);
 
   const set = (code: string, v: string) => setVals((s) => ({ ...s, [code]: v }));
   const num = (code: string) => { const n = Number((vals[code] || "").replace(/\s/g, "").replace(",", ".")); return isNaN(n) ? null : n; };
@@ -167,6 +180,26 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
           <div className="row"><input type="number" value={advance.pct} onChange={(e) => setAdvance({ ...advance, pct: Number(e.target.value) })} /><input type="number" value={advance.days} onChange={(e) => setAdvance({ ...advance, days: Number(e.target.value) })} /></div></label>
         <label className="f">Комментарий к цене (если отклонение от истории выше порога)<input value={priceComment} onChange={(e) => setPriceComment(e.target.value)} /></label>
       </div>
+      {ref && (ref.factory_prices?.length || ref.client_prices?.length) ? (
+        <div className="card" style={{ marginTop: 10, background: "#fafafa" }}>
+          <b>Справка по модели {refModel}</b>
+          <div className="grid cols-2" style={{ marginTop: 6 }}>
+            {ref.factory_prices && (
+              <div><div className="muted">Предложения завода (последние)</div>
+                {ref.factory_prices.length === 0 ? <div className="muted">истории нет</div> : (
+                  <table><tbody>{ref.factory_prices.map((h, i) => (
+                    <tr key={i}><td>{fmtDate(h.on)}</td><td className="num">{fmtRub(h.unit_price)} {h.currency}</td><td>{h.basis}</td>
+                      <td className="muted">{h.production_term?.value != null ? `${h.production_term.value} ${TERM_UNITS[h.production_term.unit || "calendar_days"] || ""}` : "—"}</td></tr>))}</tbody></table>)}
+              </div>)}
+            {ref.client_prices && (
+              <div><div className="muted">Цены клиентам (видят КД и ГД)</div>
+                {ref.client_prices.length === 0 ? <div className="muted">КП по модели ещё не было</div> : (
+                  <table><tbody>{ref.client_prices.map((h, i) => (
+                    <tr key={i}><td>{fmtDate(h.on)}</td><td>{h.deal_number}</td><td className="num">{fmtRub(h.unit_price_rub)} RUB × {h.qty}</td>
+                      <td>{h.outcome === "won" ? <span className="badge ok">выиграна</span> : h.outcome === "lost" ? <span className="badge bad">проиграна</span> : <span className="muted">{h.outcome || "—"}</span>}</td></tr>))}</tbody></table>)}
+              </div>)}
+          </div>
+        </div>) : null}
       {err && <div className="alert error">{err}</div>}
       <div className="row" style={{ marginTop: 10 }}>
         <button className="btn" onClick={save} disabled={!valid || busy}>{position ? "Сохранить изменения" : "Добавить позицию"}</button>

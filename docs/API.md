@@ -116,3 +116,19 @@
 * `GET /api/export/clients`, `/api/export/factories`.
 * `POST /api/import/fact` — факт платежей и расходов (формат `plan_fact_entries`).
 * Вебхуки событий: `deal.approved`, `deal.kp_sent`, `deal.won`.
+
+## Дополнения 03.11.2026 (доработки по спецификации задач 4, 5, 7, 9, 10)
+
+| Метод | Путь | Назначение |
+| --- | --- | --- |
+| POST | `/api/deals/{id}/positions/{pid}/tech-params/import/preview` | + поля формы `target`, `offer_id`: если файл того же формата уже загружался от клиента/завода — `mapping.source = "saved"` и запомненное сопоставление |
+| GET | `/api/deals/{id}/positions/{pid}/rfq/file` | шаблон RFQ с требованиями заказчика из таблицы позиции (строки «в РФ» помечены) |
+| POST | `/api/deals/{id}/offers/{offer_id}/images` | фото/чертежи из ответа завода к кандидату (источник «завод», логотип на проверку) |
+| POST | `/api/deals/{id}/positions/{pid}/tech-params/request` | + `client_files_checked`: без него при выбранных файлах клиента — 422 |
+| PATCH | `/api/deals/{id}` | + `keep_variant_id`: выключение альтернатив при ≥2 предложениях без выбора — 409 с `choose_variant` |
+| GET | `/api/catalog/price-reference?factory_id&model&execution_id` | справка при вводе позиции: цены и сроки завода (менеджер/КД/ГД), цены клиентам (КД/ГД) |
+| POST | `/api/catalog/executions/{id}/merge`, `/api/catalog/models/{id}/merge` | объединение дублей (ссылки и история цен переходят, дубль — в архив); КД/ГД |
+| GET | `/api/catalog/archive` | архив каталога (восстановление — PATCH `status: approved`) |
+| GET | `/api/deals`, `/api/board` | + `group`, `parent_number`/`group_number`, `related_count`/`related` — группировка связанных заявок |
+
+Журнал интеграций: вызовы переводчика пишутся в `integration_log` (`system = translator`, провайдер, число строк, ошибка). PDF-чертёж в КП — миниатюрой первой страницы (PyMuPDF).

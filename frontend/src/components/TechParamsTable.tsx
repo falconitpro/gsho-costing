@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../api";
 import type { Position, TechParamRow } from "../types";
 
-type Preview = { sheets: { name: string; rows: unknown[][]; total_rows: number; mapping: { header_row: number; first_row: number; columns: Record<string, number> } }[];
+type Preview = { sheets: { name: string; rows: unknown[][]; total_rows: number; mapping: { header_row: number; first_row: number; columns: Record<string, number>; source?: string } }[];
   columns: { key: string; title: string }[] };
 type Factory = { id: string; name: string };
 
@@ -26,11 +26,14 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
   const [mapping, setMapping] = useState<{ header_row: number; first_row: number; last_row: string; columns: Record<string, string> }>({ header_row: 0, first_row: 1, last_row: "", columns: {} });
   const [selected, setSelected] = useState<Set<number> | null>(null);
   const [offerId, setOfferId] = useState("");
-  const [offers, setOffers] = useState<{ id: string; factory: string; status: string }[]>([]);
+  const [offers, setOffers] = useState<{ id: string; factory: string; factory_id: string; status: string }[]>([]);
   const [factories, setFactories] = useState<Factory[]>([]);
   const [reqFactories, setReqFactories] = useState<string[]>([position.factory_id]);
   const [reqImages, setReqImages] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
+  const [clientChecked, setClientChecked] = useState(false);
+  const [answerOffer, setAnswerOffer] = useState<string>("");    // после импорта ответа завода — предложить загрузить его фото/чертежи
+  const [offerFiles, setOfferFiles] = useState<FileList | null>(null);
 
   const load = () => api.get<{ rows: TechParamRow[]; missing_required: string[] }>(base).then((r) => { setRows(r.rows); setMissing(r.missing_required); setDirty(false); }).catch((e) => setErr(e.message));
   useEffect(() => { load(); api.get<Factory[]>("/api/refs/factories").then(setFactories); api.get<typeof offers>(`/api/deals/${dealId}/offers`).then(setOffers).catch(() => setOffers([])); }, [position.id]);
@@ -44,7 +47,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
   async function doPreview() {
     if (!file) return;
     try {
-      const p = await api.upload<Preview>(`${base}/import/preview`, file);
+      const p = await api.upload<Preview>(`${base}/import/preview`, file, { target: wizard || "requirements", offer_id: offerId });
       setPreview(p); setSheet(0);
       const m = p.sheets[0].mapping;
       setMapping({ header_row: m.header_row, first_row: m.first_row, last_row: "", columns: Object.fromEntries(Object.entries(m.columns).map(([k, v]) => [k, String(v)])) });
@@ -56,17 +59,28 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
     const mp = { sheet: preview.sheets[sheet].name, header_row: mapping.header_row, first_row: mapping.first_row, last_row: mapping.last_row ? Number(mapping.last_row) : undefined,
       columns: Object.fromEntries(Object.entries(mapping.columns).filter(([, v]) => v !== "").map(([k, v]) => [k, Number(v)])) };
     try {
-      const r = await api.upload<{ matched: number; added: number; unmatched: { row: number; name: string }[]; conflicts: unknown[] }>(`${base}/import/apply`, file,
+      const r = await api.upload<{ matched: number; added: number; unmatched: { row: number; name: string }[]; conflicts: unknown[]; offer_id?: string }>(`${base}/import/apply`, file,
         { mapping: JSON.stringify(mp), target: wizard || "requirements", selected_rows: selected ? [...selected].join(",") : "", offer_id: offerId });
       setMsg(`Загружено: сопоставлено ${r.matched}, добавлено ${r.added}` + (r.unmatched.length ? `, не сопоставлено ${r.unmatched.length}` : "") + (r.conflicts.length ? `, заменено требований ${r.conflicts.length}` : ""));
+      if (wizard === "factory_answer") {   // задача 10: фото и чертежи из ответа завода — к ответу-кандидату
+        const oid = r.offer_id || offers.find((o) => o.factory_id === position.factory_id)?.id || "";
+        setAnswerOffer(oid);
+      }
       setWizard(null); setPreview(null); setFile(null); setErr(""); await load(); onChanged();
+    } catch (e) { setErr((e as Error).message); }
+  }
+  async function uploadOfferFiles() {
+    if (!offerFiles || !answerOffer) return;
+    try {
+      for (const f of Array.from(offerFiles)) await api.upload(`/api/deals/${dealId}/offers/${answerOffer}/images`, f, { kind: /\.(pdf|dwg|dxf)$/i.test(f.name) ? "drawing" : "photo" });
+      setMsg(`Загружено файлов завода: ${offerFiles.length} (источник «завод», отмечены как «есть логотип завода»)`); setAnswerOffer(""); setOfferFiles(null); onChanged();
     } catch (e) { setErr((e as Error).message); }
   }
   async function sendRequest() {
     setSending(true);
     try {
       const r = await api.post<{ sent: { factory: string; wecom: string | null; mail: string | null; machine_translations: unknown[] }[] }>(`${base}/request`,
-        { factory_ids: reqFactories, image_ids: reqImages, via_wecom: true, via_mail: true, request_images: true });
+        { factory_ids: reqFactories, image_ids: reqImages, via_wecom: true, via_mail: true, request_images: true, client_files_checked: clientChecked });
       setMsg("Запрос отправлен: " + r.sent.map((s) => `${s.factory} (WeCom: ${s.wecom || "—"}, почта: ${s.mail || "—"}${s.machine_translations.length ? `, машинный перевод: ${s.machine_translations.length} строк — проверьте глоссарий` : ""})`).join("; "));
       setErr(""); api.get<typeof offers>(`/api/deals/${dealId}/offers`).then(setOffers); onChanged();
     } catch (e) { setErr((e as ApiError).message); } finally { setSending(false); }
@@ -75,6 +89,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
   const sh = preview?.sheets[sheet];
   const filled = rows.filter((r) => r.value_ru).length;
   const images = position.images || [];
+  const clientSelected = images.filter((im) => reqImages.includes(im.id) && im.source === "client");
   return (
     <div>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
@@ -86,6 +101,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
             <button className="btn ghost" onClick={() => { setWizard("requirements"); setPreview(null); setOfferId(""); }}>Импорт требований клиента</button>
             <button className="btn ghost" onClick={() => { setWizard("factory_answer"); setPreview(null); setOfferId(""); }}>Импорт ответа завода</button>
             <a className="btn ghost" href={`${base}/request/file`}>Файл запроса RU+ZH</a>
+            <a className="btn ghost" href={`/api/deals/${dealId}/positions/${position.id}/rfq/file`} title="шаблон RFQ с требованиями заказчика из таблицы; строки «в РФ» помечены">RFQ с требованиями</a>
             <button className="btn ghost" onClick={addRow}>+ строка</button>
             <button className="btn" onClick={save} disabled={!dirty}>Сохранить таблицу</button>
           </div>
@@ -131,9 +147,26 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
                 {images.map((im) => <option key={im.id} value={im.id}>{im.caption || im.file_name || im.kind} ({im.source})</option>)}
               </select>
             )}
-            <button className="btn" onClick={sendRequest} disabled={sending || reqFactories.length === 0}>Отправить запрос {reqFactories.length > 1 ? `${reqFactories.length} заводам` : "заводу"}</button>
+            <button className="btn" onClick={sendRequest} disabled={sending || reqFactories.length === 0 || (clientSelected.length > 0 && !clientChecked)}>Отправить запрос {reqFactories.length > 1 ? `${reqFactories.length} заводам` : "заводу"}</button>
           </div>
+          {clientSelected.length > 0 && (
+            <div className="alert warn" style={{ marginTop: 6 }}>
+              На файлах клиента ({clientSelected.map((im) => im.caption || im.file_name).join(", ")}) могут быть его название, логотип и контакты — проверьте их перед отправкой заводу.
+              <label className="row" style={{ marginTop: 4 }}><input type="checkbox" checked={clientChecked} onChange={(e) => setClientChecked(e.target.checked)} /> файлы проверены, данных клиента нет</label>
+            </div>
+          )}
           {offers.length > 0 && <div className="muted" style={{ marginTop: 6 }}>Запросы: {offers.map((o) => `${o.factory} — ${o.status === "answered" ? "ответ получен" : o.status === "selected" ? "отобран" : o.status === "rejected" ? "не выбран" : "ожидание"}`).join("; ")}</div>}
+        </div>
+      )}
+
+      {answerOffer && (
+        <div className="card" style={{ marginTop: 10 }}>
+          <b>Фото и чертежи из ответа завода</b> <span className="muted">— загрузите файлы, приложенные заводом: они сохранятся к его ответу, при отборе завода попадут в позицию с отметкой «есть логотип завода».</span>
+          <div className="row" style={{ marginTop: 6 }}>
+            <input type="file" multiple accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.dwg,.dxf,.svg,.bmp,.tif,.tiff" onChange={(e) => setOfferFiles((e.target as HTMLInputElement).files)} />
+            <button className="btn secondary" disabled={!offerFiles?.length} onClick={uploadOfferFiles}>Загрузить</button>
+            <button className="btn ghost" onClick={() => setAnswerOffer("")}>не сейчас</button>
+          </div>
         </div>
       )}
 
@@ -156,6 +189,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
           </div>
           {preview && sh && (
             <div style={{ marginTop: 10 }}>
+              {sh.mapping.source === "saved" && <div className="alert info">Сопоставление столбцов подставлено по прошлой загрузке файла такого же формата от {wizard === "factory_answer" ? "этого завода" : "этого клиента"} — проверьте и при необходимости поправьте.</div>}
               <div className="row">
                 {preview.sheets.length > 1 && <label className="f">Лист<select value={sheet} onChange={(e) => { const i = Number(e.target.value); setSheet(i); const m = preview.sheets[i].mapping; setMapping({ header_row: m.header_row, first_row: m.first_row, last_row: "", columns: Object.fromEntries(Object.entries(m.columns).map(([k, v]) => [k, String(v)])) }); }}>{preview.sheets.map((s, i) => <option key={s.name} value={i}>{s.name}</option>)}</select></label>}
                 <label className="f">Строка заголовков<input type="number" value={mapping.header_row} onChange={(e) => setMapping({ ...mapping, header_row: Number(e.target.value) })} style={{ width: 80 }} /></label>

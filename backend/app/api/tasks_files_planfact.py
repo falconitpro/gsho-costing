@@ -51,10 +51,18 @@ def board(db: Session = Depends(get_db), user: CurrentUser = Depends(require_rol
     for t in tasks:
         by_deal.setdefault(t.deal_id, []).append({"title": t.title, "role": t.role, "due": t.due.isoformat(), "overdue": overdue(t.due, today)})
     columns = {s.value: {"title": STATUS_TITLES[s], "deals": []} for s in DealStatus}
+    # задача 9: связанные заявки одного запроса клиента (исходная + дубли) — общий ключ группы и число связанных
+    group_of = {d.id: (d.parent_deal_id or d.id) for d in deals}
+    group_size: dict[str, int] = {}
+    for g in group_of.values():
+        group_size[g] = group_size.get(g, 0) + 1
+    numbers = {d.id: d.number for d in deals}
     for d in deals:
+        g = group_of[d.id]
         columns[d.status.value]["deals"].append({"id": d.id, "number": d.number, "client": d.client.name if d.client else None, "site": d.site,
                                                  "priority": d.priority, "tasks": by_deal.get(d.id, []),
-                                                 "overdue": any(t["overdue"] for t in by_deal.get(d.id, []))})
+                                                 "overdue": any(t["overdue"] for t in by_deal.get(d.id, [])),
+                                                 "group": g, "group_number": numbers.get(g, ""), "related": group_size.get(g, 1) - 1})
     return columns
 
 
