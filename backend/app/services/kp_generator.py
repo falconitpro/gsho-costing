@@ -143,7 +143,7 @@ def build_kp(data: KpData, path: str) -> str:
     p = doc.add_paragraph()
     _run(p, f"№ {data.kp_no} от {data.kp_date} · действительно до {data.valid_until}", size=11)
     p = doc.add_paragraph()
-    _run(p, f"Заказчик: {data.client}\nОбъект: {data.site}\nКонтактное лицо: {data.manager}, {data.manager_contact}", size=11)
+    _run(p, f"Заказчик: {data.client}\nКонтактное лицо: {data.manager}, {data.manager_contact}", size=11)
     doc.add_page_break()
 
     # Обращение

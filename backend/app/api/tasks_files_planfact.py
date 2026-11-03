@@ -60,7 +60,7 @@ def board(db: Session = Depends(get_db), user: CurrentUser = Depends(require_rol
     numbers = {d.id: d.number for d in deals}
     for d in deals:
         g = group_of[d.id]
-        columns[d.status.value]["deals"].append({"id": d.id, "number": d.number, "client": d.client.name if d.client else None, "site": d.site,
+        columns[d.status.value]["deals"].append({"id": d.id, "number": d.number, "client": d.client.name if d.client else None,
                                                  "priority": d.priority, "tasks": by_deal.get(d.id, []), "status_detail": status_detail(d),
                                                  "overdue": any(t["overdue"] for t in by_deal.get(d.id, [])),
                                                  "group": g, "group_number": numbers.get(g, ""), "related": group_size.get(g, 1) - 1})

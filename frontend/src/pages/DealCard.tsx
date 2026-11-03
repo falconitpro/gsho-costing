@@ -111,7 +111,7 @@ export default function DealCard({ me }: { me: Me }) {
       <div className="row" style={{ justifyContent: "space-between" }}>
         <div>
           <h1 style={{ marginBottom: 2 }}>{deal.number} · {deal.client_name}{deal.parent_deal_id && <span className="badge" style={{ marginLeft: 6 }}>дубликат</span>}</h1>
-          <span className="badge accent">{deal.status_detail || STATUS_TITLES[deal.status]}</span> <span className="muted">{deal.site} · срок КП {fmtDate(deal.kp_due)} · версия {deal.current_version_no}{deal.contract_number && ` · контракт ${deal.contract_number}`}</span>
+          <span className="badge accent">{deal.status_detail || STATUS_TITLES[deal.status]}</span> <span className="muted">срок КП {fmtDate(deal.kp_due)} · версия {deal.current_version_no}{deal.contract_number && ` · контракт ${deal.contract_number}`}</span>
           {deal.legal_review?.status && <> <span className={"badge " + (REVIEW_BADGE[deal.legal_review.status] || "")} title={deal.legal_review.comment || ""}>юрист: {{ in_review: "на проверке", ok: "замечаний нет", remarks: "есть замечания" }[deal.legal_review.status] || deal.legal_review.status}</span></>}
         </div>
         <div className="row">
@@ -160,7 +160,7 @@ export default function DealCard({ me }: { me: Me }) {
             <h2 style={{ marginTop: 0 }}>Шапка</h2>
             <table><tbody>
               <tr><td>Клиент</td><td>{deal.client_name}</td></tr><tr><td>Контактное лицо</td><td>{deal.contact}</td></tr>
-              <tr><td>Объект</td><td>{deal.site}</td></tr><tr><td>Дата запроса</td><td>{fmtDate(deal.requested_at)}</td></tr>
+              <tr><td>Дата запроса</td><td>{fmtDate(deal.requested_at)}</td></tr>
               <tr><td>Базовая валюта</td><td>{deal.base_currency}</td></tr>
               <tr><td>Сервис до наработки</td><td>{deal.service_flag ? `да, ${deal.target_hours} м·ч` : "нет"}</td></tr>
               <tr><td>Альтернативные предложения в КП</td><td><label className="row"><input type="checkbox" checked={!!deal.has_alternatives} disabled={!editable} onChange={(e) => {

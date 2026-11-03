@@ -98,3 +98,6 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; colo
 .btn.add { display: flex; width: max-content; margin-left: auto; }
 .row > .btn.add, .push > .btn.add, .section-head > .btn.add { display: inline-flex; }
 .btn.add ~ .btn.add, .push > .btn.add { margin-left: 0; }
+/* переключатели в шапке страницы — на одной линии с заголовком */
+.page-head .tabs { margin: 0; border-bottom: 0; align-self: center; align-items: center; }
+.page-head .tabs button { padding: 4px 12px; font-size: 14px; line-height: 1.2; }

@@ -46,7 +46,8 @@ class StoredFile:
 class StorageAdapter(ABC):
     def deal_folder(self, client: str, year: int, deal_no: str, site: str) -> str:
         safe = lambda s: "".join(ch for ch in s if ch not in '\\/:*?"<>|').strip()
-        return f"{safe(client)}/{year}/{safe(deal_no)}–{safe(client)}–{safe(site)}"
+        tail = f"–{safe(site)}" if site and safe(site) else ""
+        return f"{safe(client)}/{year}/{safe(deal_no)}–{safe(client)}{tail}"
 
     @abstractmethod
     def ensure_deal_folders(self, folder: str) -> dict[str, str]:
