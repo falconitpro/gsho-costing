@@ -285,6 +285,27 @@ def rows_follow_position(pos: Position) -> None:
             r.value_ru = normalize_country(country)
 
 
+def apply_form_rows(pos: Position, form_rows: list[dict], user_id: Optional[str], skip_empty: bool = False) -> int:
+    """Ручной ввод в форме-таблице: значение, требование заказчика и комментарий — в строки таблицы технических
+    характеристик по коду (тот же вид и те же данные, что после загрузки файла). Возвращает число изменённых строк."""
+    by_code = {str(f.get("code") or "").strip(): f for f in form_rows if f.get("code")}
+    changed = 0
+    for r in pos.tech_param_rows or []:
+        f = by_code.get((r.code or "").strip())
+        if f is None or (skip_empty and not any(str(f.get(k) or "").strip() for k in ("value", "requirement", "comment"))):
+            continue
+        new = {"value_ru": str(f.get("value") or "").strip(), "customer_requirement_ru": str(f.get("requirement") or "").strip(),
+               "comment_ru": str(f.get("comment") or "").strip()}
+        if any(getattr(r, k) != v for k, v in new.items()):
+            if r.value_ru != new["value_ru"] and r.translation_status == "machine":
+                r.translation_status = "verified"
+            for k, v in new.items():
+                setattr(r, k, v)
+            r.filled_by = user_id
+            changed += 1
+    return changed
+
+
 def row_dicts(pos: Position) -> list[dict]:
     out = [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in sorted(pos.tech_param_rows or [], key=lambda r: r.no)]
     for r in out:                       # строки, созданные до появления разделов, — раздел по коду поля

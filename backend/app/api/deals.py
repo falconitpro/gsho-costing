@@ -83,6 +83,7 @@ class PositionIn(BaseModel):
     logistics_params: dict = Field(default_factory=dict)   # поля с меткой L
     execution_id: Optional[str] = None                     # задача 7: исполнение из каталога
     price_comment: str = ""
+    form_rows: list[dict] = Field(default_factory=list)    # ручной ввод таблицей: [{code, value, requirement, comment}] → строки таблицы
 
 
 def _production_days(term: dict, fallback: int) -> int:
@@ -239,6 +240,7 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
         raise HTTPException(400, "Завод не найден")
     data = body.model_dump()
     comment = data.pop("price_comment")
+    form_rows = data.pop("form_rows") or []
     # задача 1: график оплаты заводу задаёт КД; введённое менеджером — справка «условия завода»
     data["factory_payments_offer"] = data.pop("factory_payments") or []
     if user.can("payment_terms", 2):
@@ -256,6 +258,10 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
     _record_price(db, pos, deal)
     from ..services.tech_params_service import init_position_rows
     init_position_rows(db, pos, user.id)   # задача 4/7: перечень технических характеристик из исполнения каталога или шаблона по типу
+    if form_rows:
+        from ..services.tech_params_service import apply_form_rows, sync_position
+        apply_form_rows(pos, form_rows, user.id, skip_empty=True)   # пустые поля формы не затирают данные исполнения из каталога
+        sync_position(db, pos)
     ensure_default_variant(db, deal)
     audit(db, user.id, deal.id, "position", pos.id, "create", after=data)
     db.commit()
@@ -284,7 +290,7 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
     pos = db.get(Position, pos_id)
     if pos is None or pos.deal_id != deal.id:
         raise HTTPException(404)
-    allowed = set(PositionIn.model_fields) - {"price_comment", "tech_params", "logistics_params", "factory_payments"}
+    allowed = set(PositionIn.model_fields) - {"price_comment", "tech_params", "logistics_params", "factory_payments", "form_rows"}
     before = serialize(pos)
     for k, v in body.items():
         if k in allowed:
@@ -304,12 +310,17 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
     if "machine_type" in body or "model" in body or "tech_params" in body:   # карточка позиции → строки 1.1 / 1.2 / 1.3 таблицы
         from ..services.tech_params_service import rows_follow_position
         rows_follow_position(pos)
+    if body.get("execution_id") and body["execution_id"] != before.get("execution_id"):   # выбрано другое исполнение — его перечень
+        from ..services.tech_params_service import init_position_rows
+        init_position_rows(db, pos, user.id, replace=True)
+    if isinstance(body.get("form_rows"), list) and body["form_rows"]:   # ручной ввод таблицей — значения, требования, комментарии
+        from ..services.tech_params_service import apply_form_rows, init_position_rows, sync_position
+        init_position_rows(db, pos, user.id)
+        apply_form_rows(pos, body["form_rows"], user.id, skip_empty=body.get("execution_id") != before.get("execution_id"))
+        sync_position(db, pos)
     if "unit_price" in body:
         pos.price_reference = _price_ref(db, pos, body.get("price_comment", ""))
         _record_price(db, pos, deal)
-    if "execution_id" in body and body["execution_id"]:
-        from ..services.tech_params_service import init_position_rows
-        init_position_rows(db, pos, user.id, replace=True)
     audit(db, user.id, deal.id, "position", pos.id, "update", {k: before.get(k) for k in body}, body)
     db.commit()
     return serialize(pos)

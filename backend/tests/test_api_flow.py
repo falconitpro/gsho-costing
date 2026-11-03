@@ -526,3 +526,9 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     tp2 = _ok(client.get(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR)))
     assert next(r for r in tp2["rows"] if r["code"] == "1.1")["value_ru"] == "ПДМ"     # и обратно: карточка позиции → таблица
     assert "Китай" in _ok(client.get("/api/refs/countries", headers=H(MGR)))
+    # --- ручной ввод формой-таблицей: значения, требования заказчика и комментарии — в те же строки таблицы
+    _ok(client.patch(f"/api/deals/{deal['id']}/positions/{pid}", headers=H(MGR), json={"form_rows": [
+        {"code": "1.5", "value": "8 300", "requirement": "не более 8 500", "comment": "по чертежу"}]}))
+    r15 = next(r for r in _ok(client.get(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR)))["rows"] if r["code"] == "1.5")
+    assert (r15["value_ru"], r15["customer_requirement_ru"], r15["comment_ru"]) == ("8 300", "не более 8 500", "по чертежу")
+    assert r15["req_status"] == "match"
