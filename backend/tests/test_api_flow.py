@@ -913,3 +913,16 @@ def test_delete_draft_and_archive_others(client):
     assert client.post(f"/api/deals/{oid}/unarchive", headers=H(MGR)).status_code == 403
     _ok(client.post(f"/api/deals/{oid}/unarchive", headers=H(CD)))
     assert any(d["id"] == oid for d in _ok(client.get("/api/deals", headers=H(GD))))
+
+
+def test_cd_creates_deal(client):
+    """КД заводит сделку на себя (и ведёт её) или назначает ответственного менеджера; менеджер назначать не может."""
+    cl = _ok(client.get("/api/refs/clients", headers=H(CD)))[0]
+    mgr_id = _ok(client.get("/api/auth/me", headers=H(MGR)))["id"]
+    own = _ok(client.post("/api/deals", headers=H(CD), json={"client_id": cl["id"]}), 201)
+    assert own["manager_id"] == _ok(client.get("/api/auth/me", headers=H(CD)))["id"]
+    _ok(client.patch(f"/api/deals/{own['id']}", headers=H(CD), json={"contact": "Иванов"}))   # КД ведёт свою сделку
+    d = _ok(client.post("/api/deals", headers=H(CD), json={"client_id": cl["id"], "manager_id": mgr_id}), 201)
+    assert d["manager_id"] == mgr_id and any(x["id"] == d["id"] for x in _ok(client.get("/api/deals", headers=H(MGR))))
+    assert client.post("/api/deals", headers=H(MGR), json={"client_id": cl["id"], "manager_id": own["manager_id"]}).status_code == 403
+    assert client.post("/api/deals", headers=H(LOG), json={"client_id": cl["id"]}).status_code == 403

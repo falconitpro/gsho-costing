@@ -56,7 +56,7 @@ export default function DealCard({ me }: { me: Me }) {
   }, [tab, id, me.id]);
 
   if (!deal) return <div className="muted">{err || "Загрузка…"}</div>;
-  const isOwner = has("gd") || (has("manager") && deal.manager_id === me.id);
+  const isOwner = has("gd") || (has("manager", "cd") && deal.manager_id === me.id);
   const editable = isOwner && ["draft", "rework", "approved", "kp_sent"].includes(deal.status);
   const canTech = (isOwner || has("cd")) && can(me, "tech_params", 2) && !POST_WIN.includes(deal.status);
 

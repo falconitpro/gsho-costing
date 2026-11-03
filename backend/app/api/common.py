@@ -34,6 +34,11 @@ def serialize(obj, exclude: set[str] | None = None) -> dict[str, Any]:
     return out
 
 
+def is_deal_owner(user: CurrentUser, deal: Deal) -> bool:
+    """Ответственный по сделке: менеджер сделки или КД, заведший сделку на себя."""
+    return deal.manager_id == user.id and user.has(Role.MANAGER, Role.CD)
+
+
 def can_see_deal(user: CurrentUser, deal: Deal) -> bool:
     if getattr(deal, "deleted_at", None):   # удалённая сделка — только в корзине (КД, ЗГД)
         return False
