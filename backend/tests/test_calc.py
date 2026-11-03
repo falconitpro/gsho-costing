@@ -201,3 +201,20 @@ def test_door_to_door_delivery_split():
     rf = sum(pc.items_rub["rf_delivery"] for pc in members)
     intl = sum(pc.items_rub["intl_freight"] for pc in members)
     assert rf == pytest.approx(intl * 9, rel=0.15)   # 90 / 10 с поправкой на курс на дату поставки
+
+
+def test_conversion_fee_only_on_fx_part_of_service():
+    """Комиссия за конвертацию и перевод — только с валютной части сервиса; рублёвая часть отдельным платежом."""
+    from app.calc.types import Money, ServiceSummary
+    inp = sample_deal()
+    base = calc_deal(inp).variants["V1"]["base"].finance_breakdown
+    inp2 = sample_deal()
+    p1 = inp2.positions[0]
+    p1.service = ServiceSummary(cost_fx=p1.service.cost_fx, cost_rub=p1.service.cost_rub + 10_000_000, show_in_kp=True)
+    alt = calc_deal(inp2).variants["V1"]["base"].finance_breakdown
+    assert alt["conversion_fees"] == base["conversion_fees"]          # рост рублёвой части не меняет конвертацию
+    assert alt["transfer_fees"] == base["transfer_fees"]
+    inp3 = sample_deal()
+    p = inp3.positions[0]
+    p.service = ServiceSummary(cost_fx=Money(amount=p.service.cost_fx.amount * 2, currency="CNY"), cost_rub=p.service.cost_rub, show_in_kp=True)
+    assert calc_deal(inp3).variants["V1"]["base"].finance_breakdown["conversion_fees"] > base["conversion_fees"]

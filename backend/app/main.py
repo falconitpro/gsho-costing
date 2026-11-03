@@ -31,11 +31,12 @@ async def _daily_jobs() -> None:
         try:
             with SessionLocal() as db:
                 today = date.today()
-                if not db.scalar(select(FxRate).where(FxRate.on == today, FxRate.source == "cbr")):
+                have_today = set(db.scalars(select(FxRate.currency).where(FxRate.on == today, FxRate.source == "cbr")).all())
+                if not {"CNY", "USD", "EUR"} <= have_today:
                     try:
                         rates = await asyncio.to_thread(adapters.fx_source().daily, today)
                         for cur, rate in rates.items():
-                            if cur != "RUB":
+                            if cur != "RUB" and cur not in have_today:
                                 db.add(FxRate(on=today, currency=cur, rate=rate, source="cbr"))
                         db.add(IntegrationLog(system="cbr", operation="daily", ok=True, details={"on": str(today)}))
                     except Exception as e:
@@ -61,6 +62,13 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("daily job failed: %s", e)
+        try:   # просроченные задачи — уведомления исполнителю и КД (раз в час, по одной на задачу)
+            from .services.deal_service import check_overdue_tasks
+            with SessionLocal() as db:
+                if check_overdue_tasks(db):
+                    db.commit()
+        except Exception as e:   # pragma: no cover
+            log.warning("overdue check failed: %s", e)
         await asyncio.sleep(3600)
 
 

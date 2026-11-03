@@ -10,11 +10,12 @@ import Questionnaire from "../components/Questionnaire";
 import TechParamsTable from "../components/TechParamsTable";
 import KpActions from "../components/KpActions";
 import KpRevisions from "../components/KpRevisions";
+import PlanFactTab from "../components/PlanFactTab";
 import ExecutionTab from "../components/ExecutionTab";
 import { ImagesBlock, LocalOptionsBlock, OffersBlock, RelatedDeals } from "../components/ImagesLocalOptions";
 import { payText } from "../components/PaymentTermsEditor";
 
-type Tab = "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "catalog" | "feed" | "versions";
+type Tab = "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "catalog" | "feed" | "versions";
 const POST_WIN = ["contract", "execution", "closed"];
 
 export default function DealCard({ me }: { me: Me }) {
@@ -135,6 +136,7 @@ export default function DealCard({ me }: { me: Me }) {
         {deal.service_flag && has("service_head", "cd", "fd", "gd") && <button className={tab === "service" ? "active" : ""} onClick={() => setTab("service")}>Сервис</button>}
         {isMgmt && <button className={tab === "pricing" ? "active" : ""} onClick={() => setTab("pricing")}>Расчёт и утверждение</button>}
         {POST_WIN.includes(deal.status) && <button className={tab === "execution" ? "active" : ""} onClick={() => setTab("execution")}>Контракт и исполнение</button>}
+        {POST_WIN.includes(deal.status) && <button className={tab === "planfact" ? "active" : ""} onClick={() => setTab("planfact")}>План/факт</button>}
         {["kp_sent", ...POST_WIN, "lost"].includes(deal.status) && (isOwner || has("cd")) && <button className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>В каталог</button>}
         <button className={tab === "feed" ? "active" : ""} onClick={() => setTab("feed")}>Лента</button>
         <button className={tab === "versions" ? "active" : ""} onClick={() => setTab("versions")}>Версии и файлы</button>
@@ -264,6 +266,7 @@ export default function DealCard({ me }: { me: Me }) {
       {tab === "service" && <ServiceBlock key={me.id} deal={deal} me={me} reload={load} />}
       {tab === "pricing" && <ApprovalScreen key={me.id} deal={deal} me={me} reload={load} />}
       {tab === "execution" && <ExecutionTab key={me.id} deal={deal} me={me} reload={load} />}
+      {tab === "planfact" && <PlanFactTab key={me.id} deal={deal} />}
 
       {tab === "catalog" && (
         <div className="card">

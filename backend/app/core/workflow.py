@@ -19,7 +19,7 @@ class DealStatus(str, Enum):
     CALC_READY = "calc_ready"             # Расчёт сформирован
     CD_APPROVAL = "cd_approval"           # На утверждении КД
     FD_VISA = "fd_visa"                   # На визе финдиректора
-    GD_VISA = "gd_visa"                   # На визе гендиректора
+    GD_VISA = "gd_visa"                   # На визе ЗГД
     REWORK = "rework"                     # На доработке
     APPROVED = "approved"                 # Утверждено
     KP_SENT = "kp_sent"                   # КП отправлено
@@ -45,7 +45,7 @@ STATUS_TITLES = {
     DealStatus.CALC_READY: "Расчёт сформирован",
     DealStatus.CD_APPROVAL: "На утверждении КД",
     DealStatus.FD_VISA: "На визе финдиректора",
-    DealStatus.GD_VISA: "На визе гендиректора",
+    DealStatus.GD_VISA: "На визе ЗГД",
     DealStatus.REWORK: "На доработке",
     DealStatus.APPROVED: "Утверждено",
     DealStatus.KP_SENT: "КП отправлено",
@@ -274,6 +274,20 @@ def visa_decision(state: DealState, by: Role, approved: bool, flags: dict[str, b
         res.notifications.append(Notification("visa_required", [s.role], ["outlook", "wecom"], f"Требуется виза ({s.name})"))
         return res
     return approve(state, today, sla, by=by)
+
+
+def cd_insists_after_fd(state: DealState, today: date, sla: SlaDefaults,
+                        ladder: list[ApprovalStep] = DEFAULT_APPROVAL_LADDER) -> TransitionResult:
+    """ФД отказал (сделка на доработке у КД), КД настаивает на цене → виза ЗГД (условие fd_declined)."""
+    if state.status != DealStatus.REWORK:
+        raise WorkflowError("Настоять на цене можно после отказа ФД (сделка на доработке).")
+    step = next((s for s in ladder if s.role == Role.GD), None)
+    if step is None:
+        raise WorkflowError("В ступенях визации нет ступени ЗГД.")
+    res = TransitionResult(status=step.status, audit="ФД отказал, КД настаивает → виза ЗГД")
+    res.tasks.append(TaskSpec(Role.GD, "Виза: ЗГД (ФД отказал, КД настаивает)", add_business_days(today, step.sla_days), "visa"))
+    res.notifications.append(Notification("visa_required", [Role.GD], ["outlook", "wecom"], "Требуется виза ЗГД: ФД отказал, КД настаивает"))
+    return res
 
 
 def approve(state: DealState, today: date, sla: SlaDefaults, by: Role) -> TransitionResult:

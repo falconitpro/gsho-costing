@@ -13,7 +13,7 @@ export const can = (me: Me | null | undefined, group: string, level = 1) => !!me
 
 export const STATUS_TITLES: Record<string, string> = {
   draft: "Черновик", logistics_calc: "На расчёте логистики", service_calc: "На расчёте сервиса", calc_ready: "Расчёт сформирован",
-  cd_approval: "На утверждении КД", fd_visa: "На визе финдиректора", gd_visa: "На визе гендиректора", rework: "На доработке",
+  cd_approval: "На утверждении КД", fd_visa: "На визе финдиректора", gd_visa: "На визе ЗГД", rework: "На доработке",
   approved: "Утверждено", kp_sent: "КП отправлено", won: "Выиграна", lost: "Проиграна", cancelled: "Отменена",
   contract: "Заключение контракта", execution: "Исполнение контракта", closed: "Закрыта",
 };
@@ -100,6 +100,7 @@ export interface FxComponent {
   rate_by_scenario: Record<string, number>; fixed: boolean;
 }
 export interface CalcResponse {
+  fd_declined?: { comment: string; at: string | null; user: string } | null;
   input: { base_currency: string; calc_date?: string; fx: { as_of: string; rates: Record<string, number>; source: string; note?: string }; thresholds: { margin_threshold_pct: number } };
   result: { variants: Record<string, Record<string, ScenarioResult>>; fx_components: FxComponent[]; approval: { financial: boolean; general: boolean; reasons: string[] }; warnings: string[] };
   approval_flags: Record<string, boolean>; threshold_pct: number; warnings: string[]; comments: { from: string; item: string; ref: string; comment: string }[];

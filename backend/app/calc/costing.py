@@ -264,9 +264,14 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
             k = fx.rate(sv.cost_fx.currency, ev[PaymentEvent.DELIVERY], s, f"{p.id}/service", None, fx_mult)
             items_fx["service"] = sv.cost_fx
             items["service"] = sv.cost_fx.amount * k + sv.cost_rub
-            if items["service"]:
-                flows.append(Flow(on=ev[PaymentEvent.COMMISSIONING], amount_rub=-items["service"], kind="service", ref=p.id,
+            fx_rub = sv.cost_fx.amount * k
+            # валютная часть (ЗИП, резерв) и рублёвая часть (работы, выезды, ПНР, обучение) — отдельными платежами:
+            # комиссии за конвертацию и перевод начисляются только на валютную часть
+            if fx_rub:
+                flows.append(Flow(on=ev[PaymentEvent.COMMISSIONING], amount_rub=-fx_rub, kind="service", ref=f"{p.id}/fx",
                                   fx_amount=sv.cost_fx.amount, currency=sv.cost_fx.currency))
+            if sv.cost_rub:
+                flows.append(Flow(on=ev[PaymentEvent.COMMISSIONING], amount_rub=-sv.cost_rub, kind="service", ref=f"{p.id}/rub"))
 
         # 13. Гарантийный резерв — % от п.1
         items["warranty_reserve"] = items["factory_price"] * p.warranty_reserve_pct / 100.0

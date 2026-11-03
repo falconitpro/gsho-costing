@@ -18,6 +18,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   const [tab, setTab] = useState<"cost" | "terms" | "cashflow" | "fx" | "history" | "kp">("cost");
   const [rework, setRework] = useState({ block: "logistics", reason: "" });
   const [visaComment, setVisaComment] = useState("");
+  const [insistComment, setInsistComment] = useState("");
   const isCD = me.roles.some((r) => r.code === "cd" || r.code === "gd");
   const canTerms = can(me, "payment_terms", 2);
   const isFD = me.roles.some((r) => r.code === "fd");
@@ -251,6 +252,16 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
               <div className="row" style={{ marginBottom: 8 }}>
                 {deal.service_flag && <button className="btn secondary" onClick={toggleService} disabled={busy || base?.price_rub == null}>{variant.service_in_kp ? "Скрыть строку сервиса в КП" : "Показать сервис отдельной строкой в КП"}</button>}
                 <button className="btn" disabled={busy || !["calc_ready", "cd_approval", "rework"].includes(deal.status) || cdChecks.length > 0} title={cdChecks.join("\n")} onClick={() => act(`/api/deals/${deal.id}/submit`)}>Утвердить / отправить на визу</button>
+              </div>
+            )}
+            {isCD && deal.status === "rework" && calc.fd_declined && (
+              <div className="alert warn" style={{ marginBottom: 8 }}>
+                <div><b>ФД отказал в визе</b>{calc.fd_declined.user ? ` (${calc.fd_declined.user}` : ""}{calc.fd_declined.at ? `, ${fmtDate(calc.fd_declined.at)})` : calc.fd_declined.user ? ")" : ""}: {calc.fd_declined.comment}</div>
+                <div className="muted" style={{ fontSize: 12, margin: "4px 0" }}>Можно изменить цену или условия и снова отправить на визу, либо настоять на текущей цене — тогда решение принимает ЗГД.</div>
+                <div className="row">
+                  <input placeholder="почему КД настаивает (обязательно)" value={insistComment} onChange={(e) => setInsistComment(e.target.value)} style={{ width: 360 }} />
+                  <button className="btn" disabled={busy || !insistComment.trim()} onClick={() => act(`/api/deals/${deal.id}/insist`, { comment: insistComment })}>Настаиваю — передать на визу ЗГД</button>
+                </div>
               </div>
             )}
             {(isCD || isFD) && (
