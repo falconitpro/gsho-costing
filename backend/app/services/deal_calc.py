@@ -96,14 +96,19 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
         key_rate_pct=s["key_rate_pct"], pboc_rate_pct=s["pboc_rate_pct"], foreign_rate_pct=s["foreign_rates_pct"],
         history_years=s["fx_history_years"], weight_forward=s["fx_weights"]["forward"], weight_trend=s["fx_weights"]["trend"],
         weight_expert=s["fx_weights"]["expert"],
-        expert_points={c: [ExpertPoint(on=date.fromisoformat(p["on"]), rate=p["rate"]) for p in pts] for c, pts in s["fx_expert_points"].items()},
+        expert_points={c: [ExpertPoint(on=date.fromisoformat(p["on"]), rate=p["rate"]) for p in pts]
+                       for c, pts in settings_service.expert_points(s["fx_expert_points"]).items()},
         use_historical_volatility=ov.get("use_historical_volatility", s["use_historical_volatility"]),
         vol_multiplier_pessimistic=s["vol_multipliers"]["pessimistic"], vol_multiplier_optimistic=s["vol_multipliers"]["optimistic"],
     )
     ag = {**(s.get("advance_guarantee_cost") or {}), **{k: v for k, v in (deal.bank_guarantee or {}).items() if k in ("enabled", "mode", "value")}}
+    tf = dict(s.get("transfer_fee") or {})
+    if tf == settings_service.DEFAULTS["transfer_fee"] and s.get("transfer_fee_rub") is not None:   # задана только прежняя фиксированная комиссия
+        tf["fixed_rub"] = s["transfer_fee_rub"]
     finance = FinanceSettings(
         financing_rate_pct=s["financing_rate_pct"], deposit_rate_pct=s["deposit_rate_pct"], conversion_fee_pct=s["conversion_fee_pct"],
-        transfer_fee_rub=s["transfer_fee_rub"], guarantee_rate_pct=s["guarantee_rate_pct"], vat_offset_days=s["vat_offset_days"],
+        transfer_fee_rub=float(tf.get("fixed_rub") or 0), transfer_fee_pct=float(tf.get("pct") or 0), transfer_fee_mode=tf.get("mode") or "fixed",
+        guarantee_rate_pct=s["guarantee_rate_pct"], vat_offset_days=s["vat_offset_days"],
         import_vat_in_cost=s["import_vat_in_cost"], advance_guarantee=AdvanceGuarantee(**{k: v for k, v in ag.items() if k in AdvanceGuarantee.model_fields}),
         local_options_order_reserve_days=int(s.get("local_options_order_reserve_days") or 14),
     )
@@ -137,7 +142,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             util_fee_rub=_num(lg.get("util_fee_rub")), certification_rub=_num(lg.get("certification_rub")),
             weight_kg=_num(((p.logistics_params or {}).get("1.15") or (p.logistics_params or {}).get("1.14") or {}).get("value")) * p.qty,
             volume_m3=_num(lg.get("volume_m3")),
-            warranty_reserve_pct=p.warranty_reserve_pct if p.warranty_reserve_pct is not None else wr.get(p.machine_type, wr["default"]),
+            warranty_reserve_pct=p.warranty_reserve_pct if p.warranty_reserve_pct is not None else wr.get(p.machine_type, wr.get("default", 2.5)),
             service=service, batch_id=p.batch_id,
         ))
     batches = []
@@ -181,6 +186,8 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
         overhead_scale=[OverheadStep(**o) for o in s["overhead_scale"]], thresholds=thresholds, scenarios=scenarios,
         positions=positions, batches=batches, variants=variants, commissioning_days=s["commissioning_days"],
         runtime_hours_per_month=s["hours_per_month_by_type"].get("default", 400),
+        external_commission_pct=float(s.get("external_commission_pct") or 0), manager_commission_pct=float(s.get("manager_commission_pct") or 0),
+        cd_commission_pct=float(s.get("cd_commission_pct") or 0),
     )
 
 

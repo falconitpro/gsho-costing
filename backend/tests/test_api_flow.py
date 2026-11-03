@@ -116,7 +116,7 @@ def test_full_flow(client, tmp_path):
     base = calc["result"]["variants"][var["id"]]["base"]
     assert set(base["items_rub"]) == {"factory_price", "domestic_logistics", "export_formalities", "intl_freight", "insurance", "customs_duty",
                                       "import_vat", "broker_util", "certification", "rf_delivery", "finance", "service", "warranty_reserve", "overhead",
-                                      "local_completion"}
+                                      "local_completion", "external_commission", "manager_commission", "cd_commission"}
     assert base["items_rub"]["service"] > 0 and base["items_rub"]["customs_duty"] > 0 and base["cash_gap"]["amount_rub"] < 0
     assert calc["result"]["fx_components"] and calc["threshold_pct"] == 3.0
     assert base["defaults_used"]["client_payments"] is True and any("типовой схеме" in w for w in calc["warnings"])
@@ -545,3 +545,17 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     snap = ((pl.get("tech_params") or {}).get("_rfq") or {}).get("fields") or {}
     if "1.1" in snap:
         assert snap["1.1"]["value"] == "Самосвал шахтный"
+    # --- настройки: КД меняет внешнюю комиссию и поля для логиста, комиссию КД — только ГД; экспертные точки — в едином виде
+    _ok(client.put("/api/admin/settings/external_commission_pct", headers=H(CD), json={"value": 2.5, "comment": "тест"}))
+    assert client.put("/api/admin/settings/cd_commission_pct", headers=H(CD), json={"value": 1.0}).status_code == 403
+    mt = _ok(client.get("/api/admin/settings/meta", headers=H(CD)))
+    assert mt["items"]["external_commission_pct"]["editable"] and not mt["items"]["cd_commission_pct"]["editable"]
+    assert mt["items"]["region_norms"]["type"] == "dict_table" and mt["items"]["fx_expert_points"]["type"] == "expert_points"
+    _ok(client.put("/api/admin/settings/fx_expert_points", headers=H(FD), json={"value": {"cny": {"2027-03-31": 12.5}}}))
+    assert _ok(client.get("/api/admin/settings", headers=H(FD)))["fx_expert_points"] == {"CNY": [{"on": "2027-03-31", "rate": 12.5}]}
+    _ok(client.put("/api/admin/settings/logistics_l_codes", headers=H(CD), json={"value": ["1.1", "1.14", "1.5"]}))
+    sch = _ok(client.get("/api/deals/rfq/template", headers=H(MGR)))
+    assert {f["code"] for f in sch["fields"] if f["is_l"]} <= {"1.1", "1.14", "1.5"}
+    _ok(client.put("/api/admin/settings/logistics_l_codes", headers=H(GD), json={"value": None}))
+    s_ = _ok(client.get("/api/admin/settings", headers=H(FD)))
+    assert s_["commissioning_days"] == 5 and s_["unplanned_reserve_pct"] == 3.0 and s_["sla_days"]["logistics"] == 1

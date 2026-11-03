@@ -24,14 +24,18 @@ DEFAULTS: dict[str, Any] = {
     "financing_rate_pct": 18.0,
     "deposit_rate_pct": None,
     "conversion_fee_pct": 0.5,
-    "transfer_fee_rub": 3000.0,
+    "transfer_fee": {"mode": "fixed", "fixed_rub": 3000.0, "pct": 0.1},
+    "external_commission_pct": 2.0,    # внешняя комиссия, % от цены клиента
+    "manager_commission_pct": 0.0,     # комиссия менеджера, % от себестоимости
+    "cd_commission_pct": 0.0,          # комиссия КД, % от себестоимости
+    "logistics_l_codes": None,         # коды полей опросника для логиста (метка L); None — как в шаблоне RFQ
     "guarantee_rate_pct": 3.0,
     "vat_offset_days": 90,
     "import_vat_in_cost": False,
     "overhead_scale": [{"up_to_rub": 50_000_000, "pct": 5.0}, {"up_to_rub": 200_000_000, "pct": 4.0}, {"up_to_rub": None, "pct": 3.0}],
     "overhead_actual_pct_last_year": None,
-    "warranty_reserve_pct_by_type": {"default": 2.0},
-    "unplanned_reserve_pct": 5.0,
+    "warranty_reserve_pct_by_type": {"default": 2.5},
+    "unplanned_reserve_pct": 3.0,
     "labour_rates_rub_per_hour": {"engineer_1": 3500, "engineer_2": 2800, "mechanic": 2000},
     "region_norms": {"default": {"travel_rub": 30000, "lodging_rub_per_day": 4000, "per_diem_rub": 1500, "travel_hours": 16}},
     "hours_per_month_by_type": {"default": 400},
@@ -40,10 +44,10 @@ DEFAULTS: dict[str, Any] = {
     "price_deviation_pct": 10.0,
     "logistics_deviation_pct": 15.0,
     "plan_fact_deviation_pct": 10.0,
-    "sla_days": {"logistics": 2, "service": 2, "cd": 1, "fd": 1, "gd": 1, "manager_rework": 1},
+    "sla_days": {"logistics": 1, "service": 2, "cd": 1, "fd": 1, "gd": 1, "manager_rework": 1},
     "kp_fx_clause_pct": 5.0,
     "kp_validity_days": 30,
-    "commissioning_days": 30,
+    "commissioning_days": 5,
     # задача 1: типовые схемы оплаты (пока КД не задал условия) и БГ на аванс
     "default_client_payment_scheme": [
         {"no": 1, "share_pct": 30, "event": "contract", "offset_days": 0},
@@ -72,6 +76,23 @@ DEFAULTS: dict[str, Any] = {
         {"name": "Генеральная", "role": "gd", "condition": "deal_above_gd_limit|fd_declined|overhead_override", "sla_days": 1},
     ],
 }
+
+
+def expert_points(value: Any) -> dict[str, list[dict]]:
+    """Экспертные точки курса в едином виде {валюта: [{on, rate}]}; принимает и старую запись {валюта: {дата: курс}}."""
+    out: dict[str, list[dict]] = {}
+    for cur, pts in (value or {}).items():
+        if isinstance(pts, dict):
+            pts = [{"on": d, "rate": r} for d, r in pts.items()]
+        rows = []
+        for p in pts or []:
+            try:
+                rows.append({"on": str(p["on"])[:10], "rate": float(p["rate"])})
+            except (KeyError, TypeError, ValueError):
+                continue
+        if rows:
+            out[str(cur).upper()[:3]] = sorted(rows, key=lambda x: x["on"])
+    return out
 
 
 def get_all(db: Session) -> dict[str, Any]:
@@ -145,8 +166,8 @@ META: dict[str, dict] = {
                    "fields": [{"key": "forward", "label": "Форвард"}, {"key": "trend", "label": "Тренд и сезонность"}, {"key": "expert", "label": "Экспертная оценка"}],
                    "help": "Доли методов в итоговом прогнозе, в сумме 1 (например 0,4 / 0,3 / 0,3)."},
     "fx_history_years": {"group": "Сценарии и прогноз курса", "title": "Глубина истории курса", "unit": "лет", "type": "number"},
-    "fx_expert_points": {"group": "Сценарии и прогноз курса", "title": "Экспертные точки курса", "type": "json",
-                         "help": "Ожидаемый курс на даты, по валютам: {\"CNY\": {\"2027-03-31\": 12.5}}."},
+    "fx_expert_points": {"group": "Сценарии и прогноз курса", "title": "Экспертные точки курса", "type": "expert_points",
+                         "help": "Ожидаемый курс валюты к рублю на даты (например, по прогнозу банков). Участвует в прогнозе с весом «Экспертная оценка»."},
     "kp_fx_clause_pct": {"group": "Сценарии и прогноз курса", "title": "Оговорка о курсе в КП", "unit": "%", "type": "number",
                          "help": "При изменении курса больше чем на эту величину цена КП пересматривается (текст в КП)."},
     # Стоимость денег и банк
@@ -158,7 +179,20 @@ META: dict[str, dict] = {
     "deposit_rate_pct": {"group": "Стоимость денег и банк", "title": "Ставка размещения", "unit": "% годовых", "type": "number", "nullable": True,
                          "help": "Доход на свободные деньги. Пусто — не учитывается."},
     "conversion_fee_pct": {"group": "Стоимость денег и банк", "title": "Комиссия за конвертацию", "unit": "%", "type": "number"},
-    "transfer_fee_rub": {"group": "Стоимость денег и банк", "title": "Комиссия за валютный перевод", "unit": "₽", "type": "number"},
+    "transfer_fee": {"group": "Стоимость денег и банк", "title": "Комиссия за перевод", "type": "object",
+                     "fields": [{"key": "mode", "label": "Как считать", "type": "select", "options": [
+                                    {"value": "fixed", "label": "фиксированная сумма"}, {"value": "pct", "label": "процент от суммы"},
+                                    {"value": "both", "label": "процент + фиксированная сумма"}]},
+                                {"key": "fixed_rub", "label": "Фиксированная сумма, ₽"}, {"key": "pct", "label": "Процент от суммы перевода, %"}],
+                     "help": "За каждый платёж заводу и каждый валютный платёж."},
+    "external_commission_pct": {"group": "Комиссии", "title": "Внешняя комиссия", "unit": "% от цены клиента", "type": "number",
+                                "help": "Статья 16 себестоимости; выплачивается вместе с оплатами клиента. Меняют КД или ГД."},
+    "manager_commission_pct": {"group": "Комиссии", "title": "Комиссия менеджера", "unit": "% от себестоимости", "type": "number",
+                               "help": "Статья 17: от суммы статей 1–15. Меняют КД или ГД."},
+    "cd_commission_pct": {"group": "Комиссии", "title": "Комиссия КД", "unit": "% от себестоимости", "type": "number",
+                          "help": "Статья 18: от суммы статей 1–15. Меняет ГД."},
+    "logistics_l_codes": {"group": "Технические характеристики", "title": "Поля для логиста (метка L)", "type": "l_codes",
+                          "help": "Какие поля опросника попадают логисту для расчёта (габариты, массы, тип машины…). Не задано — как в шаблоне RFQ."},
     "guarantee_rate_pct": {"group": "Стоимость денег и банк", "title": "Ставка банковской гарантии (прочие)", "unit": "% годовых", "type": "number"},
     "advance_guarantee_cost": {"group": "Стоимость денег и банк", "title": "Банковская гарантия на аванс клиента", "type": "object",
                                "help": "Расход в статье 11, если в условиях клиента есть аванс. КД может изменить в сделке.",
@@ -176,13 +210,17 @@ META: dict[str, dict] = {
                        "columns": [{"key": "up_to_rub", "label": "Сумма сделки до, ₽", "type": "number", "nullable": True}, {"key": "pct", "label": "Накладные, %", "type": "number"}]},
     "overhead_actual_pct_last_year": {"group": "Накладные и резервы", "title": "Фактические накладные прошлого года", "unit": "%", "type": "number", "nullable": True,
                                       "help": "Справочно, для сравнения со шкалой."},
-    "warranty_reserve_pct_by_type": {"group": "Накладные и резервы", "title": "Гарантийный резерв по типу машины", "unit": "%", "type": "dict", "key_label": "Тип машины",
-                                     "help": "«default» — для типов, которых нет в списке."},
+    "warranty_reserve_pct_by_type": {"group": "Сервис", "title": "Расходы на гарантийные случаи", "unit": "% от цены завода", "type": "dict", "key_label": "Тип машины",
+                                     "help": "Статья 13 себестоимости. Ориентир: производители тяжёлой техники закладывают на гарантию в среднем ≈1,4 % "
+                                             "выручки; для китайской техники на удалённых объектах в РФ (доставка запчастей, выезды) — 2–3 % от цены "
+                                             "завода, по умолчанию 2,5 %. «default» — для типов, которых нет в списке."},
     "unplanned_reserve_pct": {"group": "Накладные и резервы", "title": "Резерв на непредвиденные расходы", "unit": "%", "type": "number"},
     # Сервис
     "labour_rates_rub_per_hour": {"group": "Сервис", "title": "Ставки работ сервиса", "unit": "₽/ч", "type": "object",
                                   "fields": [{"key": "engineer_1", "label": "Инженер 1 категории"}, {"key": "engineer_2", "label": "Инженер 2 категории"}, {"key": "mechanic", "label": "Механик"}]},
-    "region_norms": {"group": "Сервис", "title": "Нормы выезда по регионам", "type": "json",
+    "region_norms": {"group": "Сервис", "title": "Нормативы выездов по регионам", "type": "dict_table", "key_label": "Регион",
+                     "columns": [{"key": "travel_rub", "label": "Проезд, ₽"}, {"key": "lodging_rub_per_day", "label": "Проживание, ₽/сут"},
+                                 {"key": "per_diem_rub", "label": "Суточные, ₽"}, {"key": "travel_hours", "label": "В пути, ч"}],
                      "help": "Для каждого региона: проезд, проживание в сутки, суточные (₽), часы в пути. «default» — для остальных."},
     "hours_per_month_by_type": {"group": "Сервис", "title": "Наработка в месяц по типу машины", "unit": "м·ч", "type": "dict", "key_label": "Тип машины"},
     "commissioning_days": {"group": "Сервис", "title": "Длительность ПНР", "unit": "дн.", "type": "number"},
@@ -215,8 +253,8 @@ META: dict[str, dict] = {
     "kp_brand_default": {"group": "Интеграции и КП", "title": "Подача КП по умолчанию", "type": "select",
                          "options": [{"value": "factory", "label": "под маркой завода"}, {"value": "company", "label": "под брендом компании"}]},
 }
-GROUP_ORDER = ["Маржа и визы", "Условия оплаты по умолчанию", "Стоимость денег и банк", "Сценарии и прогноз курса", "НДС",
-               "Накладные и резервы", "Сервис", "Контроль отклонений", "Сроки и календарь", "Интеграции и КП"]
+GROUP_ORDER = ["Маржа и визы", "Комиссии", "Условия оплаты по умолчанию", "Стоимость денег и банк", "Сценарии и прогноз курса", "НДС",
+               "Накладные и резервы", "Сервис", "Технические характеристики", "Контроль отклонений", "Сроки и календарь", "Интеграции и КП"]
 
 
 def meta() -> dict:

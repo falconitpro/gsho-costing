@@ -186,6 +186,8 @@ class FinanceSettings(BaseModel):
     deposit_rate_pct: Optional[float] = None  # доход от размещения, если ФД включил
     conversion_fee_pct: float = 0.5          # % от суммы каждого валютного платежа
     transfer_fee_rub: float = 3000.0         # фикс за перевод
+    transfer_fee_pct: float = 0.0            # % от суммы перевода
+    transfer_fee_mode: str = "fixed"         # fixed | pct | both — фиксированная сумма, процент или и то и другое
     guarantee_rate_pct: float = 3.0          # % годовых от суммы гарантии (явные гарантии в строках графика)
     advance_guarantee: AdvanceGuarantee = Field(default_factory=AdvanceGuarantee)   # БГ на аванс (задача 1)
     vat_offset_days: int = 90                # срок до зачёта ввозного НДС
@@ -321,6 +323,9 @@ class DealCalcInput(BaseModel):
     variants: list[VariantInput]
     commissioning_days: int = 30
     runtime_hours_per_month: float = 400.0     # интенсивность эксплуатации для события RUNTIME
+    external_commission_pct: float = 0.0       # % от цены клиента (выплата вместе с оплатами клиента)
+    manager_commission_pct: float = 0.0        # % от себестоимости (статьи 1–15)
+    cd_commission_pct: float = 0.0             # % от себестоимости (статьи 1–15)
 
 
 # ----------------------------------------------------------------- результаты
@@ -338,10 +343,14 @@ COST_ITEMS: list[tuple[int, str, str]] = [
     (10, "rf_delivery", "Доставка по РФ"),
     (11, "finance", "Финансовые расходы"),
     (12, "service", "Сервис до наработки"),
-    (13, "warranty_reserve", "Гарантийный резерв"),
+    (13, "warranty_reserve", "Гарантийные случаи (резерв)"),
     (14, "overhead", "Накладные компании"),
     (15, "local_completion", "Доукомплектование в РФ"),
+    (16, "external_commission", "Внешняя комиссия (от цены клиента)"),
+    (17, "manager_commission", "Комиссия менеджера (от себестоимости)"),
+    (18, "cd_commission", "Комиссия КД (от себестоимости)"),
 ]
+COMMISSION_KEYS = ("external_commission", "manager_commission", "cd_commission")
 COST_KEYS = [k for _, k, _ in COST_ITEMS]
 
 

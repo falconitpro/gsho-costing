@@ -53,7 +53,7 @@ export default function App() {
             <NavLink to="/clients">Клиенты</NavLink>
             <NavLink to="/catalog">Каталог</NavLink>
             <NavLink to="/factories">Заводы</NavLink>
-            {has("admin", "fd", "gd") && <NavLink to="/settings">Настройки</NavLink>}
+            {has("admin", "fd", "gd", "cd") && <NavLink to="/settings">Настройки</NavLink>}
             {perm("access_admin", 2) && <NavLink to="/access">Уровни доступа</NavLink>}
           </nav>
         )}

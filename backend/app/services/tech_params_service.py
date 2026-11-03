@@ -247,6 +247,13 @@ def rows_from_rfq(db: Session, pos: Position, parsed, user_id: Optional[str]) ->
     sync_position(db, pos)   # страна — только названием страны
 
 
+def l_codes(db: Session) -> Optional[set]:
+    """Коды полей для логиста (метка L) из настроек; None — как в шаблоне RFQ."""
+    from . import settings_service
+    v = settings_service.get(db, "logistics_l_codes")
+    return set(v) if isinstance(v, list) else None
+
+
 def _field_value(code: str, text: str):
     """Значение строки таблицы → значение поля опросника (числовые коды — числом, как при импорте)."""
     from .rfq_import import NUMERIC_CODES, _parse_number
@@ -274,7 +281,8 @@ def sync_position(db: Session, pos: Position) -> dict:
     tp = dict(pos.tech_params or {})
     lp = dict(pos.logistics_params or {})
     snap = dict(((tp.get("_rfq") or {}).get("fields")) or {}) if isinstance(tp.get("_rfq"), dict) else {}
-    l_meta = {f["code"]: f for f in _general_fields() if f.get("is_l")}
+    lc = l_codes(db)
+    l_meta = {f["code"]: f for f in _general_fields() if (f["code"] in lc if lc is not None else f.get("is_l"))}
     snap_changed = False
     for r in pos.tech_param_rows or []:
         if is_country_row(r.code, r.name_ru):

@@ -13,6 +13,7 @@ from .cashflow import Flow, build_cashflow
 from .fx_forecast import FxHistory, ForecastResult, forecast_rate
 from .terms import client_delivery_term, production_end
 from .types import (
+    COMMISSION_KEYS,
     AllocationMethod, ApprovalNeed, BatchInput, COST_KEYS, DealCalcInput, DealCalcResult, FxComponent,
     Money, PaymentEvent, PaymentLine, PositionCost, PositionInput, ScenarioName, ScenarioParams, Sensitivity,
     VariantInput, VariantScenarioResult,
@@ -299,6 +300,8 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
             on = _payment_date(line, var_events, inp, cal)
             amt = _line_amount(line, price)
             flows.append(Flow(on=on, amount_rub=amt, kind="client", ref=f"client/{line.no}"))
+            if inp.external_commission_pct and amt > 0:   # внешняя комиссия выплачивается вместе с оплатами клиента
+                flows.append(Flow(on=on, amount_rub=-amt * inp.external_commission_pct / 100.0, kind="other", ref=f"commission/{line.no}"))
             payment_dates.append({"no": line.no, "event": line.event.value, "on": on, "amount_rub": round(amt, 2), "via": line.via,
                                   "default": variant.client_payments_default})
             is_advance = line.event in ADVANCE_EVENTS or on < var_events[PaymentEvent.SHIPMENT]
@@ -322,15 +325,22 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
     direct_sum_1_13 = sum(direct[k] for k in COST_KEYS if k != "overhead")
     oh_pct = variant.overhead_pct_override if variant.overhead_pct_override is not None else _overhead_pct(direct_sum_1_13, inp)
     direct["overhead"] = direct_sum_1_13 * oh_pct / 100.0
+    # 16–18. Комиссии: внешняя — от цены клиента; менеджера и КД — от себестоимости (статьи 1–15)
+    cost_1_15 = sum(v for k, v in direct.items() if k not in COMMISSION_KEYS)
+    direct["external_commission"] = (price or 0.0) * inp.external_commission_pct / 100.0
+    direct["manager_commission"] = cost_1_15 * inp.manager_commission_pct / 100.0
+    direct["cd_commission"] = cost_1_15 * inp.cd_commission_pct / 100.0
     cost_total = sum(direct.values())
 
     # распределение статей 11 и 14 и цены по позициям пропорционально прямой себестоимости
-    pos_direct = {pc.position_id: sum(v for k, v in pc.items_rub.items() if k not in ("finance", "overhead")) for pc in pos_costs}
+    pos_direct = {pc.position_id: sum(v for k, v in pc.items_rub.items() if k not in ("finance", "overhead", *COMMISSION_KEYS)) for pc in pos_costs}
     pd_total = sum(pos_direct.values()) or 1.0
     for pc in pos_costs:
         w = pos_direct[pc.position_id] / pd_total
         pc.items_rub["finance"] = direct["finance"] * w
         pc.items_rub["overhead"] = direct["overhead"] * w
+        for k in COMMISSION_KEYS:
+            pc.items_rub[k] = direct[k] * w
         pc.items_rub = {k: round(v, 2) for k, v in pc.items_rub.items()}
         pc.total_rub = round(sum(pc.items_rub.values()), 2)
         pc.price_rub = round(price * w, 2) if price is not None else None

@@ -126,7 +126,8 @@ class FactIn(BaseModel):
 FACT_ROLES = {
     "cost_item": {"logistician": {"domestic_logistics", "export_formalities", "intl_freight", "insurance", "customs_duty", "import_vat",
                                   "broker_util", "certification", "rf_delivery"},
-                  "service_head": {"service", "local_completion"}, "fd": {"finance", "warranty_reserve", "overhead", "factory_price", "local_completion"},
+                  "service_head": {"service", "local_completion"},
+                  "fd": {"finance", "warranty_reserve", "overhead", "factory_price", "local_completion", "external_commission", "manager_commission", "cd_commission"},
                   "manager": {"factory_price", "local_completion"}, "cd": {"local_completion"}, "purchasing": {"local_completion"}},
 }
 

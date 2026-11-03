@@ -23,8 +23,9 @@ export const COST_ITEMS: [number, string, string][] = [
   [3, "export_formalities", "Экспортные формальности КНР"], [4, "intl_freight", "Международная перевозка"],
   [5, "insurance", "Страхование"], [6, "customs_duty", "Таможенная пошлина"], [7, "import_vat", "НДС при ввозе"],
   [8, "broker_util", "Брокер, СВХ, утильсбор"], [9, "certification", "Сертификация и разрешения"], [10, "rf_delivery", "Доставка по РФ"],
-  [11, "finance", "Финансовые расходы"], [12, "service", "Сервис до наработки"], [13, "warranty_reserve", "Гарантийный резерв"],
+  [11, "finance", "Финансовые расходы"], [12, "service", "Сервис до наработки"], [13, "warranty_reserve", "Гарантийные случаи (резерв)"],
   [14, "overhead", "Накладные компании"], [15, "local_completion", "Доукомплектование в РФ"],
+  [16, "external_commission", "Внешняя комиссия (от цены клиента)"], [17, "manager_commission", "Комиссия менеджера"], [18, "cd_commission", "Комиссия КД"],
 ];
 
 export const EVENT_TITLES: Record<string, string> = {

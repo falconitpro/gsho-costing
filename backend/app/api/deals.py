@@ -376,7 +376,12 @@ def rfq_template_schema(db: Session = Depends(get_db), user: CurrentUser = Depen
     from ..services.rfq_import import template_fields
     from ..services.rfq_template import template_path
     custom = db.scalar(select(Template).where(Template.kind == "rfq", Template.is_active.is_(True)).order_by(Template.version.desc()))
-    return template_fields(template_path(custom.file_path if custom else None))
+    out = template_fields(template_path(custom.file_path if custom else None))
+    from ..services.tech_params_service import l_codes
+    lc = l_codes(db)
+    if lc is not None:   # метка L — по настройке «Поля для логиста»
+        out["fields"] = [{**f, "is_l": f["code"] in lc} for f in out["fields"]]
+    return out
 
 
 @router.get("/rfq/template/file")
@@ -398,7 +403,8 @@ async def rfq_preview(deal_id: str, file: UploadFile = File(...), db: Session = 
         shutil.copyfileobj(file.file, tmp)
         path = tmp.name
     try:
-        parsed = parse_rfq(path)
+        from ..services.tech_params_service import l_codes
+        parsed = parse_rfq(path).apply_l_codes(l_codes(db))
     finally:
         os.unlink(path)
     return parsed.to_dict()
@@ -414,7 +420,8 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     path = os.path.join(tmpdir, file.filename or "rfq.xlsx")
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    parsed = parse_rfq(path)
+    from ..services.tech_params_service import l_codes
+    parsed = parse_rfq(path).apply_l_codes(l_codes(db))   # поля для логиста — по настройке
     attempt = (db.scalar(select(RfqImport.attempt).where(RfqImport.deal_id == deal.id).order_by(RfqImport.attempt.desc())) or 0) + 1
     imp = RfqImport(deal_id=deal.id, file_path=path, file_hash=sha256_file(path), template_version=parsed.template_version,
                     attempt=attempt, parsed=parsed.to_dict(), errors=[e.__dict__ for e in parsed.errors], imported_by=user.id)
