@@ -63,6 +63,7 @@ class RowIn(BaseModel):
     comment_ru: str = ""
     required: bool = False
     local_ru: bool = False
+    section: str = ""
 
 
 @router.get("/positions/{pos_id}/tech-params")
@@ -75,8 +76,12 @@ def get_rows(deal_id: str, pos_id: str, db: Session = Depends(get_db), user: Cur
         tps.init_position_rows(db, pos, user.id)
         db.commit()
     rows = tps.row_dicts(pos)
+    for r in rows:   # соответствие значения завода требованию заказчика: match | mismatch | none (нет значения или требования)
+        val, req = (r["value_ru"] or r["value_zh"] or "").strip(), (r["customer_requirement_ru"] or "").strip()
+        r["req_status"] = offers_service.req_status(val, req) if val and req else "none"
     missing_required = [r["name_ru"] for r in rows if r["required"] and not r["local_ru"] and not (r["value_ru"] or r["value_zh"])]
     return {"rows": rows, "missing_required": missing_required, "machine_unverified": sum(1 for r in rows if r["translation_status"] == "machine"),
+            "mismatched": sum(1 for r in rows if r["req_status"] == "mismatch"),
             "columns": [{"key": k, "title": tps.COLUMN_TITLES[k]} for k in tps.COLUMNS]}
 
 
@@ -92,6 +97,8 @@ def save_rows(deal_id: str, pos_id: str, rows: list[RowIn], db: Session = Depend
         row = existing.get(r.id) if r.id else None
         data = r.model_dump(exclude={"id"})
         data["no"] = data["no"] or i
+        if not data["section"]:
+            data["section"] = row.section if (row := existing.get(r.id) if r.id else None) else tps.section_label(data["code"])
         if row is None:
             row = PositionTechParam(position_id=pos.id, source="manual", filled_by=user.id, **data)
             db.add(row)

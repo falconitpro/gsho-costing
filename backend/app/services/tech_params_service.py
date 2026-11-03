@@ -12,6 +12,7 @@ import csv
 import os
 import re
 import tempfile
+from functools import lru_cache
 from typing import Any, Optional
 
 from openpyxl import Workbook, load_workbook
@@ -103,24 +104,55 @@ def translate(db: Session, texts: list[str], src: str, dst: str, kind: str = "pa
 
 # ------------------------------------------------------------------ шаблоны перечня и строки позиции
 
-def ensure_general_template(db: Session) -> list[TechParamTemplate]:
-    """Стартовый перечень — фиксированные техпараметры RFQ (разделы 1–11); обязательные — по REQUIRED_CODES."""
-    rows = db.scalars(select(TechParamTemplate).where(TechParamTemplate.machine_type_id.is_(None)).order_by(TechParamTemplate.no)).all()
-    if rows:
-        return rows
-    from .rfq_import import REQUIRED_CODES
+@lru_cache(maxsize=1)
+def _general_fields() -> list[dict]:
+    """Поля разделов 1–11 встроенного шаблона RFQ (читаются из файла один раз за процесс)."""
     try:
         fields = template_fields(template_path(None))["fields"]
     except Exception:
         fields = []
-    no = 0
-    for f in fields:
-        sec = f.get("section_no") or 0
-        if not (1 <= sec <= 11) or f.get("is_l"):
-            continue
-        no += 1
-        rows.append(TechParamTemplate(machine_type_id=None, no=no, code=f["code"], name_ru=f.get("name") or f["code"], name_zh=f.get("name_zh") or "",
+    return [f for f in fields if 1 <= (f.get("section_no") or 0) <= 11]
+
+
+def section_label(code: str, title: str = "") -> str:
+    """«1. Общие данные / 总体参数» — номер раздела по коду поля и название раздела (как в файле опросника)."""
+    major = (code or "").split(".")[0]
+    title = (title or "").strip()
+    if title and re.match(r"^\d+\.", title):
+        return title
+    if not major.isdigit():
+        return title or "Дополнительные параметры"
+    return f"{major}. {title}" if title else f"{major}. {_general_sections().get(major, 'Раздел ' + major)}"
+
+
+@lru_cache(maxsize=1)
+def _general_sections() -> dict[str, str]:
+    """Номер раздела → название раздела по встроенному шаблону RFQ."""
+    out: dict[str, str] = {}
+    for f in _general_fields():
+        major = str(f["code"]).split(".")[0]
+        if f.get("section") and major not in out:
+            out[major] = f["section"]
+    return out
+
+
+def ensure_general_template(db: Session) -> list[TechParamTemplate]:
+    """Стартовый перечень — фиксированные техпараметры RFQ (разделы 1–11); обязательные — по REQUIRED_CODES."""
+    rows = list(db.scalars(select(TechParamTemplate).where(TechParamTemplate.machine_type_id.is_(None)).order_by(TechParamTemplate.no)).all())
+    from .rfq_import import REQUIRED_CODES
+    wanted = _general_fields()   # включая поля «L»: габариты и массы нужны и в КП
+    have = {r.code for r in rows if r.code}
+    missing = [f for f in wanted if f["code"] not in have]
+    if rows and not missing:
+        return rows
+    for f in missing:
+        rows.append(TechParamTemplate(machine_type_id=None, no=0, code=f["code"], name_ru=f.get("name") or f["code"], name_zh=f.get("name_zh") or "",
                                       unit=(f.get("unit") or "").split(" / ")[0], required=f["code"] in REQUIRED_CODES, section=f.get("section") or ""))
+    # порядок — как в шаблоне RFQ (строки без кода, добавленные вручную, — в конце)
+    order = {f["code"]: i for i, f in enumerate(wanted)}
+    rows.sort(key=lambda r: (order.get(r.code, len(order)), r.no))
+    for i, r in enumerate(rows, 1):
+        r.no = i
     db.add_all(rows)
     db.flush()
     return rows
@@ -148,11 +180,14 @@ def init_position_rows(db: Session, pos: Position, user_id: Optional[str], repla
             rows.append(PositionTechParam(position_id=pos.id, no=r.get("no") or i, code=r.get("code") or "", name_ru=r.get("name_ru") or "",
                                           name_zh=r.get("name_zh") or "", unit=r.get("unit") or "", value_ru=r.get("value_ru") or "",
                                           value_zh=r.get("value_zh") or "", required=bool(r.get("required")), local_ru=bool(r.get("local_ru")),
-                                          source="catalog", filled_by=user_id))
+                                          section=r.get("section") or section_label(r.get("code") or ""), source="catalog", filled_by=user_id))
     else:
+        # поля, которые уже есть в карточке позиции (тип и модель), — сразу в таблицу
+        known = {"1.1": pos.machine_type or "", "1.2": pos.model or ""}
         for t in template_for(db, pos.machine_type):
             rows.append(PositionTechParam(position_id=pos.id, no=t.no, code=t.code, name_ru=t.name_ru, name_zh=t.name_zh, unit=t.unit,
-                                          required=t.required, source="manual", filled_by=user_id))
+                                          value_ru=known.get(t.code, ""), required=t.required, section=section_label(t.code, t.section),
+                                          source="manual", filled_by=user_id))
     db.add_all(rows)
     db.flush()
     db.refresh(pos)
@@ -166,17 +201,16 @@ def _fmt_value(v: Any) -> str:
     return str(v)
 
 
-def rows_from_rfq(db: Session, pos: Position, parsed, user_id: Optional[str]) -> None:
-    """Импорт RFQ (шаблон завода): строки разделов 1–11 с требованиями и значениями RU/ZH."""
+def rfq_rows(db: Session, parsed, machine_type: str = "") -> list[dict]:
+    """Строки таблицы теххарактеристик из разобранного RFQ: все поля разделов 1–11 из файла (с разделами, как в файле)
+    плюс поля опросника компании, которых в файле нет (пустые, чтобы их можно было дозаполнить)."""
     from .rfq_import import REQUIRED_CODES
-    req_by_code = {t.code: t.required for t in template_for(db, pos.machine_type)}
-    for r in list(pos.tech_param_rows or []):
-        db.delete(r)
-    no = 0
-    for code, f in sorted(parsed.fields.items(), key=lambda kv: [int(x) for x in kv[0].split(".")]):
-        if not (1 <= f.section_no <= 11) or f.is_l:
-            continue
-        no += 1
+    tpl = template_for(db, machine_type)
+    req_by_code = {t.code: t.required for t in tpl}
+    out: dict[str, dict] = {}
+    for code, f in parsed.fields.items():
+        if not (1 <= f.section_no <= 11):
+            continue                         # поля «L» (габариты, массы) — и логисту, и в таблицу: это тоже теххарактеристики для КП
         v_ru, v_zh = f.value_ru, f.value_zh
         value_ru = "" if v_ru is None else str(v_ru).strip()
         value_zh = "" if v_zh is None else str(v_zh).strip()
@@ -185,17 +219,39 @@ def rows_from_rfq(db: Session, pos: Position, parsed, user_id: Optional[str]) ->
             value_ru, value_zh = value_zh, ""
         if not value_ru and f.value not in (None, "") and not has_cjk(f.value):
             value_ru = _fmt_value(f.value)
-        db.add(PositionTechParam(position_id=pos.id, no=no, code=code, name_ru=f.name_ru, name_zh=f.name_zh, unit=(f.unit or "").split(" / ")[0],
-                                 customer_requirement_ru="" if f.requirement is None else str(f.requirement), customer_requirement_zh="" if f.requirement_zh is None else str(f.requirement_zh),
-                                 value_ru=value_ru, value_zh=value_zh, comment_ru="" if f.comment is None else str(f.comment),
-                                 required=req_by_code.get(code, code in REQUIRED_CODES), source="rfq", filled_by=user_id,
-                                 translation_status="none"))
+        out[code] = {"code": code, "name_ru": f.name_ru, "name_zh": f.name_zh, "unit": (f.unit or "").split(" / ")[0],
+                     "customer_requirement_ru": "" if f.requirement is None else str(f.requirement),
+                     "customer_requirement_zh": "" if f.requirement_zh is None else str(f.requirement_zh),
+                     "value_ru": value_ru, "value_zh": value_zh, "comment_ru": "" if f.comment is None else str(f.comment),
+                     "required": req_by_code.get(code, code in REQUIRED_CODES), "section": section_label(code, f.section), "source": "rfq"}
+    # поля опросника компании, которых нет в файле завода
+    for t in tpl:
+        if t.code and t.code not in out and 1 <= int(t.code.split(".")[0] or 0) <= 11:
+            out[t.code] = {"code": t.code, "name_ru": t.name_ru, "name_zh": t.name_zh, "unit": t.unit, "customer_requirement_ru": "",
+                           "customer_requirement_zh": "", "value_ru": "", "value_zh": "", "comment_ru": "", "required": t.required,
+                           "section": section_label(t.code, t.section), "source": "template"}
+    rows = sorted(out.values(), key=lambda r: [int(x) for x in r["code"].split(".")])
+    for i, r in enumerate(rows, 1):
+        r["no"] = i
+    return rows
+
+
+def rows_from_rfq(db: Session, pos: Position, parsed, user_id: Optional[str]) -> None:
+    """Импорт RFQ (шаблон завода): таблица позиции заменяется строками из файла + недостающими полями опросника."""
+    for r in list(pos.tech_param_rows or []):
+        db.delete(r)
+    for r in rfq_rows(db, parsed, pos.machine_type):
+        db.add(PositionTechParam(position_id=pos.id, filled_by=user_id, translation_status="none", **r))
     db.flush()
     db.refresh(pos)
 
 
 def row_dicts(pos: Position) -> list[dict]:
-    return [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in sorted(pos.tech_param_rows or [], key=lambda r: r.no)]
+    out = [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in sorted(pos.tech_param_rows or [], key=lambda r: r.no)]
+    for r in out:                       # строки, созданные до появления разделов, — раздел по коду поля
+        if not r.get("section"):
+            r["section"] = section_label(r.get("code") or "")
+    return out
 
 
 # ------------------------------------------------------------------ импорт таблиц с предпросмотром
@@ -460,7 +516,10 @@ def send_request(db: Session, deal, pos: Position, factory: Factory, file_path: 
             result["wecom"] = f"ошибка: {e}"
     elif via_wecom:
         result["wecom"] = "не отправлено: в карточке завода нет контакта WeCom"
-    emails = [c.get("email") for c in (factory.contacts or []) if c.get("email")]
+    # получатели — контакты завода по направлению «Заявки и КП»; если таких нет — все контакты с почтой
+    contacts = factory.contacts or []
+    rfq_contacts = [c for c in contacts if "rfq" in (c.get("roles") or [])]
+    emails = [c.get("email") for c in (rfq_contacts or contacts) if c.get("email")]
     if via_mail and not emails:
         result["mail"] = "не отправлено: в карточке завода нет e-mail"
     if via_mail and emails:

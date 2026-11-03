@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
 import type { Position, TechParamRow } from "../types";
 
@@ -34,12 +34,13 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
   const [clientChecked, setClientChecked] = useState(false);
   const [answerOffer, setAnswerOffer] = useState<string>("");    // после импорта ответа завода — предложить загрузить его фото/чертежи
   const [offerFiles, setOfferFiles] = useState<FileList | null>(null);
+  const [closed, setClosed] = useState<Record<string, boolean>>({});   // свёрнутые разделы
 
   const load = () => api.get<{ rows: TechParamRow[]; missing_required: string[] }>(base).then((r) => { setRows(r.rows); setMissing(r.missing_required); setDirty(false); }).catch((e) => setErr(e.message));
   useEffect(() => { load(); api.get<Factory[]>("/api/refs/factories").then(setFactories); api.get<typeof offers>(`/api/deals/${dealId}/offers`).then(setOffers).catch(() => setOffers([])); }, [position.id]);
 
   const upd = (i: number, patch: Partial<TechParamRow>) => { setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r))); setDirty(true); };
-  const addRow = () => { setRows((rs) => [...rs, { no: (rs[rs.length - 1]?.no || 0) + 1, code: "", name_ru: "", name_zh: "", unit: "", customer_requirement_ru: "", value_ru: "", value_zh: "", comment_ru: "", required: false, local_ru: false }]); setDirty(true); };
+  const addRow = () => { setRows((rs) => [...rs, { no: (rs[rs.length - 1]?.no || 0) + 1, code: "", name_ru: "", name_zh: "", unit: "", customer_requirement_ru: "", value_ru: "", value_zh: "", comment_ru: "", required: false, local_ru: false, section: rs[rs.length - 1]?.section || "Дополнительные параметры" }]); setDirty(true); };
   const delRow = (i: number) => { setRows((rs) => rs.filter((_, j) => j !== i)); setDirty(true); };
   async function save() {
     try { await api.put(base, rows); setMsg("Таблица сохранена"); setErr(""); await load(); onChanged(); } catch (e) { setErr((e as Error).message); }
@@ -95,7 +96,8 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
         <span className="muted">Теххарактеристики: заполнено значений {filled} из {rows.length}
           {missing.length > 0 && <> · <span className="badge bad">не заполнены обязательные: {missing.slice(0, 4).join(", ")}{missing.length > 4 ? " …" : ""}</span></>}
-          {rows.some((r) => r.translation_status === "machine") && <> · <span className="badge warn">машинный перевод — проверьте</span></>}</span>
+          {rows.some((r) => r.translation_status === "machine") && <> · <span className="badge warn">машинный перевод — проверьте</span></>}
+          {rows.some((r) => r.req_status === "mismatch") && <> · <span className="badge" style={{ background: "#ffd9b3" }}>не соответствует требованию: {rows.filter((r) => r.req_status === "mismatch").length}</span></>}</span>
         {canEdit && (
           <div className="row">
             <button className="btn ghost" onClick={() => { setWizard("requirements"); setPreview(null); setOfferId(""); }}>Импорт требований клиента</button>
@@ -113,27 +115,40 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
         <table>
           <thead><tr>{COLS.map((c) => <th key={c.key} style={{ width: c.w }}>{c.title}</th>)}<th title="обязательный параметр">Обяз.</th><th title="реализуется в России — не идёт заводу">В РФ</th>{canEdit && <th />}</tr></thead>
           <tbody>{rows.map((r, i) => {
+            const sec = r.section || "Дополнительные параметры";
+            const head = i === 0 || (rows[i - 1].section || "Дополнительные параметры") !== sec;
+            const inSec = rows.filter((x) => (x.section || "Дополнительные параметры") === sec);
+            const header = head && (
+              <tr key={"s" + i} style={{ background: "#f1f1f1", cursor: "pointer" }} onClick={() => setClosed({ ...closed, [sec]: !closed[sec] })}>
+                <td colSpan={COLS.length + 2 + (canEdit ? 1 : 0)} style={{ fontWeight: 700, padding: "6px 8px" }}>
+                  {closed[sec] ? "▸" : "▾"} {sec} <span className="muted" style={{ fontWeight: 400 }}>· заполнено {inSec.filter((x) => x.value_ru || x.value_zh).length} из {inSec.length}
+                    {inSec.some((x) => x.req_status === "mismatch") && ` · не соответствует требованию: ${inSec.filter((x) => x.req_status === "mismatch").length}`}</span></td></tr>);
+            if (closed[sec]) return <Fragment key={r.id || i}>{header}</Fragment>;
             const empty = !r.value_ru && !r.value_zh;
             const bg = r.local_ru ? "#eef4ff" : empty && r.required ? "#fde7e7" : empty ? "#fff6d6" : r.translation_status === "machine" ? "#f3e8ff" : undefined;
+            // значение завода не соответствует требованию заказчика — оранжевая ячейка, соответствует — зелёная рамка
+            const vStyle = (cKey: string) => cKey !== "value_ru" ? {} : r.req_status === "mismatch" ? { background: "#ffd9b3", borderColor: "#e08a00", fontWeight: 600 } : r.req_status === "match" ? { borderColor: "#2e9e5b" } : {};
+            const vTitle = r.req_status === "mismatch" ? `Не соответствует требованию заказчика: «${r.customer_requirement_ru}»` : r.req_status === "match" ? "Соответствует требованию заказчика" : undefined;
             return (
-              <tr key={r.id || i} style={{ background: bg }}>
+              <Fragment key={r.id || i}>{header}
+              <tr style={{ background: bg }}>
                 {COLS.map((c) => (
                   <td key={c.key} style={{ padding: 3 }}>
-                    {canEdit ? <input style={{ width: "100%", padding: 4 }} value={String(r[c.key] ?? "")} type={c.key === "no" ? "number" : "text"}
+                    {canEdit ? <input style={{ width: "100%", padding: 4, ...vStyle(c.key) }} value={String(r[c.key] ?? "")} type={c.key === "no" ? "number" : "text"}
                       onChange={(e) => upd(i, { [c.key]: c.key === "no" ? Number(e.target.value) : e.target.value } as Partial<TechParamRow>)}
-                      title={c.key === "name_ru" && r.name_zh ? r.name_zh : c.key === "value_ru" && r.value_zh ? `ZH: ${r.value_zh}` : undefined} />
-                      : <span title={c.key === "value_ru" && r.value_zh ? `ZH: ${r.value_zh}` : undefined}>{String(r[c.key] ?? "")}</span>}
+                      title={c.key === "name_ru" && r.name_zh ? r.name_zh : c.key === "value_ru" ? [vTitle, r.value_zh ? `ZH: ${r.value_zh}` : ""].filter(Boolean).join(" · ") || undefined : undefined} />
+                      : <span style={{ padding: "1px 4px", borderRadius: 3, ...vStyle(c.key) }} title={c.key === "value_ru" ? vTitle : undefined}>{String(r[c.key] ?? "")}</span>}
                     {c.key === "value_ru" && r.value_zh && r.value_zh !== r.value_ru && <div className="muted" style={{ fontSize: 11 }}>{r.value_zh}{r.translation_status === "machine" && canEdit && <> · <a href="#" onClick={(e) => { e.preventDefault(); api.post(`${base}/verify/${r.id}`).then(load); }}>перевод верный</a></>}</div>}
                   </td>
                 ))}
                 <td style={{ textAlign: "center" }}><input type="checkbox" checked={!!r.required} disabled={!canEdit} onChange={(e) => upd(i, { required: e.target.checked })} /></td>
                 <td style={{ textAlign: "center" }}><input type="checkbox" checked={!!r.local_ru} disabled={!canEdit} onChange={(e) => upd(i, { local_ru: e.target.checked })} /></td>
                 {canEdit && <td><button className="btn ghost" style={{ padding: "2px 6px" }} onClick={() => delRow(i)}>×</button></td>}
-              </tr>);
+              </tr></Fragment>);
           })}</tbody>
         </table>
       </div>
-      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Цвета: красный — обязательный параметр без значения, жёлтый — не заполнено, фиолетовый — машинный перевод (проверьте), синий — реализуется в России (в запрос заводу не попадает).</div>
+      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Цвета: красный — обязательный параметр без значения, жёлтый — не заполнено, фиолетовый — машинный перевод (проверьте), синий — реализуется в России (в запрос заводу не попадает). Значение: оранжевое — не соответствует требованию заказчика, зелёная рамка — соответствует. Разделы сворачиваются щелчком по заголовку.</div>
 
       {canEdit && (
         <div className="card" style={{ marginTop: 10 }}>

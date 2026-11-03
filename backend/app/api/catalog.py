@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -183,6 +183,143 @@ def price_reference(factory_id: str, model: str, execution_id: str = "", db: Ses
                                  "outcome": h.outcome, "kp_brand": h.kp_brand}
                                 for h in db.scalars(q.order_by(ClientPriceHistory.on.desc()).limit(5)).all()]
     return out
+
+
+# ------------------------------------------------------------------ добавление оборудования прямо в каталог
+
+def _catalog_contributor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if not user.has(Role.MANAGER, Role.CD, Role.GD):
+        raise HTTPException(403, "Добавлять оборудование в каталог могут менеджер, КД и ГД")
+    return user
+
+
+class EquipmentIn(BaseModel):
+    factory_id: Optional[str] = None
+    factory_name: str = ""
+    factory_address: str = ""
+    machine_type: str = ""
+    model: str
+    execution_name: str = ""
+    brand_name: str = ""
+    tech_params: list[dict] = Field(default_factory=list)
+    logistics_params: dict = Field(default_factory=dict)
+    unit_price: Optional[float] = None
+    currency: str = "CNY"
+    basis: str = ""
+    production_term: dict = Field(default_factory=dict)
+    comment: str = ""
+
+
+def _added(ex: EquipmentExecution, created: bool, editor: bool) -> dict:
+    return {**serialize(ex), "created": created,
+            "message": ("Добавлено в каталог" if editor else "Отправлено на подтверждение КД/ГД") if created else "Такое исполнение уже есть в каталоге — добавлена запись истории цен"}
+
+
+@router.post("/catalog/equipment", status_code=201)
+def catalog_add(body: EquipmentIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_contributor)):
+    """Добавить оборудование вручную: завод → тип → модель → исполнение с теххарактеристиками и ценой.
+    Менеджер — на подтверждение КД/ГД; КД и ГД — сразу в каталог."""
+    editor = user.can("catalog", 2)
+    try:
+        ex, created = cs.add_equipment(db, body.model_dump(), user, editor)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    db.commit()
+    return _added(ex, created, editor)
+
+
+def _tmp_upload(file: UploadFile) -> str:
+    import os
+    import shutil
+    import tempfile
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, file.filename or "table.xlsx")
+    with open(path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return path
+
+
+@router.post("/catalog/equipment/import/preview")
+async def catalog_import_preview(file: UploadFile = File(...), db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_contributor)):
+    """Предпросмотр файла: опросник RFQ одной машины (kind=rfq — данные для формы добавления) или список моделей (kind=list)."""
+    import os
+    import shutil
+    from ..services.rfq_import import parse_rfq
+    path = _tmp_upload(file)
+    try:
+        parsed = None
+        if (file.filename or "").lower().endswith((".xlsx", ".xlsm")):
+            try:
+                parsed = parse_rfq(path)
+            except Exception:
+                parsed = None
+        if parsed is not None and len(parsed.fields) >= 20 and parsed.position.get("model"):
+            pos = parsed.position
+            rows = tps.rfq_rows(db, parsed, pos.get("machine_type") or "")
+            return {"kind": "rfq", "item": {
+                "factory_name": parsed.header.get("factory_name") or "", "factory_address": parsed.header.get("factory_address") or "",
+                "machine_type": pos.get("machine_type") or "", "model": str(pos.get("model") or ""), "unit_price": pos.get("unit_price"),
+                "currency": pos.get("currency") or "CNY", "basis": pos.get("basis") or "",
+                "production_term": {"value": int(pos["production_days"]), "unit": "calendar_days"} if pos.get("production_days") else {},
+                "tech_params": rows, "logistics_params": parsed.logistics_params},
+                "messages": [{"severity": e.severity, "message": e.message} for e in parsed.errors],
+                "filled": sum(1 for r in rows if r["value_ru"]), "total": len(rows)}
+        sheets = tps.read_table(path, file.filename or "")
+        return {"kind": "list", "sheets": [{"name": sh["name"], "rows": sh["rows"][:200], "total_rows": len(sh["rows"]),
+                                            "mapping": cs.guess_list_mapping(sh["rows"])} for sh in sheets],
+                "columns": [{"key": k, "title": t} for k, t in (("factory", "Завод"), ("machine_type", "Тип машины"), ("model", "Модель"),
+                            ("execution", "Исполнение"), ("brand_name", "Наименование под брендом"), ("unit_price", "Цена"),
+                            ("currency", "Валюта"), ("basis", "Базис"), ("production_days", "Срок производства, дн"))]}
+    except Exception as e:
+        raise HTTPException(422, f"Не удалось прочитать файл: {e}")
+    finally:
+        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+
+
+@router.post("/catalog/equipment/import/apply")
+async def catalog_import_apply(file: UploadFile = File(...), mapping: str = Form(...), default_factory_id: str = Form(""),
+                               db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_contributor)):
+    """Список моделей из таблицы: по строке — модель/исполнение каталога (и цена в истории цен завода, если указана)."""
+    import json
+    import os
+    import shutil
+    editor = user.can("catalog", 2)
+    mp = json.loads(mapping)
+    cols = {k: int(v) for k, v in (mp.get("columns") or {}).items() if v not in (None, "")}
+    if "model" not in cols:
+        raise HTTPException(422, "Укажите столбец «Модель»")
+    if "factory" not in cols and not default_factory_id:
+        raise HTTPException(422, "Укажите столбец «Завод» или выберите завод для всего списка")
+    path = _tmp_upload(file)
+    try:
+        sheets = tps.read_table(path, file.filename or "")
+        sheet = next((x for x in sheets if x["name"] == mp.get("sheet")), sheets[0])
+        sel = set(mp.get("selected_rows") or []) or None
+        added, existing, errors = [], 0, []
+        for i in range(int(mp.get("first_row") or 0), len(sheet["rows"])):
+            if sel is not None and i not in sel:
+                continue
+            row = sheet["rows"][i]
+            cell = lambda k: (str(row[cols[k]]).strip() if k in cols and cols[k] < len(row) and row[cols[k]] not in (None, "") else "")
+            if not cell("model"):
+                continue
+            try:
+                ex, created = cs.add_equipment(db, {"factory_id": None if cell("factory") else default_factory_id, "factory_name": cell("factory"),
+                                                    "machine_type": cell("machine_type"), "model": cell("model"), "execution_name": cell("execution"),
+                                                    "brand_name": cell("brand_name"), "unit_price": cell("unit_price") or None,
+                                                    "currency": cell("currency") or "CNY", "basis": cell("basis"),
+                                                    "production_days": cell("production_days") or None}, user, editor)
+                if created:
+                    added.append({"id": ex.id, "model": cell("model"), "status": ex.status})
+                else:
+                    existing += 1
+            except ValueError as e:
+                errors.append({"row": i, "message": str(e)})
+        db.commit()
+        return {"added": added, "existing": existing, "errors": errors,
+                "message": f"Добавлено {len(added)}" + ("" if editor else " (на подтверждение КД/ГД)") + (f", уже были в каталоге: {existing}" if existing else "")}
+    finally:
+        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
 
 
 # ------------------------------------------------------------------ типы машин

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
+import CatalogAdd from "../components/CatalogAdd";
 
 type Tree = { factory_id: string; factory: string; types: { machine_type: string; models: { id: string; model: string; brand_name: string; status: string; executions: { id: string; name: string; brand_name: string; status: string; params: number; images: number; source_deal_id: string | null }[] }[] }[] }[];
 type Exec = { id: string; name: string; brand_name: string; status: string; tech_params: { no: number; name_ru: string; unit: string; value_ru: string; required: boolean; local_ru: boolean }[]; images: unknown[];
@@ -12,7 +13,7 @@ type TplRow = { id?: string; no: number; code: string; name_ru: string; name_zh:
 
 /** Задача 7: каталог производитель → тип → модель → исполнение, подтверждение КД/ГД, история цен; задача 4: глоссарий и шаблоны (обязательность). */
 export default function CatalogPage({ me }: { me: Me }) {
-  const [tab, setTab] = useState<"tree" | "pending" | "glossary" | "templates" | "archive">("tree");
+  const [tab, setTab] = useState<"tree" | "add" | "pending" | "glossary" | "templates" | "archive">("tree");
   const [mergeExec, setMergeExec] = useState("");
   const [mergeModel, setMergeModel] = useState<Record<string, string>>({});
   const [archive, setArchive] = useState<{ models: { id: string; model: string; brand_name: string }[]; executions: { id: string; name: string; model_id: string }[] }>({ models: [], executions: [] });
@@ -27,6 +28,7 @@ export default function CatalogPage({ me }: { me: Me }) {
   const [tpl, setTpl] = useState<TplRow[]>([]);
   const [msg, setMsg] = useState("");
   const editor = can(me, "catalog", 2);
+  const contributor = me.roles.some((r) => ["manager", "cd", "gd"].includes(r.code));
   const loadTree = () => api.get<Tree>(`/api/catalog/tree?include_pending=${editor}`).then(setTree);
   const loadGl = () => api.get<Gl[]>(`/api/refs/glossary?q=${encodeURIComponent(glQ)}`).then(setGl).catch(() => setGl([]));
   const loadTpl = () => api.get<{ rows: TplRow[] }>(`/api/refs/tech-param-templates?machine_type_id=${tplType}`).then((r) => setTpl(r.rows));
@@ -50,6 +52,7 @@ export default function CatalogPage({ me }: { me: Me }) {
       {msg && <div className="alert info">{msg}</div>}
       <div className="tabs">
         <button className={tab === "tree" ? "active" : ""} onClick={() => setTab("tree")}>Производитель → тип → модель → исполнение</button>
+        {contributor && <button className={tab === "add" ? "active" : ""} onClick={() => setTab("add")}>+ Добавить оборудование</button>}
         {editor && <button className={tab === "pending" ? "active" : ""} onClick={() => setTab("pending")}>На подтверждение ({pending.length})</button>}
         {can(me, "glossary") && <button className={tab === "glossary" ? "active" : ""} onClick={() => setTab("glossary")}>Глоссарий RU ↔ ZH</button>}
         <button className={tab === "templates" ? "active" : ""} onClick={() => setTab("templates")}>Шаблоны теххарактеристик</button>
@@ -124,6 +127,7 @@ export default function CatalogPage({ me }: { me: Me }) {
             {archive.executions.length === 0 && <tr><td className="muted">нет</td></tr>}</tbody></table>
         </div>
       )}
+      {tab === "add" && <CatalogAdd editor={editor} onAdded={(m) => { setMsg(m); loadTree(); if (editor) api.get<typeof pending>("/api/catalog/pending").then(setPending); }} />}
       {tab === "pending" && (
         <div className="card">
           <table><thead><tr><th>Исполнение</th><th>Модель</th><th>Из сделки</th><th>Предложено</th><th /></tr></thead>

@@ -192,3 +192,108 @@ def tree(db: Session, include_pending: bool = False) -> list[dict]:
         if by_type:
             out.append({"factory_id": f.id, "factory": f.name, "types": list(by_type.values())})
     return out
+
+
+# ------------------------------------------------------------------ добавление оборудования прямо в каталог
+
+LIST_ALIASES = {
+    "factory": ("завод", "производитель", "изготовитель", "manufacturer", "factory", "工厂", "制造商"),
+    "machine_type": ("тип машины", "тип", "type", "设备类型", "类型"),
+    "model": ("модель", "model", "型号"),
+    "execution": ("исполнение", "комплектация", "вариант", "configuration", "配置"),
+    "brand_name": ("наименование под брендом", "бренд", "brand"),
+    "unit_price": ("цена", "стоимость", "price", "价格", "单价"),
+    "currency": ("валюта", "currency", "币种"),
+    "basis": ("базис", "incoterms", "условия поставки"),
+    "production_days": ("срок производства", "производство, дн", "production", "生产周期"),
+}
+
+
+def guess_list_mapping(rows: list[list]) -> dict:
+    """Список моделей (прайс, перечень от завода): строка заголовков и столбцы по названиям."""
+    from .tech_params_service import _norm
+    best, best_row, best_cols = 0, 0, {}
+    for i, row in enumerate(rows[:30]):
+        cols: dict[str, int] = {}
+        for j, cell in enumerate(row):
+            v = _norm(cell)
+            if not v:
+                continue
+            hits = [(len(a), key) for key, aliases in LIST_ALIASES.items() for a in map(_norm, aliases) if v == a or v.startswith(a)]
+            for _, key in sorted(hits, reverse=True):
+                if key not in cols:
+                    cols[key] = j
+                    break
+        if len(cols) > best:
+            best, best_row, best_cols = len(cols), i, cols
+    return {"header_row": best_row, "first_row": best_row + 1 if best else 0, "columns": best_cols}
+
+
+def _num(v) -> Optional[float]:
+    from .rfq_import import _parse_number
+    return _parse_number(v) if v not in (None, "") else None
+
+
+def add_equipment(db: Session, data: dict, user, editor: bool) -> tuple[EquipmentExecution, bool]:
+    """Новая запись каталога вручную или из файла. Менеджер — «на проверке» (подтверждает КД или ГД);
+    КД/ГД — сразу в каталоге. Совпадающее исполнение (тот же набор параметров) не дублируется.
+    data: factory_id | factory_name, machine_type, model, execution_name, brand_name, tech_params (строки таблицы),
+          logistics_params, unit_price, currency, basis, production_term {value, unit}, comment.
+    Возвращает (исполнение, создано ли новое)."""
+    from ..models import FactoryPriceHistory
+    status = "approved" if editor else "pending"
+    model_name = (data.get("model") or "").strip()
+    if not model_name:
+        raise ValueError("Укажите модель")
+    factory = db.get(Factory, data["factory_id"]) if data.get("factory_id") else None
+    if factory is None:
+        fname = (data.get("factory_name") or "").strip()
+        if not fname:
+            raise ValueError("Укажите завод")
+        factory = db.scalar(select(Factory).where(Factory.name == fname))
+        if factory is None:
+            factory = Factory(name=fname, address=data.get("factory_address") or "")
+            db.add(factory)
+            db.flush()
+    mt_name = (data.get("machine_type") or "").strip()
+    mt = db.scalar(select(MachineType).where(MachineType.name == mt_name)) if mt_name else None
+    if mt is None and mt_name:
+        mt = MachineType(name=mt_name, status=status, proposed_by=user.id)
+        db.add(mt)
+        db.flush()
+    model = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == factory.id, EquipmentModel.model == model_name))
+    if model is None:
+        model = EquipmentModel(factory_id=factory.id, machine_type=mt_name, machine_type_id=mt.id if mt else None, model=model_name,
+                               logistics_params=data.get("logistics_params") or {}, status=status, proposed_by=user.id)
+        db.add(model)
+        db.flush()
+    elif model.status == "archived":
+        model.status = status
+    if editor and data.get("brand_name"):
+        model.brand_name = model.brand_name or data["brand_name"]
+    rows = [r for r in (data.get("tech_params") or []) if (r.get("name_ru") or "").strip()]
+    for i, r in enumerate(rows, 1):
+        r.setdefault("no", i)
+    fp = fingerprint(rows)
+    ex = db.scalar(select(EquipmentExecution).where(EquipmentExecution.model_id == model.id, EquipmentExecution.fingerprint == fp,
+                                                    EquipmentExecution.status != "archived"))
+    created = ex is None
+    if created:
+        ex = EquipmentExecution(model_id=model.id, name=(data.get("execution_name") or "").strip() or f"{model_name} базовое",
+                                brand_name=(data.get("brand_name") or "") if editor else "", tech_params=rows, local_options=[], images=[],
+                                fingerprint=fp, status=status, proposed_by=user.id)
+        if editor:
+            ex.approved_by, ex.approved_at = user.id, datetime.now(timezone.utc)
+        db.add(ex)
+        db.flush()
+    price = _num(data.get("unit_price"))
+    if price:
+        term = data.get("production_term") or {}
+        if not term and _num(data.get("production_days")):
+            term = {"value": int(_num(data.get("production_days"))), "unit": "calendar_days"}
+        db.add(FactoryPriceHistory(factory_id=factory.id, model=model_name, execution_id=ex.id, unit_price=price,
+                                   currency=(data.get("currency") or "CNY")[:3].upper(), basis=data.get("basis") or "",
+                                   production_term=term, on=date.today(), source="price_list"))
+    audit(db, user.id, None, "equipment_execution", ex.id, "catalog_add" if created else "catalog_add_existing",
+          after={"factory": factory.name, "model": model_name, "status": ex.status, "params": len(rows), "comment": data.get("comment") or ""})
+    return ex, created

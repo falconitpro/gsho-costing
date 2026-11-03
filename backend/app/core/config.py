@@ -49,6 +49,8 @@ class Settings:
 
     # Переводчик RU↔ZH (задача 4): console | yandex
     translator_provider: str = field(default_factory=lambda: _env("TRANSLATOR_PROVIDER", "yandex"))
+    company_registry_provider: str = field(default_factory=lambda: _env("COMPANY_REGISTRY_PROVIDER", "dadata"))
+    dadata_api_key: str = field(default_factory=lambda: _env("DADATA_API_KEY", ""))
     yandex_translate_api_key: str = field(default_factory=lambda: _env("YANDEX_TRANSLATE_API_KEY", ""))
     yandex_folder_id: str = field(default_factory=lambda: _env("YANDEX_FOLDER_ID", ""))
 

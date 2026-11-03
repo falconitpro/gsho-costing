@@ -97,3 +97,129 @@ def set_value(db: Session, key: str, value: Any, user_id: str | None, comment: s
 
 def history(db: Session, key: str) -> list[RateSetting]:
     return db.scalars(select(RateSetting).where(RateSetting.key == key).order_by(RateSetting.valid_from.desc())).all()
+
+
+# ------------------------------------------------------------------ описание настроек для экрана «Настройки»
+# type: number | bool | select | object (поля fields) | dict (свободные ключи → число) | table (строки с колонками columns) | dates | json
+_PM = [{"key": "pessimistic", "label": "Пессимистичный"}, {"key": "optimistic", "label": "Оптимистичный"}]
+_EVENTS = [
+    {"value": "contract", "label": "подписание контракта"}, {"value": "client_prepayment", "label": "аванс клиента"},
+    {"value": "lc_opened", "label": "открытие аккредитива"}, {"value": "factory_contract", "label": "контракт с заводом"},
+    {"value": "factory_prepayment", "label": "аванс заводу"}, {"value": "readiness", "label": "готовность на заводе"},
+    {"value": "shipment", "label": "отгрузка"}, {"value": "border", "label": "пересечение границы (CMR)"},
+    {"value": "declaration", "label": "выпуск ДТ"}, {"value": "delivery", "label": "поставка клиенту"},
+    {"value": "commissioning", "label": "ПНР"}, {"value": "runtime", "label": "наработка"},
+]
+_SCHEME_COLS = [
+    {"key": "share_pct", "label": "Доля, %", "type": "number"},
+    {"key": "event", "label": "Событие", "type": "select", "options": _EVENTS},
+    {"key": "offset_days", "label": "Через, дней", "type": "number"},
+    {"key": "offset_kind", "label": "Дни", "type": "select", "options": [{"value": "calendar", "label": "календарные"}, {"value": "working", "label": "рабочие"}]},
+    {"key": "via", "label": "Способ", "type": "select", "options": [{"value": "transfer", "label": "перевод"}, {"value": "lc", "label": "аккредитив"}]},
+]
+
+META: dict[str, dict] = {
+    # Маржа и визы
+    "margin_threshold_pct": {"group": "Маржа и визы", "title": "Порог маржи", "unit": "%", "type": "number",
+                             "help": "Если маржа сделки ниже порога, нужна виза финансового директора."},
+    "cash_gap_limit_rub": {"group": "Маржа и визы", "title": "Лимит кассового разрыва", "unit": "₽", "type": "number", "nullable": True,
+                           "help": "Кассовый разрыв больше лимита требует визы ФД. Пусто — лимита нет."},
+    "gd_deal_limit_rub": {"group": "Маржа и визы", "title": "Сумма сделки для визы ГД", "unit": "₽", "type": "number", "nullable": True,
+                          "help": "Сделки дороже этой суммы визирует генеральный директор. Пусто — не требуется."},
+    "approval_ladder": {"group": "Маржа и визы", "title": "Ступени визации", "type": "table",
+                        "help": "Порядок виз и условия, при которых ступень включается.",
+                        "columns": [{"key": "name", "label": "Ступень", "type": "text"},
+                                    {"key": "role", "label": "Кто визирует", "type": "select", "options": [{"value": "cd", "label": "КД"}, {"value": "fd", "label": "ФД"}, {"value": "gd", "label": "ГД"}]},
+                                    {"key": "condition", "label": "Условие (служебное)", "type": "text"},
+                                    {"key": "sla_days", "label": "Срок, раб. дн.", "type": "number"}]},
+    # Сценарии и курс
+    "scenario_dk": {"group": "Сценарии и прогноз курса", "title": "Отклонение курса в сценариях", "unit": "%", "type": "object", "fields": _PM,
+                    "help": "На сколько процентов курс в сценарии отличается от базового (пессимистичный — дороже)."},
+    "scenario_dt": {"group": "Сценарии и прогноз курса", "title": "Сдвиг сроков в сценариях", "unit": "дн.", "type": "object", "fields": _PM,
+                    "help": "Задержка (+) или ускорение (−) производства и поставки относительно базового сценария."},
+    "use_historical_volatility": {"group": "Сценарии и прогноз курса", "title": "Учитывать историческую волатильность курса", "type": "bool",
+                                  "help": "Расширять диапазон сценариев по фактическим колебаниям курса за прошлые годы."},
+    "vol_multipliers": {"group": "Сценарии и прогноз курса", "title": "Множители волатильности", "type": "object", "fields": _PM,
+                        "help": "Какую часть исторической волатильности добавлять к сценарию."},
+    "fx_weights": {"group": "Сценарии и прогноз курса", "title": "Веса методов прогноза курса", "type": "object",
+                   "fields": [{"key": "forward", "label": "Форвард"}, {"key": "trend", "label": "Тренд и сезонность"}, {"key": "expert", "label": "Экспертная оценка"}],
+                   "help": "Доли методов в итоговом прогнозе, в сумме 1 (например 0,4 / 0,3 / 0,3)."},
+    "fx_history_years": {"group": "Сценарии и прогноз курса", "title": "Глубина истории курса", "unit": "лет", "type": "number"},
+    "fx_expert_points": {"group": "Сценарии и прогноз курса", "title": "Экспертные точки курса", "type": "json",
+                         "help": "Ожидаемый курс на даты, по валютам: {\"CNY\": {\"2027-03-31\": 12.5}}."},
+    "kp_fx_clause_pct": {"group": "Сценарии и прогноз курса", "title": "Оговорка о курсе в КП", "unit": "%", "type": "number",
+                         "help": "При изменении курса больше чем на эту величину цена КП пересматривается (текст в КП)."},
+    # Стоимость денег и банк
+    "key_rate_pct": {"group": "Стоимость денег и банк", "title": "Ключевая ставка ЦБ РФ", "unit": "%", "type": "number"},
+    "pboc_rate_pct": {"group": "Стоимость денег и банк", "title": "Ставка Народного банка Китая", "unit": "%", "type": "number"},
+    "foreign_rates_pct": {"group": "Стоимость денег и банк", "title": "Ставки по валютам (для форварда)", "unit": "%", "type": "dict", "key_label": "Валюта"},
+    "financing_rate_pct": {"group": "Стоимость денег и банк", "title": "Ставка финансирования", "unit": "% годовых", "type": "number",
+                           "help": "Стоимость денег для кассового разрыва."},
+    "deposit_rate_pct": {"group": "Стоимость денег и банк", "title": "Ставка размещения", "unit": "% годовых", "type": "number", "nullable": True,
+                         "help": "Доход на свободные деньги. Пусто — не учитывается."},
+    "conversion_fee_pct": {"group": "Стоимость денег и банк", "title": "Комиссия за конвертацию", "unit": "%", "type": "number"},
+    "transfer_fee_rub": {"group": "Стоимость денег и банк", "title": "Комиссия за валютный перевод", "unit": "₽", "type": "number"},
+    "guarantee_rate_pct": {"group": "Стоимость денег и банк", "title": "Ставка банковской гарантии (прочие)", "unit": "% годовых", "type": "number"},
+    "advance_guarantee_cost": {"group": "Стоимость денег и банк", "title": "Банковская гарантия на аванс клиента", "type": "object",
+                               "help": "Расход в статье 11, если в условиях клиента есть аванс. КД может изменить в сделке.",
+                               "fields": [{"key": "enabled", "label": "Учитывать", "type": "bool"},
+                                          {"key": "mode", "label": "Способ расчёта", "type": "select",
+                                           "options": [{"value": "one_time_pct", "label": "разовый % от аванса"}, {"value": "annual_pct", "label": "% годовых до поставки"}, {"value": "fixed", "label": "фиксированная сумма, ₽"}]},
+                                          {"key": "value", "label": "Значение"}]},
+    # НДС
+    "vat_offset_days": {"group": "НДС", "title": "Срок возмещения ввозного НДС", "unit": "дн.", "type": "number"},
+    "import_vat_in_cost": {"group": "НДС", "title": "Ввозной НДС — расход (не возмещается)", "type": "bool",
+                           "help": "Выключено: НДС возмещается и влияет только на кассовый разрыв."},
+    # Накладные и резервы
+    "overhead_scale": {"group": "Накладные и резервы", "title": "Шкала накладных расходов", "type": "table",
+                       "help": "Процент накладных от себестоимости в зависимости от суммы сделки. Пустая граница — «и выше».",
+                       "columns": [{"key": "up_to_rub", "label": "Сумма сделки до, ₽", "type": "number", "nullable": True}, {"key": "pct", "label": "Накладные, %", "type": "number"}]},
+    "overhead_actual_pct_last_year": {"group": "Накладные и резервы", "title": "Фактические накладные прошлого года", "unit": "%", "type": "number", "nullable": True,
+                                      "help": "Справочно, для сравнения со шкалой."},
+    "warranty_reserve_pct_by_type": {"group": "Накладные и резервы", "title": "Гарантийный резерв по типу машины", "unit": "%", "type": "dict", "key_label": "Тип машины",
+                                     "help": "«default» — для типов, которых нет в списке."},
+    "unplanned_reserve_pct": {"group": "Накладные и резервы", "title": "Резерв на непредвиденные расходы", "unit": "%", "type": "number"},
+    # Сервис
+    "labour_rates_rub_per_hour": {"group": "Сервис", "title": "Ставки работ сервиса", "unit": "₽/ч", "type": "object",
+                                  "fields": [{"key": "engineer_1", "label": "Инженер 1 категории"}, {"key": "engineer_2", "label": "Инженер 2 категории"}, {"key": "mechanic", "label": "Механик"}]},
+    "region_norms": {"group": "Сервис", "title": "Нормы выезда по регионам", "type": "json",
+                     "help": "Для каждого региона: проезд, проживание в сутки, суточные (₽), часы в пути. «default» — для остальных."},
+    "hours_per_month_by_type": {"group": "Сервис", "title": "Наработка в месяц по типу машины", "unit": "м·ч", "type": "dict", "key_label": "Тип машины"},
+    "commissioning_days": {"group": "Сервис", "title": "Длительность ПНР", "unit": "дн.", "type": "number"},
+    # Контроль отклонений
+    "price_deviation_pct": {"group": "Контроль отклонений", "title": "Отклонение цены завода от истории", "unit": "%", "type": "number",
+                            "help": "Больше — менеджер обязан написать комментарий."},
+    "logistics_deviation_pct": {"group": "Контроль отклонений", "title": "Отклонение логистики от истории", "unit": "%", "type": "number",
+                                "help": "Больше — логист обязан написать комментарий."},
+    "plan_fact_deviation_pct": {"group": "Контроль отклонений", "title": "Допустимое отклонение план/факт", "unit": "%", "type": "number"},
+    # Сроки
+    "sla_days": {"group": "Сроки и календарь", "title": "Сроки выполнения задач (SLA)", "unit": "раб. дн.", "type": "object",
+                 "fields": [{"key": "logistics", "label": "Логист"}, {"key": "service", "label": "Сервис"}, {"key": "cd", "label": "КД"},
+                            {"key": "fd", "label": "ФД"}, {"key": "gd", "label": "ГД"}, {"key": "manager_rework", "label": "Доработка менеджером"}]},
+    "kp_validity_days": {"group": "Сроки и календарь", "title": "Срок действия КП", "unit": "дн.", "type": "number"},
+    "lc_opening_days": {"group": "Сроки и календарь", "title": "Открытие аккредитива после контракта (план)", "unit": "дн.", "type": "number"},
+    "factory_contract_lag_days": {"group": "Сроки и календарь", "title": "Контракт с заводом после контракта с клиентом", "unit": "дн.", "type": "number"},
+    "delivery_reserve_pct": {"group": "Сроки и календарь", "title": "Резерв к сроку поставки в КП", "unit": "%", "type": "number",
+                             "help": "Срок для клиента = расчётный × (1 + резерв), с округлением до целой недели."},
+    "rf_delivery_days_default": {"group": "Сроки и календарь", "title": "Доставка по РФ после выпуска ДТ (по умолчанию)", "unit": "дн.", "type": "number"},
+    "local_options_order_reserve_days": {"group": "Сроки и календарь", "title": "Запас при заказе опций РФ", "unit": "дн.", "type": "number"},
+    "rf_holidays": {"group": "Сроки и календарь", "title": "Дополнительные нерабочие дни", "type": "dates",
+                    "help": "Переносы и праздники сверх производственного календаря, по одной дате в строке (ГГГГ-ММ-ДД)."},
+    # Условия оплаты
+    "default_client_payment_scheme": {"group": "Условия оплаты по умолчанию", "title": "Типовая схема оплаты клиента", "type": "table", "columns": _SCHEME_COLS,
+                                      "help": "Применяется в расчёте, пока КД не задал условия в сделке."},
+    "default_factory_payment_scheme": {"group": "Условия оплаты по умолчанию", "title": "Типовая схема оплаты заводу", "type": "table", "columns": _SCHEME_COLS},
+    # Интеграции и КП
+    "translator_provider": {"group": "Интеграции и КП", "title": "Переводчик", "type": "select",
+                            "options": [{"value": "yandex", "label": "Яндекс Переводчик"}, {"value": "console", "label": "не подключён (только глоссарий)"}]},
+    "kp_brand_default": {"group": "Интеграции и КП", "title": "Подача КП по умолчанию", "type": "select",
+                         "options": [{"value": "factory", "label": "под маркой завода"}, {"value": "company", "label": "под брендом компании"}]},
+}
+GROUP_ORDER = ["Маржа и визы", "Условия оплаты по умолчанию", "Стоимость денег и банк", "Сценарии и прогноз курса", "НДС",
+               "Накладные и резервы", "Сервис", "Контроль отклонений", "Сроки и календарь", "Интеграции и КП"]
+
+
+def meta() -> dict:
+    """Описание всех ключей для экрана настроек; ключи без описания — в группу «Прочее» (тип json)."""
+    items = {k: {"key": k, **META.get(k, {"group": "Прочее", "title": k, "type": "json"})} for k in DEFAULTS}
+    return {"groups": GROUP_ORDER + ["Прочее"], "items": items}
