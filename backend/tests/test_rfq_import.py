@@ -109,3 +109,14 @@ def test_parse_shifted_rows_and_values_in_zh_column(tmp_path):
     assert any(e.severity == "info" and "по названию" in e.message for e in r.errors)
     assert r.logistics_params.get("1.5", {}).get("value") == 5050                    # отметки «L» взяты из шаблона компании
     assert _parse_number("≥ 200") == 200 and _parse_number("95,6 (при 2 400 об/мин)") == 95.6 and _parse_number("200–1000") is None
+
+
+def test_country_normalized():
+    """Страна-производитель — только названием страны, без провинций и адреса."""
+    from app.services.countries import is_country_row, normalize_country
+    assert normalize_country("China, Shandong province, Jinan") == "Китай"
+    assert normalize_country("中国山东省临沂市") == "Китай"
+    assert normalize_country("Xuzhou, Jiangsu") == "Китай"
+    assert normalize_country("CN") == "Китай" and normalize_country("Made in Korea") == "Республика Корея"
+    assert normalize_country("Sweden (Örebro)") == "Швеция" and normalize_country("Дания, Копенгаген") == "Дания"
+    assert is_country_row("1.3", "") and is_country_row("", "Страна-производитель")

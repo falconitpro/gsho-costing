@@ -35,6 +35,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
   const [prod, setProd] = useState<{ value: string; unit: string; fixed_date: string; start_event: string }>({ value: String(position?.production_term?.value ?? position?.production_days ?? 90), unit: position?.production_term?.unit || "calendar_days", fixed_date: position?.production_term?.fixed_date || "", start_event: position?.production_term?.start_event || "factory_contract" });
   const [dterm, setDterm] = useState<{ unit: string; start_event: string }>({ unit: position?.delivery_term?.unit || "calendar_days", start_event: position?.delivery_term?.start_event || "client_contract" });
   const [tree, setTree] = useState<Tree>([]);
+  const [countries, setCountries] = useState<string[]>([]);
   const [execId, setExecId] = useState(position?.execution_id || "");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -44,6 +45,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
     api.get<Schema>("/api/deals/rfq/template").then(setSchema);
     api.get<Factory[]>("/api/refs/factories").then(setFactories);
     api.get<Tree>("/api/catalog/tree").then(setTree).catch(() => setTree([]));
+    api.get<string[]>("/api/refs/countries").then(setCountries).catch(() => setCountries([]));
   }, []);
   useEffect(() => {
     if (!position) return;
@@ -133,6 +135,12 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
         <input value={v} placeholder="модель" onChange={(e) => set(code, e.target.value)} />
         {(trademark || v) && <span className="muted" style={{ fontSize: 12 }}>обозначение: <b>{designation({ trademark, model: v })}</b></span>}
       </div>);
+    if (code === "1.3") return (
+      <select value={v} onChange={(e) => set(code, e.target.value)}>
+        <option value="">—</option>
+        {v && !countries.includes(v) && <option value={v}>{v} (не из списка)</option>}
+        {countries.map((x) => <option key={x}>{x}</option>)}
+      </select>);
     if (code === "13.1") return <select value={v || "CNY"} onChange={(e) => set(code, e.target.value)}>{CURRENCIES.map((c) => <option key={c}>{c}</option>)}</select>;
     if (code === "13.2") return <select value={v || "FCA"} onChange={(e) => set(code, e.target.value)}>{["EXW", "FCA", "CPT", "CIP", "DAP", "DDP"].map((b) => <option key={b}>{b}</option>)}</select>;
     const yesno = (f.unit || "").toLowerCase().startsWith("да/нет");

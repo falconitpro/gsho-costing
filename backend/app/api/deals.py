@@ -301,6 +301,9 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
     for key in ("tech_params", "logistics_params"):
         if isinstance(body.get(key), dict):
             setattr(pos, key, {**(getattr(pos, key) or {}), **body[key]})
+    if "machine_type" in body or "model" in body or "tech_params" in body:   # карточка позиции → строки 1.1 / 1.2 / 1.3 таблицы
+        from ..services.tech_params_service import rows_follow_position
+        rows_follow_position(pos)
     if "unit_price" in body:
         pos.price_reference = _price_ref(db, pos, body.get("price_comment", ""))
         _record_price(db, pos, deal)

@@ -113,10 +113,13 @@ def save_rows(deal_id: str, pos_id: str, rows: list[RowIn], db: Session = Depend
     for rid, row in existing.items():
         if rid not in keep:
             db.delete(row)
-    audit(db, user.id, deal.id, "tech_params", pos.id, "save", after={"rows": len(rows)})
+    db.flush()
+    db.refresh(pos)
+    synced = tps.sync_position(db, pos)   # тип машины / модель из таблицы — в позицию (перечень позиций, все роли); страна — названием
+    audit(db, user.id, deal.id, "tech_params", pos.id, "save", after={"rows": len(rows), **synced})
     db.commit()
     db.refresh(pos)
-    return {"rows": tps.row_dicts(pos)}
+    return {"rows": tps.row_dicts(pos), "position": {"machine_type": pos.machine_type, "model": pos.model}, "synced": synced}
 
 
 @router.post("/positions/{pos_id}/tech-params/verify/{row_id}")
@@ -207,6 +210,17 @@ async def import_apply(deal_id: str, pos_id: str, file: UploadFile = File(...), 
             res["offer_id"] = offer.id
         else:
             res = tps.apply_import(db, pos, path, file.filename or "", mp, user.id, target=target, selected_rows=sel, add_unmatched=add_unmatched)
+        db.flush()
+        db.refresh(pos)
+        res["synced"] = tps.sync_position(db, pos)   # строки позиции (после восстановления снимка) → позиция
+        from ..services.countries import is_country_row, normalize_country
+        for r in res.get("rows") or []:          # и в ответе (в т.ч. ответ другого завода) — страна названием
+            if is_country_row(r.get("code") or "", r.get("name_ru") or "") and (r.get("value_ru") or r.get("value_zh")):
+                r["value_ru"] = normalize_country(r.get("value_ru") or r.get("value_zh"))
+        if offer_id and res.get("offer_id"):
+            offer.params = [{**p_, "value_ru": normalize_country(p_.get("value_ru") or p_.get("value_zh"))}
+                            if is_country_row(p_.get("code") or "", p_.get("name_ru") or "") and (p_.get("value_ru") or p_.get("value_zh")) else p_
+                            for p_ in (offer.params or [])]
         # запоминаем сопоставление для следующих файлов этого клиента/завода
         try:
             sheets = tps.read_table(path, file.filename or "")

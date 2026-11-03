@@ -234,6 +234,13 @@ def _apply_factory(f: Factory, body: FactoryIn, user: Optional[CurrentUser] = No
     f.wecom_external_ids = [c["wecom_id"] for c in ordered if c.get("wecom_id")]
 
 
+@router.get("/countries")
+def countries(user: CurrentUser = Depends(get_current_user)):
+    """Справочник стран для поля «Страна-производитель»."""
+    from ..services.countries import country_names
+    return country_names()
+
+
 @router.get("/factories/contact-roles")
 def factory_contact_roles(user: CurrentUser = Depends(get_current_user)):
     return CONTACT_ROLES

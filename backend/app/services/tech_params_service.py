@@ -244,6 +244,45 @@ def rows_from_rfq(db: Session, pos: Position, parsed, user_id: Optional[str]) ->
         db.add(PositionTechParam(position_id=pos.id, filled_by=user_id, translation_status="none", **r))
     db.flush()
     db.refresh(pos)
+    sync_position(db, pos)   # страна — только названием страны
+
+
+def sync_position(db: Session, pos: Position) -> dict:
+    """Таблица → позиция: страна-производитель приводится к названию страны; тип машины (1.1) и модель (1.2), изменённые
+    в таблице, переносятся в позицию — оттуда они видны в перечне позиций, карточке сделки и у всех ролей."""
+    from .countries import is_country_row, normalize_country
+    changed: dict = {}
+    tp = dict(pos.tech_params or {})
+    for r in pos.tech_param_rows or []:
+        if is_country_row(r.code, r.name_ru):
+            raw = r.value_ru or r.value_zh
+            norm = normalize_country(raw)
+            if raw and norm and norm != r.value_ru:
+                r.value_ru = norm
+                changed["country"] = norm
+        code, val = (r.code or "").strip(), (r.value_ru or "").strip()
+        if code == "1.1" and val and val != (pos.machine_type or ""):
+            pos.machine_type = changed["machine_type"] = val
+        if code == "1.2" and val and val != (pos.model or ""):
+            pos.model = changed["model"] = val
+        if code in ("1.1", "1.2", "1.3") and val and isinstance(tp.get(code), dict) and tp[code].get("value") != val:
+            tp[code] = {**tp[code], "value": val}
+    if tp != (pos.tech_params or {}):
+        pos.tech_params = tp
+    return changed
+
+
+def rows_follow_position(pos: Position) -> None:
+    """Позиция → таблица: тип машины, модель и страна, изменённые в карточке позиции, — в строки 1.1 / 1.2 / 1.3."""
+    for r in pos.tech_param_rows or []:
+        if r.code == "1.1" and pos.machine_type and r.value_ru != pos.machine_type:
+            r.value_ru = pos.machine_type
+        if r.code == "1.2" and pos.model and r.value_ru != pos.model:
+            r.value_ru = pos.model
+        country = ((pos.tech_params or {}).get("1.3") or {}).get("value") if isinstance((pos.tech_params or {}).get("1.3"), dict) else None
+        if r.code == "1.3" and country and r.value_ru != country:
+            from .countries import normalize_country
+            r.value_ru = normalize_country(country)
 
 
 def row_dicts(pos: Position) -> list[dict]:
