@@ -44,10 +44,31 @@ export default function App() {
   return (
     <BrowserRouter>
       <header className="top">
-        <NavLink to="/deals" className="brand">
-          <img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" />
-          <span>Себестоимость ГШО</span>
-        </NavLink>
+        <div className="top-row">
+          <NavLink to="/deals" className="brand">
+            <img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" />
+            <span>Себестоимость ГШО</span>
+          </NavLink>
+          <div className="account">
+            {devUsers.length > 0 && (
+              <label className="dev-switch" title="тестовый стенд: войти под другой учётной записью">
+                <span>Войти как</span>
+                <select value={getDevUser()} onChange={(e) => { setDevUser(e.target.value); load(); }}>
+                  <option value="">— выберите пользователя —</option>
+                  {devUsers.map((u) => (
+                    <option key={u.email} value={u.email}>{u.display_name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {me && (
+              <div className="me" title={`${me.display_name} — ${me.roles.map((r) => r.title).join(", ")}`}>
+                <span className="avatar">{me.display_name.replace(/\(.*\)/, "").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()}</span>
+                <span className="who"><b>{me.display_name.replace(/\s*\(.*\)\s*$/, "")}</b><small>{me.roles.map((r) => r.title).join(", ")}</small></span>
+              </div>)}
+            {!me && devUsers.length === 0 && <a className="btn" href="/api/auth/login">Войти через Microsoft 365</a>}
+          </div>
+        </div>
         {me && (
           <nav>
             <NavLink to="/deals">Сделки</NavLink>
@@ -63,17 +84,6 @@ export default function App() {
             {has("admin", "gd", "fd") && <NavLink to="/admin">Администрирование</NavLink>}
           </nav>
         )}
-        <span className="spacer" />
-        {devUsers.length > 0 && (
-          <select value={getDevUser()} onChange={(e) => { setDevUser(e.target.value); load(); }} title="dev: переключение пользователя">
-            <option value="">— выберите пользователя (dev) —</option>
-            {devUsers.map((u) => (
-              <option key={u.email} value={u.email}>{u.display_name}</option>
-            ))}
-          </select>
-        )}
-        {me && <span className="me muted" title={me.roles.map((r) => r.title).join(", ")}>{me.display_name}<small>{me.roles.map((r) => r.title).join(", ")}</small></span>}
-        {!me && devUsers.length === 0 && <a className="btn" href="/api/auth/login">Войти через Microsoft 365</a>}
       </header>
       <FloatingScrollbar />
       <main>
