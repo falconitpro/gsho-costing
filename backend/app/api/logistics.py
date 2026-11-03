@@ -51,6 +51,7 @@ class PositionLogisticsIn(BaseModel):
     duty_pct: Optional[float] = None
     vat_pct: Optional[float] = None
     hs_manual_comment: str = ""
+    hs_description: str = ""                  # наименование кода, введённого вручную (нет в справочнике) — пополняет справочник
     util_fee_rub: float = 0.0
     util_applies: Optional[bool] = None       # начисляется ли утилизационный сбор; None — по справочнику ТН ВЭД
     util_base_rate_rub: Optional[float] = None    # базовая ставка, ₽
@@ -153,6 +154,16 @@ def update_position_logistics(deal_id: str, pos_id: str, body: PositionLogistics
         ref_row = db.scalar(select(HsCode).where(HsCode.code == body.hs_code, HsCode.valid_to.is_(None)))
         if ref_row:
             ref = {"duty_pct": ref_row.duty_pct, "vat_pct": ref_row.vat_pct, "util_fee": ref_row.util_fee, "certification": ref_row.certification}
+    if body.hs_code and ref is None and body.hs_description.strip():
+        # ручной код ТН ВЭД с наименованием — в справочник (ставки — введённые логистом)
+        import re as _re
+        code = _re.sub(r"\D", "", body.hs_code)
+        if len(code) == 10:
+            db.add(HsCode(code=code, description=body.hs_description.strip(), duty_pct=body.duty_pct or 0.0,
+                          vat_pct=body.vat_pct if body.vat_pct is not None else 22.0, util_fee=bool(body.util_applies), certification=[],
+                          valid_from=date.today()))
+            data["hs_code"] = code
+            audit(db, user.id, deal.id, "hs_code", code, "manual_add", after={"description": body.hs_description.strip()})
     chk = hs_check(body.duty_pct, body.vat_pct, ref)
     if chk.get("mismatch") and not body.hs_manual_comment:
         raise HTTPException(422, {"message": "Ставка отличается от справочника ТН ВЭД — укажите комментарий", "hs_check": chk})
@@ -215,8 +226,15 @@ def complete(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     missing = [p.designation for p in deal.positions if not (p.logistics or {}).get("hs_code")]
     if missing:
         raise HTTPException(422, {"message": "Не задан код ТН ВЭД", "positions": missing})
-    if any(p.batch_id is None for p in deal.positions):
-        raise HTTPException(422, "Все позиции должны быть распределены по партиям")
+    unbatched = [p for p in deal.positions if p.batch_id is None]
+    if unbatched:   # распределять позиции по партиям не нужно: без партии — в первую (или в общую партию сделки)
+        b0 = deal.batches[0] if deal.batches else None
+        if b0 is None:
+            b0 = Batch(deal_id=deal.id, name="Партия 1", items={})
+            db.add(b0)
+            db.flush()
+        for p in unbatched:
+            p.batch_id = b0.id
     st = DealState(status=deal.status, service_flag=deal.service_flag, logistics_done=deal.logistics_done, service_done=deal.service_done)
     tr = block_completed(st, "logistics", date.today(), sla(db))
     deal.logistics_done = True

@@ -31,7 +31,7 @@ def storage(s: Settings | None = None) -> StorageAdapter:
 
 def mail(s: Settings | None = None) -> MailAdapter:
     s = s or get_settings()
-    return {"console": ConsoleMail, "outlook": lambda: OutlookGraphMail(s), "yandex_smtp": lambda: YandexSmtpMail(s)}[s.mail_provider]()
+    return {"console": ConsoleMail, "outlook": lambda: OutlookGraphMail(s), "yandex_smtp": lambda: YandexSmtpMail(s), "smtp": lambda: YandexSmtpMail(s)}[s.mail_provider]()
 
 
 def messenger(s: Settings | None = None) -> MessengerAdapter:

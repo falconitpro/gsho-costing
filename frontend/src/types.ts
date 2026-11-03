@@ -77,7 +77,7 @@ export interface Deal {
   kp_due: string | null; priority: string; status: string; manager_id: string; base_currency: string; service_flag: boolean;
   target_hours: number | null; client_payments: PaymentLine[]; client_payment_wishes?: string; bank_guarantee?: Record<string, unknown>;
   positions: Position[]; variants: Variant[]; batches: Batch[]; offer?: Variant | null; payment_terms_set?: boolean;
-  checks?: string[]; current_version_no: number; outcome?: string | null; logistics_done: boolean; service_done: boolean;
+  checks?: string[]; report_date?: string | null; current_version_no: number; outcome?: string | null; logistics_done: boolean; service_done: boolean;
   has_alternatives?: boolean; won_variant_id?: string | null; parent_deal_id?: string | null; request_group_id?: string | null;
   kp_brand?: string; kp_images_mode?: string; contract_number?: string; contract_signed_at?: string | null; factory_contract_signed_at?: string | null;
   in_execution?: boolean;
@@ -100,7 +100,7 @@ export interface FxComponent {
   rate_by_scenario: Record<string, number>; fixed: boolean;
 }
 export interface CalcResponse {
-  input: { base_currency: string; fx: { as_of: string; rates: Record<string, number>; source: string }; thresholds: { margin_threshold_pct: number } };
+  input: { base_currency: string; calc_date?: string; fx: { as_of: string; rates: Record<string, number>; source: string }; thresholds: { margin_threshold_pct: number } };
   result: { variants: Record<string, Record<string, ScenarioResult>>; fx_components: FxComponent[]; approval: { financial: boolean; general: boolean; reasons: string[] }; warnings: string[] };
   approval_flags: Record<string, boolean>; threshold_pct: number; warnings: string[]; comments: { from: string; item: string; ref: string; comment: string }[];
   factory_price_history?: { model: string; unit_price: number; currency: string; on: string }[];
@@ -117,4 +117,5 @@ export interface Task { id: string; deal_id: string; deal_number: string; title:
 export interface Stage {
   id: string; code: string; title: string; planned_on: string | null; actual_on: string | null; amount?: number | null; currency: string; actual_amount?: number | null;
   responsible_roles: string[]; kind: string; position_id: string | null; position: string | null; batch_id: string | null; batch: string | null; note: string; done: boolean; overdue: boolean; can_set: boolean;
+  baseline_on?: string | null; refined_on?: string | null; refined_note?: string; deviation_days?: number | null;
 }

@@ -16,17 +16,21 @@ function LinesEditor({ lines, events, onChange }: { lines: PaymentLine[]; events
   const sum = lines.reduce((s, l) => s + (l.share_pct || 0), 0);
   return (
     <div>
-      <table><thead><tr><th>№</th><th>Доля, %</th><th>Событие-основание</th><th>Смещение</th><th>Дни</th><th>Аккредитив</th><th /></tr></thead>
+      <table className="pay" style={{ width: "100%", tableLayout: "fixed" }}>
+        <colgroup><col style={{ width: 36 }} /><col style={{ width: 90 }} /><col /><col style={{ width: 90 }} /><col style={{ width: 130 }} /><col style={{ width: 90 }} /><col style={{ width: "28%" }} /><col style={{ width: 36 }} /></colgroup>
+        <thead><tr><th>№</th><th>Доля, %</th><th>Событие-основание</th><th>Через, дн.</th><th>Дни</th><th>Аккредитив</th><th>Условие словами</th><th /></tr></thead>
         <tbody>{lines.map((l, i) => (
           <tr key={i}>
-            <td>{i + 1}</td>
-            <td><input type="number" value={l.share_pct ?? ""} style={{ width: 70 }} onChange={(e) => upd(i, { share_pct: Number(e.target.value) })} /></td>
+            <td className="muted">{i + 1}</td>
+            <td><input type="number" value={l.share_pct ?? ""} onChange={(e) => upd(i, { share_pct: Number(e.target.value) })} /></td>
             <td><select value={l.event} onChange={(e) => upd(i, { event: e.target.value })}>{events.map((ev) => <option key={ev} value={ev}>{EVENT_TITLES[ev]}</option>)}</select></td>
-            <td><input type="number" value={l.offset_days} style={{ width: 70 }} onChange={(e) => upd(i, { offset_days: Number(e.target.value) })} /></td>
+            <td><input type="number" value={l.offset_days} onChange={(e) => upd(i, { offset_days: Number(e.target.value) })} /></td>
             <td><select value={l.offset_kind || "calendar"} onChange={(e) => upd(i, { offset_kind: e.target.value })}><option value="calendar">календарные</option><option value="working">рабочие</option></select></td>
-            <td><input type="checkbox" checked={l.via === "lc"} onChange={(e) => upd(i, { via: e.target.checked ? "lc" : "transfer" })} /></td>
-            <td><button className="btn ghost" style={{ padding: "2px 6px" }} onClick={() => onChange(lines.filter((_, j) => j !== i).map((x, k) => ({ ...x, no: k + 1 })))}>×</button></td>
-          </tr>))}</tbody></table>
+            <td style={{ textAlign: "center" }}><input type="checkbox" checked={l.via === "lc"} onChange={(e) => upd(i, { via: e.target.checked ? "lc" : "transfer" })} /></td>
+            <td className="muted" style={{ fontSize: 12 }}>{payText(l)}</td>
+            <td><button className="btn ghost" style={{ padding: "2px 6px" }} title="удалить платёж" onClick={() => onChange(lines.filter((_, j) => j !== i).map((x, k) => ({ ...x, no: k + 1 })))}>×</button></td>
+          </tr>))}
+          {lines.length === 0 && <tr><td colSpan={8} className="muted">Платежей нет</td></tr>}</tbody></table>
       <div className="row" style={{ marginTop: 4 }}>
         <button className="btn ghost" onClick={() => onChange([...lines, { no: lines.length + 1, share_pct: Math.max(0, 100 - sum), event: events[0], offset_days: 0, offset_kind: "calendar", via: "transfer" }])}>+ платёж</button>
         <span className={"badge " + (sum === 100 ? "ok" : "bad")}>итого {sum} %</span>
@@ -68,9 +72,10 @@ export default function PaymentTermsEditor({ deal, calc, onSaved }: { deal: Deal
       <h2 style={{ marginTop: 0 }}>Условия оплаты (задаёт КД)</h2>
       {pt.client_payment_wishes && <div className="alert info">Пожелания клиента по оплате (от менеджера): <b>{pt.client_payment_wishes}</b> <button className="btn ghost" style={{ marginLeft: 8 }} onClick={() => api.post(`/api/deals/${deal.id}/payment-terms`, { accept_wishes: true }).then(() => setMsg("Отмечено: пожелания клиента приняты"))}>принять как есть</button></div>}
       {msg && <div className="alert info">{msg}</div>}
-      <div className="grid cols-2">
-        <div>
-          <b>Клиент</b> <span className="muted">{deal.has_alternatives ? "по каждому предложению" : "сделка"}</span>
+      <style>{`.pay td { padding: 3px; vertical-align: middle; } .pay td input:not([type=checkbox]), .pay td select { width: 100%; padding: 4px; box-sizing: border-box; }
+        .pay thead th { background: #f1f1f1; } .paysec { border: 1px solid #e5e5e5; border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }`}</style>
+      <div className="paysec">
+          <h3 style={{ marginTop: 0 }}>1. Расчёты с клиентом <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>{deal.has_alternatives ? "по каждому предложению" : "по сделке"}</span></h3>
           {!deal.has_alternatives && <><SchemeBar onPick={setClient} /><LinesEditor lines={client} events={CLIENT_EVENTS} onChange={setClient} />
             {client.length === 0 && <div className="muted">Не заданы — расчёт по типовой схеме</div>}</>}
           {deal.has_alternatives && deal.variants.filter((v) => !v.is_default).map((v) => (
@@ -84,12 +89,12 @@ export default function PaymentTermsEditor({ deal, calc, onSaved }: { deal: Deal
               <input type="number" step="0.01" value={bg.value} style={{ width: 110 }} onChange={(e) => setBg({ ...bg, value: Number(e.target.value) })} />
             </div>
           </div>
-        </div>
-        <div>
-          <b>Завод</b> <span className="muted">по позициям; условия завода из RFQ/ответа — справка</span>
+      </div>
+      <div className="paysec">
+          <h3 style={{ marginTop: 0 }}>2. Расчёты с заводом <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>по позициям; условия завода из RFQ / ответа — справка</span></h3>
           {pt.positions.map((p) => (
             <div key={p.id} style={{ marginBottom: 10 }}>
-              <div className="row"><b>{p.model}</b>
+              <div className="row" style={{ marginBottom: 4 }}><b>{p.model}</b>
                 <button className="btn ghost" style={{ padding: "2px 8px" }} onClick={() => setFactory({ ...factory, [p.id]: pt.default_factory })}>типовая 30/70 (14 раб. дн.)</button>
                 {p.factory_payments_offer?.length > 0 && <button className="btn ghost" style={{ padding: "2px 8px" }} onClick={() => setFactory({ ...factory, [p.id]: p.factory_payments_offer })} title={p.factory_payments_offer.map(payText).join("; ")}>условия завода</button>}</div>
               <LinesEditor lines={factory[p.id] || []} events={FACTORY_EVENTS} onChange={(l) => setFactory({ ...factory, [p.id]: l })} />
@@ -100,7 +105,6 @@ export default function PaymentTermsEditor({ deal, calc, onSaved }: { deal: Deal
                 <span className="muted">производство: {p.production_term?.value ?? "—"} {TERM_UNITS[p.production_term?.unit || "calendar_days"]}</span>
               </div>
             </div>))}
-        </div>
       </div>
       <div className="row" style={{ marginTop: 8 }}><button className="btn" onClick={save}>Сохранить условия оплаты и сроки</button><UndoButton h={history} /><span className="muted">изменение после визы сбрасывает визы</span></div>
     </div>

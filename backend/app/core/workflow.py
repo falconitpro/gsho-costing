@@ -290,13 +290,14 @@ def approve(state: DealState, today: date, sla: SlaDefaults, by: Role) -> Transi
 
 
 def rework(state: DealState, block: str, reason: str, today: date, sla: SlaDefaults) -> TransitionResult:
-    """Возврат на доработку (КД или ЗГД, на любом этапе). Создаёт новую версию расчёта."""
+    """Возврат на доработку (КД, ЗГД или ФД, на любом этапе расчёта). Создаёт новую версию расчёта."""
     if not reason:
         raise WorkflowError("Укажите причину возврата.")
-    role = {"manager": Role.MANAGER, "logistics": Role.LOGISTICIAN, "service": Role.SERVICE_HEAD, "pricing": Role.CD}.get(block)
+    role = {"manager": Role.MANAGER, "logistics": Role.LOGISTICIAN, "service": Role.SERVICE_HEAD, "pricing": Role.CD, "gd": Role.GD}.get(block)
     if role is None:
-        raise WorkflowError("Укажите блок доработки: manager / logistics / service / pricing.")
-    days = {"manager": sla.manager_rework_days, "logistics": sla.logistics_days, "service": sla.service_days, "pricing": sla.cd_days}[block]
+        raise WorkflowError("Укажите блок доработки: manager / logistics / service / pricing / gd.")
+    days = {"manager": sla.manager_rework_days, "logistics": sla.logistics_days, "service": sla.service_days, "pricing": sla.cd_days,
+            "gd": sla.gd_days}[block]
     res = TransitionResult(status=DealStatus.REWORK, new_version=True, audit=f"Возврат на доработку ({block}): {reason}")
     res.tasks.append(TaskSpec(role, f"Доработка: {reason}", add_business_days(today, days), block))
     res.notifications.append(Notification("rework", [role], ["outlook", "wecom", "app"], f"Возврат на доработку: {reason}"))

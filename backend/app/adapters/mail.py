@@ -76,16 +76,49 @@ class OutlookGraphMail(MailAdapter):
 
 
 class YandexSmtpMail(MailAdapter):
-    """Яндекс 360: SMTP для исходящих, IMAP для чтения общего ящика."""
+    """SMTP (Яндекс 360 или любой почтовый сервер): исходящие письма с вложениями. Черновиков в SMTP нет."""
 
     def __init__(self, s):
         self.s = s
 
-    def send(self, msg: OutgoingMail) -> str:   # pragma: no cover
-        raise NotImplementedError("Альтернативный адаптер")
+    def send(self, msg: OutgoingMail) -> str:
+        import mimetypes
+        import os
+        import smtplib
+        import ssl
+        from email.message import EmailMessage
+        from email.utils import make_msgid
+        if not self.s.smtp_user or not self.s.smtp_password:
+            raise RuntimeError("Почта не настроена: задайте SMTP_USER и SMTP_PASSWORD на сервере")
+        m = EmailMessage()
+        m["From"] = self.s.smtp_from or self.s.smtp_user
+        m["To"] = ", ".join(a for a in msg.to if a)
+        m["Subject"] = msg.subject
+        if msg.sender and msg.sender != m["From"]:
+            m["Reply-To"] = msg.sender
+        mid = make_msgid()
+        m["Message-ID"] = mid
+        m.set_content("Письмо в формате HTML.")
+        m.add_alternative(msg.body_html, subtype="html")
+        for path in msg.attachments:
+            ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+            main, sub = ctype.split("/", 1)
+            with open(path, "rb") as f:
+                m.add_attachment(f.read(), maintype=main, subtype=sub, filename=os.path.basename(path))
+        ctx = ssl.create_default_context()
+        if self.s.smtp_port == 465:
+            with smtplib.SMTP_SSL(self.s.smtp_host, self.s.smtp_port, context=ctx, timeout=30) as smtp:
+                smtp.login(self.s.smtp_user, self.s.smtp_password)
+                smtp.send_message(m)
+        else:
+            with smtplib.SMTP(self.s.smtp_host, self.s.smtp_port, timeout=30) as smtp:
+                smtp.starttls(context=ctx)
+                smtp.login(self.s.smtp_user, self.s.smtp_password)
+                smtp.send_message(m)
+        return mid
 
-    def create_draft(self, msg: OutgoingMail) -> str:   # pragma: no cover
-        raise NotImplementedError
+    def create_draft(self, msg: OutgoingMail) -> str:
+        return ""   # в SMTP черновиков нет — письмо отправляется кнопкой «Отправить клиенту»
 
     def fetch_inbox(self, mailbox: str, since_iso: str) -> list[IncomingMail]:   # pragma: no cover
-        raise NotImplementedError
+        return []

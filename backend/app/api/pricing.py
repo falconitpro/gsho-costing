@@ -316,7 +316,7 @@ class ReworkIn(BaseModel):
 
 
 @router.post("/rework")
-def rework(deal_id: str, body: ReworkIn, db: Session = Depends(get_db), user: CurrentUser = Depends(CD)):
+def rework(deal_id: str, body: ReworkIn, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.CD, Role.GD, Role.FD))):
     deal = get_deal_or_404(db, deal_id, user)
     try:
         tr = wf_rework(DealState(status=deal.status, service_flag=deal.service_flag), body.block, body.reason, date.today(), sla(db))
@@ -452,3 +452,152 @@ def _pay_text(l: dict) -> str:
     kind = "раб. дн." if l.get("offset_kind") == "working" else "дн."
     via = " (аккредитив)" if l.get("via") == "lc" else ""
     return f"{share} — {title}" + (f" + {off} {kind}" if off else "") + via
+
+
+# ------------------------------------------------------------------ КП: пересобрать, выгрузить Word / PDF, отправить клиенту
+
+def _kp_access(deal: Deal, user: CurrentUser) -> None:
+    if not (user.has(Role.CD, Role.GD, Role.ADMIN) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):
+        raise HTTPException(403, "КП формируют и отправляют менеджер сделки, КД или ЗГД")
+
+
+def _approved_version(db: Session, deal: Deal) -> DealVersion:
+    ver = db.get(DealVersion, deal.approved_version_id) if deal.approved_version_id else None
+    if ver is None or deal.status not in (DealStatus.APPROVED, DealStatus.KP_SENT, DealStatus.CONTRACT, DealStatus.EXECUTION):
+        raise HTTPException(409, "КП формируется по утверждённой версии расчёта — сначала утвердите расчёт")
+    return ver
+
+
+def _kp_local(db: Session, deal: Deal, ver: DealVersion, rebuild: bool = False) -> str:
+    """Локальный путь к файлу КП утверждённой версии; при отсутствии или rebuild=True — собирается заново и сохраняется в «05 КП»."""
+    if ver.kp_path and not rebuild:
+        local = os.path.join(tempfile.mkdtemp(), os.path.basename(ver.kp_path))
+        try:
+            return adapters.storage().download(ver.kp_path, local)
+        except Exception:
+            pass
+    path = _build_kp_file(db, deal, ver)
+    ensure_folders(db, deal)
+    stored = adapters.storage().upload(path, deal.storage_folder, "05_kp", os.path.basename(path))
+    ver.kp_path = stored.path
+    db.add(Attachment(deal_id=deal.id, folder="05_kp", entity="version", entity_id=ver.id, file_name=os.path.basename(path),
+                      storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=None))
+    return path
+
+
+def _to_pdf(docx_path: str) -> str:
+    """Word → PDF через LibreOffice (установлен в образе бэкенда)."""
+    import shutil
+    import subprocess
+    out = tempfile.mkdtemp()
+    exe = shutil.which("soffice") or shutil.which("libreoffice")
+    if not exe:
+        raise HTTPException(503, "Конвертер в PDF недоступен на сервере (LibreOffice)")
+    subprocess.run([exe, "--headless", "--convert-to", "pdf", "--outdir", out, docx_path], check=True, timeout=120,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={**os.environ, "HOME": out})
+    pdf = os.path.join(out, os.path.splitext(os.path.basename(docx_path))[0] + ".pdf")
+    if not os.path.isfile(pdf):
+        raise HTTPException(500, "Не удалось преобразовать КП в PDF")
+    return pdf
+
+
+@router.post("/kp/build")
+def kp_build(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """«Сформировать КП»: пересобрать файл по утверждённой версии (после правки подачи КП, изображений, реквизитов)."""
+    deal = get_deal_or_404(db, deal_id, user)
+    _kp_access(deal, user)
+    ver = _approved_version(db, deal)
+    _kp_local(db, deal, ver, rebuild=True)
+    audit(db, user.id, deal.id, "kp", ver.id, "kp_rebuilt")
+    db.commit()
+    return {"version_no": ver.version_no, "kp_path": ver.kp_path}
+
+
+@router.get("/kp/file")
+def kp_file(deal_id: str, format: str = "docx", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """«Выгрузить КП»: Word (docx) или PDF."""
+    from fastapi.responses import FileResponse
+    deal = get_deal_or_404(db, deal_id, user)
+    ver = _approved_version(db, deal)
+    path = _kp_local(db, deal, ver)
+    db.commit()
+    name = f"{deal.number}_КП_v{ver.version_no}"
+    if format == "pdf":
+        return FileResponse(_to_pdf(path), filename=name + ".pdf", media_type="application/pdf")
+    return FileResponse(path, filename=name + ".docx",
+                        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+@router.get("/kp/recipients")
+def kp_recipients(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Получатели КП: контакты клиента с e-mail (отмечены те, что относятся к объекту сделки)."""
+    deal = get_deal_or_404(db, deal_id, user)
+    out = []
+    for c in (deal.client.contacts if deal.client else []) or []:
+        if c.get("email"):
+            out.append({"name": c.get("name") or "", "position": c.get("position") or "", "email": c["email"], "phone": c.get("phone") or ""})
+    return {"recipients": out, "subject": f"Коммерческое предложение {deal.number}" + (f" — {deal.site}" if deal.site else ""),
+            "body": "Добрый день!\n\nНаправляем коммерческое предложение во вложении. Будем рады ответить на вопросы.\n\nС уважением,"}
+
+
+class KpSendIn(BaseModel):
+    to: list[str]
+    cc: list[str] = []
+    subject: str = ""
+    body: str = ""
+    format: str = "pdf"            # pdf | docx | both
+
+
+@router.post("/kp/send")
+def kp_send(deal_id: str, body: KpSendIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """«Отправить клиенту»: письмо из системы с КП во вложении выбранным получателям и отметка «КП отправлено»."""
+    import html
+    import re
+    from ..adapters.mail import OutgoingMail
+    from .deals import mark_kp_sent
+    deal = get_deal_or_404(db, deal_id, user)
+    _kp_access(deal, user)
+    ver = _approved_version(db, deal)
+    if deal.status != DealStatus.APPROVED:
+        raise HTTPException(409, "КП уже отправлено — повторная отправка без смены статуса: выгрузите файл и отправьте вручную")
+    to = [a.strip() for a in body.to + body.cc if a and a.strip()]
+    bad = [a for a in to if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", a)]
+    if not body.to or bad:
+        raise HTTPException(422, "Укажите получателей с корректными e-mail" + (f": {', '.join(bad)}" if bad else ""))
+    docx = _kp_local(db, deal, ver)
+    files = [docx] if body.format == "docx" else [_to_pdf(docx)] if body.format == "pdf" else [docx, _to_pdf(docx)]
+    subject = body.subject or f"Коммерческое предложение {deal.number}"
+    html_body = "".join(f"<p>{html.escape(par).replace(chr(10), '<br>')}</p>" for par in (body.body or "").split("\n\n"))
+    try:
+        msg_id = adapters.mail().send(OutgoingMail(to=to, subject=subject, body_html=html_body, attachments=files, sender=user.email or ""))
+    except Exception as e:
+        audit(db, user.id, deal.id, "kp", ver.id, "kp_send_failed", comment=str(e)[:500])
+        db.commit()
+        raise HTTPException(502, f"Письмо не отправлено: {e}")
+    mark_kp_sent(db, deal, user, to, "система", subject=subject, body_text=f"{body.body}\n\nВложение: {', '.join(os.path.basename(f) for f in files)}")
+    audit(db, user.id, deal.id, "kp", ver.id, "kp_sent_from_system", after={"to": to, "format": body.format, "message_id": msg_id})
+    db.commit()
+    return {"status": deal.status.value, "sent_to": to, "message_id": msg_id, "provider": _mail_provider()}
+
+
+def _mail_provider() -> str:
+    from ..core.config import get_settings
+    return get_settings().mail_provider
+
+
+class ReportDateIn(BaseModel):
+    report_date: Optional[date] = None   # пусто — сегодняшняя дата
+
+
+@router.put("/report-date")
+def set_report_date(deal_id: str, body: ReportDateIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Дата отчёта (расчёта): курсы ЦБ, прогноз и сроки считаются на эту дату. Меняют КД или ЗГД."""
+    deal = get_deal_or_404(db, deal_id, user)
+    if not user.has(Role.CD, Role.GD):
+        raise HTTPException(403, "Дату отчёта меняют КД или ЗГД")
+    before = deal.report_date
+    deal.report_date = body.report_date
+    audit(db, user.id, deal.id, "deal", deal.id, "report_date", {"report_date": str(before) if before else None},
+          {"report_date": str(body.report_date) if body.report_date else None})
+    db.commit()
+    return {"report_date": deal.report_date.isoformat() if deal.report_date else None}

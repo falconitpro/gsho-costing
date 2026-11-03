@@ -81,7 +81,7 @@ def _local_options(rows: list[LocalOption]) -> list[LocalOptionInput]:
 
 def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> DealCalcInput:
     s = settings_service.get_all(db)
-    calc_date = calc_date or date.today()
+    calc_date = calc_date or deal.report_date or date.today()   # дата отчёта — задают КД / ЗГД
     fx, history = load_fx(db, calc_date)
     ov = deal.scenario_override or {}
     dk, dt = dict(s["scenario_dk"]), dict(s["scenario_dt"])

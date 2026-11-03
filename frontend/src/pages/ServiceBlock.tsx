@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { UndoButton, useUndoHistory } from "../undo";
-import { api, fmtRub, designation } from "../api";
+import { api, fmtRub, designation, ru } from "../api";
 import type { Deal, Me } from "../types";
 
 type Op = { name: string; hours: number; qualification: string; spare_part_rows: number[] };
@@ -31,7 +31,7 @@ export default function ServiceBlock({ deal, me, reload }: { deal: Deal; me: Me;
     if (!pid) return;
     api.get<Defaults>(`/api/deals/${deal.id}/service/positions/${pid}/defaults`).then((x) => {
       history.accept(); setD(x); setHpm(String(x.hours_per_month)); setWarrantyPct(x.warranty?.overridden ? String(x.warranty.pct) : "");
-      setRegs(x.regulations.length ? x.regulations : [{ name: "ТО-1", interval_hours: 250, operations: [{ name: "Осмотр, смазка", hours: 2, qualification: "mechanic", spare_part_rows: [] }] },
+      setRegs(x.regulations.length ? x.regulations.map((r) => ({ ...r, name: ru(r.name), operations: r.operations.map((o) => ({ ...o, name: ru(o.name) })) })) : [{ name: "ТО-1", interval_hours: 250, operations: [{ name: "Осмотр, смазка", hours: 2, qualification: "mechanic", spare_part_rows: [] }] },
         { name: "ТО-2", interval_hours: 500, operations: [{ name: "Замена масла и фильтров двигателя", hours: 4, qualification: "engineer_2", spare_part_rows: [] }] }]);
       const existing = (positions.find((p) => p.id === pid)?.service_calc as { result?: Result } | undefined)?.result;
       setRes(existing || null);
@@ -88,7 +88,7 @@ export default function ServiceBlock({ deal, me, reload }: { deal: Deal; me: Me;
           <button className="btn" onClick={calc}>Рассчитать сервис</button><UndoButton h={history} />
         </div>}
         {d && d.spare_parts.length > 0 && <details style={{ marginTop: 8 }}><summary className="muted">Лист «ЗИП на ТО» из RFQ ({d.spare_parts.length} строк)</summary>
-          <table><tbody>{d.spare_parts.map((s) => <tr key={s.row}><td>{s.row}</td><td>{s.name}</td><td className="num">{s.interval_hours ?? "—"}</td><td className="num">{fmtRub(s.unit_price)}</td></tr>)}</tbody></table></details>}
+          <table><tbody>{d.spare_parts.map((s) => <tr key={s.row}><td>{s.row}</td><td>{ru(s.name) || "без перевода"}</td><td className="num">{s.interval_hours ?? "—"}</td><td className="num">{fmtRub(s.unit_price)}</td></tr>)}</tbody></table></details>}
       </div>
       {res && (
         <div className="card">
@@ -102,7 +102,7 @@ export default function ServiceBlock({ deal, me, reload }: { deal: Deal; me: Me;
           </div>
           <div className="muted">Выполнений: {Object.entries(res.executions).map(([k, v]) => `${k} × ${v}`).join(", ")}</div>
           <table><thead><tr><th>Месяц</th><th className="num">Наработка</th><th>Регламенты</th><th className="num">Чел·ч</th><th className="num">Работы</th><th className="num">Выезды</th><th className="num">Выезды, RUB</th><th className="num">ЗИП</th></tr></thead>
-            <tbody>{res.rows.filter((r) => r.regulations.length).map((r) => <tr key={r.month}><td>{r.month}</td><td className="num">{r.hours_cum}</td><td>{r.regulations.join(", ")}</td><td className="num">{r.labour_hours}</td><td className="num">{fmtRub(r.labour_rub)}</td><td className="num">{r.visits}</td><td className="num">{fmtRub(r.visit_rub)}</td><td className="num">{fmtRub(r.spare_parts_fx)}</td></tr>)}</tbody></table>
+            <tbody>{res.rows.filter((r) => r.regulations.length).map((r) => <tr key={r.month}><td>{r.month}</td><td className="num">{r.hours_cum}</td><td>{r.regulations.map(ru).join(", ")}</td><td className="num">{r.labour_hours}</td><td className="num">{fmtRub(r.labour_rub)}</td><td className="num">{r.visits}</td><td className="num">{fmtRub(r.visit_rub)}</td><td className="num">{fmtRub(r.spare_parts_fx)}</td></tr>)}</tbody></table>
           {canEdit && <button className="btn" style={{ marginTop: 8 }} onClick={() => api.post(`/api/deals/${deal.id}/service/complete`).then(reload).catch((e) => setErr(e.message))}>Завершить блок сервиса</button>}
         </div>
       )}

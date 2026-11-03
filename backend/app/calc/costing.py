@@ -192,7 +192,10 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
 
         ship = ev[PaymentEvent.SHIPMENT]
         # 2–3. Логистика позиции (оплата при отгрузке)
+        in_d2d = bool(batch and batch.door_to_door and batch.door_to_door.amount)   # единая стоимость партии уже включает путь завод → граница
         for key, m in (("domestic_logistics", p.domestic_logistics), ("export_formalities", p.export_formalities)):
+            if key == "domestic_logistics" and in_d2d:
+                m = Money(amount=0.0, currency=m.currency)
             items_fx[key] = m
             k = fx.rate(m.currency, ship, s, f"{p.id}/{key}", None, fx_mult)
             items[key] = m.amount * k

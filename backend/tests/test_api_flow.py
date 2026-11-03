@@ -144,7 +144,15 @@ def test_full_flow(client, tmp_path):
     dm = _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))
     assert dm["variants"][0]["price_rub"] and "calc_result" not in dm     # после утверждения менеджер видит цену
     # --- менеджер: КП отправлено (история цен клиентам, задача 8), исход → стадия контракта (задача 2)
-    assert _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": ["mech@rudnik.example"]}))["status"] == "kp_sent"
+    # КП: пересобрать, выгрузить Word, получатели, отправить из системы (почта console) — отметка «КП отправлено»
+    _ok(client.post(f"/api/deals/{did}/kp/build", headers=H(MGR)))
+    kf = client.get(f"/api/deals/{did}/kp/file?format=docx", headers=H(MGR))
+    assert kf.status_code == 200 and kf.content[:2] == b"PK"
+    rc = _ok(client.get(f"/api/deals/{did}/kp/recipients", headers=H(MGR)))
+    assert rc["recipients"][0]["email"] == "mech@rudnik.example"
+    assert client.post(f"/api/deals/{did}/kp/send", headers=H(MGR), json={"to": ["не-адрес"], "format": "docx"}).status_code == 422
+    sent = _ok(client.post(f"/api/deals/{did}/kp/send", headers=H(MGR), json={"to": ["mech@rudnik.example"], "subject": rc["subject"], "body": rc["body"], "format": "docx"}))
+    assert sent["status"] == "kp_sent" and sent["sent_to"] == ["mech@rudnik.example"]
     card_cd = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(CD)))
     assert card_cd["kp_history"] and card_cd["kp_history"][0]["deal_number"] == deal["number"] and card_cd["kp_history"][0]["versions"]
     card_mgr = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(MGR)))
@@ -178,6 +186,18 @@ def test_full_flow(client, tmp_path):
     assert client.post(f"/api/deals/{did}/execution/stages/{adv['id']}/actual", headers=H(MGR), json={"actual_on": "2026-12-10", "actual_amount": 1}).status_code == 403
     r = _ok(client.post(f"/api/deals/{did}/execution/stages/{adv['id']}/actual", headers=H(FD), json={"actual_on": "2026-12-10", "actual_amount": adv["amount"]}))
     assert next(s for s in r["stages"] if s["code"] == "client_advance")["done"]
+    # контроль сроков: базовый план зафиксирован, уточнённая дата готовности сдвигает прогноз поставки, отклонение в днях
+    rd = next(s for s in r["stages"] if s["code"] == "readiness")
+    dl = next(s for s in r["stages"] if s["code"] == "delivery")
+    assert rd["baseline_on"] and dl["baseline_on"] and dl["deviation_days"] is not None
+    from datetime import date as _d, timedelta as _td
+    later = (_d.fromisoformat(rd["planned_on"]) + _td(days=20)).isoformat()
+    rf = _ok(client.post(f"/api/deals/{did}/execution/stages/{rd['id']}/refine", headers=H(LOG), json={"refined_on": later, "note": "завод перенёс готовность"}))
+    rd2 = next(s for s in rf["stages"] if s["id"] == rd["id"])
+    dl2 = next(s for s in rf["stages"] if s["code"] == "delivery")
+    assert rd2["refined_on"] == later and rd2["baseline_on"] == rd["baseline_on"]
+    assert rd2["deviation_days"] == (_d.fromisoformat(later) - _d.fromisoformat(rd["baseline_on"])).days
+    assert dl2["planned_on"] > dl["planned_on"] and dl2["deviation_days"] > dl["deviation_days"]
     # --- план/факт (стадия исполнения)
     _ok(client.post(f"/api/deals/{did}/fact", headers=H(LOG), json={"kind": "cost_item", "cost_item_code": "intl_freight", "amount": 2000000, "on": "2027-03-01"}), 201)
     assert client.post(f"/api/deals/{did}/fact", headers=H(LOG), json={"kind": "cost_item", "cost_item_code": "service", "amount": 1, "on": "2027-03-01"}).status_code == 403
@@ -232,6 +252,12 @@ def test_low_margin_goes_to_fd_visa(client, tmp_path):
     rw = _ok(client.post(f"/api/deals/{did}/rework", headers=H(CD), json={"block": "logistics", "reason": "уточнить фрахт"}))
     assert rw["status"] == "rework" and rw["version_no"] >= 2
     assert any(t["deal_id"] == did and t["block"] == "logistics" for t in _ok(client.get("/api/tasks/my", headers=H(LOG))))
+    # ФД тоже возвращает на доработку — в т.ч. ЗГД; дату отчёта меняют КД / ЗГД
+    assert _ok(client.post(f"/api/deals/{did}/rework", headers=H(FD), json={"block": "gd", "reason": "проверить условия"}))["status"] == "rework"
+    assert client.put(f"/api/deals/{did}/report-date", headers=H(FD), json={"report_date": "2026-11-01"}).status_code == 403
+    assert _ok(client.put(f"/api/deals/{did}/report-date", headers=H(CD), json={"report_date": "2026-11-01"}))["report_date"] == "2026-11-01"
+    assert _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))["input"]["calc_date"] == "2026-11-01"
+    _ok(client.put(f"/api/deals/{did}/report-date", headers=H(CD), json={"report_date": None}))
     board = _ok(client.get("/api/board", headers=H(FD)))
     assert any(d["id"] == did for d in board["rework"]["deals"])
 

@@ -8,6 +8,7 @@ import ServiceBlock from "./ServiceBlock";
 import PositionForm from "./PositionForm";
 import Questionnaire from "../components/Questionnaire";
 import TechParamsTable from "../components/TechParamsTable";
+import KpActions from "../components/KpActions";
 import ExecutionTab from "../components/ExecutionTab";
 import { ImagesBlock, LocalOptionsBlock, OffersBlock, RelatedDeals } from "../components/ImagesLocalOptions";
 import { payText } from "../components/PaymentTermsEditor";
@@ -112,7 +113,7 @@ export default function DealCard({ me }: { me: Me }) {
             <button className="btn" onClick={send} disabled={(deal.checks || []).length > 0} title={(deal.checks || []).join("\n")}>Отправить на расчёт</button>
           )}
           {isOwner && deal.status === "approved" && (
-            <button className="btn" onClick={() => api.post(`/api/deals/${deal.id}/kp-sent`, { recipients: ["client"], sent_via: "outlook" }).then(load)}>КП отправлено</button>
+            <button className="btn ghost" title="если КП отправили вручную из своей почты" onClick={() => api.post(`/api/deals/${deal.id}/kp-sent`, { recipients: ["client"], sent_via: "outlook" }).then(load)}>Отметить: КП отправлено вручную</button>
           )}
           {isOwner && deal.status === "kp_sent" && ["won", "lost", "cancelled"].map((o) => (
             <button key={o} className={"btn " + (o === "won" ? "" : "secondary")} onClick={() => outcome(o)}>{o === "won" ? "Выиграна → контракт" : o === "lost" ? "Проиграна" : "Отменена"}</button>))}
@@ -120,6 +121,7 @@ export default function DealCard({ me }: { me: Me }) {
         </div>
       </div>
       {err && <div className="alert error">{err}</div>}
+      <div style={{ margin: "6px 0" }}><KpActions dealId={deal.id} status={deal.status} canAct={isOwner || has("cd", "gd", "admin")} onDone={() => { load(); }} /></div>
       {(deal.checks || []).length > 0 && editable && <div className="alert warn">Перед отправкой на расчёт: {deal.checks!.join(" ")}</div>}
       <RelatedDeals dealId={deal.id} me={me} />
 

@@ -13,6 +13,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
   const [form, setForm] = useState({ contract_number: deal.contract_number || "", contract_signed_at: deal.contract_signed_at || "", factory_contract_signed_at: deal.factory_contract_signed_at || "", won_variant_id: deal.won_variant_id || "" });
   const [actual, setActual] = useState<Record<string, { actual_on: string; actual_amount: string; note: string }>>({});
   const [reason, setReason] = useState("");
+  const [refine, setRefine] = useState<Record<string, { on: string; note: string }>>({});
   const [err, setErr] = useState("");
   const isMgr = me.roles.some((r) => r.code === "manager") && deal.manager_id === me.id;
   const isCdGd = me.roles.some((r) => r.code === "cd" || r.code === "gd");
@@ -58,22 +59,38 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
           <div className="row" style={{ gap: 24 }}>
             <div className="kpi"><span className="v">{done} / {data.stages.length}</span><span className="l">этапов выполнено</span></div>
             <div className="kpi"><span className="v">{data.stages.filter((s) => s.overdue).length}</span><span className="l">просрочено</span></div>
+            <div className="kpi"><span className="v">{data.stages.filter((s) => (s.deviation_days ?? 0) > 0).length}</span><span className="l">сдвинуто позже плана</span></div>
           </div>
-          <p className="muted">Фактическую дату вносят ответственные (логист — отгрузка, CMR, ДТ, доставка; сервис — ПНР; менеджер — подписание и готовность), платежи и аккредитив — ФД. Ввод факта пересчитывает плановые даты следующих этапов и платежей.</p>
+          {(() => {   // ключевые сроки: базовый план → прогноз / факт
+            const key = ["delivery", "commissioning", "closing"].map((c) => data.stages.filter((s) => s.code === c)).map((ss) => ss.sort((a, b) => (b.planned_on || "").localeCompare(a.planned_on || ""))[0]).filter(Boolean);
+            return key.length > 0 && (
+              <table style={{ marginTop: 8 }}><thead><tr><th>Ключевой срок</th><th>Базовый план</th><th>Прогноз / факт</th><th className="num">Отклонение</th></tr></thead>
+                <tbody>{key.map((s) => <tr key={s.id}><td>{s.title}</td><td>{fmtDate(s.baseline_on)}</td><td>{s.done ? <b>{fmtDate(s.actual_on)}</b> : fmtDate(s.refined_on || s.planned_on)}</td><td className="num"><Dev d={s.deviation_days} /></td></tr>)}</tbody></table>);
+          })()}
+          <p className="muted">Базовый план фиксируется при начале исполнения и не меняется. Уточнённая дата (например, завод подтвердил готовность) пересчитывает прогноз следующих этапов; отклонение — от базового плана, «+» — позже. Фактическую дату вносят ответственные (логист — отгрузка, CMR, ДТ, доставка; сервис — ПНР; менеджер — подписание и готовность), платежи и аккредитив — ФД. Ввод факта пересчитывает плановые даты следующих этапов и платежей.</p>
         </div>
       </div>
       {Object.entries(groups).map(([g, stages]) => (
         <div className="card" key={g}>
           <h2 style={{ marginTop: 0 }}>{g}</h2>
           <table>
-            <thead><tr><th>Этап</th><th>План</th><th>Факт</th>{can(me, "cost") && <th className="num">Сумма</th>}<th>Ответственный</th><th>Отметка</th></tr></thead>
+            <thead><tr><th>Этап</th><th>Базовый план</th><th>Уточнено</th><th>Прогноз</th><th>Факт</th><th className="num">Отклонение</th>{can(me, "cost") && <th className="num">Сумма</th>}<th>Ответственный</th><th>Отметка</th></tr></thead>
             <tbody>{stages.map((s) => {
               const a = actual[s.id] || { actual_on: s.actual_on || "", actual_amount: s.actual_amount != null ? String(s.actual_amount) : (s.amount != null ? String(s.amount) : ""), note: s.note || "" };
               return (
                 <tr key={s.id} style={{ background: s.done ? "#e6f5ec" : s.overdue ? "#fde7e7" : undefined }}>
                   <td>{s.title}{s.note && <div className="muted" style={{ fontSize: 11 }}>{s.note}</div>}</td>
-                  <td>{fmtDate(s.planned_on)}</td>
+                  <td>{fmtDate(s.baseline_on) || <span className="muted">—</span>}</td>
+                  <td>{s.refined_on ? <>{fmtDate(s.refined_on)}{s.refined_note && <div className="muted" style={{ fontSize: 11 }}>{s.refined_note}</div>}</> : <span className="muted">—</span>}
+                    {s.can_set && !s.done && deal.status !== "closed" && (() => { const r = refine[s.id] || { on: s.refined_on || "", note: s.refined_note || "" };
+                      return <div className="row" style={{ marginTop: 2 }}>
+                        <input type="date" value={r.on} style={{ width: 130 }} onChange={(e) => setRefine({ ...refine, [s.id]: { ...r, on: e.target.value } })} />
+                        <input placeholder="основание" value={r.note} style={{ width: 100 }} onChange={(e) => setRefine({ ...refine, [s.id]: { ...r, note: e.target.value } })} />
+                        <button className="btn ghost" style={{ padding: "2px 6px" }} onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/stages/${s.id}/refine`, { refined_on: r.on || null, note: r.note }))}>уточнить</button>
+                      </div>; })()}</td>
+                  <td>{s.done ? <span className="muted">—</span> : fmtDate(s.planned_on)}</td>
                   <td>{s.done ? <b>{fmtDate(s.actual_on)}</b> : s.overdue ? <span className="badge bad">просрочен</span> : <span className="muted">—</span>}</td>
+                  <td className="num"><Dev d={s.deviation_days} /></td>
                   {can(me, "cost") && <td className="num">{s.amount != null ? `${fmtRub(s.amount)} ${s.currency}` : ""}{s.actual_amount != null && <div className="muted">факт {fmtRub(s.actual_amount)}</div>}</td>}
                   <td className="muted">{s.responsible_roles.map((r) => ROLE_T[r] || r).join(", ")}</td>
                   <td>{s.can_set && deal.status !== "closed" ? (
@@ -90,4 +107,11 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
       ))}
     </>
   );
+}
+
+/** Отклонение от базового плана: «+N дн.» — позже (красным), «−N дн.» — раньше (зелёным). */
+function Dev({ d }: { d?: number | null }) {
+  if (d == null) return <span className="muted">—</span>;
+  if (d === 0) return <span className="muted">в срок</span>;
+  return <span className={"badge " + (d > 0 ? "bad" : "ok")}>{d > 0 ? "+" : "−"}{Math.abs(d)} дн.</span>;
 }

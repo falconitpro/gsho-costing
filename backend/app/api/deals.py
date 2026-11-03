@@ -554,20 +554,25 @@ class KpSentIn(BaseModel):
 def kp_sent_ep(deal_id: str, body: KpSentIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
     _editable_by_manager(deal, user)
+    mark_kp_sent(db, deal, user, body.recipients, body.sent_via)
+    db.commit()
+    return {"status": deal.status.value}
+
+
+def mark_kp_sent(db: Session, deal: Deal, user: CurrentUser, recipients: list[str], sent_via: str, subject: str = "", body_text: str = "") -> None:
+    """Отметка «КП отправлено»: переход статуса, лента, задачи, история цен клиентам, предложение пополнить каталог."""
     try:
         tr = wf_kp_sent(DealState(status=deal.status, service_flag=deal.service_flag))
     except Exception as e:
         raise HTTPException(409, str(e))
-    db.add(FeedEntry(deal_id=deal.id, kind="mail_out", direction="out", counterparty=", ".join(body.recipients),
-                     subject=f"КП по сделке {deal.number}", body=f"Отправлено через {body.sent_via}", user_id=user.id))
+    db.add(FeedEntry(deal_id=deal.id, kind="mail_out", direction="out", counterparty=", ".join(recipients),
+                     subject=subject or f"КП по сделке {deal.number}", body=body_text or f"Отправлено через {sent_via}", user_id=user.id))
     complete_tasks(db, deal, block="kp")
     apply_transition(db, deal, tr, user.id)
     # задачи 7, 8: история цен клиентам по отправленной версии КП; предложение занести оборудование в каталог
     from ..services.catalog_service import record_client_prices, propose_catalog_task
     record_client_prices(db, deal, user.id)
     propose_catalog_task(db, deal, user.id)
-    db.commit()
-    return {"status": deal.status.value}
 
 
 class OutcomeIn(BaseModel):

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { api, ApiError, designation } from "../api";
+import { api, ApiError, designation, ru } from "../api";
 import { UndoButton, useUndoHistory } from "../undo";
 import type { Position, TechParamRow } from "../types";
 
@@ -133,7 +133,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
             const header = head && (
               <tr key={"s" + i} style={{ background: "#f1f1f1", cursor: "pointer" }} onClick={() => setClosed({ ...closed, [sec]: !closed[sec] })}>
                 <td colSpan={COLS.length + 2 + (canEdit ? 1 : 0)} style={{ fontWeight: 700, padding: "6px 8px" }}>
-                  {closed[sec] ? "▸" : "▾"} {sec} <span className="muted" style={{ fontWeight: 400 }}>· заполнено {inSec.filter((x) => x.value_ru || x.value_zh).length} из {inSec.length}
+                  {closed[sec] ? "▸" : "▾"} {ru(sec)} <span className="muted" style={{ fontWeight: 400 }}>· заполнено {inSec.filter((x) => x.value_ru || x.value_zh).length} из {inSec.length}
                     {inSec.some((x) => x.req_status === "mismatch") && ` · не соответствует требованию: ${inSec.filter((x) => x.req_status === "mismatch").length}`}</span></td></tr>);
             if (closed[sec]) return <Fragment key={r.id || i}>{header}</Fragment>;
             const empty = !r.value_ru && !r.value_zh;
