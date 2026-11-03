@@ -463,9 +463,9 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
                              data={"mapping": json.dumps({"sheet": pl["sheets"][0]["name"], **mp})}))
     assert len(ap["added"]) == 2 and all(a["status"] == "pending" for a in ap["added"])
     # --- клиент по ИНН: неверный ИНН 422; источник без ключа — 503 (понятная ошибка); создание с реквизитами
-    assert client.get("/api/refs/clients/lookup?inn=7701234560", headers=H(MGR)).status_code == 422
+    assert client.get("/api/refs/clients/lookup?inn=7707083890", headers=H(MGR)).status_code == 422
     assert client.get("/api/refs/clients/lookup?inn=7707083893", headers=H(MGR)).status_code in (503, 502)
-    assert client.post("/api/refs/clients", headers=H(MGR), json={"name": "Тест", "inn": "7701234560"}).status_code == 422
+    assert client.post("/api/refs/clients", headers=H(MGR), json={"name": "Тест", "inn": "7707083890"}).status_code == 422
     cl = _ok(client.post("/api/refs/clients", headers=H(MGR), json={"name": "ПАО СБЕРБАНК", "inn": "7707083893", "kpp": "773601001", "ogrn": "1027700132195",
                                                                      "director": "ПРЕЗИДЕНТ, Греф Герман Оскарович", "legal_status": "ACTIVE",
                                                                      "registry": {"source": "dadata"}}), 201)
