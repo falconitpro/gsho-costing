@@ -32,7 +32,7 @@ function LinesEditor({ lines, events, onChange }: { lines: PaymentLine[]; events
           </tr>))}
           {lines.length === 0 && <tr><td colSpan={8} className="muted">Платежей нет</td></tr>}</tbody></table>
       <div className="row" style={{ marginTop: 4 }}>
-        <button className="btn ghost" onClick={() => onChange([...lines, { no: lines.length + 1, share_pct: Math.max(0, 100 - sum), event: events[0], offset_days: 0, offset_kind: "calendar", via: "transfer" }])}>+ платёж</button>
+        <button className="btn add" onClick={() => onChange([...lines, { no: lines.length + 1, share_pct: Math.max(0, 100 - sum), event: events[0], offset_days: 0, offset_kind: "calendar", via: "transfer" }])}>Платёж</button>
         <span className={"badge " + (sum === 100 ? "ok" : "bad")}>итого {sum} %</span>
       </div>
     </div>

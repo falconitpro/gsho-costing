@@ -46,7 +46,7 @@ export default function DealsList({ me }: { me: Me }) {
 
   return (
     <>
-      <div className="row" style={{ justifyContent: "space-between" }}>
+      <div className="page-head">
         <h1>Сделки</h1>
         {isManager && <button className="btn add" onClick={() => setShowNew(!showNew)}>Новая сделка</button>}
       </div>

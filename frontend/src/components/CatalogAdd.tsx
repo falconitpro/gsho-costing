@@ -155,7 +155,7 @@ export default function CatalogAdd({ editor, onAdded }: { editor: boolean; onAdd
             ])}</tbody></table>
         </div>
         <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn ghost" onClick={() => setRows([...rows, { code: "", name_ru: "", unit: "", value_ru: "", section: "Дополнительные параметры" }])}>+ параметр</button>
+          <button className="btn add" onClick={() => setRows([...rows, { code: "", name_ru: "", unit: "", value_ru: "", section: "Дополнительные параметры" }])}>Параметр</button>
           <button className="btn" disabled={busy || !form.model || (!form.factory_id && !form.factory_name)} onClick={add}>Добавить в каталог</button><UndoButton h={history} />
           <span className="muted">заполнено параметров: {rows.filter((r) => r.value_ru).length} из {rows.length}</span>
         </div>

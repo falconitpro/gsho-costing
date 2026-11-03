@@ -122,7 +122,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
             <button className="btn ghost" onClick={() => { setWizard("factory_answer"); setPreview(null); setOfferId(""); }}>Импорт ответа завода</button>
             <a className="btn ghost" href={`/api/deals/${dealId}/positions/${position.id}/rfq/file`} title="шаблон RFQ с требованиями заказчика из таблицы; строки «в РФ» помечены">RFQ с требованиями</a>
             <UndoButton h={history} />
-            <button className="btn ghost" onClick={addRow}>+ строка</button>
+            <button className="btn add" onClick={addRow}>Строка</button>
             <button className="btn" onClick={save} disabled={!dirty}>Сохранить таблицу</button>
           </div>
         )}

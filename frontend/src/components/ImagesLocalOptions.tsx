@@ -115,7 +115,7 @@ export function LocalOptionsBlock({ dealId, position, me, onChanged }: { dealId:
             <input type="number" value={form.install_days} style={{ width: 70 }} onChange={(e) => setForm({ ...form, install_days: Number(e.target.value) })} />
             <input type="number" value={form.install_cost_rub} style={{ width: 110 }} onChange={(e) => setForm({ ...form, install_cost_rub: Number(e.target.value) })} /></div></label>
           <label className="f">Комментарий<input value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} /></label>
-          <div className="row" style={{ alignItems: "end" }}><button className="btn secondary" onClick={save} disabled={!form.name}>{edit ? "Сохранить" : "+ Добавить опцию РФ"}</button>{edit && <button className="btn ghost" onClick={() => { setEdit(null); setForm({ ...EMPTY }); }}>отмена</button>}</div>
+          <div className="row" style={{ alignItems: "end" }}><button className={edit ? "btn" : "btn add"} onClick={save} disabled={!form.name}>{edit ? "Сохранить" : "Добавить опцию РФ"}</button>{edit && <button className="btn ghost" onClick={() => { setEdit(null); setForm({ ...EMPTY }); }}>отмена</button>}</div>
         </div>
       )}
       {options.length === 0 && !canEdit && <div className="muted">Нет опций, реализуемых в России</div>}

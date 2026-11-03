@@ -83,8 +83,8 @@ export default function ServiceBlock({ deal, me, reload }: { deal: Deal; me: Me;
               <td><input value={o.spare_part_rows.join(",")} disabled={!canEdit} placeholder="напр. 4,5" onChange={(e) => updOp(i, k, { spare_part_rows: e.target.value.split(",").map((x) => Number(x.trim())).filter((x) => x > 0) })} style={{ width: 90 }} /></td>
             </tr>)))}</tbody></table>
         {canEdit && <div className="row" style={{ marginTop: 8 }}>
-          <button className="btn ghost" onClick={() => setRegs([...regs, { name: "ТО-3", interval_hours: 1000, operations: [{ name: "", hours: 1, qualification: "engineer_2", spare_part_rows: [] }] }])}>+ регламент</button>
-          <button className="btn ghost" onClick={() => setRegs(regs.map((r, i) => (i === regs.length - 1 ? { ...r, operations: [...r.operations, { name: "", hours: 1, qualification: "mechanic", spare_part_rows: [] }] } : r)))}>+ операция в последний</button>
+          <button className="btn add" onClick={() => setRegs([...regs, { name: "ТО-3", interval_hours: 1000, operations: [{ name: "", hours: 1, qualification: "engineer_2", spare_part_rows: [] }] }])}>Регламент</button>
+          <button className="btn add" onClick={() => setRegs(regs.map((r, i) => (i === regs.length - 1 ? { ...r, operations: [...r.operations, { name: "", hours: 1, qualification: "mechanic", spare_part_rows: [] }] } : r)))}>Операция в последний</button>
           <button className="btn" onClick={calc}>Рассчитать сервис</button><UndoButton h={history} />
         </div>}
         {d && d.spare_parts.length > 0 && <details style={{ marginTop: 8 }}><summary className="muted">Лист «ЗИП на ТО» из RFQ ({d.spare_parts.length} строк)</summary>

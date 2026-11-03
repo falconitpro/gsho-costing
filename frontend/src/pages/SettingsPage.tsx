@@ -85,7 +85,7 @@ function Editor({ m, value, onChange }: { m: Meta; value: unknown; onChange: (v:
         {entries.map(([k, x], i) => <tr key={i}><td><input value={k} onChange={(e) => put(entries.map((en, j) => (j === i ? [e.target.value, en[1]] : en)))} /></td>
           <td><Field col={{ key: k, label: k }} value={x} onChange={(nv) => put(entries.map((en, j) => (j === i ? [en[0], nv] : en)))} /></td>
           <td><button className="btn ghost" onClick={() => put(entries.filter((_, j) => j !== i))}>×</button></td></tr>)}</tbody></table>
-        <button className="btn ghost" onClick={() => put([...entries, [`новый_${entries.length + 1}`, 0]])}>+ строка</button></div>;
+        <button className="btn add" onClick={() => put([...entries, [`новый_${entries.length + 1}`, 0]])}>Строка</button></div>;
     }
     case "table": {
       const rows = ((value || []) as Record<string, unknown>[]);
@@ -93,7 +93,7 @@ function Editor({ m, value, onChange }: { m: Meta; value: unknown; onChange: (v:
       return <div style={{ overflowX: "auto" }}><table><thead><tr>{(m.columns || []).map((c) => <th key={c.key}>{c.label}</th>)}<th /></tr></thead><tbody>
         {rows.map((r, i) => <tr key={i}>{(m.columns || []).map((c) => <td key={c.key}><Field col={c} value={r[c.key]} onChange={(x) => put(rows.map((rr, j) => (j === i ? { ...rr, [c.key]: x } : rr)))} /></td>)}
           <td><button className="btn ghost" onClick={() => put(rows.filter((_, j) => j !== i))}>×</button></td></tr>)}</tbody></table>
-        <button className="btn ghost" onClick={() => put([...rows, {}])}>+ строка</button></div>;
+        <button className="btn add" onClick={() => put([...rows, {}])}>Строка</button></div>;
     }
     case "dict_table": {
       const entries = Object.entries((value || {}) as Record<string, Record<string, unknown>>);
@@ -103,7 +103,7 @@ function Editor({ m, value, onChange }: { m: Meta; value: unknown; onChange: (v:
           {k === "default" && <div className="muted" style={{ fontSize: 11 }}>для остальных регионов</div>}</td>
           {(m.columns || []).map((c) => <td key={c.key}><Field col={c} value={row?.[c.key]} onChange={(x) => put(entries.map((en, j) => (j === i ? [en[0], { ...en[1], [c.key]: x }] : en)))} /></td>)}
           <td>{k !== "default" && <button className="btn ghost" onClick={() => put(entries.filter((_, j) => j !== i))}>×</button>}</td></tr>)}</tbody></table>
-        <button className="btn ghost" onClick={() => put([...entries, [`Регион ${entries.length}`, { ...(entries.find(([k]) => k === "default")?.[1] || {}) }]])}>+ регион</button></div>;
+        <button className="btn add" onClick={() => put([...entries, [`Регион ${entries.length}`, { ...(entries.find(([k]) => k === "default")?.[1] || {}) }]])}>Регион</button></div>;
     }
     case "expert_points": {
       const rows = toExpertRows(value);
@@ -114,7 +114,7 @@ function Editor({ m, value, onChange }: { m: Meta; value: unknown; onChange: (v:
           <td><input type="date" value={r.on} onChange={(e) => put(rows.map((x, j) => (j === i ? { ...x, on: e.target.value } : x)))} /></td>
           <td><input inputMode="decimal" value={r.rate} style={{ width: 120 }} onChange={(e) => put(rows.map((x, j) => (j === i ? { ...x, rate: e.target.value } : x)))} /></td>
           <td><button className="btn ghost" onClick={() => put(rows.filter((_, j) => j !== i))}>×</button></td></tr>)}</tbody></table>
-        <button className="btn ghost" onClick={() => put([...rows, { cur: "CNY", on: new Date(Date.now() + 90 * 864e5).toISOString().slice(0, 10), rate: "" }])}>+ точка</button></div>;
+        <button className="btn add" onClick={() => put([...rows, { cur: "CNY", on: new Date(Date.now() + 90 * 864e5).toISOString().slice(0, 10), rate: "" }])}>Точка</button></div>;
     }
     case "dates": return <textarea rows={5} style={{ width: "100%" }} value={((value || []) as string[]).join("\n")} placeholder="2027-01-02"
       onChange={(e) => onChange(e.target.value.split(/\s+/).map((x) => x.trim()).filter(Boolean))} />;
@@ -150,9 +150,9 @@ export default function SettingsPage({ me }: { me: Me }) {
   const match = (m: Meta) => !q || `${m.title} ${m.help || ""} ${m.group}`.toLowerCase().includes(q.toLowerCase());
   return (
     <>
-      <div className="row" style={{ justifyContent: "space-between" }}>
+      <div className="page-head">
         <h1>Настройки: ставки и нормативы</h1>
-        <input placeholder="поиск настройки" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} />
+        <div className="push"><input placeholder="поиск настройки" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240, maxWidth: "100%" }} /></div>
       </div>
       <p className="muted">Значения применяются к новым расчётам; каждое изменение сохраняется в истории с комментарием. ФД меняет пороги, сценарии и стоимость денег; КД — внешнюю комиссию и комиссию менеджера; остальное — ЗГД или администратор. Ваши роли: {me.roles.map((r) => r.title).join(", ")}.</p>
       {msg && <div className="alert info">{msg}</div>}
