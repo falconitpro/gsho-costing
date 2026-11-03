@@ -8,13 +8,13 @@
 
 | Метод | Путь | Роль | Описание |
 | --- | --- | --- | --- |
-| GET | `/catalog/tree`, `/catalog/executions/{id}`, `/catalog/pending` | любая; pending — КД/ГД | Каталог производитель → тип → модель → исполнение, история цен по правам |
-| POST | `/catalog/executions/{id}/decision`; PATCH `/catalog/executions/{id}`, `/catalog/models/{id}` | КД, ГД | Подтверждение занесения, наименование под брендом компании |
-| GET/POST | `/refs/machine-types`, `POST …/{id}/approve` | любая / КД, ГД | Типы машин (заводятся по ходу работы) |
-| GET/PUT | `/refs/tech-param-templates?machine_type_id=` | любая / КД, ГД | Шаблоны технических характеристик и обязательность |
+| GET | `/catalog/tree`, `/catalog/executions/{id}`, `/catalog/pending` | любая; pending — КД/ЗГД | Каталог производитель → тип → модель → исполнение, история цен по правам |
+| POST | `/catalog/executions/{id}/decision`; PATCH `/catalog/executions/{id}`, `/catalog/models/{id}` | КД, ЗГД | Подтверждение занесения, наименование под брендом компании |
+| GET/POST | `/refs/machine-types`, `POST …/{id}/approve` | любая / КД, ЗГД | Типы машин (заводятся по ходу работы) |
+| GET/PUT | `/refs/tech-param-templates?machine_type_id=` | любая / КД, ЗГД | Шаблоны технических характеристик и обязательность |
 | GET/POST/DELETE | `/refs/glossary`, `POST …/{id}/confirm` | по праву `glossary` | Глоссарий RU↔CN |
-| POST | `/deals/{id}/payment-terms` | КД, ГД | Условия оплаты клиента и завода, БГ на аванс, точка отсчёта срока поставки (задачи 1, 3) |
-| GET/PUT/POST/DELETE | `/admin/access`, `…/{role}/{group}`, `…/overrides`, `…/preview` | администратор, ГД | Уровни доступа (задача 11) |
+| POST | `/deals/{id}/payment-terms` | КД, ЗГД | Условия оплаты клиента и завода, БГ на аванс, точка отсчёта срока поставки (задачи 1, 3) |
+| GET/PUT/POST/DELETE | `/admin/access`, `…/{role}/{group}`, `…/overrides`, `…/preview` | администратор, ЗГД | Уровни доступа (задача 11) |
 
 Группы доступа и уровни (0 — не видит, 1 — видит, 2 — редактирует) перечислены в `core/roles.FIELD_GROUPS`; `GET /auth/me` возвращает `perms` текущего пользователя.
 
@@ -33,18 +33,18 @@
 | Метод | Путь | Роль | Описание |
 | --- | --- | --- | --- |
 | GET | `/deals?status=` | по видимости | Список сделок (менеджер — свои; логист — с «на расчёте логистики»; сервис — с флагом) |
-| POST | `/deals` | менеджер, ГД | Создать сделку (номер авто `D-ГГГГ-NNNN`) |
+| POST | `/deals` | менеджер, ЗГД | Создать сделку (номер авто `D-ГГГГ-NNNN`) |
 | GET | `/deals/{id}` | по видимости | Карточка с позициями, вариантами, партиями и списком проверок перед отправкой |
-| PATCH | `/deals/{id}` | менеджер сделки; КД/ГД — `client_payments`, `bank_guarantee` | Шапка, условия эксплуатации, флаг сервиса, пожелания клиента по оплате (`client_payment_wishes`), отметка «Альтернативные предложения» (`has_alternatives`) |
-| POST | `/deals/{id}/duplicate` | менеджер, КД, ГД | Дублировать заявку (задача 9): `offer_id`, `copy_calcs` |
+| PATCH | `/deals/{id}` | менеджер сделки; КД/ЗГД — `client_payments`, `bank_guarantee` | Шапка, условия эксплуатации, флаг сервиса, пожелания клиента по оплате (`client_payment_wishes`), отметка «Альтернативные предложения» (`has_alternatives`) |
+| POST | `/deals/{id}/duplicate` | менеджер, КД, ЗГД | Дублировать заявку (задача 9): `offer_id`, `copy_calcs` |
 | GET | `/deals/{id}/related` | по видимости | Связанные заявки по одному запросу клиента |
-| GET/PUT | `/deals/{id}/positions/{pid}/tech-params` | менеджер (КД, ГД) | Таблица технических характеристик (задача 4); `…/verify/{row}` — подтвердить машинный перевод |
+| GET/PUT | `/deals/{id}/positions/{pid}/tech-params` | менеджер (КД, ЗГД) | Таблица технических характеристик (задача 4); `…/verify/{row}` — подтвердить машинный перевод |
 | POST | `…/tech-params/import/preview`, `…/import/apply` (multipart: `mapping`, `target`, `selected_rows`, `offer_id`) | менеджер | Импорт файла клиента / ответа завода с предпросмотром и сопоставлением |
 | POST | `…/tech-params/request` | менеджер | Двуязычный запрос одному или нескольким заводам (WeCom + e-mail, вложения клиента); `GET …/request/file` — скачать файл |
-| GET/POST | `/deals/{id}/offers`, `GET …/compare`, `POST …/submit-compare`, `POST …/select` | менеджер; отбор — КД/ГД | Ответы заводов, сравнение «параметр × завод», отбор для КП (задача 9) |
-| POST/GET/PATCH/DELETE | `/deals/{id}/positions/{pid}/images[/{iid}]` | менеджер, КД, ГД; `in_kp`/`kp_order` — КД/ГД | Изображения и чертежи (задача 10) |
-| PATCH | `/deals/{id}/kp-settings` | КД, ГД | Бренд подачи КП и способ вложения изображений |
-| POST/PATCH/DELETE | `/deals/{id}/positions/{pid}/local-options[/{oid}]` | менеджер, сервис, КД, ГД, закупки | Опции, реализуемые в России (задача 6) |
+| GET/POST | `/deals/{id}/offers`, `GET …/compare`, `POST …/submit-compare`, `POST …/select` | менеджер; отбор — КД/ЗГД | Ответы заводов, сравнение «параметр × завод», отбор для КП (задача 9) |
+| POST/GET/PATCH/DELETE | `/deals/{id}/positions/{pid}/images[/{iid}]` | менеджер, КД, ЗГД; `in_kp`/`kp_order` — КД/ЗГД | Изображения и чертежи (задача 10) |
+| PATCH | `/deals/{id}/kp-settings` | КД, ЗГД | Бренд подачи КП и способ вложения изображений |
+| POST/PATCH/DELETE | `/deals/{id}/positions/{pid}/local-options[/{oid}]` | менеджер, сервис, КД, ЗГД, закупки | Опции, реализуемые в России (задача 6) |
 | GET/POST | `/deals/{id}/catalog/candidates`, `…/propose` | менеджер | Предложить занесение в каталог (задача 7) |
 | GET | `/deals/{id}/execution/stages`; PATCH `…/contract`; POST `…/start`, `…/stages/{sid}/actual`, `…/terms-changed`, `…/close` | по ролям этапа; платежи — ФД; закрытие — КД | Стадия контракта и исполнения (задача 2) |
 | POST | `/deals/{id}/positions` | менеджер | Добавить позицию вручную; сверка цены с историей (422 с `price_reference`, если нужен комментарий) |
@@ -59,7 +59,7 @@
 | GET | `/deals/{id}/feed` | по видимости | Лента: WeCom, письма, системные события |
 | GET | `/deals/{id}/versions`, `…/{ver_id}` | по видимости | Версии расчёта (менеджеру — без полного Excel) |
 | GET | `/deals/{id}/attachments` | по видимости | Файлы (без «04 Расчёт себестоимости» для не-руководства) |
-| GET | `/deals/{id}/audit` | КД, ФД, ГД, админ | Журнал действий по сделке |
+| GET | `/deals/{id}/audit` | КД, ФД, ЗГД, админ | Журнал действий по сделке |
 
 ## Логистика и таможня
 
@@ -83,13 +83,13 @@
 
 | Метод | Путь | Роль | Описание |
 | --- | --- | --- | --- |
-| GET | `/deals/{id}/calc` | КД, ФД, ГД | 14 статей × 3 сценария по вариантам, денежный поток, курсы по платежам, чувствительность, комментарии логиста/менеджера, история цен завода и КП клиенту, предупреждение о цене ниже предыдущего КП |
-| POST | `/deals/{id}/price` | КД, ГД | Цена `mode=amount|markup|margin`; флаг сервиса в КП; условия оплаты варианта; переопределение накладных (комментарий → виза ГД); после визы — сброс виз |
-| POST | `/deals/{id}/compare-payments` | КД, ФД, ГД | Сравнение двух наборов условий оплаты одного варианта |
-| POST | `/deals/{id}/scenario-override` | КД, ГД | ΔK/Δt сделки с комментарием |
-| POST | `/deals/{id}/submit` | КД, ГД | Коммерческая виза → ФД/ГД по условиям или утверждение (версия, Excel, КП, черновик письма) |
-| POST | `/deals/{id}/visa` | ФД, ГД | Виза `approved` + комментарий; `cd_insists` при отказе ФД → ГД |
-| POST | `/deals/{id}/rework` | КД, ГД | Возврат на доработку: блок + причина → новая версия, задача автору блока |
+| GET | `/deals/{id}/calc` | КД, ФД, ЗГД | 14 статей × 3 сценария по вариантам, денежный поток, курсы по платежам, чувствительность, комментарии логиста/менеджера, история цен завода и КП клиенту, предупреждение о цене ниже предыдущего КП |
+| POST | `/deals/{id}/price` | КД, ЗГД | Цена `mode=amount|markup|margin`; флаг сервиса в КП; условия оплаты варианта; переопределение накладных (комментарий → виза ЗГД); после визы — сброс виз |
+| POST | `/deals/{id}/compare-payments` | КД, ФД, ЗГД | Сравнение двух наборов условий оплаты одного варианта |
+| POST | `/deals/{id}/scenario-override` | КД, ЗГД | ΔK/Δt сделки с комментарием |
+| POST | `/deals/{id}/submit` | КД, ЗГД | Коммерческая виза → ФД/ЗГД по условиям или утверждение (версия, Excel, КП, черновик письма) |
+| POST | `/deals/{id}/visa` | ФД, ЗГД | Виза `approved` + комментарий; `cd_insists` при отказе ФД → ЗГД |
+| POST | `/deals/{id}/rework` | КД, ЗГД | Возврат на доработку: блок + причина → новая версия, задача автору блока |
 
 ## Справочники и клиенты
 
@@ -99,7 +99,7 @@
 
 ## Администрирование
 
-`GET /admin/settings`, `PUT /admin/settings/{key}` (ФД — пороги, ΔK/Δt, стоимость денег, веса прогноза; админ/ГД — остальное; история `GET …/history`),
+`GET /admin/settings`, `PUT /admin/settings/{key}` (ФД — пороги, ΔK/Δt, стоимость денег, веса прогноза; админ/ЗГД — остальное; история `GET …/history`),
 `GET/POST/PATCH /admin/users`, `POST /admin/hs/upload` (CSV, версии ставок с датами), `POST /admin/fx/load`, `POST /admin/fx/history`, `POST /admin/fx/manual`, `GET /admin/fx`,
 `POST /admin/templates/{kind}`, `GET /admin/audit`, `GET /admin/integrations/log`.
 
@@ -108,7 +108,7 @@
 `GET /tasks/my`, `GET /board` (руководство), `POST /tasks/check-overdue` (планировщик),
 `GET /files/{path}` (локальное хранилище, роль-проверка папки 04),
 `POST /deals/{id}/fact` (роли по статьям: логист 2–10, сервис 12, менеджер платежи, ФД финансы), `GET /deals/{id}/plan-fact` (отчёт по 14 статьям и итогам), `POST /deals/{id}/plan-fact/close` (ФД),
-`GET /reports/estimate-accuracy` (ФД, ГД).
+`GET /reports/estimate-accuracy` (ФД, ЗГД).
 
 ## На будущее (очередь 3): интеграция с 1С
 
@@ -126,8 +126,8 @@
 | POST | `/api/deals/{id}/offers/{offer_id}/images` | фото/чертежи из ответа завода к кандидату (источник «завод», логотип на проверку) |
 | POST | `/api/deals/{id}/positions/{pid}/tech-params/request` | + `client_files_checked`: без него при выбранных файлах клиента — 422 |
 | PATCH | `/api/deals/{id}` | + `keep_variant_id`: выключение альтернатив при ≥2 предложениях без выбора — 409 с `choose_variant` |
-| GET | `/api/catalog/price-reference?factory_id&model&execution_id` | справка при вводе позиции: цены и сроки завода (менеджер/КД/ГД), цены клиентам (КД/ГД) |
-| POST | `/api/catalog/executions/{id}/merge`, `/api/catalog/models/{id}/merge` | объединение дублей (ссылки и история цен переходят, дубль — в архив); КД/ГД |
+| GET | `/api/catalog/price-reference?factory_id&model&execution_id` | справка при вводе позиции: цены и сроки завода (менеджер/КД/ЗГД), цены клиентам (КД/ЗГД) |
+| POST | `/api/catalog/executions/{id}/merge`, `/api/catalog/models/{id}/merge` | объединение дублей (ссылки и история цен переходят, дубль — в архив); КД/ЗГД |
 | GET | `/api/catalog/archive` | архив каталога (восстановление — PATCH `status: approved`) |
 | GET | `/api/deals`, `/api/board` | + `group`, `parent_number`/`group_number`, `related_count`/`related` — группировка связанных заявок |
 
@@ -137,7 +137,7 @@
 
 | Метод | Путь | Назначение |
 | --- | --- | --- |
-| POST | `/api/catalog/equipment` | добавить оборудование вручную (завод → тип → модель → исполнение, технические характеристики, цена); менеджер — на подтверждение КД/ГД, КД/ГД — сразу |
+| POST | `/api/catalog/equipment` | добавить оборудование вручную (завод → тип → модель → исполнение, технические характеристики, цена); менеджер — на подтверждение КД/ЗГД, КД/ЗГД — сразу |
 | POST | `/api/catalog/equipment/import/preview` | файл: опросник RFQ одной машины (`kind=rfq`, данные для формы) или список моделей (`kind=list`, сопоставление столбцов) |
 | POST | `/api/catalog/equipment/import/apply` | добавить модели из списка (`mapping`, `default_factory_id`) |
 | GET | `/api/refs/clients/lookup?inn=` | реквизиты по ИНН (ЕГРЮЛ/ЕГРИП через `COMPANY_REGISTRY_PROVIDER=dadata`, ключ `DADATA_API_KEY`); 422 — неверный ИНН, 503 — источник не подключён |

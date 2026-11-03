@@ -35,7 +35,7 @@ function LinesEditor({ lines, events, onChange }: { lines: PaymentLine[]; events
   );
 }
 
-/** Задача 1: условия оплаты клиента и завода задаёт КД (ГД); БГ на аванс; задача 3: точка отсчёта и единицы срока поставки (правка КД). */
+/** Задача 1: условия оплаты клиента и завода задаёт КД (ЗГД); БГ на аванс; задача 3: точка отсчёта и единицы срока поставки (правка КД). */
 export default function PaymentTermsEditor({ deal, calc, onSaved }: { deal: Deal; calc: CalcResponse; onSaved: () => void }) {
   const pt = calc.payment_terms!;
   const [schemes, setSchemes] = useState<Scheme[]>([]);

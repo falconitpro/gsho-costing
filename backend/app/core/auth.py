@@ -146,7 +146,7 @@ class CurrentUser:
         return bool(self.roles & set(roles))
 
     def can(self, group: str, level: int = 1) -> bool:
-        """Право по группе доступа: 1 — видит, 2 — редактирует (настраивается администратором/ГД)."""
+        """Право по группе доступа: 1 — видит, 2 — редактирует (настраивается администратором/ЗГД)."""
         return self.perms.get(group, 0) >= level
 
 

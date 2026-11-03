@@ -149,7 +149,7 @@ class CloseIn(BaseModel):
 
 @router.post("/close")
 def close(deal_id: str, body: CloseIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Закрытие сделки после исполнения — только КД (и ГД)."""
+    """Закрытие сделки после исполнения — только КД (и ЗГД)."""
     deal = get_deal_or_404(db, deal_id, user)
     if not user.can("execution_close", 2):
         raise HTTPException(403, "Сделку закрывает коммерческий директор")

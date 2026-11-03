@@ -51,8 +51,8 @@ class DealUpdate(BaseModel):
     operating_conditions: Optional[dict] = None
     service_flag: Optional[bool] = None
     target_hours: Optional[float] = None
-    client_payments: Optional[list[dict]] = None       # только КД/ГД (задача 1)
-    bank_guarantee: Optional[dict] = None              # только КД/ГД
+    client_payments: Optional[list[dict]] = None       # только КД/ЗГД (задача 1)
+    bank_guarantee: Optional[dict] = None              # только КД/ЗГД
     base_currency: Optional[str] = None
     client_payment_wishes: Optional[str] = None
     has_alternatives: Optional[bool] = None

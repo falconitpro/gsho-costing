@@ -146,7 +146,7 @@ export default function ClientsPage({ me }: { me: Me }) {
             </div>
             {card.kp_history ? (
               <>
-                <h2>История КП (все версии) <span className="muted" style={{ fontWeight: 400 }}>· видят КД и ГД</span></h2>
+                <h2>История КП (все версии) <span className="muted" style={{ fontWeight: 400 }}>· видят КД и ЗГД</span></h2>
                 {card.kp_totals && <div className="row" style={{ gap: 20 }}><div className="kpi"><span className="v">{card.kp_totals.kp_count}</span><span className="l">КП</span></div><div className="kpi"><span className="v">{card.kp_totals.won}</span><span className="l">выиграно</span></div><div className="kpi"><span className="v">{fmtRub(card.kp_totals.sum_rub)}</span><span className="l">сумма последних версий, RUB</span></div></div>}
                 <div className="row" style={{ margin: "6px 0" }}><input placeholder="модель" value={filter.model} onChange={(e) => setFilter({ ...filter, model: e.target.value })} />
                   <select value={filter.outcome} onChange={(e) => setFilter({ ...filter, outcome: e.target.value })}><option value="">все результаты</option><option value="won">выиграно</option><option value="lost">проиграно</option><option value="cancelled">отменено</option><option value="open">без результата</option></select>
@@ -173,7 +173,7 @@ export default function ClientsPage({ me }: { me: Me }) {
                     </Fragment>);
                   })}</tbody></table>
               </>
-            ) : <p className="muted">История КП и цен клиентам доступна КД и ГД (настраивается в уровнях доступа).</p>}
+            ) : <p className="muted">История КП и цен клиентам доступна КД и ЗГД (настраивается в уровнях доступа).</p>}
           </div>
         )}
       </div>

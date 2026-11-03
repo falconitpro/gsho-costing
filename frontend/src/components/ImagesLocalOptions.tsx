@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, fmtRub } from "../api";
 import { can, type LocalOption, type Me, type Position, type PositionImage } from "../types";
 
-/** Задача 10: изображения и чертежи позиции. Загружают менеджер/КД/ГД; «В КП» и порядок — КД/ГД. */
+/** Задача 10: изображения и чертежи позиции. Загружают менеджер/КД/ЗГД; «В КП» и порядок — КД/ЗГД. */
 export function ImagesBlock({ dealId, position, me, onChanged }: { dealId: string; position: Position; me: Me; onChanged: () => void }) {
   const base = `/api/deals/${dealId}/positions/${position.id}/images`;
   const [images, setImages] = useState<PositionImage[]>([]);
@@ -22,7 +22,7 @@ export function ImagesBlock({ dealId, position, me, onChanged }: { dealId: strin
     <div>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <b>Изображения и чертежи</b>
-        <span className="muted">в КП: {images.filter((i) => i.in_kp).length} из {images.length}{!canSelect && " · выбор для КП делает КД/ГД"}</span>
+        <span className="muted">в КП: {images.filter((i) => i.in_kp).length} из {images.length}{!canSelect && " · выбор для КП делает КД/ЗГД"}</span>
       </div>
       {err && <div className="alert error">{err}</div>}
       <div className="row" style={{ marginTop: 6, flexWrap: "wrap" }}>
@@ -122,7 +122,7 @@ export function LocalOptionsBlock({ dealId, position, me, onChanged }: { dealId:
   );
 }
 
-/** Задача 9: ответы заводов — сравнение «параметр × завод», отправка на отбор, отбор КД/ГД. */
+/** Задача 9: ответы заводов — сравнение «параметр × завод», отправка на отбор, отбор КД/ЗГД. */
 export function OffersBlock({ dealId, position, me, onChanged }: { dealId: string; position: Position; me: Me; onChanged: () => void }) {
   type Cmp = { offers: { offer_id: string; factory: string; model: string; unit_price?: number; currency: string; production_term: Record<string, unknown>; status: string; answered: boolean; images: number; selected_deal_id: string | null }[];
     rows: { no: number; name_ru: string; unit: string; requirement: string; required: boolean; cells: { value: string; status: string; comment: string }[] }[] };

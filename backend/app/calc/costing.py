@@ -423,7 +423,7 @@ def calc_deal(inp: DealCalcInput) -> DealCalcResult:
             approval.reasons.append(f"Вариант «{v.name}»: кассовый разрыв {-base.cash_gap.amount_rub:,.0f} RUB выше лимита ФД.")
         if thr.gd_deal_limit_rub is not None and base.price_rub and base.price_rub > thr.gd_deal_limit_rub:
             approval.general = True
-            approval.reasons.append(f"Вариант «{v.name}»: сумма сделки выше лимита ГД.")
+            approval.reasons.append(f"Вариант «{v.name}»: сумма сделки выше лимита ЗГД.")
         if v.overhead_pct_override is not None:
             approval.general = True
             approval.reasons.append(f"Вариант «{v.name}»: КД переопределил процент накладных ({v.overhead_pct_override} %).")

@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 ADMIN = require_roles(Role.ADMIN, Role.GD)
 FD_ADMIN = require_roles(Role.ADMIN, Role.FD, Role.GD)
 SETTINGS_READ = require_roles(Role.ADMIN, Role.FD, Role.GD, Role.CD)
-# ключи, которые меняет КД (и ГД): комиссии внешняя и менеджера
+# ключи, которые меняет КД (и ЗГД): комиссии внешняя и менеджера
 CD_KEYS = {"external_commission_pct", "manager_commission_pct"}
 
 # ключи, которые может менять ФД (ставки стоимости денег, порог маржи, ΔK/Δt, лимиты)
@@ -45,7 +45,7 @@ def settings_meta(user: CurrentUser = Depends(SETTINGS_READ)):
     m = settings_service.meta()
     for k, it in m["items"].items():
         it["editable"] = _can_set(user, k)
-        it["editors"] = "КД или ГД" if k in CD_KEYS else "ФД, ГД" if k in FD_KEYS else "ГД"
+        it["editors"] = "КД или ЗГД" if k in CD_KEYS else "ФД, ЗГД" if k in FD_KEYS else "ЗГД"
     return m
 
 
@@ -63,11 +63,11 @@ def set_setting(key: str, body: SettingIn, db: Session = Depends(get_db), user: 
     if key not in settings_service.DEFAULTS:
         raise HTTPException(404, "Неизвестный ключ")
     if not _can_set(user, key):
-        raise HTTPException(403, "Этот параметр меняет " + ("КД или ГД" if key in CD_KEYS else "ФД, ГД или администратор" if key in FD_KEYS else "ГД или администратор"))
+        raise HTTPException(403, "Этот параметр меняет " + ("КД или ЗГД" if key in CD_KEYS else "ФД, ЗГД или администратор" if key in FD_KEYS else "ЗГД или администратор"))
     if key == "fx_expert_points":
         body.value = settings_service.expert_points(body.value)
     if key in ("gd_deal_limit_rub", "overhead_scale") and not user.has(Role.GD, Role.ADMIN):
-        raise HTTPException(403, "Лимит и шкалу накладных утверждает ГД")
+        raise HTTPException(403, "Лимит и шкалу накладных утверждает ЗГД")
     before = settings_service.get(db, key)
     settings_service.set_value(db, key, body.value, user.id, body.comment)
     audit(db, user.id, None, "setting", key, "update", {"value": before}, {"value": body.value}, body.comment)
@@ -238,7 +238,7 @@ def integrations_log(limit: int = 100, db: Session = Depends(get_db), user: Curr
 
 def _access_admin(user: CurrentUser = Depends(ADMIN)) -> CurrentUser:
     if not user.can("access_admin", 2):
-        raise HTTPException(403, "Уровни доступа меняют администратор и ГД")
+        raise HTTPException(403, "Уровни доступа меняют администратор и ЗГД")
     return user
 
 

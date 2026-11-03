@@ -1,5 +1,5 @@
 """Несколько заводов по одному запросу клиента (задача 9): ответы-кандидаты, сравнение «параметр × завод»,
-отбор КД/ГД, дублирование заявки, бренд подачи КП."""
+отбор КД/ЗГД, дублирование заявки, бренд подачи КП."""
 from __future__ import annotations
 
 import re
@@ -173,14 +173,14 @@ def compare(db: Session, deal: Deal, source_position: Optional[Position]) -> dic
 
 
 def submit_compare(db: Session, deal: Deal, user_id: str) -> None:
-    """Менеджер отправил сравнение на отбор → задача КД (видна и ГД)."""
+    """Менеджер отправил сравнение на отбор → задача КД (видна и ЗГД)."""
     if not db.scalar(select(Task.id).where(Task.deal_id == deal.id, Task.block == "offers", Task.done_at.is_(None))):
         db.add(Task(deal_id=deal.id, role=Role.CD.value, title="Отобрать заводы для КП (сравнение ответов)", block="offers", due=add_business_days(date.today(), 1)))
     db.add(FeedEntry(deal_id=deal.id, kind="system", subject="Сравнение ответов заводов отправлено на отбор", body="", user_id=user_id))
 
 
 def select_offers(db: Session, deal: Deal, offer_ids: list[str], user_id: str, copy_calcs: bool = True) -> list[Deal]:
-    """КД/ГД отобрал ответы: первый — в исходную заявку (позиция обновляется), остальные — отдельные заявки дублированием.
+    """КД/ЗГД отобрал ответы: первый — в исходную заявку (позиция обновляется), остальные — отдельные заявки дублированием.
     Неотобранные ответы остаются в истории цен завода."""
     offers = [o for o in db.scalars(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id)).all() if o.id in offer_ids]
     if not offers:

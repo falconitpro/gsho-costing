@@ -84,7 +84,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
     return m;
   }, [schema]);
 
-  // задача 7: справка при вводе позиции — последние цены и сроки завода (менеджер, КД, ГД), цены клиентам (КД, ГД)
+  // задача 7: справка при вводе позиции — последние цены и сроки завода (менеджер, КД, ЗГД), цены клиентам (КД, ЗГД)
   const refModel = vals["1.2"] || "";
   useEffect(() => {
     if (!factoryId || !refModel) { setRef(null); return; }
@@ -255,7 +255,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
                       <td className="muted">{h.production_term?.value != null ? `${h.production_term.value} ${TERM_UNITS[h.production_term.unit || "calendar_days"] || ""}` : "—"}</td></tr>))}</tbody></table>)}
               </div>)}
             {ref.client_prices && (
-              <div><div className="muted">Цены клиентам (видят КД и ГД)</div>
+              <div><div className="muted">Цены клиентам (видят КД и ЗГД)</div>
                 {ref.client_prices.length === 0 ? <div className="muted">КП по модели ещё не было</div> : (
                   <table><tbody>{ref.client_prices.map((h, i) => (
                     <tr key={i}><td>{fmtDate(h.on)}</td><td>{h.deal_number}</td><td className="num">{fmtRub(h.unit_price_rub)} RUB × {h.qty}</td>

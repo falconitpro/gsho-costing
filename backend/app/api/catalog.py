@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api", tags=["catalog"])
 
 def _catalog_editor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     if not user.can("catalog", 2):
-        raise HTTPException(403, "Каталог правят КД и ГД")
+        raise HTTPException(403, "Каталог правят КД и ЗГД")
     return user
 
 
@@ -57,7 +57,7 @@ class ExecutionDecision(BaseModel):
 
 @router.post("/catalog/executions/{exec_id}/decision")
 def execution_decision(exec_id: str, body: ExecutionDecision, db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_editor)):
-    """КД или ГД подтверждает (или отклоняет) занесение исполнения в каталог; подтверждение одного закрывает задачу для обоих."""
+    """КД или ЗГД подтверждает (или отклоняет) занесение исполнения в каталог; подтверждение одного закрывает задачу для обоих."""
     ex = db.get(EquipmentExecution, exec_id)
     if ex is None:
         raise HTTPException(404)
@@ -170,7 +170,7 @@ def catalog_archive(db: Session = Depends(get_db), user: CurrentUser = Depends(_
 
 @router.get("/catalog/price-reference")
 def price_reference(factory_id: str, model: str, execution_id: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Справка при вводе позиции: последние цены и сроки производства завода (менеджер, КД, ГД) и цены клиентам (КД, ГД)."""
+    """Справка при вводе позиции: последние цены и сроки производства завода (менеджер, КД, ЗГД) и цены клиентам (КД, ЗГД)."""
     from ..models import ClientPriceHistory
     out: dict = {"factory_prices": None, "client_prices": None}
     if user.can("factory_price_history"):
@@ -192,7 +192,7 @@ def price_reference(factory_id: str, model: str, execution_id: str = "", db: Ses
 
 def _catalog_contributor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     if not user.has(Role.MANAGER, Role.CD, Role.GD):
-        raise HTTPException(403, "Добавлять оборудование в каталог могут менеджер, КД и ГД")
+        raise HTTPException(403, "Добавлять оборудование в каталог могут менеджер, КД и ЗГД")
     return user
 
 
@@ -216,13 +216,13 @@ class EquipmentIn(BaseModel):
 
 def _added(ex: EquipmentExecution, created: bool, editor: bool) -> dict:
     return {**serialize(ex), "created": created,
-            "message": ("Добавлено в каталог" if editor else "Отправлено на подтверждение КД/ГД") if created else "Такое исполнение уже есть в каталоге — добавлена запись истории цен"}
+            "message": ("Добавлено в каталог" if editor else "Отправлено на подтверждение КД/ЗГД") if created else "Такое исполнение уже есть в каталоге — добавлена запись истории цен"}
 
 
 @router.post("/catalog/equipment", status_code=201)
 def catalog_add(body: EquipmentIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_contributor)):
     """Добавить оборудование вручную: завод → тип → модель → исполнение с техническими характеристиками и ценой.
-    Менеджер — на подтверждение КД/ГД; КД и ГД — сразу в каталог."""
+    Менеджер — на подтверждение КД/ЗГД; КД и ЗГД — сразу в каталог."""
     editor = user.can("catalog", 2)
     try:
         ex, created = cs.add_equipment(db, body.model_dump(), user, editor)
@@ -321,7 +321,7 @@ async def catalog_import_apply(file: UploadFile = File(...), mapping: str = Form
                 errors.append({"row": i, "message": str(e)})
         db.commit()
         return {"added": added, "existing": existing, "errors": errors,
-                "message": f"Добавлено {len(added)}" + ("" if editor else " (на подтверждение КД/ГД)") + (f", уже были в каталоге: {existing}" if existing else "")}
+                "message": f"Добавлено {len(added)}" + ("" if editor else " (на подтверждение КД/ЗГД)") + (f", уже были в каталоге: {existing}" if existing else "")}
     finally:
         shutil.rmtree(os.path.dirname(path), ignore_errors=True)
 
@@ -340,7 +340,7 @@ def machine_types(db: Session = Depends(get_db), user: CurrentUser = Depends(get
 
 @router.post("/refs/machine-types", status_code=201)
 def create_machine_type(body: MachineTypeIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Тип заводится по ходу работы: КД/ГД — сразу подтверждённый, менеджер — на подтверждение."""
+    """Тип заводится по ходу работы: КД/ЗГД — сразу подтверждённый, менеджер — на подтверждение."""
     if db.scalar(select(MachineType).where(MachineType.name == body.name)):
         raise HTTPException(409, "Такой тип уже есть")
     t = MachineType(name=body.name, name_zh=body.name_zh, status="approved" if user.can("catalog", 2) else "pending", proposed_by=user.id)
@@ -359,7 +359,7 @@ def approve_machine_type(type_id: str, db: Session = Depends(get_db), user: Curr
     return serialize(t)
 
 
-# ------------------------------------------------------------------ шаблоны технических характеристик (обязательность задают КД/ГД)
+# ------------------------------------------------------------------ шаблоны технических характеристик (обязательность задают КД/ЗГД)
 
 class TemplateRowIn(BaseModel):
     id: Optional[str] = None
@@ -482,7 +482,7 @@ class ProposeIn(BaseModel):
 
 @router.post("/deals/{deal_id}/catalog/propose")
 def propose(deal_id: str, body: ProposeIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Менеджер подтверждает состав для занесения → исполнения «на проверке» и задача КД/ГД."""
+    """Менеджер подтверждает состав для занесения → исполнения «на проверке» и задача КД/ЗГД."""
     deal = get_deal_or_404(db, deal_id, user)
     if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):
         raise HTTPException(403)
@@ -494,7 +494,7 @@ def propose(deal_id: str, body: ProposeIn, db: Session = Depends(get_db), user: 
 
 @router.get("/catalog/pending")
 def pending(db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_editor)):
-    """Очередь на подтверждение для КД/ГД."""
+    """Очередь на подтверждение для КД/ЗГД."""
     rows = db.scalars(select(EquipmentExecution).where(EquipmentExecution.status == "pending").order_by(EquipmentExecution.created_at)).all()
     out = []
     for e in rows:
