@@ -251,3 +251,10 @@ def util_reference(deal_id: str, pos_id: str, hs_code: str = "", db: Session = D
     row = db.scalar(select(HsCode).where(HsCode.code == code, HsCode.valid_to.is_(None))) if code else None
     ref = settings_service.util_reference(settings_service.get_all(db), code, pos.machine_type)
     return {**ref, "hs_code": code, "hs_found": row is not None, "applies_by_hs": bool(row.util_fee) if row else None, "machine_type": pos.machine_type}
+
+
+@router.get("/defaults")
+def logistics_defaults(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Нормативы для экрана логиста: доля единой стоимости доставки до границы РФ."""
+    get_deal_or_404(db, deal_id, user)
+    return {"door_to_door_border_pct": float(settings_service.get(db, "door_to_door_border_pct") or 10.0)}

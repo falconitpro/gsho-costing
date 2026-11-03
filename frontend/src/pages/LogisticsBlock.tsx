@@ -18,7 +18,9 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const batches = deal.batches || [];
   const positions = deal.positions || [];
   const [batch, setBatch] = useState({ name: `Партия ${batches.length + 1}`, route: "завод → Маньчжурия → Забайкальск → пункт поставки", transport_units: 1, transit_days: 14, customs_days: 5, rf_delivery_days: 5, border_planned: "", allocation: "cost",
-    intl_freight: 0, intl_currency: "CNY", insurance_pct: 0.3, broker_rub: 0, rf_delivery_rub: 0, comment_freight: "", comment_broker: "", comment_rf: "" });
+    intl_freight: 0, intl_currency: "CNY", insurance_pct: 0.3, broker_rub: 0, rf_delivery_rub: 0, comment_freight: "", comment_broker: "", comment_rf: "", d2d: true, d2d_amount: 0, d2d_currency: "CNY" });
+  const [borderPct, setBorderPct] = useState(10);   // единая стоимость доставки: доля до границы РФ (настройка КД / ЗГД)
+  useEffect(() => { api.get<{ door_to_door_border_pct: number }>(`/api/deals/${deal.id}/logistics/defaults`).then((r) => setBorderPct(r.door_to_door_border_pct)).catch(() => undefined); }, [deal.id]);
   const [bc, setBc] = useState<Record<string, string>>({});   // комментарии к остальным полям партии
   const bcc = (k: string) => <input value={bc[k] || ""} placeholder="комментарий" onChange={(e) => setBc({ ...bc, [k]: e.target.value })} />;
   const [forms, setForms] = useState<Record<string, PosForm>>(() => Object.fromEntries(positions.map((p) => {
@@ -43,7 +45,8 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
     try {
       await api.post(`/api/deals/${deal.id}/logistics/batches`, { name: batch.name, route: batch.route, transport_units: batch.transport_units, transit_days: batch.transit_days, customs_days: batch.customs_days,
         rf_delivery_days: batch.rf_delivery_days, border_planned: batch.border_planned || null, allocation: batch.allocation,
-        items: { intl_freight: { amount: batch.intl_freight, currency: batch.intl_currency }, insurance_pct: batch.insurance_pct, broker_rub: batch.broker_rub, rf_delivery_rub: batch.rf_delivery_rub,
+        items: { intl_freight: { amount: batch.d2d ? 0 : batch.intl_freight, currency: batch.intl_currency }, insurance_pct: batch.insurance_pct, broker_rub: batch.broker_rub,
+          rf_delivery_rub: batch.d2d ? 0 : batch.rf_delivery_rub, door_to_door: batch.d2d ? { amount: batch.d2d_amount, currency: batch.d2d_currency } : null,
           comments: { ...bc, intl_freight: batch.comment_freight, broker_rub: batch.comment_broker, rf_delivery_rub: batch.comment_rf } },
         position_ids: positions.filter((p) => !p.batch_id).map((p) => p.id) });
       setErr(""); reload();
@@ -72,10 +75,13 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
       {err && <div className="alert error">{err}</div>}
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Партии и консолидация</h2>
-        <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление / по РФ, дн</th><th>CMR план / факт</th><th>Международная перевозка</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Распределение</th><th>Позиции</th></tr></thead>
-          <tbody>{batches.map((b) => { const it = b.items as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; return (
+        <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление / по РФ, дн</th><th>CMR план / факт</th><th>Доставка до границы РФ</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Распределение</th><th>Позиции</th></tr></thead>
+          <tbody>{batches.map((b) => { const it = b.items as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; const d2d = it.door_to_door as Money | null | undefined; return (
             <tr key={b.id}><td>{b.name}</td><td>{b.route}</td><td className="num">{b.transport_units}</td><td className="num">{b.transit_days} / {b.customs_days} / {b.rf_delivery_days ?? 5}</td><td>{fmtDate(b.border_planned)} / {b.border_actual ? <b>{fmtDate(b.border_actual)}</b> : "—"}</td>
-              <td>{fr ? `${fmtRub(fr.amount)} ${fr.currency}` : "—"}</td><td>{it.insurance_pct != null ? `${it.insurance_pct} %` : "—"}</td><td className="num">{fmtRub(it.broker_rub as number)}</td><td className="num">{fmtRub(it.rf_delivery_rub as number)}</td>
+              {d2d?.amount ? <td colSpan={1} title="единая стоимость завод → клиент">{fmtRub(d2d.amount * borderPct / 100)} {d2d.currency} <span className="muted">({borderPct} % от {fmtRub(d2d.amount)})</span></td>
+                : <td>{fr ? `${fmtRub(fr.amount)} ${fr.currency}` : "—"}</td>}
+              <td>{it.insurance_pct != null ? `${it.insurance_pct} %` : "—"}</td><td className="num">{fmtRub(it.broker_rub as number)}</td>
+              <td className="num">{d2d?.amount ? <>{fmtRub(d2d.amount * (100 - borderPct) / 100)} {d2d.currency} <span className="muted">({100 - borderPct} %)</span></> : fmtRub(it.rf_delivery_rub as number)}</td>
               <td>{b.allocation}</td><td>{positions.filter((p) => p.batch_id === b.id).map((p) => designation(p)).join(", ")}</td></tr>); })}</tbody></table>
         {canEdit && (
           <>
@@ -91,15 +97,27 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
                 { key: "cmr", name: "Плановая дата пересечения границы (CMR)", ref: <span className="muted">если известна</span>, filled: !!batch.border_planned, value: <input type="date" value={batch.border_planned} onChange={(e) => setBatch({ ...batch, border_planned: e.target.value })} />, comment: bcc("border_planned") },
               ] },
               { title: "Стоимость", rows: [
-                { key: "fr", name: "Международная перевозка", unit: <select value={batch.intl_currency} onChange={(e) => setBatch({ ...batch, intl_currency: e.target.value })}><option>CNY</option><option>USD</option><option>RUB</option></select>,
+                { key: "mode", name: "Стоимость доставки вводится", filled: true,
+                  value: <select value={batch.d2d ? "single" : "split"} onChange={(e) => setBatch({ ...batch, d2d: e.target.value === "single" })}>
+                    <option value="single">единым полем: завод → клиент</option><option value="split">по участкам: до границы и по РФ</option></select>, comment: bcc("delivery_mode") },
+                ...(batch.d2d ? [
+                  { key: "d2d", name: <b>Доставка от завода до клиента</b>, unit: <select value={batch.d2d_currency} onChange={(e) => setBatch({ ...batch, d2d_currency: e.target.value })}>{["RUB", "USD", "EUR", "CNY"].map((c) => <option key={c} value={c}>{c === "RUB" ? "руб" : c}</option>)}</select>, filled: batch.d2d_amount > 0, required: true,
+                    ref: <span className="muted">до границы РФ {borderPct} % = {fmtRub(batch.d2d_amount * borderPct / 100)}; от границы до клиента {100 - borderPct} % = {fmtRub(batch.d2d_amount * (100 - borderPct) / 100)} {batch.d2d_currency === "RUB" ? "руб" : batch.d2d_currency}</span>,
+                    value: <input type="number" value={batch.d2d_amount} onChange={(e) => setBatch({ ...batch, d2d_amount: Number(e.target.value) })} />,
+                    comment: <input value={batch.comment_freight} placeholder="комментарий" onChange={(e) => setBatch({ ...batch, comment_freight: e.target.value })} /> },
+                ] : [
+                { key: "fr", name: "Доставка от завода до границы РФ", unit: <select value={batch.intl_currency} onChange={(e) => setBatch({ ...batch, intl_currency: e.target.value })}><option value="RUB">руб</option><option>USD</option><option>EUR</option><option>CNY</option></select>,
                   ref: <span className="muted">при отклонении от истории — комментарий</span>, filled: batch.intl_freight > 0, required: true,
                   value: <input type="number" value={batch.intl_freight} onChange={(e) => setBatch({ ...batch, intl_freight: Number(e.target.value) })} />,
                   comment: <input value={batch.comment_freight} placeholder="комментарий" onChange={(e) => setBatch({ ...batch, comment_freight: e.target.value })} /> },
+                ]),
                 { key: "ins", name: "Страхование", unit: "% от стоимости", filled: batch.insurance_pct > 0, value: <input type="number" step="0.01" value={batch.insurance_pct} onChange={(e) => setBatch({ ...batch, insurance_pct: Number(e.target.value) })} />, comment: bcc("insurance_pct") },
                 { key: "br", name: "Брокер и СВХ", unit: "RUB", filled: batch.broker_rub > 0, value: <input type="number" value={batch.broker_rub} onChange={(e) => setBatch({ ...batch, broker_rub: Number(e.target.value) })} />,
                   comment: <input value={batch.comment_broker} placeholder="комментарий" onChange={(e) => setBatch({ ...batch, comment_broker: e.target.value })} /> },
+                ...(batch.d2d ? [] : [
                 { key: "rf", name: "Доставка по РФ до объекта", unit: "RUB", filled: batch.rf_delivery_rub > 0, value: <input type="number" value={batch.rf_delivery_rub} onChange={(e) => setBatch({ ...batch, rf_delivery_rub: Number(e.target.value) })} />,
                   comment: <input value={batch.comment_rf} placeholder="комментарий" onChange={(e) => setBatch({ ...batch, comment_rf: e.target.value })} /> },
+                ]),
                 { key: "alloc", name: "Распределение общих статей между позициями", filled: true, value: <select value={batch.allocation} onChange={(e) => setBatch({ ...batch, allocation: e.target.value })}><option value="cost">по стоимости</option><option value="weight">по весу</option><option value="volume">по объёму</option></select>, comment: bcc("allocation") },
               ] },
             ]} />
