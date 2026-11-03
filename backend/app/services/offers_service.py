@@ -111,19 +111,26 @@ def duplicate_deal(db: Session, deal: Deal, user_id: str, offer_id: Optional[str
 _NUM = re.compile(r"-?\d+(?:[.,]\d+)?")
 
 
-def _req_status(val: str, req: str) -> str:
+def req_status(val: str, req: str) -> str:
     """Соответствие значения требованию: текстовое совпадение или числовое («не менее 3200», «≤ 5», «3000–3500», «5 т»)."""
     nv, nr = _norm(val), _norm(req)
     if nv == nr or nr in nv:
         return "match"
     if nv and any(nv == _norm(alt) for alt in re.split(r"/|,|;| или | or ", req)):   # «L4 / L5» → «L5»
         return "match"
-    nums_v = [float(x.replace(",", ".")) for x in _NUM.findall(val)]
-    nums_r = [float(x.replace(",", ".")) for x in _NUM.findall(req)]
+    glue = lambda t: re.sub(r"(?<=\d)[ \u00a0](?=\d{3}(?!\d))", "", t)   # «3 050» → «3050» (пробел между разрядами)
+    val_g, req = glue(val), glue(req)
+    nums_v = [float(x.replace(",", ".")) for x in _NUM.findall(re.sub(r"\([^)]*\)", "", val_g))]
+    nums_r = [float(x.replace(",", ".")) for x in _NUM.findall(re.sub(r"\([^)]*\)", "", req))]
     if not nums_v or not nums_r:
         return "mismatch"
     v = nums_v[0]
-    if len(nums_r) >= 2 and any(ch in req for ch in "–-…"):           # диапазон
+    tol = re.search(r"±\s*([\d.,]+)", val_g)
+    if tol and len(nums_r) == 1 and not any(k in _norm(req) for k in ("не менее", "не более", "минимум", "максимум")):
+        return "match" if abs(v - nums_r[0]) <= float(tol.group(1).replace(",", ".")) else "mismatch"
+    if re.search(r"\d-\d", val_g) or re.search(r"\d-\d", req):     # «8.25-20», «L4-L5» — обозначение, не диапазон: только текстом
+        return "mismatch"
+    if len(nums_r) >= 2 and re.search(r"\d\s*[–…]\s*\d|\d\s+-\s+\d|от\s*[\d.,]+.*до\s*\d", req):   # диапазон «3000–3500», «от 3000 до 3500»
         lo, hi = min(nums_r[0], nums_r[1]), max(nums_r[0], nums_r[1])
         return "match" if lo <= v <= hi else "mismatch"
     r = nums_r[0]
@@ -156,7 +163,7 @@ def compare(db: Session, deal: Deal, source_position: Optional[Position]) -> dic
         for o in offers:
             v = by_offer[o.id].get(key) or {}
             val = (v.get("value_ru") or v.get("value_zh") or "").strip()
-            status = "empty" if not val else ("unknown" if not req else _req_status(val, req))
+            status = "empty" if not val else ("unknown" if not req else req_status(val, req))
             cells.append({"value": val, "value_zh": v.get("value_zh") or "", "comment": v.get("comment_ru") or "", "status": status})
         rows.append({"no": r.get("no"), "name_ru": r.get("name_ru"), "unit": r.get("unit"), "requirement": req, "required": r.get("required"), "cells": cells})
     return {"offers": cols, "rows": rows}

@@ -89,6 +89,15 @@ class Client(TimestampMixin, Base):
     address: Mapped[str] = mapped_column(Text, default="")
     sites: Mapped[list[dict]] = mapped_column(JSONType, default=list)        # объекты / месторождения
     contacts: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    # реквизиты из реестра (ЕГРЮЛ/ЕГРИП через внешний источник, по ИНН)
+    full_name: Mapped[str] = mapped_column(Text, default="")
+    kpp: Mapped[str] = mapped_column(String(9), default="")
+    ogrn: Mapped[str] = mapped_column(String(15), default="")
+    director: Mapped[str] = mapped_column(String(255), default="")
+    legal_status: Mapped[str] = mapped_column(String(32), default="")          # ACTIVE | LIQUIDATING | LIQUIDATED …
+    okved: Mapped[str] = mapped_column(String(255), default="")
+    registry: Mapped[dict] = mapped_column(JSONType, default=dict)             # ответ источника (сокращённо)
+    registry_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     manager_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     default_payment_scheme_id: Mapped[Optional[str]] = mapped_column(ForeignKey("payment_schemes.id"))
 
@@ -100,8 +109,23 @@ class Factory(TimestampMixin, Base):
     name_zh: Mapped[str] = mapped_column(String(255), default="")
     address: Mapped[str] = mapped_column(Text, default="")                   # 0.8
     country: Mapped[str] = mapped_column(String(64), default="CN")
+    # контакты по направлениям: [{name, name_zh, position, roles: [rfq|sales|logistics|finance|service|quality|management|other],
+    #   phone, mobile, email, wechat, wecom_id, whatsapp, language, primary, comment}]
     contacts: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     wecom_external_ids: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    short_name: Mapped[str] = mapped_column(String(128), default="")
+    address_zh: Mapped[str] = mapped_column(Text, default="")
+    province: Mapped[str] = mapped_column(String(128), default="")
+    city: Mapped[str] = mapped_column(String(128), default="")
+    website: Mapped[str] = mapped_column(String(255), default="")
+    uscc: Mapped[str] = mapped_column(String(32), default="")                # 统一社会信用代码 — единый код юрлица КНР
+    supplier_status: Mapped[str] = mapped_column(String(32), default="")     # manufacturer | official_dealer | trader
+    bank_details: Mapped[dict] = mapped_column(JSONType, default=dict)       # {beneficiary, bank, swift, account, bank_address}
+    default_currency: Mapped[str] = mapped_column(String(3), default="CNY")
+    default_basis: Mapped[str] = mapped_column(String(16), default="")
+    machine_types: Mapped[list[str]] = mapped_column(JSONType, default=list)  # что выпускает
+    notes: Mapped[str] = mapped_column(Text, default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     payment_terms: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     typical_production_days: Mapped[Optional[int]] = mapped_column(Integer)
     rating: Mapped[Optional[float]] = mapped_column(Float)
@@ -430,6 +454,7 @@ class PositionTechParam(TimestampMixin, Base):
     local_ru: Mapped[bool] = mapped_column(Boolean, default=False)           # реализуется в России (задача 6) — не идёт заводу
     source: Mapped[str] = mapped_column(String(16), default="manual")        # manual | client_import | factory_answer | catalog | rfq
     translation_status: Mapped[str] = mapped_column(String(16), default="none")   # none | glossary | machine | verified
+    section: Mapped[str] = mapped_column(String(255), default="")              # раздел опросника («1. Общие данные»), как в файле
     filled_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
 
 

@@ -12,7 +12,7 @@ from ..core.auth import CurrentUser, get_current_user, require_roles
 from ..core.roles import Role, filter_payload
 from ..core.workflow import DealStatus
 from ..db import get_db
-from ..models import Client, Deal, DealVersion, EquipmentModel, Factory, FactoryPriceHistory, HsCode, PaymentScheme
+from ..models import Client, Deal, DealVersion, EquipmentModel, Factory, FactoryPriceHistory, HsCode, PaymentScheme, Position
 from ..services.deal_service import audit
 from .common import serialize
 
@@ -26,7 +26,45 @@ class ClientIn(BaseModel):
     sites: list[dict] = Field(default_factory=list)
     contacts: list[dict] = Field(default_factory=list)
     default_payment_scheme_id: Optional[str] = None
+    full_name: str = ""
+    kpp: str = ""
+    ogrn: str = ""
+    director: str = ""
+    legal_status: str = ""
+    okved: str = ""
+    registry: dict = Field(default_factory=dict)
 
+
+def _registry_lookup(db: Session, inn: str, user: CurrentUser) -> list[dict]:
+    """Реквизиты по ИНН из внешнего источника; каждый вызов — в журнал интеграций."""
+    from .. import adapters
+    from ..adapters.company_registry import RegistryNotConfigured
+    from ..models import IntegrationLog
+    reg = None
+    try:
+        reg = adapters.company_registry()
+        found = [c.as_dict() for c in reg.find_by_inn(inn)]
+        db.add(IntegrationLog(system="registry", operation="find_by_inn", ok=True, details={"provider": reg.name, "inn": inn, "found": len(found)}))
+        db.commit()
+        return found
+    except RegistryNotConfigured as e:
+        raise HTTPException(503, str(e))
+    except Exception as e:
+        db.add(IntegrationLog(system="registry", operation="find_by_inn", ok=False, details={"provider": getattr(reg, "name", ""), "inn": inn, "error": str(e)[:300]}))
+        db.commit()
+        raise HTTPException(502, f"Источник реквизитов недоступен: {e}")
+
+
+@router.get("/clients/lookup")
+def client_lookup(inn: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Поиск организации по ИНН: реквизиты из ЕГРЮЛ/ЕГРИП (через подключённый источник) и признак «уже есть в базе»."""
+    from ..adapters.company_registry import inn_valid
+    inn = inn.strip()
+    if not inn_valid(inn):
+        raise HTTPException(422, "ИНН неверный: 10 цифр для организации или 12 для ИП, с правильными контрольными цифрами")
+    existing = db.scalar(select(Client).where(Client.inn == inn))
+    found = _registry_lookup(db, inn, user)
+    return {"inn": inn, "existing_client_id": existing.id if existing else None, "results": found}
 
 @router.get("/clients")
 def clients(q: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
@@ -37,10 +75,16 @@ def clients(q: str = "", db: Session = Depends(get_db), user: CurrentUser = Depe
 
 
 @router.post("/clients", status_code=201)
-def create_client(body: ClientIn, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.GD, Role.ADMIN))):
+def create_client(body: ClientIn, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN))):
+    from datetime import datetime, timezone
+    from ..adapters.company_registry import inn_valid
+    if not inn_valid(body.inn):
+        raise HTTPException(422, "ИНН неверный: проверьте контрольные цифры")
     if db.scalar(select(Client).where(Client.inn == body.inn)):
         raise HTTPException(409, "Клиент с таким ИНН уже есть")
     c = Client(manager_id=user.id, **body.model_dump())
+    if body.registry:
+        c.registry_checked_at = datetime.now(timezone.utc)
     db.add(c)
     db.flush()
     audit(db, user.id, None, "client", c.id, "create", after=body.model_dump())
@@ -89,28 +133,147 @@ def client_card(client_id: str, db: Session = Depends(get_db), user: CurrentUser
     return filter_payload(data, user)
 
 
+@router.post("/clients/{client_id}/refresh-registry")
+def client_refresh_registry(client_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN))):
+    """Обновить реквизиты клиента из реестра (наименование, КПП, ОГРН, адрес, руководитель, статус)."""
+    from datetime import datetime, timezone
+    c = db.get(Client, client_id)
+    if c is None:
+        raise HTTPException(404)
+    found = _registry_lookup(db, c.inn, user)
+    if not found:
+        raise HTTPException(404, "Организация с таким ИНН в реестре не найдена")
+    main = next((x for x in found if (x.get("raw") or {}).get("branch_type") in (None, "MAIN")), found[0])
+    before = serialize(c)
+    c.name = main["name"] or c.name
+    for k_src, k_dst in (("full_name", "full_name"), ("kpp", "kpp"), ("ogrn", "ogrn"), ("address", "address"), ("director", "director"),
+                         ("status", "legal_status"), ("okved", "okved")):
+        if main.get(k_src):
+            setattr(c, k_dst, main[k_src])
+    c.registry, c.registry_checked_at = main, datetime.now(timezone.utc)
+    audit(db, user.id, None, "client", c.id, "registry_refresh", {k: before.get(k) for k in ("name", "kpp", "address", "director")}, {"source": main.get("source")})
+    db.commit()
+    return serialize(c)
+
+
 @router.get("/factories")
 def factories(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    return [serialize(f) for f in db.scalars(select(Factory).order_by(Factory.name)).all()]
+    out = [serialize(f) for f in db.scalars(select(Factory).order_by(Factory.name)).all()]
+    if not user.can("factory_price_history"):          # банковские реквизиты — тем, кто видит цены завода
+        for f in out:
+            f.pop("bank_details", None)
+    return out
+
+
+CONTACT_ROLES = {"rfq": "Заявки и КП", "sales": "Продажи / договор", "logistics": "Логистика и отгрузка", "finance": "Финансы и оплаты",
+                 "service": "Сервис и запчасти", "quality": "Качество и документы", "management": "Руководство", "other": "Другое"}
+
+
+class FactoryContact(BaseModel):
+    name: str
+    name_zh: str = ""
+    position: str = ""
+    roles: list[str] = Field(default_factory=list)       # направления из CONTACT_ROLES
+    phone: str = ""
+    mobile: str = ""
+    email: str = ""
+    wechat: str = ""
+    wecom_id: str = ""                                    # внешний контакт WeCom (для отправки из системы)
+    whatsapp: str = ""
+    telegram: str = ""
+    language: str = ""                                    # ru | zh | en
+    primary: bool = False
+    comment: str = ""
 
 
 class FactoryIn(BaseModel):
     name: str
     name_zh: str = ""
+    short_name: str = ""
     address: str = ""
+    address_zh: str = ""
     country: str = "CN"
-    contacts: list[dict] = Field(default_factory=list)
-    wecom_external_ids: list[str] = Field(default_factory=list)
+    province: str = ""
+    city: str = ""
+    website: str = ""
+    uscc: str = ""
+    supplier_status: str = ""
+    contacts: list[FactoryContact] = Field(default_factory=list)
     payment_terms: list[dict] = Field(default_factory=list)
+    bank_details: dict = Field(default_factory=dict)
+    default_currency: str = "CNY"
+    default_basis: str = ""
+    machine_types: list[str] = Field(default_factory=list)
     typical_production_days: Optional[int] = None
+    rating: Optional[float] = None
+    notes: str = ""
+    is_active: bool = True
+
+
+def _factory_editor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if not user.has(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN, Role.LOGISTICIAN):
+        raise HTTPException(403, "Карточки заводов ведут менеджеры, логисты, КД и ГД")
+    return user
+
+
+def _apply_factory(f: Factory, body: FactoryIn, user: Optional[CurrentUser] = None) -> None:
+    data = body.model_dump()
+    if user is not None and not user.can("factory_price_history"):
+        data.pop("bank_details", None)                   # реквизиты не видны роли — и не перезаписываются ею
+    for k, v in data.items():
+        setattr(f, k, v)
+    # отправка из системы (запрос заводу): WeCom-контакты по направлению «Заявки» первыми
+    ordered = sorted(data["contacts"], key=lambda c: (("rfq" not in c["roles"]), not c["primary"]))
+    f.wecom_external_ids = [c["wecom_id"] for c in ordered if c.get("wecom_id")]
+
+
+@router.get("/factories/contact-roles")
+def factory_contact_roles(user: CurrentUser = Depends(get_current_user)):
+    return CONTACT_ROLES
+
+
+@router.get("/factories/{factory_id}")
+def factory_card(factory_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    f = db.get(Factory, factory_id)
+    if f is None:
+        raise HTTPException(404)
+    d = serialize(f)
+    d["models"] = [{"id": m.id, "model": m.model, "machine_type": m.machine_type, "status": m.status}
+                   for m in db.scalars(select(EquipmentModel).where(EquipmentModel.factory_id == f.id).order_by(EquipmentModel.model)).all()]
+    d["deals"] = len({p.deal_id for p in db.scalars(select(Position).where(Position.factory_id == f.id)).all()})
+    if not user.can("factory_price_history"):
+        d.pop("bank_details", None)
+    return d
 
 
 @router.post("/factories", status_code=201)
-def create_factory(body: FactoryIn, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.GD, Role.ADMIN))):
-    f = Factory(**body.model_dump())
+def create_factory(body: FactoryIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_factory_editor)):
+    if db.scalar(select(Factory).where(Factory.name == body.name)):
+        raise HTTPException(409, "Завод с таким наименованием уже есть")
+    f = Factory()
+    _apply_factory(f, body, user)
     db.add(f)
+    db.flush()
+    audit(db, user.id, None, "factory", f.id, "create", after={"name": f.name})
     db.commit()
     return serialize(f)
+
+
+@router.put("/factories/{factory_id}")
+def update_factory(factory_id: str, body: FactoryIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_factory_editor)):
+    f = db.get(Factory, factory_id)
+    if f is None:
+        raise HTTPException(404)
+    if body.name != f.name and db.scalar(select(Factory).where(Factory.name == body.name)):
+        raise HTTPException(409, "Завод с таким наименованием уже есть")
+    before = {"name": f.name, "contacts": len(f.contacts or [])}
+    _apply_factory(f, body, user)
+    audit(db, user.id, None, "factory", f.id, "update", before, {"name": f.name, "contacts": len(f.contacts or [])})
+    db.commit()
+    out = serialize(f)
+    if not user.can("factory_price_history"):
+        out.pop("bank_details", None)
+    return out
 
 
 @router.get("/factories/{factory_id}/prices")

@@ -36,6 +36,12 @@ def settings_all(db: Session = Depends(get_db), user: CurrentUser = Depends(FD_A
     return settings_service.get_all(db)
 
 
+@router.get("/settings/meta")
+def settings_meta(user: CurrentUser = Depends(FD_ADMIN)):
+    """Названия, описания, единицы, группы и типы полей — для понятного экрана «Настройки»."""
+    return settings_service.meta()
+
+
 class SettingIn(BaseModel):
     value: Any
     comment: str = ""

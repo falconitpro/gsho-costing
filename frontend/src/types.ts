@@ -42,6 +42,7 @@ export interface DeliveryTerm { unit?: string; start_event?: string }
 export interface TechParamRow {
   id?: string; no: number; code: string; name_ru: string; name_zh: string; unit: string; customer_requirement_ru: string; customer_requirement_zh?: string;
   value_ru: string; value_zh: string; comment_ru: string; comment_zh?: string; required: boolean; local_ru: boolean; source?: string; translation_status?: string;
+  section?: string; req_status?: "match" | "mismatch" | "none";
 }
 export interface LocalOption {
   id: string; position_id: string; name: string; qty: number; supplier: string; cost: number; currency: string; supplier_lead_days: number; needs_install: boolean;

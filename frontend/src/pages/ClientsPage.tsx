@@ -1,10 +1,14 @@
 import { Fragment, useEffect, useState } from "react";
-import { api, fmtDate, fmtPct, fmtRub } from "../api";
+import { api, ApiError, fmtDate, fmtPct, fmtRub } from "../api";
 import type { Me } from "../types";
 import { payText } from "../components/PaymentTermsEditor";
 import type { PaymentLine } from "../types";
 
-type Client = { id: string; name: string; inn: string; address: string; sites: { name: string }[]; contacts: { name: string; email?: string }[] };
+type Client = { id: string; name: string; inn: string; address: string; sites: { name: string }[]; contacts: { name: string; email?: string }[];
+  full_name?: string; kpp?: string; ogrn?: string; director?: string; legal_status?: string; okved?: string; registry_checked_at?: string | null };
+type Found = { inn: string; name: string; full_name: string; kpp: string; ogrn: string; address: string; director: string; status: string; okved: string;
+  registered_on: string | null; kind: string; source: string; raw: Record<string, unknown> };
+const STATUS_RU: Record<string, string> = { ACTIVE: "действующая", LIQUIDATING: "ликвидируется", LIQUIDATED: "ликвидирована", BANKRUPT: "банкротство", REORGANIZING: "реорганизация" };
 type KpVer = { version_no: number; on: string; unit_price_rub: number; total_rub: number; payment_terms: PaymentLine[]; delivery_term: string; kp_brand: string; kp_path: string; kp_no: string };
 type KpHist = { deal_id: string; deal_number: string; variant: string; factory: string; model: string; qty: number; outcome: string | null; chosen: boolean | null; manager: string; latest: KpVer; versions: KpVer[] };
 type Card = Client & { funnel: { requests: number; kp_sent: number; won: number }; deals: { id: string; number: string; status: string; outcome: string | null }[];
@@ -28,28 +32,71 @@ function verDiff(newer: KpVer, older?: KpVer): string[] {
 export default function ClientsPage({ me }: { me: Me }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [card, setCard] = useState<Card | null>(null);
-  const [form, setForm] = useState({ name: "", inn: "", address: "" });
+  const EMPTY_FORM = { name: "", inn: "", address: "", full_name: "", kpp: "", ogrn: "", director: "", legal_status: "", okved: "", registry: {} as Record<string, unknown> };
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [found, setFound] = useState<Found[] | null>(null);
+  const [lookupMsg, setLookupMsg] = useState("");
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState({ model: "", outcome: "", factory: "", from: "", to: "" });
-  const canCreate = me.roles.some((r) => ["manager", "gd", "admin"].includes(r.code));
+  const canCreate = me.roles.some((r) => ["manager", "cd", "gd", "admin"].includes(r.code));
   const load = () => api.get<Client[]>("/api/refs/clients").then(setClients);
   useEffect(() => { load(); }, []);
   async function create() {
-    try { await api.post("/api/refs/clients", form); setForm({ name: "", inn: "", address: "" }); setErr(""); load(); }
+    try { const c = await api.post<Client>("/api/refs/clients", form); setForm(EMPTY_FORM); setFound(null); setLookupMsg(""); setErr(""); load(); api.get<Card>(`/api/refs/clients/${c.id}`).then(setCard); }
     catch (e) { setErr((e as Error).message); }
+  }
+  // поиск реквизитов по ИНН во внешнем источнике (ЕГРЮЛ/ЕГРИП)
+  async function lookup() {
+    setBusy(true); setLookupMsg(""); setFound(null);
+    try {
+      const r = await api.get<{ existing_client_id: string | null; results: Found[] }>(`/api/refs/clients/lookup?inn=${form.inn.trim()}`);
+      if (r.existing_client_id) { setLookupMsg("Клиент с этим ИНН уже есть в базе — открыта его карточка"); api.get<Card>(`/api/refs/clients/${r.existing_client_id}`).then(setCard); }
+      else if (!r.results.length) setLookupMsg("Организация с таким ИНН в реестре не найдена — заполните реквизиты вручную");
+      else if (r.results.length === 1) pick(r.results[0]);
+      else setFound(r.results);
+    } catch (e) {
+      const st = (e as ApiError).status;
+      setLookupMsg(st === 503 ? "Источник реквизитов не подключён (нужен ключ DaData на сервере) — заполните вручную" : (e as Error).message);
+    } finally { setBusy(false); }
+  }
+  function pick(f: Found) {
+    setForm({ ...form, inn: f.inn, name: f.name, full_name: f.full_name, kpp: f.kpp, ogrn: f.ogrn, address: f.address, director: f.director,
+      legal_status: f.status, okved: f.okved, registry: f as unknown as Record<string, unknown> });
+    setFound(null);
+    setLookupMsg(`Реквизиты получены из реестра${f.status && f.status !== "ACTIVE" ? ` — внимание: организация ${STATUS_RU[f.status] || f.status}` : ""}. Проверьте и нажмите «Добавить».`);
   }
   return (
     <div className="grid cols-2">
       <div>
         <h1>Клиенты</h1>
         {canCreate && (
-          <div className="card row">
-            <input placeholder="Наименование" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            <input placeholder="ИНН" value={form.inn} onChange={(e) => setForm({ ...form, inn: e.target.value })} />
-            <input placeholder="Адрес" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-            <button className="btn" onClick={create} disabled={!form.name || form.inn.length < 10}>Добавить</button>
-            {err && <span className="badge bad">{err}</span>}
+          <div className="card">
+            <b>Новый клиент</b> <span className="muted">— введите ИНН и нажмите «Найти»: наименование, КПП, ОГРН, адрес и руководитель подтянутся из ЕГРЮЛ/ЕГРИП</span>
+            <div className="row" style={{ marginTop: 6 }}>
+              <input placeholder="ИНН (10 или 12 цифр)" value={form.inn} inputMode="numeric" onChange={(e) => setForm({ ...form, inn: e.target.value.replace(/\D/g, "").slice(0, 12) })}
+                onKeyDown={(e) => { if (e.key === "Enter" && form.inn.length >= 10) lookup(); }} style={{ width: 170 }} />
+              <button className="btn secondary" onClick={lookup} disabled={busy || (form.inn.length !== 10 && form.inn.length !== 12)}>{busy ? "Поиск…" : "Найти по ИНН"}</button>
+            </div>
+            {lookupMsg && <div className="alert info" style={{ marginTop: 6 }}>{lookupMsg}</div>}
+            {found && (
+              <div style={{ marginTop: 6 }}><div className="muted">Найдено несколько записей (головная организация и филиалы) — выберите:</div>
+                {found.map((f, i) => <div key={i} className="row" style={{ marginTop: 4 }}><button className="btn ghost" onClick={() => pick(f)}>выбрать</button>
+                  <span>{f.name} · КПП {f.kpp || "—"} · {f.address}{(f.raw?.branch_type as string) === "BRANCH" ? " · филиал" : ""}</span></div>)}</div>)}
+            <div className="grid cols-2" style={{ marginTop: 6 }}>
+              <label className="f">Наименование<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+              <label className="f">Полное наименование<input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></label>
+              <label className="f">КПП<input value={form.kpp} onChange={(e) => setForm({ ...form, kpp: e.target.value })} /></label>
+              <label className="f">ОГРН / ОГРНИП<input value={form.ogrn} onChange={(e) => setForm({ ...form, ogrn: e.target.value })} /></label>
+              <label className="f">Руководитель<input value={form.director} onChange={(e) => setForm({ ...form, director: e.target.value })} /></label>
+              <label className="f">Юридический адрес<input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></label>
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              <button className="btn" onClick={create} disabled={!form.name || (form.inn.length !== 10 && form.inn.length !== 12)}>Добавить</button>
+              {(form.name || form.inn) && <button className="btn ghost" onClick={() => { setForm(EMPTY_FORM); setFound(null); setLookupMsg(""); }}>очистить</button>}
+              {err && <span className="badge bad">{err}</span>}
+            </div>
           </div>
         )}
         <div className="card">
@@ -63,6 +110,16 @@ export default function ClientsPage({ me }: { me: Me }) {
         {card && (
           <div className="card">
             <h2>{card.name}</h2>
+            <table style={{ marginBottom: 8 }}><tbody>
+              {card.full_name && <tr><td className="muted">Полное наименование</td><td>{card.full_name}</td></tr>}
+              <tr><td className="muted">ИНН / КПП</td><td>{card.inn}{card.kpp ? ` / ${card.kpp}` : ""}</td></tr>
+              {card.ogrn && <tr><td className="muted">ОГРН</td><td>{card.ogrn}</td></tr>}
+              {card.director && <tr><td className="muted">Руководитель</td><td>{card.director}</td></tr>}
+              {card.address && <tr><td className="muted">Адрес</td><td>{card.address}</td></tr>}
+              {card.legal_status && <tr><td className="muted">Статус</td><td><span className={"badge " + (card.legal_status === "ACTIVE" ? "ok" : "bad")}>{STATUS_RU[card.legal_status] || card.legal_status}</span></td></tr>}
+              <tr><td className="muted">Реестр</td><td>{card.registry_checked_at ? `проверено ${fmtDate(card.registry_checked_at)}` : "не проверялось"}
+                {canCreate && <button className="btn ghost" style={{ marginLeft: 8, padding: "1px 8px" }} onClick={() => api.post(`/api/refs/clients/${card.id}/refresh-registry`).then(() => api.get<Card>(`/api/refs/clients/${card.id}`).then(setCard)).catch((e) => setErr((e as Error).message))}>обновить из реестра</button>}</td></tr>
+            </tbody></table>
             <div className="row" style={{ gap: 24 }}>
               <div className="kpi"><span className="v">{card.funnel.requests}</span><span className="l">запросов</span></div>
               <div className="kpi"><span className="v">{card.funnel.kp_sent}</span><span className="l">КП</span></div>

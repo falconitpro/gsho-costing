@@ -10,6 +10,7 @@ import SettingsPage from "./pages/SettingsPage";
 import ClientsPage from "./pages/ClientsPage";
 import AccessPage from "./pages/AccessPage";
 import CatalogPage from "./pages/CatalogPage";
+import FactoriesPage from "./pages/FactoriesPage";
 
 export const MeContext = { current: null as Me | null };
 
@@ -51,6 +52,7 @@ export default function App() {
             {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
             <NavLink to="/clients">Клиенты</NavLink>
             <NavLink to="/catalog">Каталог</NavLink>
+            <NavLink to="/factories">Заводы</NavLink>
             {has("admin", "fd", "gd") && <NavLink to="/settings">Настройки</NavLink>}
             {perm("access_admin", 2) && <NavLink to="/access">Уровни доступа</NavLink>}
           </nav>
@@ -79,6 +81,7 @@ export default function App() {
             <Route path="/clients" element={<ClientsPage me={me} />} />
             <Route path="/settings" element={<SettingsPage me={me} />} />
             <Route path="/catalog" element={<CatalogPage me={me} />} />
+            <Route path="/factories" element={<FactoriesPage me={me} />} />
             {perm("access_admin", 2) && <Route path="/access" element={<AccessPage me={me} />} />}
           </Routes>
         )}

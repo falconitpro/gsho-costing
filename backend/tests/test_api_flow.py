@@ -420,3 +420,79 @@ def test_access_levels_admin(client):
     _ok(client.delete(f"/api/admin/access/overrides/{ov['id']}", headers=H(GD)), 204)
     _ok(client.put("/api/admin/access/manager/client_price_history", headers=H(ADM), json={"level": 0}))
     assert _ok(client.get("/api/auth/me", headers=H(MGR)))["perms"]["client_price_history"] == 0
+
+
+def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
+    """Каталог: добавление вручную/из RFQ/списком (менеджер → на подтверждение, КД — сразу); клиент по ИНН; справочник заводов;
+    описание настроек; разделы и подсветка несовпадения в таблице теххарактеристик."""
+    import json
+    from openpyxl import Workbook
+    factories = _ok(client.get("/api/refs/factories", headers=H(MGR)))
+    # --- каталог: вручную
+    body = {"factory_id": factories[0]["id"], "machine_type": "Самосвал", "model": "KT-30", "execution_name": "KT-30 базовое",
+            "tech_params": [{"code": "1.5", "name_ru": "Длина", "unit": "мм", "value_ru": "8 200"}], "unit_price": 1_200_000, "currency": "CNY"}
+    assert client.post("/api/catalog/equipment", headers=H(LOG), json=body).status_code == 403
+    m = _ok(client.post("/api/catalog/equipment", headers=H(MGR), json=body), 201)
+    assert m["status"] == "pending" and m["created"] and "подтверждение" in m["message"]
+    assert any(p["id"] == m["id"] for p in _ok(client.get("/api/catalog/pending", headers=H(CD))))
+    _ok(client.post(f"/api/catalog/executions/{m['id']}/decision", headers=H(CD), json={"approve": True}))
+    c = _ok(client.post("/api/catalog/equipment", headers=H(CD), json={**body, "model": "KT-40", "brand_name": "BH-40"}), 201)
+    assert c["status"] == "approved" and c["brand_name"] == "BH-40"
+    again = _ok(client.post("/api/catalog/equipment", headers=H(CD), json={**body, "model": "KT-40"}), 201)
+    assert again["created"] is False and again["id"] == c["id"]                         # тот же набор параметров — без дубля
+    tree = _ok(client.get("/api/catalog/tree", headers=H(MGR)))
+    assert any(mm["model"] == "KT-30" for f in tree for t in f["types"] for mm in t["models"])
+    # --- каталог: файл RFQ одной машины → данные для формы
+    rfq = fill_rfq_template(str(tmp_path / "rfq.xlsx"), FILLED, ZIP, option_names=OPTION_NAMES)
+    with open(rfq, "rb") as fh:
+        pv = _ok(client.post("/api/catalog/equipment/import/preview", headers=H(MGR), files={"file": ("rfq.xlsx", fh)}))
+    assert pv["kind"] == "rfq" and pv["item"]["model"] == "XDR80T" and pv["filled"] > 20
+    assert all(r["section"] for r in pv["item"]["tech_params"])
+    # --- каталог: список моделей
+    wb = Workbook(); ws = wb.active
+    ws.append(["Перечень моделей"]); ws.append(["Завод", "Тип машины", "Модель", "Цена", "Валюта"])
+    ws.append([factories[1]["name"], "Погрузчик", "LW-600", 700000, "CNY"]); ws.append([factories[1]["name"], "Погрузчик", "LW-800", 900000, "CNY"])
+    f = tmp_path / "list.xlsx"; wb.save(f)
+    with open(f, "rb") as fh:
+        pl = _ok(client.post("/api/catalog/equipment/import/preview", headers=H(MGR), files={"file": ("list.xlsx", fh)}))
+    assert pl["kind"] == "list"
+    mp = pl["sheets"][0]["mapping"]
+    assert mp["header_row"] == 1 and mp["columns"]["model"] == 2 and mp["columns"]["factory"] == 0
+    with open(f, "rb") as fh:
+        ap = _ok(client.post("/api/catalog/equipment/import/apply", headers=H(MGR), files={"file": ("list.xlsx", fh)},
+                             data={"mapping": json.dumps({"sheet": pl["sheets"][0]["name"], **mp})}))
+    assert len(ap["added"]) == 2 and all(a["status"] == "pending" for a in ap["added"])
+    # --- клиент по ИНН: неверный ИНН 422; источник без ключа — 503 (понятная ошибка); создание с реквизитами
+    assert client.get("/api/refs/clients/lookup?inn=7701234560", headers=H(MGR)).status_code == 422
+    assert client.get("/api/refs/clients/lookup?inn=7707083893", headers=H(MGR)).status_code in (503, 502)
+    assert client.post("/api/refs/clients", headers=H(MGR), json={"name": "Тест", "inn": "7701234560"}).status_code == 422
+    cl = _ok(client.post("/api/refs/clients", headers=H(MGR), json={"name": "ПАО СБЕРБАНК", "inn": "7707083893", "kpp": "773601001", "ogrn": "1027700132195",
+                                                                     "director": "ПРЕЗИДЕНТ, Греф Герман Оскарович", "legal_status": "ACTIVE",
+                                                                     "registry": {"source": "dadata"}}), 201)
+    assert cl["kpp"] == "773601001" and cl["registry_checked_at"]
+    # --- справочник заводов: контакты по направлениям, WeCom «Заявки» первым
+    fz = _ok(client.post("/api/refs/factories", headers=H(MGR), json={
+        "name": "Test Mining Machinery Co., Ltd.", "name_zh": "测试矿山机械有限公司", "province": "Shandong", "uscc": "91370700MA3C000000",
+        "contacts": [{"name": "Li Wei", "roles": ["finance"], "email": "fin@test.cn", "wecom_id": "wm_fin"},
+                     {"name": "Zhang San", "roles": ["rfq", "sales"], "email": "sales@test.cn", "wechat": "zhangsan_wx", "wecom_id": "wm_rfq", "primary": True}]}), 201)
+    assert fz["wecom_external_ids"][0] == "wm_rfq"
+    assert client.post("/api/refs/factories", headers=H(FD), json={"name": "X"}).status_code == 403
+    card = _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(MGR)))
+    assert card["contacts"][1]["wechat"] == "zhangsan_wx" and "models" in card
+    _ok(client.put(f"/api/refs/factories/{fz['id']}", headers=H(MGR), json={**{k: card[k] for k in ("name", "name_zh", "contacts")}, "bank_details": {"swift": "BKCHCNBJ"}}))
+    up = _ok(client.put(f"/api/refs/factories/{fz['id']}", headers=H(LOG), json={**{k: card[k] for k in ("name", "name_zh", "contacts")}, "website": "https://test.cn"}))
+    assert up["website"] == "https://test.cn" and "bank_details" not in up              # логист не видит реквизиты…
+    assert _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(MGR)))["bank_details"] == {"swift": "BKCHCNBJ"}   # …и не стирает их
+    assert all("bank_details" not in f_ for f_ in _ok(client.get("/api/refs/factories", headers=H(LOG))))
+    assert "rfq" in _ok(client.get("/api/refs/factories/contact-roles", headers=H(MGR)))
+    # --- настройки: у каждого ключа есть понятное название и группа
+    meta = _ok(client.get("/api/admin/settings/meta", headers=H(FD)))
+    assert meta["items"]["margin_threshold_pct"]["title"] == "Порог маржи" and not [k for k, v in meta["items"].items() if v["group"] == "Прочее"]
+    # --- таблица теххарактеристик: разделы и подсветка несовпадения с требованием
+    clients = _ok(client.get("/api/refs/clients", headers=H(MGR)))
+    deal = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "разделы"}), 201)
+    with open(rfq, "rb") as fh:
+        imp = _ok(client.post(f"/api/deals/{deal['id']}/rfq/import", headers=H(MGR), files={"file": ("rfq.xlsx", fh)}), 201)
+    tp = _ok(client.get(f"/api/deals/{deal['id']}/positions/{imp['position']['id']}/tech-params", headers=H(MGR)))
+    assert all(r["section"] and r["section"][0].isdigit() for r in tp["rows"])
+    assert {r["req_status"] for r in tp["rows"]} <= {"match", "mismatch", "none"} and "mismatched" in tp

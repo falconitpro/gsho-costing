@@ -5,6 +5,7 @@
   MAIL_PROVIDER      = console | outlook | yandex_smtp
   MESSENGER_PROVIDER = console | wecom
   TRANSLATOR_PROVIDER= console | yandex   (задача 4; ключ — YANDEX_TRANSLATE_API_KEY, каталог — YANDEX_FOLDER_ID)
+  COMPANY_REGISTRY_PROVIDER = none | dadata   (реквизиты клиента по ИНН; ключ — DADATA_API_KEY)
   AUTH_PROVIDER      = dev | entra | yandex | keycloak   (см. core/auth.py)
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ from .fx_source import CbrFxSource
 from .mail import ConsoleMail, MailAdapter, OutlookGraphMail, YandexSmtpMail
 from .messenger import ConsoleMessenger, MessengerAdapter, WeComMessenger
 from .storage import LocalStorage, S3Storage, SharePointStorage, StorageAdapter, YandexDiskStorage
+from .company_registry import CompanyRegistry, make_registry
 from .translator import TranslatorAdapter, make_translator
 
 
@@ -45,3 +47,8 @@ def fx_source(s: Settings | None = None) -> CbrFxSource:
 def translator(s: Settings | None = None) -> TranslatorAdapter:
     s = s or get_settings()
     return make_translator(s.translator_provider, s.yandex_translate_api_key, s.yandex_folder_id)
+
+
+def company_registry(s: Settings | None = None) -> CompanyRegistry:
+    s = s or get_settings()
+    return make_registry(s.company_registry_provider, s.dadata_api_key)
