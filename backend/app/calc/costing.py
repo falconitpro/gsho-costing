@@ -205,7 +205,8 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
         # 4–5, 8, 10. Статьи партии → доля позиции
         share = 1.0
         if batch:
-            k0 = {c: fx.rate(c, ship, s, "_alloc", None, fx_mult) for c in ("CNY", "USD", "EUR", "RUB")}
+            # курсы только тех валют, что есть в загруженных курсах (на прошлую дату отчёта может не быть USD / EUR)
+            k0 = {c: fx.rate(c, ship, s, "_alloc", None, fx_mult) for c in ("CNY", "USD", "EUR", "RUB") if c == "RUB" or c in inp.fx.rates}
             share = _alloc_weights(batch_members[batch.id], batch.allocation, k0)[p.id]
             fr = batch.intl_freight
             d2d = batch.door_to_door if batch.door_to_door and batch.door_to_door.amount else None
