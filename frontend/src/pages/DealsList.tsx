@@ -48,7 +48,7 @@ export default function DealsList({ me }: { me: Me }) {
     <>
       <div className="page-head">
         <h1>Сделки</h1>
-        {isManager && <button className="btn add" onClick={() => setShowNew(!showNew)}>Новая сделка</button>}
+        {isManager && <div className="push"><button className="btn add" onClick={() => setShowNew(!showNew)}>Новая сделка</button></div>}
       </div>
       {showNew && (
         <div className="card">
