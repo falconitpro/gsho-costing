@@ -29,6 +29,10 @@ function summary(m: Meta, v: unknown): string {
     case "table": {
       const rows = v as Record<string, unknown>[];
       if (m.key === "overhead_scale") return rows.map((r) => `${r.up_to_rub == null ? "свыше" : "до " + fmtRub(r.up_to_rub as number) + " ₽"} — ${num(r.pct)} %`).join("; ");
+      if (m.key === "approval_ladder") {
+        const role = (x: unknown) => m.columns?.find((c) => c.key === "role")?.options?.find((o) => o.value === x)?.label || String(x ?? "—");
+        return rows.map((r) => `${r.name} — ${role(r.role)}, ${r.sla_days ?? "—"} раб. дн.`).join("; ");
+      }
       return rows.map((r) => (m.columns || []).filter((c) => c.key !== "condition").map((c) => {
         const x = r[c.key];
         if (x == null || x === "" || x === 0 && c.key === "offset_days") return "";

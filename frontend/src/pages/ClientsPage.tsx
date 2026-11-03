@@ -34,7 +34,9 @@ export default function ClientsPage({ me }: { me: Me }) {
   const [card, setCard] = useState<Card | null>(null);
   const EMPTY_FORM = { name: "", inn: "", address: "", full_name: "", kpp: "", ogrn: "", director: "", legal_status: "", okved: "", registry: {} as Record<string, unknown> };
   const [form, setForm] = useState(EMPTY_FORM);
-  const [found, setFound] = useState<Found[] | null>(null);
+  const [found, setFound] = useState<Found[] | null>(null);       // филиалы — показываются по ссылке
+  const [showBranches, setShowBranches] = useState(false);
+  const [picked, setPicked] = useState<"head" | "branch" | null>(null);
   const [lookupMsg, setLookupMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -51,21 +53,27 @@ export default function ClientsPage({ me }: { me: Me }) {
   async function lookup() {
     setBusy(true); setLookupMsg(""); setFound(null);
     try {
-      const r = await api.get<{ existing_client_id: string | null; results: Found[] }>(`/api/refs/clients/lookup?inn=${form.inn.trim()}`);
+      const r = await api.get<{ inn: string; existing_client_id: string | null; results: Found[] }>(`/api/refs/clients/lookup?inn=${form.inn.trim()}`);
       if (r.existing_client_id) { setLookupMsg("Клиент с этим ИНН уже есть в базе — открыта его карточка"); api.get<Card>(`/api/refs/clients/${r.existing_client_id}`).then(setCard); }
       else if (!r.results.length) setLookupMsg("Организация с таким ИНН в реестре не найдена — заполните реквизиты вручную");
-      else if (r.results.length === 1) pick(r.results[0]);
-      else setFound(r.results);
+      else {
+        // головная организация подставляется сразу, филиалы — по ссылке
+        const isBranch = (f: Found) => (f.raw?.branch_type as string) === "BRANCH";
+        const head = r.results.find((f) => !isBranch(f)) || r.results[0];
+        const branches = r.results.filter((f) => f !== head && isBranch(f));
+        pick(head, "head", r.inn);
+        setFound(branches.length ? branches : null); setShowBranches(false);
+      }
     } catch (e) {
       const st = (e as ApiError).status;
       setLookupMsg(st === 503 ? "Источник реквизитов не подключён (нужен ключ DaData на сервере) — заполните вручную" : (e as Error).message);
     } finally { setBusy(false); }
   }
-  function pick(f: Found) {
-    setForm({ ...form, inn: f.inn, name: f.name, full_name: f.full_name, kpp: f.kpp, ogrn: f.ogrn, address: f.address, director: f.director,
-      legal_status: f.status, okved: f.okved, registry: f as unknown as Record<string, unknown> });
-    setFound(null);
-    setLookupMsg(`Реквизиты получены из реестра${f.status && f.status !== "ACTIVE" ? ` — внимание: организация ${STATUS_RU[f.status] || f.status}` : ""}. Проверьте и нажмите «Добавить».`);
+  function pick(f: Found, kind: "head" | "branch" = "head", inn?: string) {
+    setForm((cur) => ({ ...cur, inn: f.inn || inn || cur.inn, name: f.name, full_name: f.full_name, kpp: f.kpp, ogrn: f.ogrn, address: f.address,
+      director: f.director, legal_status: f.status, okved: f.okved, registry: f as unknown as Record<string, unknown> }));
+    setPicked(kind); setShowBranches(false);
+    setLookupMsg(`${kind === "branch" ? "Подставлен филиал" : "Подставлена головная организация"}: ${f.name}${f.status && f.status !== "ACTIVE" ? ` — внимание: организация ${STATUS_RU[f.status] || f.status}` : ""}. Проверьте и нажмите «Добавить».`);
   }
   return (
     <div className="grid cols-2">
@@ -80,10 +88,17 @@ export default function ClientsPage({ me }: { me: Me }) {
               <button className="btn secondary" onClick={lookup} disabled={busy || (form.inn.length !== 10 && form.inn.length !== 12)}>{busy ? "Поиск…" : "Найти по ИНН"}</button>
             </div>
             {lookupMsg && <div className="alert info" style={{ marginTop: 6 }}>{lookupMsg}</div>}
-            {found && (
-              <div style={{ marginTop: 6 }}><div className="muted">Найдено несколько записей (головная организация и филиалы) — выберите:</div>
-                {found.map((f, i) => <div key={i} className="row" style={{ marginTop: 4 }}><button className="btn ghost" onClick={() => pick(f)}>выбрать</button>
-                  <span>{f.name} · КПП {f.kpp || "—"} · {f.address}{(f.raw?.branch_type as string) === "BRANCH" ? " · филиал" : ""}</span></div>)}</div>)}
+            {found && found.length > 0 && (
+              <div style={{ marginTop: 4 }}>
+                <a href="#" onClick={(e) => { e.preventDefault(); setShowBranches(!showBranches); }}>
+                  {showBranches ? "скрыть филиалы" : `у организации есть филиалы (${found.length}${found.length >= 19 ? "+" : ""}) — выбрать филиал вместо головной`}</a>
+                {picked === "branch" && <> · <a href="#" onClick={(e) => { e.preventDefault(); lookup(); }}>вернуть головную</a></>}
+                {showBranches && (
+                  <div style={{ maxHeight: 220, overflow: "auto", marginTop: 4, border: "1px solid var(--line)", borderRadius: 6, padding: 6 }}>
+                    {found.map((f, i) => <div key={i} className="row" style={{ marginTop: 3 }}><button className="btn ghost" style={{ padding: "1px 8px" }} onClick={() => pick(f, "branch")}>выбрать</button>
+                      <span style={{ fontSize: 12 }}>{f.name} · КПП {f.kpp || "—"} · {f.address}</span></div>)}
+                  </div>)}
+              </div>)}
             <div className="grid cols-2" style={{ marginTop: 6 }}>
               <label className="f">Наименование<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
               <label className="f">Полное наименование<input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></label>
@@ -94,7 +109,7 @@ export default function ClientsPage({ me }: { me: Me }) {
             </div>
             <div className="row" style={{ marginTop: 8 }}>
               <button className="btn" onClick={create} disabled={!form.name || (form.inn.length !== 10 && form.inn.length !== 12)}>Добавить</button>
-              {(form.name || form.inn) && <button className="btn ghost" onClick={() => { setForm(EMPTY_FORM); setFound(null); setLookupMsg(""); }}>очистить</button>}
+              {(form.name || form.inn) && <button className="btn ghost" onClick={() => { setForm(EMPTY_FORM); setFound(null); setPicked(null); setLookupMsg(""); }}>очистить</button>}
               {err && <span className="badge bad">{err}</span>}
             </div>
           </div>
