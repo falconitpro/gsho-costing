@@ -48,6 +48,8 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
 
   return (
     <>
+      <style>{`.ltable td input, .ltable td select { width: 100%; box-sizing: border-box; } .ltable td { vertical-align: middle; padding: 4px 6px; }
+        .ltable tr.lsec td { background: var(--accent-soft); font-weight: 600; } .ltable tbody tr:not(.lsec):hover { background: #fafafa; }`}</style>
       {err && <div className="alert error">{err}</div>}
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Партии и консолидация</h2>
@@ -57,23 +59,33 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
               <td>{fr ? `${fmtRub(fr.amount)} ${fr.currency}` : "—"}</td><td>{it.insurance_pct != null ? `${it.insurance_pct} %` : "—"}</td><td className="num">{fmtRub(it.broker_rub as number)}</td><td className="num">{fmtRub(it.rf_delivery_rub as number)}</td>
               <td>{b.allocation}</td><td>{positions.filter((p) => p.batch_id === b.id).map((p) => designation(p)).join(", ")}</td></tr>); })}</tbody></table>
         {canEdit && (
-          <div className="grid cols-3" style={{ marginTop: 10 }}>
-            <label className="f">Название<input value={batch.name} onChange={(e) => setBatch({ ...batch, name: e.target.value })} /></label>
-            <label className="f">Маршрут<input value={batch.route} onChange={(e) => setBatch({ ...batch, route: e.target.value })} /></label>
-            <label className="f">Транспортных единиц<input type="number" value={batch.transport_units} onChange={(e) => setBatch({ ...batch, transport_units: Number(e.target.value) })} /></label>
-            <label className="f">Транзит, дн<input type="number" value={batch.transit_days} onChange={(e) => setBatch({ ...batch, transit_days: Number(e.target.value) })} /></label>
-            <label className="f">Оформление, дн<input type="number" value={batch.customs_days} onChange={(e) => setBatch({ ...batch, customs_days: Number(e.target.value) })} /></label>
-            <label className="f">Доставка по РФ после выпуска ДТ, дн<input type="number" value={batch.rf_delivery_days} onChange={(e) => setBatch({ ...batch, rf_delivery_days: Number(e.target.value) })} /></label>
-            <label className="f">Плановая дата пересечения границы (CMR), если известна<input type="date" value={batch.border_planned} onChange={(e) => setBatch({ ...batch, border_planned: e.target.value })} /></label>
-            <label className="f">Распределение общих статей<select value={batch.allocation} onChange={(e) => setBatch({ ...batch, allocation: e.target.value })}><option value="cost">по стоимости</option><option value="weight">по весу</option><option value="volume">по объёму</option></select></label>
-            <label className="f">Международная перевозка<div className="row"><input type="number" value={batch.intl_freight} onChange={(e) => setBatch({ ...batch, intl_freight: Number(e.target.value) })} />
-              <select value={batch.intl_currency} onChange={(e) => setBatch({ ...batch, intl_currency: e.target.value })}><option>CNY</option><option>USD</option><option>RUB</option></select></div>
-              <input placeholder="комментарий при отклонении от истории" value={batch.comment_freight} onChange={(e) => setBatch({ ...batch, comment_freight: e.target.value })} /></label>
-            <label className="f">Страхование, % от стоимости<input type="number" step="0.01" value={batch.insurance_pct} onChange={(e) => setBatch({ ...batch, insurance_pct: Number(e.target.value) })} /></label>
-            <label className="f">Брокер и СВХ, RUB<input type="number" value={batch.broker_rub} onChange={(e) => setBatch({ ...batch, broker_rub: Number(e.target.value) })} /><input placeholder="комментарий" value={batch.comment_broker} onChange={(e) => setBatch({ ...batch, comment_broker: e.target.value })} /></label>
-            <label className="f">Доставка по РФ до объекта, RUB<input type="number" value={batch.rf_delivery_rub} onChange={(e) => setBatch({ ...batch, rf_delivery_rub: Number(e.target.value) })} /><input placeholder="комментарий" value={batch.comment_rf} onChange={(e) => setBatch({ ...batch, comment_rf: e.target.value })} /></label>
-            <div className="row" style={{ alignItems: "end" }}><button className="btn secondary" onClick={createBatch}>Создать партию (нераспределённые позиции)</button></div>
-          </div>
+          <>
+            <h3 style={{ marginBottom: 4 }}>Новая партия</h3>
+            <table className="ltable">
+              <thead><tr><th style={{ width: "34%" }}>Параметр</th><th style={{ width: "26%" }}>Значение</th><th style={{ width: 80 }}>Ед.</th><th>Комментарий (при отклонении от истории)</th></tr></thead>
+              <tbody>
+                <tr className="lsec"><td colSpan={4}>Маршрут и сроки</td></tr>
+                <tr><td>Название партии</td><td><input value={batch.name} onChange={(e) => setBatch({ ...batch, name: e.target.value })} /></td><td /><td /></tr>
+                <tr><td>Маршрут</td><td colSpan={3}><input value={batch.route} onChange={(e) => setBatch({ ...batch, route: e.target.value })} /></td></tr>
+                <tr><td>Транспортных единиц</td><td><input type="number" value={batch.transport_units} onChange={(e) => setBatch({ ...batch, transport_units: Number(e.target.value) })} /></td><td className="muted">шт.</td><td /></tr>
+                <tr><td>Транзит до границы</td><td><input type="number" value={batch.transit_days} onChange={(e) => setBatch({ ...batch, transit_days: Number(e.target.value) })} /></td><td className="muted">дн</td><td /></tr>
+                <tr><td>Таможенное оформление</td><td><input type="number" value={batch.customs_days} onChange={(e) => setBatch({ ...batch, customs_days: Number(e.target.value) })} /></td><td className="muted">дн</td><td /></tr>
+                <tr><td>Доставка по РФ после выпуска ДТ</td><td><input type="number" value={batch.rf_delivery_days} onChange={(e) => setBatch({ ...batch, rf_delivery_days: Number(e.target.value) })} /></td><td className="muted">дн</td><td /></tr>
+                <tr><td>Плановая дата пересечения границы (CMR)</td><td><input type="date" value={batch.border_planned} onChange={(e) => setBatch({ ...batch, border_planned: e.target.value })} /></td><td /><td className="muted">если известна</td></tr>
+                <tr className="lsec"><td colSpan={4}>Стоимость</td></tr>
+                <tr><td>Международная перевозка</td><td><input type="number" value={batch.intl_freight} onChange={(e) => setBatch({ ...batch, intl_freight: Number(e.target.value) })} /></td>
+                  <td><select value={batch.intl_currency} onChange={(e) => setBatch({ ...batch, intl_currency: e.target.value })}><option>CNY</option><option>USD</option><option>RUB</option></select></td>
+                  <td><input value={batch.comment_freight} onChange={(e) => setBatch({ ...batch, comment_freight: e.target.value })} /></td></tr>
+                <tr><td>Страхование</td><td><input type="number" step="0.01" value={batch.insurance_pct} onChange={(e) => setBatch({ ...batch, insurance_pct: Number(e.target.value) })} /></td><td className="muted">% от стоимости</td><td /></tr>
+                <tr><td>Брокер и СВХ</td><td><input type="number" value={batch.broker_rub} onChange={(e) => setBatch({ ...batch, broker_rub: Number(e.target.value) })} /></td><td className="muted">RUB</td>
+                  <td><input value={batch.comment_broker} onChange={(e) => setBatch({ ...batch, comment_broker: e.target.value })} /></td></tr>
+                <tr><td>Доставка по РФ до объекта</td><td><input type="number" value={batch.rf_delivery_rub} onChange={(e) => setBatch({ ...batch, rf_delivery_rub: Number(e.target.value) })} /></td><td className="muted">RUB</td>
+                  <td><input value={batch.comment_rf} onChange={(e) => setBatch({ ...batch, comment_rf: e.target.value })} /></td></tr>
+                <tr><td>Распределение общих статей между позициями</td><td><select value={batch.allocation} onChange={(e) => setBatch({ ...batch, allocation: e.target.value })}><option value="cost">по стоимости</option><option value="weight">по весу</option><option value="volume">по объёму</option></select></td><td /><td /></tr>
+              </tbody>
+            </table>
+            <div className="row" style={{ marginTop: 8 }}><button className="btn secondary" onClick={createBatch}>Создать партию (нераспределённые позиции)</button></div>
+          </>
         )}
       </div>
 
@@ -81,24 +93,44 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
         const f = forms[p.id];
         if (!f) return null;
         const lp = p.logistics_params || {};
+        // проверка по истории (сохраняется при записи позиции): среднее и отклонение — рядом со статьёй
+        const checks = ((p.logistics || {}) as { checks?: Record<string, { history_avg?: number; deviation_pct?: number; needs_comment?: boolean; n?: number }> }).checks || {};
+        const hc = ((p.logistics || {}) as { hs_check?: { found?: boolean; mismatch?: boolean; ref_duty_pct?: number; ref_vat_pct?: number; certification?: string[] } }).hs_check;
+        const hist = (k: string) => { const c = checks[k]; if (!c || c.history_avg == null) return <span className="muted">—</span>;
+          return <span className={c.needs_comment ? "badge warn" : "muted"} style={{ fontSize: 12 }}>ср. {fmtRub(c.history_avg)}{c.deviation_pct != null ? `, ${c.deviation_pct > 0 ? "+" : ""}${c.deviation_pct} %` : ""}</span>; };
         return (
           <div className="card" key={p.id}>
             <h2 style={{ marginTop: 0 }}>{p.machine_type} {designation(p)} × {p.qty} <span className="muted">· данных для логиста (L): {Object.keys(lp).length}</span></h2>
             <details style={{ marginBottom: 10 }} open={Object.keys(lp).length > 0}><summary className="muted" style={{ cursor: "pointer" }}>Технические данные из опросника (метка L)</summary>
               <div style={{ marginTop: 6 }}><Questionnaire position={p} onlyL /></div></details>
-            <div className="grid cols-3">
-              <label className="f">Внутрикитайская логистика завод → граница<div className="row"><input type="number" value={f.domestic_logistics.amount} disabled={!canEdit} onChange={(e) => upd(p.id, { domestic_logistics: { ...f.domestic_logistics, amount: Number(e.target.value) } })} /><span>CNY</span></div>
-                <input placeholder="комментарий к отклонению" disabled={!canEdit} value={f.comments.domestic_logistics || ""} onChange={(e) => upd(p.id, { comments: { ...f.comments, domestic_logistics: e.target.value } })} /></label>
-              <label className="f">Экспортные формальности КНР<div className="row"><input type="number" value={f.export_formalities.amount} disabled={!canEdit} onChange={(e) => upd(p.id, { export_formalities: { ...f.export_formalities, amount: Number(e.target.value) } })} /><span>CNY</span></div></label>
-              <label className="f">Объём, м³ (для распределения)<input type="number" value={f.volume_m3} disabled={!canEdit} onChange={(e) => upd(p.id, { volume_m3: e.target.value })} /></label>
-              <label className="f">Код ТН ВЭД (поиск по коду/описанию)<input value={f.hs_code} disabled={!canEdit} onChange={(e) => { upd(p.id, { hs_code: e.target.value }); if (e.target.value.length >= 2) api.get<typeof hs>(`/api/refs/hs?q=${encodeURIComponent(e.target.value)}`).then(setHs); }} />
-                {canEdit && hs.length > 0 && <div style={{ fontSize: 12 }}>{hs.slice(0, 5).map((h) => <div key={h.code} style={{ cursor: "pointer" }} onClick={() => { upd(p.id, { hs_code: h.code, duty_pct: String(h.duty_pct), vat_pct: String(h.vat_pct) }); setHs([]); }}>{h.code} — {h.description} (пошлина {h.duty_pct} %, НДС {h.vat_pct} %; {h.certification.join(", ")})</div>)}</div>}</label>
-              <label className="f">Пошлина, % <input type="number" value={f.duty_pct} disabled={!canEdit} onChange={(e) => upd(p.id, { duty_pct: e.target.value })} /><input placeholder="комментарий при ручной ставке" disabled={!canEdit} value={f.hs_manual_comment} onChange={(e) => upd(p.id, { hs_manual_comment: e.target.value })} /></label>
-              <label className="f">НДС при ввозе, %<input type="number" value={f.vat_pct} disabled={!canEdit} onChange={(e) => upd(p.id, { vat_pct: e.target.value })} /></label>
-              <label className="f">Утилизационный сбор, RUB<input type="number" value={f.util_fee_rub} disabled={!canEdit} onChange={(e) => upd(p.id, { util_fee_rub: Number(e.target.value) })} /></label>
-              <label className="f">Сертификация (ТР ТС 010/2011, ЭПБ, ПСМ), RUB<input type="number" value={f.certification_rub} disabled={!canEdit} onChange={(e) => upd(p.id, { certification_rub: Number(e.target.value) })} />
-                <input placeholder="комментарий к отклонению" disabled={!canEdit} value={f.comments.certification_rub || ""} onChange={(e) => upd(p.id, { comments: { ...f.comments, certification_rub: e.target.value } })} /></label>
-            </div>
+            <table className="ltable">
+              <thead><tr><th style={{ width: "34%" }}>Статья</th><th style={{ width: "22%" }}>Значение</th><th style={{ width: 70 }}>Ед.</th><th style={{ width: "18%" }}>По истории</th><th>Комментарий</th></tr></thead>
+              <tbody>
+                <tr className="lsec"><td colSpan={5}>Китай: до границы</td></tr>
+                <tr><td>Внутрикитайская логистика завод → граница</td>
+                  <td><input type="number" value={f.domestic_logistics.amount} disabled={!canEdit} onChange={(e) => upd(p.id, { domestic_logistics: { ...f.domestic_logistics, amount: Number(e.target.value) } })} /></td>
+                  <td className="muted">CNY</td><td>{hist("domestic_logistics")}</td>
+                  <td><input placeholder="при отклонении от истории" disabled={!canEdit} value={f.comments.domestic_logistics || ""} onChange={(e) => upd(p.id, { comments: { ...f.comments, domestic_logistics: e.target.value } })} /></td></tr>
+                <tr><td>Экспортные формальности КНР</td>
+                  <td><input type="number" value={f.export_formalities.amount} disabled={!canEdit} onChange={(e) => upd(p.id, { export_formalities: { ...f.export_formalities, amount: Number(e.target.value) } })} /></td>
+                  <td className="muted">CNY</td><td>{hist("export_formalities")}</td>
+                  <td><input placeholder="при отклонении от истории" disabled={!canEdit} value={f.comments.export_formalities || ""} onChange={(e) => upd(p.id, { comments: { ...f.comments, export_formalities: e.target.value } })} /></td></tr>
+                <tr><td>Объём (для распределения общих статей)</td>
+                  <td><input type="number" value={f.volume_m3} disabled={!canEdit} onChange={(e) => upd(p.id, { volume_m3: e.target.value })} /></td><td className="muted">м³</td><td /><td /></tr>
+                <tr className="lsec"><td colSpan={5}>Таможня РФ</td></tr>
+                <tr><td>Код ТН ВЭД <span className="muted">(поиск по коду или описанию)</span></td>
+                  <td colSpan={2}><input value={f.hs_code} disabled={!canEdit} onChange={(e) => { upd(p.id, { hs_code: e.target.value }); if (e.target.value.length >= 2) api.get<typeof hs>(`/api/refs/hs?q=${encodeURIComponent(e.target.value)}`).then(setHs); }} />
+                    {canEdit && hs.length > 0 && <div style={{ fontSize: 12, marginTop: 2 }}>{hs.slice(0, 5).map((h) => <div key={h.code} style={{ cursor: "pointer", padding: "2px 0" }} onClick={() => { upd(p.id, { hs_code: h.code, duty_pct: String(h.duty_pct), vat_pct: String(h.vat_pct) }); setHs([]); }}><b>{h.code}</b> — {h.description} (пошлина {h.duty_pct} %, НДС {h.vat_pct} %; {h.certification.join(", ")})</div>)}</div>}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>{hc?.found === false ? "кода нет в справочнике" : hc?.certification?.length ? hc.certification.join(", ") : ""}</td><td /></tr>
+                <tr><td>Пошлина</td><td><input type="number" value={f.duty_pct} disabled={!canEdit} onChange={(e) => upd(p.id, { duty_pct: e.target.value })} /></td><td className="muted">%</td><td>{hc?.found ? <span className={hc.mismatch ? "badge warn" : "muted"} style={{ fontSize: 12 }}>справочник: {hc.ref_duty_pct} %</span> : null}</td>
+                  <td><input placeholder="обязателен при ручной ставке" disabled={!canEdit} value={f.hs_manual_comment} onChange={(e) => upd(p.id, { hs_manual_comment: e.target.value })} /></td></tr>
+                <tr><td>НДС при ввозе</td><td><input type="number" value={f.vat_pct} disabled={!canEdit} onChange={(e) => upd(p.id, { vat_pct: e.target.value })} /></td><td className="muted">%</td><td>{hc?.found ? <span className={hc.mismatch ? "badge warn" : "muted"} style={{ fontSize: 12 }}>справочник: {hc.ref_vat_pct} %</span> : null}</td><td /></tr>
+                <tr><td>Утилизационный сбор</td><td><input type="number" value={f.util_fee_rub} disabled={!canEdit} onChange={(e) => upd(p.id, { util_fee_rub: Number(e.target.value) })} /></td><td className="muted">RUB</td><td />
+                  <td><input disabled={!canEdit} value={f.comments.util_fee_rub || ""} onChange={(e) => upd(p.id, { comments: { ...f.comments, util_fee_rub: e.target.value } })} /></td></tr>
+                <tr><td>Сертификация (ТР ТС 010/2011, ЭПБ, ПСМ)</td><td><input type="number" value={f.certification_rub} disabled={!canEdit} onChange={(e) => upd(p.id, { certification_rub: Number(e.target.value) })} /></td><td className="muted">RUB</td><td>{hist("certification_rub")}</td>
+                  <td><input placeholder="при отклонении от истории" disabled={!canEdit} value={f.comments.certification_rub || ""} onChange={(e) => upd(p.id, { comments: { ...f.comments, certification_rub: e.target.value } })} /></td></tr>
+              </tbody>
+            </table>
             {canEdit && <div className="row" style={{ marginTop: 8 }}><button className="btn secondary" onClick={() => savePos(p.id)}>Сохранить позицию</button><span className="muted">партия: {batches.find((b) => b.id === p.batch_id)?.name || "не распределена"}</span></div>}
           </div>
         );
