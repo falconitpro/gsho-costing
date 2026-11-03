@@ -363,6 +363,7 @@ def model_card(db: Session, model: EquipmentModel, with_prices: bool) -> dict:
         "machine_type": model.machine_type, "status": model.status, "factory_id": model.factory_id, "factory": factory.name if factory else "",
         "logistics_params": model.logistics_params or {}, "maintenance_regulations": model.maintenance_regulations or [],
         "default_hours_per_month": model.default_hours_per_month,
+        "hs": {**(model.hs_info or {}), "code": model.default_hs_code} if model.default_hs_code else None,   # код ТН ВЭД (вводит логист)
         "executions": [{
             "id": e.id, "name": e.name, "brand_name": e.brand_name, "status": e.status, "tech_params": e.tech_params or [],
             "local_options": e.local_options or [], "source_deal_id": e.source_deal_id,

@@ -25,8 +25,11 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const bcc = (k: string) => <input value={bc[k] || ""} placeholder="комментарий" onChange={(e) => setBc({ ...bc, [k]: e.target.value })} />;
   const [forms, setForms] = useState<Record<string, PosForm>>(() => Object.fromEntries(positions.map((p) => {
     const l = (p.logistics || {}) as Partial<PosForm>;
+    const cat = (p as { catalog_hs?: { code: string; description?: string; duty_pct?: number | null; vat_pct?: number | null } }).catalog_hs;   // код из карточки оборудования каталога
     return [p.id, { domestic_logistics: (l.domestic_logistics as Money) || { amount: 0, currency: "CNY" }, export_formalities: (l.export_formalities as Money) || { amount: 0, currency: "CNY" },
-      hs_code: l.hs_code || "", duty_pct: l.duty_pct != null ? String(l.duty_pct) : "", vat_pct: l.vat_pct != null ? String(l.vat_pct) : "22", hs_manual_comment: "", hs_description: "",
+      hs_code: l.hs_code || cat?.code || "", duty_pct: l.duty_pct != null ? String(l.duty_pct) : cat?.duty_pct != null ? String(cat.duty_pct) : "",
+      vat_pct: l.vat_pct != null ? String(l.vat_pct) : cat?.vat_pct != null ? String(cat.vat_pct) : "22", hs_manual_comment: "",
+      hs_description: (l as { hs_description?: string }).hs_description || cat?.description || "",
       util_fee_rub: l.util_fee_rub || 0, certification_rub: l.certification_rub || 0, volume_m3: l.volume_m3 != null ? String(l.volume_m3) : "", comments: (l.comments as Record<string, string>) || {},
       util_applies: l.util_applies ?? null, util_base_rate_rub: l.util_base_rate_rub != null ? String(l.util_base_rate_rub) : "", util_coefficient: l.util_coefficient != null ? String(l.util_coefficient) : "" }];
   })));
@@ -172,18 +175,17 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
                   value: <input type="number" value={f.volume_m3} disabled={!canEdit} onChange={(e) => upd(p.id, { volume_m3: e.target.value })} />, comment: ci("volume_m3") },
               ] },
               { title: "Таможня РФ", rows: [
-                { key: "hs", name: <>Код ТН ВЭД <span className="muted">(поиск по коду или описанию; можно ввести вручную)</span></>, filled: !!f.hs_code, required: true,
+                { key: "hs", name: <>Код ТН ВЭД <span className="muted">(вводится вручную; поиск по справочнику)</span></>, filled: !!f.hs_code, required: true,
                   ref: <span className="muted">{hc?.found === false ? "кода нет в справочнике" : hc?.certification?.length ? hc.certification.join(", ") : ""}</span>,
                   value: <>
                     <input value={f.hs_code} disabled={!canEdit} placeholder="10 цифр" onChange={(e) => { const v = e.target.value; upd(p.id, { hs_code: v }); if (v.length >= 2) api.get<typeof hs>(`/api/refs/hs?q=${encodeURIComponent(v)}`).then(setHs); if (/^\d{10}$/.test(v.replace(/\s/g, ""))) lookupHs(p.id, v); }} />
                     {canEdit && hs.length > 0 && <div style={{ fontSize: 12, marginTop: 2 }}>{hs.slice(0, 5).map((h) => <div key={h.code} style={{ cursor: "pointer", padding: "2px 0" }} onClick={() => { upd(p.id, { hs_code: h.code, duty_pct: String(h.duty_pct), vat_pct: String(h.vat_pct), util_applies: null, util_coefficient: "" }); setHs([]); loadUref(p.id, h.code); }}><b>{h.code}</b> — {h.description} (пошлина {h.duty_pct} %, НДС {h.vat_pct} %; {h.certification.join(", ")})</div>)}</div>}</>,
                   comment: ci("hs_code") },
-                ...(/^\d{10}$/.test(f.hs_code.replace(/\s/g, "")) && hsInfo[p.id]?.code === f.hs_code.replace(/\s/g, "") && hsInfo[p.id]?.source !== "reference" ? [
+                ...(/^\d{10}$/.test(f.hs_code.replace(/\s/g, "")) ? [
                   { key: "hsn", name: "Наименование кода ТН ВЭД", filled: !!f.hs_description, required: true,
-                    ref: <span className="muted">{hsInfo[p.id]?.error || hsInfo[p.id]?.note || (hsInfo[p.id]?.source === "internet" ? "найдено в интернете — проверьте" : "")}
-                      {(hsInfo[p.id]?.links || []).map((l) => <> · <a key={l.url} href={l.url} target="_blank" rel="noreferrer">{l.title}</a></>)}</span>,
+                    ref: <span className="muted">{hsInfo[p.id]?.source === "reference" ? "из справочника" : (p as { catalog_hs?: unknown }).catalog_hs && !(p.logistics as { hs_code?: string } | undefined)?.hs_code ? "из карточки оборудования в каталоге" : "вводится вручную"}</span>,
                     value: <input value={f.hs_description} placeholder="наименование по ТН ВЭД ЕАЭС" disabled={!canEdit} onChange={(e) => upd(p.id, { hs_description: e.target.value })} />,
-                    comment: <span className="muted" style={{ fontSize: 11 }}>сохранится в справочник ТН ВЭД</span> },
+                    comment: <span className="muted" style={{ fontSize: 11 }}>сохранится в позиции и в карточке оборудования каталога</span> },
                 ] : []),
                 { key: "duty", name: "Пошлина", unit: "%", filled: f.duty_pct !== "",
                   ref: hc?.found ? <span className={hc.mismatch ? "badge warn" : "muted"}>справочник: {hc.ref_duty_pct} %</span> : null,

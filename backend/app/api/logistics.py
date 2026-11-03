@@ -164,6 +164,16 @@ def update_position_logistics(deal_id: str, pos_id: str, body: PositionLogistics
                           valid_from=date.today()))
             data["hs_code"] = code
             audit(db, user.id, deal.id, "hs_code", code, "manual_add", after={"description": body.hs_description.strip()})
+    # код ТН ВЭД — в карточку оборудования каталога (модель позиции): в следующих сделках подставляется логисту
+    if body.hs_code:
+        from ..models import EquipmentModel
+        import re as _re2
+        code_ = _re2.sub(r"\D", "", body.hs_code)
+        m = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == pos.factory_id, EquipmentModel.model == pos.model))
+        if m is not None and len(code_) == 10:
+            m.default_hs_code = code_
+            m.hs_info = {"code": code_, "description": body.hs_description.strip() or (ref_row.description if ref else ""),
+                         "duty_pct": body.duty_pct, "vat_pct": body.vat_pct, "util_applies": body.util_applies, "on": date.today().isoformat(), "deal": deal.number}
     chk = hs_check(body.duty_pct, body.vat_pct, ref)
     if chk.get("mismatch") and not body.hs_manual_comment:
         raise HTTPException(422, {"message": "Ставка отличается от справочника ТН ВЭД — укажите комментарий", "hs_check": chk})

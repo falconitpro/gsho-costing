@@ -19,7 +19,7 @@ type Analytics = {
 };
 type Card = { id: string; model: string; trademark: string; brand_name: string; machine_type: string; status: string; factory: string;
   logistics_params: Record<string, { name?: string; value?: unknown; unit?: string }>; maintenance_regulations: { name: string; interval_hours: number; operations?: { name: string; hours: number }[] }[];
-  default_hours_per_month?: number | null; executions: Exec[]; with_prices: boolean; factory_prices?: FPrice[]; client_prices?: CPrice[]; analytics?: Analytics };
+  default_hours_per_month?: number | null; hs?: { code: string; description?: string; duty_pct?: number | null; vat_pct?: number | null; on?: string; deal?: string } | null; executions: Exec[]; with_prices: boolean; factory_prices?: FPrice[]; client_prices?: CPrice[]; analytics?: Analytics };
 
 const UNITS: Record<string, string> = { calendar_days: "кал. дн.", working_days: "раб. дн.", weeks: "нед.", date: "" };
 const OUTCOME: Record<string, string> = { won: "выиграна", lost: "проиграна" };
@@ -90,7 +90,11 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
               <td className="muted" style={{ fontSize: 12 }}>{(r.operations || []).map((o) => `${o.name} (${o.hours} ч)`).join("; ")}</td></tr>)}</tbody></table> : <div className="muted">не заданы</div>}
             {card.default_hours_per_month && <div className="muted">Наработка: {card.default_hours_per_month} м·ч в месяц</div>}
           </div>
-          <div><h3>Данные для логистики</h3>
+          <div><h3>Код ТН ВЭД</h3>
+            {card.hs ? <div><b>{card.hs.code}</b>{card.hs.description && <> — {card.hs.description}</>}
+              <div className="muted" style={{ fontSize: 12 }}>{card.hs.duty_pct != null && `пошлина ${card.hs.duty_pct} % · `}{card.hs.vat_pct != null && `НДС ${card.hs.vat_pct} % · `}внёс логист{card.hs.deal && ` по сделке ${card.hs.deal}`}{card.hs.on && `, ${fmtDate(card.hs.on)}`}</div></div>
+              : <div className="muted">ещё не задан — появится после расчёта логистики по этой модели</div>}
+            <h3>Данные для логистики</h3>
             {Object.keys(card.logistics_params).length ? <table><tbody>{Object.entries(card.logistics_params).map(([code, f]) => <tr key={code}><td>{f.name || code}</td><td className="num"><b>{String(f.value ?? "—")}</b></td><td className="muted">{(f.unit || "").split(" / ")[0]}</td></tr>)}</tbody></table>
               : <div className="muted">нет</div>}
           </div>
