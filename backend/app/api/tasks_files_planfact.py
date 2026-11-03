@@ -145,6 +145,8 @@ def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depen
     deal = db.get(Deal, att.deal_id if att else ver.deal_id)
     if not can_see_deal(user, deal):
         raise HTTPException(404)
+    if att is not None and att.folder == "08_legal" and not user.can("legal_docs"):
+        raise HTTPException(403, "Документы сделки закрыты для роли")
     restricted = (att and att.folder == "04_cost") or (ver and path == ver.excel_path)
     if restricted and not user.can("cost_files"):
         raise HTTPException(403, "Папка «04 Расчёт себестоимости» недоступна для роли")

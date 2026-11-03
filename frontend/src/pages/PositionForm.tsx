@@ -181,7 +181,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
         <h2 style={{ marginTop: 0 }}>{position ? `Позиция ${designation(position)}: правка полей опросника` : "Новая позиция: ввод полей опросника вручную"}</h2>
         <span className="muted">заполнено {filledCount} из {schema.fields.length}{reqCount ? ` · требований заказчика: ${reqCount}` : ""} · обязательные: завод, модель, кол-во, цена</span>
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>Те же поля, что в шаблоне RFQ ({schema.title || "RU-CN"}). Метка <span className="badge">L</span> — данные для логиста. Заполняйте то, что известно; остальное можно дополнить позже или импортом файла.</p>
+      <p className="muted" style={{ marginTop: 0 }}>Те же поля, что в шаблоне RFQ ({schema.title || "RU-CN"}). Заполняйте то, что известно; остальное можно дополнить позже или импортом файла.</p>
       <div className="row" style={{ marginBottom: 8 }}>
         <button className="btn ghost" onClick={() => setOpen(Object.fromEntries([...bySection.keys()].map((k) => [k, true])))}>развернуть все разделы</button>
         <button className="btn ghost" onClick={() => setOpen({})}>свернуть</button>
@@ -206,7 +206,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
                     const req = schema.required.includes(f.code), empty = !vals[f.code];
                     return (
                       <tr key={f.code} style={{ background: empty && req ? "#fde7e7" : empty ? "#fff6d6" : undefined }} title={f.name_zh}>
-                        <td>{f.code} {f.is_l && <span className="badge" title="данные для логиста">L</span>}</td>
+                        <td>{f.code}</td>
                         <td>{no === 12 && f.code !== "12.6"
                           ? <input style={{ width: "100%" }} placeholder="наименование опции" value={optNames[f.code] || ""} onChange={(e) => setOptNames({ ...optNames, [f.code]: e.target.value })} />
                           : <>{f.name || (no === 10 ? "Параметр рабочего оборудования" : "")}{req && <span style={{ color: "var(--accent)" }}> *</span>}</>}

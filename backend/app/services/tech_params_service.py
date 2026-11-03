@@ -587,6 +587,14 @@ def apply_import(db: Session, pos: Position, path: str, filename: str, mapping: 
 
 # ------------------------------------------------------------------ запрос заводу
 
+def request_trademark(pos: Position, factory: Optional[Factory]) -> str:
+    """Торговая марка для запроса: марка позиции, если она есть у выбранного завода (или завод — завод позиции), иначе первая марка завода."""
+    tms = list(factory.trademarks or []) if factory else []
+    if pos.trademark and (not factory or factory.id == pos.factory_id or pos.trademark in tms):
+        return pos.trademark
+    return tms[0] if tms else ""
+
+
 def build_request_xlsx(db: Session, pos: Position, factory: Optional[Factory], deal_number: str, user_id: Optional[str],
                        request_images: bool = True) -> tuple[str, list[dict]]:
     """Двуязычный файл запроса: № / параметр RU / 参数 / ед. / требования RU / 要求 / 数值 (пусто) / 备注. Строки «реализуется в России» не включаются.
@@ -600,7 +608,9 @@ def build_request_xlsx(db: Session, pos: Position, factory: Optional[Factory], d
     ws.title = "Техданные 技术参数"
     ws["A1"] = f"Запрос технических характеристик / 技术参数询价 — {deal_number}"
     ws["A1"].font = Font(bold=True, size=13)
-    ws["A2"] = f"Завод / 工厂: {(factory.name_zh or factory.name) if factory else ''}   Модель / 型号: {pos.designation}   Кол-во / 数量: {pos.qty}"
+    tm = request_trademark(pos, factory)
+    ws["A2"] = (f"Завод / 工厂: {(factory.name_zh or factory.name) if factory else ''}   Марка / 品牌: {tm or '—'}   "
+                f"Модель / 型号: {pos.designation}   Кол-во / 数量: {pos.qty}")
     ws["A3"] = "Просим заполнить столбцы «Значение / 数值» и «Комментарий / 备注» по каждому параметру с учётом требований заказчика. 请根据客户要求填写每项参数的数值和备注。"
     if request_images:
         ws["A4"] = "Просим приложить фото, рендеры и габаритные чертежи предлагаемой машины. 请附上所报机型的照片、效果图和外形尺寸图。"

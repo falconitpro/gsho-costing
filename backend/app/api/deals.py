@@ -345,6 +345,11 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
     if "unit_price" in body:
         pos.price_reference = _price_ref(db, pos, body.get("price_comment", ""))
         _record_price(db, pos, deal)
+    if {"unit_price", "currency", "basis", "production_term", "form_rows"} & set(body):   # обновить ответ завода позиции
+        from ..services.offers_service import offer_from_position
+        db.flush()
+        db.refresh(pos)
+        offer_from_position(db, deal, pos, user.id)
     audit(db, user.id, deal.id, "position", pos.id, "update", {k: before.get(k) for k in body}, body)
     db.commit()
     return serialize(pos)
@@ -395,7 +400,7 @@ def delete_variant(deal_id: str, var_id: str, db: Session = Depends(get_db), use
 
 @router.get("/rfq/template")
 def rfq_template_schema(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Все поля опросника из актуального шаблона RFQ (разделы, коды, названия RU/CN, единицы, метка L) — для ручного ввода."""
+    """Все поля опросника из актуального шаблона RFQ (разделы, коды, названия RU/CN, единицы, поля для логиста) — для ручного ввода."""
     from ..models import Template
     from ..services.rfq_import import template_fields
     from ..services.rfq_template import template_path
@@ -403,7 +408,7 @@ def rfq_template_schema(db: Session = Depends(get_db), user: CurrentUser = Depen
     out = template_fields(template_path(custom.file_path if custom else None))
     from ..services.tech_params_service import l_codes
     lc = l_codes(db)
-    if lc is not None:   # метка L — по настройке «Поля для логиста»
+    if lc is not None:   # поля для логиста — по настройке «Поля для логиста»
         out["fields"] = [{**f, "is_l": f["code"] in lc} for f in out["fields"]]
     return out
 
@@ -413,9 +418,10 @@ def rfq_template_file(db: Session = Depends(get_db), user: CurrentUser = Depends
     """Пустой шаблон RFQ для отправки заводу."""
     from fastapi.responses import FileResponse
     from ..models import Template
-    from ..services.rfq_template import template_path
+    from ..services.rfq_template import clean_template_copy
     custom = db.scalar(select(Template).where(Template.kind == "rfq", Template.is_active.is_(True)).order_by(Template.version.desc()))
-    return FileResponse(template_path(custom.file_path if custom else None), filename="RFQ_RU-CN.xlsx")
+    dst = clean_template_copy(os.path.join(tempfile.mkdtemp(), "RFQ_RU-CN.xlsx"), custom.file_path if custom else None)
+    return FileResponse(dst, filename="RFQ_RU-CN.xlsx")
 
 
 @router.post("/{deal_id}/rfq/preview")
@@ -490,6 +496,9 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     _record_price(db, pos, deal)
     from ..services.tech_params_service import rows_from_rfq
     rows_from_rfq(db, pos, parsed, user.id)   # задача 4: таблица технических характеристик из ответа завода в шаблоне RFQ
+    db.refresh(pos)
+    from ..services.offers_service import offer_from_position
+    offer_from_position(db, deal, pos, user.id, f"RFQ: {file.filename or ''}")   # ответ завода в RFQ → «Заводы и ответы»
     ensure_default_variant(db, deal)
     # шапка сделки из раздела 0 опросника (заполняем только пустое, менеджер мог ввести раньше)
     deal.operating_conditions = {**(deal.operating_conditions or {}), **{k: parsed.header.get(k) for k in ("temp_min", "temp_max", "operating_conditions") if parsed.header.get(k) is not None}}

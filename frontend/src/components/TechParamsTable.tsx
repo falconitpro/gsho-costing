@@ -8,6 +8,12 @@ type Preview = { sheets: { name: string; rows: unknown[][]; total_rows: number; 
   columns: { key: string; title: string }[] };
 type Factory = { id: string; name: string; trademarks?: string[] };
 const isCountry = (r: { code?: string; name_ru?: string }) => r.code === "1.3" || /^(страна|country)/i.test((r.name_ru || "").trim());
+/** торговая марка для выбранного завода: марка позиции, если она у этого завода, иначе первая марка завода */
+const tmFor = (f: Factory | undefined, pos: Position) => {
+  const tms = f?.trademarks || [];
+  if (pos.trademark && (!f || f.id === pos.factory_id || tms.includes(pos.trademark))) return pos.trademark;
+  return tms[0] || "";
+};
 const fname = (f?: Factory) => (f ? f.name + (f.trademarks?.length ? ` (${f.trademarks.join(", ")})` : "") : "—");
 
 const COLS: { key: keyof TechParamRow; title: string; w?: number }[] = [
@@ -114,7 +120,6 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
           <div className="row">
             <button className="btn ghost" onClick={() => { setWizard("requirements"); setPreview(null); setOfferId(""); }}>Импорт требований клиента</button>
             <button className="btn ghost" onClick={() => { setWizard("factory_answer"); setPreview(null); setOfferId(""); }}>Импорт ответа завода</button>
-            <a className="btn ghost" href={`${base}/request/file`} title="двуязычный Excel (RU + CN) для отправки заводу вручную: требования заказчика, пустые столбцы «Значение» и «Комментарий»">Скачать запрос заводу (Excel RU + CN)</a>
             <a className="btn ghost" href={`/api/deals/${dealId}/positions/${position.id}/rfq/file`} title="шаблон RFQ с требованиями заказчика из таблицы; строки «в РФ» помечены">RFQ с требованиями</a>
             <UndoButton h={history} />
             <button className="btn ghost" onClick={addRow}>+ строка</button>
@@ -124,10 +129,43 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
       </div>
       {err && <div className="alert error">{err}</div>}
       {msg && <div className="alert info">{msg}</div>}
+      {/* выбор завода — вверху листа; выбранные заводы выделены карточками с торговой маркой */}
+      <div className="card" style={{ marginBottom: 8, padding: 10 }}>
+        <div className="row" style={{ flexWrap: "wrap", alignItems: "center" }}>
+          <b>Завод для запроса:</b>
+          {canEdit && (
+            <select value="" onChange={(e) => e.target.value && setReqFactories([...reqFactories, e.target.value])} style={{ minWidth: 280 }}>
+              <option value="">{reqFactories.length ? "+ добавить ещё завод…" : "— выбрать завод —"}</option>
+              {factories.filter((f) => !reqFactories.includes(f.id)).map((f) => <option key={f.id} value={f.id}>{fname(f)}</option>)}
+            </select>)}
+          {reqFactories.length === 0 && <span className="badge warn">завод не выбран</span>}
+        </div>
+        <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+          {reqFactories.map((id) => {
+            const f = factories.find((x) => x.id === id);
+            const tm = tmFor(f, position);
+            return (
+              <div key={id} style={{ border: "2px solid var(--accent)", background: "#fff3f3", borderRadius: 8, padding: "8px 12px", minWidth: 220, position: "relative" }}>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>✔ {f?.name || "—"}</div>
+                <div style={{ fontSize: 13 }}>Марка: <b>{tm || "—"}</b>{f?.trademarks && f.trademarks.length > 1 ? <span className="muted"> (марки завода: {f.trademarks.join(", ")})</span> : null}</div>
+                {id === position.factory_id && <div className="muted" style={{ fontSize: 11 }}>завод позиции</div>}
+                {canEdit && <button className="btn ghost" style={{ position: "absolute", top: 2, right: 2, padding: "0 6px" }} title="убрать завод" onClick={() => setReqFactories(reqFactories.filter((x) => x !== id))}>×</button>}
+              </div>);
+          })}
+        </div>
+      </div>
       <div style={{ overflowX: "auto" }}>
         <table>
           <thead><tr>{COLS.map((c) => <th key={c.key} style={{ width: c.w }}>{c.title}</th>)}<th title="обязательный параметр">Обяз.</th><th title="реализуется в России — не идёт заводу">В РФ</th>{canEdit && <th />}</tr></thead>
-          <tbody>{rows.map((r, i) => {
+          <tbody>
+            <tr style={{ background: "#fff3f3" }} title="торговая марка — по выбранному заводу (вверху листа)">
+              <td style={{ padding: 3 }}>—</td><td style={{ padding: 3, fontWeight: 600 }}>Марка (торговая марка)</td><td />
+              <td style={{ padding: 3 }}>{position.trademark || ""}</td>
+              <td style={{ padding: 3, fontWeight: 700 }}>{reqFactories.map((id) => tmFor(factories.find((x) => x.id === id), position)).filter(Boolean).join(" / ") || "—"}</td>
+              <td style={{ padding: 3 }} className="muted">{reqFactories.length > 1 ? "по выбранным заводам" : "по выбранному заводу"}</td>
+              <td /><td />{canEdit && <td />}
+            </tr>
+            {rows.map((r, i) => {
             const sec = r.section || "Дополнительные параметры";
             const head = i === 0 || (rows[i - 1].section || "Дополнительные параметры") !== sec;
             const inSec = rows.filter((x) => (x.section || "Дополнительные параметры") === sec);
@@ -174,25 +212,16 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
         <div className="card" style={{ marginTop: 10 }}>
           <b>Запрос заводу (RU + CN)</b> <span className="muted">— требования заказчика, пустой столбец «Значение», просьба приложить фото и чертежи. Отправка через WeCom и e-mail; по каждому заводу создаётся ответ-кандидат.</span>
           <div className="row" style={{ marginTop: 6 }}>
-            {/* заводы — из выпадающего списка; несколько заводов добавляются по одному, лишний убирается крестиком */}
-            <div>
-              <select value="" onChange={(e) => e.target.value && setReqFactories([...reqFactories, e.target.value])} style={{ minWidth: 280 }}>
-                <option value="">{reqFactories.length ? "+ добавить ещё завод…" : "— выбрать завод —"}</option>
-                {factories.filter((f) => !reqFactories.includes(f.id)).map((f) => <option key={f.id} value={f.id}>{fname(f)}</option>)}
-              </select>
-              <div className="row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
-                {reqFactories.map((id) => <span key={id} className="badge accent">{fname(factories.find((f) => f.id === id))}{id === position.factory_id ? " — завод позиции" : ""}
-                  <a href={`${base}/request/file?factory_id=${id}`} style={{ marginLeft: 6 }} title="скачать запрос этому заводу (Excel RU + CN) для отправки вручную">⬇ Excel</a>
-                  <button className="btn ghost" style={{ padding: "0 4px", marginLeft: 2 }} title="убрать" onClick={() => setReqFactories(reqFactories.filter((x) => x !== id))}>×</button></span>)}
-              </div>
-            </div>
+            <span className="muted">Заводы: <b>{reqFactories.map((id) => factories.find((f) => f.id === id)?.name || "—").join(", ") || "не выбраны (выберите вверху листа)"}</b></span>
             {images.length > 0 && (
               <select multiple value={reqImages} onChange={(e) => setReqImages([...e.target.selectedOptions].map((o) => o.value))} style={{ minWidth: 220, height: 80 }} title="файлы клиента, которые приложить к запросу">
                 {images.map((im) => <option key={im.id} value={im.id}>{im.caption || im.file_name || lbl(IMAGE_KIND, im.kind)} ({lbl(IMAGE_SOURCE, im.source)})</option>)}
               </select>
             )}
             <button className="btn" onClick={sendRequest} disabled={sending || reqFactories.length === 0 || (clientSelected.length > 0 && !clientChecked)}>Отправить запрос {reqFactories.length > 1 ? `${reqFactories.length} заводам` : "заводу"}</button>
-            {reqFactories.length > 0 && <a className="btn secondary" href={`${base}/request/file?factory_id=${reqFactories[0]}`} title="двуязычный Excel для отправки вручную (почта, WeChat); по каждому заводу — ссылка «⬇ Excel» у названия">Скачать запрос (Excel RU + CN) для отправки вручную</a>}
+            <a className={"btn secondary" + (reqFactories.length ? "" : " disabled")} aria-disabled={!reqFactories.length}
+              href={reqFactories.length ? `${base}/request/file?factory_ids=${reqFactories.join(",")}` : undefined}
+              title="двуязычный Excel (RU + CN) для отправки вручную; несколько заводов — архив ZIP с файлом на каждый завод">Скачать запрос {reqFactories.length > 1 ? `${reqFactories.length} заводам (ZIP)` : "заводу"}</a>
           </div>
           {clientSelected.length > 0 && (
             <div className="alert warn" style={{ marginTop: 6 }}>

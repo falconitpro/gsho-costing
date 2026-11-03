@@ -26,6 +26,7 @@ from tests.test_rfq_import import FILLED, OPTION_NAMES, ZIP  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
 MGR, LOG, SVC, CD, FD = "manager@example.com", "logist@example.com", "service@example.com", "cd@example.com", "fd@example.com"
+LAW = "lawyer@example.com"
 
 
 @pytest.fixture(scope="module")
@@ -221,6 +222,8 @@ def test_full_flow(client, tmp_path):
     cs = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(MGR)))["contract_steps"]
     assert cs[0]["code"] == "draft" and cs[0]["state"] == "current" and all(c["state"] == "pending" for c in cs[1:])
     _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "draft", "comment": "проект по КП"}))
+    assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "legal_review"}).status_code == 403   # только юрист, КД, ЗГД
+    _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(LAW), json={"code": "legal_review", "comment": "замечаний нет"}))
     _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "client_review"}))
     assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "internal_approval"}).status_code == 403
     r_ia = _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(CD), json={"code": "internal_approval", "comment": "условия = КП"}))
@@ -815,3 +818,50 @@ def test_factory_delete_and_contacts(client):
     assert any(x["id"] == used["id"] for x in _ok(client.get("/api/refs/factories?include_archived=true", headers=H(MGR))))
     card_u = _ok(client.get(f"/api/refs/factories/{used['id']}", headers=H(GD)))
     _ok(client.put(f"/api/refs/factories/{used['id']}", headers=H(GD), json={**{k: v for k, v in card_u.items() if v is not None}, "is_active": True}))
+
+
+def test_documents_lawyer_and_offer_from_tech_table(client):
+    """Файлы клиента в сделке, задача и проверка юриста, закрытый доступ к юридическим файлам; ответ завода из таблицы теххарактеристик."""
+    from app.db import SessionLocal
+    from app.models import Deal, FactoryOffer, Position, User
+    from app.services.offers_service import offer_from_position
+    with SessionLocal() as db:
+        mgr = db.query(User).filter(User.email == MGR).one()
+        d = db.query(Deal).filter(Deal.manager_id == mgr.id).first()
+        if d is None:
+            pytest.skip("нет сделки менеджера")
+        did = d.id
+    tender = ("Тендерная документация.pdf", b"%PDF-1.4 test", "application/pdf")
+    up = _ok(client.post(f"/api/deals/{did}/documents", headers=H(MGR), files={"file": tender}, data={"category": "tender", "comment": "от клиента"}), 201)
+    assert any(x["category"] == "tender" for x in up["documents"])
+    docs = _ok(client.get(f"/api/deals/{did}/documents", headers=H(LAW)))
+    assert any(x["file_name"] == "Тендерная документация.pdf" for x in docs["documents"]) and docs["review"]["status"] == "in_review"
+    assert any(t["deal_id"] == did and t["block"] == "legal" for t in _ok(client.get("/api/tasks/my", headers=H(LAW))))
+    # протокол разногласий — юрист; менеджер юридические документы не загружает
+    dis = ("Протокол разногласий.docx", b"PK test", "application/octet-stream")
+    assert client.post(f"/api/deals/{did}/documents", headers=H(MGR), files={"file": dis}, data={"category": "disagreements"}).status_code == 403
+    _ok(client.post(f"/api/deals/{did}/documents", headers=H(LAW), files={"file": dis}, data={"category": "disagreements"}), 201)
+    assert client.post(f"/api/deals/{did}/legal-review", headers=H(MGR), json={"status": "ok"}).status_code == 403
+    assert client.post(f"/api/deals/{did}/legal-review", headers=H(LAW), json={"status": "remarks", "comment": ""}).status_code == 422
+    _ok(client.post(f"/api/deals/{did}/legal-review", headers=H(LAW), json={"status": "remarks", "comment": "п. 5.2 — неустойка"}))
+    assert _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))["legal_review"]["status"] == "remarks"
+    assert not any(t["deal_id"] == did and t["block"] == "legal" and not t.get("done_at") for t in _ok(client.get("/api/tasks/my", headers=H(LAW))))
+    # файлы юридической папки закрыты для ролей без доступа
+    url = next(x["url"] for x in _ok(client.get(f"/api/deals/{did}/documents", headers=H(MGR)))["documents"] if x["category"] == "tender")
+    assert client.get(url, headers=H(LOG)).status_code in (403, 404)
+    assert client.get(f"/api/deals/{did}/documents", headers=H(LOG)).status_code == 403
+    # ответ завода из таблицы теххарактеристик
+    with SessionLocal() as db:
+        pos = db.query(Position).filter(Position.factory_id.isnot(None)).first()
+        if pos is None:
+            return
+        deal = db.get(Deal, pos.deal_id)
+        if pos.tech_param_rows:
+            pos.tech_param_rows[0].value_ru = pos.tech_param_rows[0].value_ru or "тест-значение"
+            pos.tech_param_rows[0].local_ru = False
+        pos.unit_price = pos.unit_price or 1000.0
+        o = offer_from_position(db, deal, pos, None, "из таблицы технических характеристик")
+        assert o is not None and o.factory_id == pos.factory_id
+        assert db.query(FactoryOffer).filter(FactoryOffer.deal_id == deal.id, FactoryOffer.source_position_id == pos.id,
+                                             FactoryOffer.factory_id == pos.factory_id).count() == 1
+        db.rollback()

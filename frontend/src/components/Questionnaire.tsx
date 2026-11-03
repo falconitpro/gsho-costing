@@ -46,7 +46,7 @@ export default function Questionnaire({ position, onlyL = false, showEmpty = fal
   return (
     <div>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-        <span className="muted">{title || (onlyL ? "Поля с меткой L — данные для расчёта логистики" : "Опросник RFQ")}
+        <span className="muted">{title || (onlyL ? "Данные для расчёта логистики" : "Опросник RFQ")}
           {meta._rfq && <> · заполнено {meta._rfq.filled} из {meta._rfq.total}</>}{meta._source_file && <> · источник: {meta._source_file}</>}</span>
         {!showEmpty && <label className="row muted" style={{ fontSize: 12 }}><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> показать незаполненные</label>}
       </div>
@@ -57,7 +57,7 @@ export default function Questionnaire({ position, onlyL = false, showEmpty = fal
             <thead><tr><th style={{ width: 60 }}>Код</th><th>Параметр</th><th style={{ width: 90 }}>Ед.</th><th>Требование заказчика</th><th>Значение завода</th><th>Комментарий</th></tr></thead>
             <tbody>{fs.map((f) => (
               <tr key={f.code} style={{ opacity: f.value == null || f.value === "" ? 0.55 : 1 }}>
-                <td>{f.code} {f.is_l && <span className="badge" title="данные для логиста">L</span>}</td>
+                <td>{f.code}</td>
                 <td>{f.name}{f.name_zh && <div className="muted" style={{ fontSize: 11 }}>{f.name_zh}</div>}</td>
                 <td className="muted">{(f.unit || "").split(" / ")[0]}</td>
                 <td className="muted">{fmtVal(f.requirement)}</td>
@@ -80,7 +80,7 @@ const ruOnly = (t: unknown) => {
   return parts.join(" / ") || "";
 };
 
-/** Данные для логиста (метка L): одна таблица по разделам, только по-русски — параметр, значение, единица. */
+/** Данные для логиста : одна таблица по разделам, только по-русски — параметр, значение, единица. */
 function LogisticsView({ fields, all, setAll }: { fields: RfqFieldData[]; all: boolean; setAll: (v: boolean) => void }) {
   const bySection = new Map<number, RfqFieldData[]>();
   for (const f of fields) { const n = f.section_no ?? Number(f.code.split(".")[0]); if (!bySection.has(n)) bySection.set(n, []); bySection.get(n)!.push(f); }

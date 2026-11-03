@@ -47,6 +47,8 @@ STAGE_DEFS: dict[str, dict[str, Any]] = {
 CONTRACT_STEPS: list[dict[str, Any]] = [
     {"code": "draft", "title": "Подготовка проекта контракта", "roles": ["manager", "cd", "gd"], "task_role": "manager",
      "hint": "проект на основе утверждённого КП: предмет, цена, условия оплаты, сроки, гарантия"},
+    {"code": "legal_review", "title": "Юридическая проверка контракта", "roles": ["lawyer", "cd", "gd"], "task_role": "lawyer",
+     "hint": "юрист проверяет проект или типовую форму клиента; при необходимости — протокол разногласий (файлы — во вкладке «Документы»)"},
     {"code": "client_review", "title": "Согласование проекта с клиентом", "roles": ["manager", "cd", "gd"], "task_role": "manager",
      "hint": "проект направлен клиенту, замечания учтены"},
     {"code": "internal_approval", "title": "Согласование условий внутри компании", "roles": ["cd", "fd", "gd"], "task_role": "cd",

@@ -22,6 +22,27 @@ def template_path(custom: Optional[str] = None) -> str:
     return custom if custom and os.path.exists(custom) else DEFAULT_TEMPLATE
 
 
+def strip_l_marks(ws) -> None:
+    """Служебные отметки «L» (данные для логиста) в файлы для заводов и пользователей не выводятся: какие поля нужны
+    логисту, система берёт из встроенного шаблона и настройки «Поля для логиста»."""
+    hdr, _, l_col = _find_main_header(ws)
+    if not l_col:
+        return
+    for r in range(hdr, ws.max_row + 1):
+        c = ws.cell(r, l_col)
+        if isinstance(c.value, str) and c.value.strip().upper() in ("L", "Л"):
+            c.value = None
+
+
+def clean_template_copy(dst: str, src: Optional[str] = None) -> str:
+    """Копия шаблона RFQ без отметок «L» — для скачивания пустого шаблона."""
+    shutil.copyfile(template_path(src), dst)
+    wb = load_workbook(dst)
+    strip_l_marks(next((w for w in wb.worksheets if "тех" in w.title.lower()), wb.worksheets[0]))
+    wb.save(dst)
+    return dst
+
+
 def fill_rfq_template(dst: str, values: dict[str, Any], spare_parts: Optional[list[dict]] = None,
                       comments: Optional[dict[str, str]] = None, option_names: Optional[dict[str, str]] = None,
                       src: Optional[str] = None) -> str:
@@ -85,6 +106,7 @@ def fill_rfq_template(dst: str, values: dict[str, Any], spare_parts: Optional[li
                                      ("part_no", "part_no"), ("brand", "brand"), ("lead_days", "lead")):
                         if key in sp and col in zc:
                             z.cell(r, zc[col]).value = sp[key]
+    strip_l_marks(ws)
     wb.save(dst)
     return dst
 
@@ -123,5 +145,6 @@ def fill_rfq_requirements(dst: str, rows: list[dict], src: Optional[str] = None)
             continue
         put(r, cols.get("req_ru"), row.get("customer_requirement_ru"))
         put(r, cols.get("req_zh"), row.get("customer_requirement_zh"))
+    strip_l_marks(ws)
     wb.save(dst)
     return dst

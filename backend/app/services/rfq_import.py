@@ -306,12 +306,10 @@ def parse_rfq(path: str, by_name: bool = True) -> RfqParsed:
         out.fields[code] = f
 
     if by_name and not any(f.is_l for f in out.fields.values()):
-        # в файле нет отметок «L» (данные логисту) — берём их из встроенного шаблона по кодам
+        # в файле нет отметок данных для логиста — берём их из встроенного шаблона по кодам
         l_codes = _canonical()[1]
         for code, f in out.fields.items():
             f.is_l = code in l_codes
-        if l_codes:
-            out.errors.append(ImportError_("", "В файле нет отметок «L» (данные для логиста) — применены отметки из шаблона компании.", "info"))
     for code in REQUIRED_CODES - set(out.fields):
         out.errors.append(ImportError_(code, f"В шаблоне нет обязательного поля {code}."))
         out.missing_required.append(code)
