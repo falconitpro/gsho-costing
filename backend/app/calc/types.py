@@ -250,7 +250,7 @@ class PositionInput(BaseModel):
     # Таможня
     hs_code: str = ""
     duty_pct: float = 0.0
-    vat_pct: float = 20.0
+    vat_pct: float = 22.0
     util_fee_rub: float = 0.0
     certification_rub: float = 0.0
     # Для распределения общих статей партии
@@ -310,7 +310,7 @@ class DealCalcInput(BaseModel):
     deal_actual_events: dict[str, date] = Field(default_factory=dict)   # contract | factory_contract | client_prepayment | lc_opened
     rf_holidays: list[date] = Field(default_factory=list)              # дополнительные праздники/переносы
     base_currency: Currency = "CNY"
-    client_vat_pct: float = 20.0
+    client_vat_pct: float = 22.0
     fx: FxRates
     fx_history: dict[str, list[tuple[date, float]]] = Field(default_factory=dict)   # история ЦБ по валютам
     fx_settings: FxForecastSettings = Field(default_factory=FxForecastSettings)

@@ -138,11 +138,11 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             actual_events=_dates(p.actual_events),
             domestic_logistics=Money(**lg.get("domestic_logistics", {"amount": 0, "currency": "CNY"})),
             export_formalities=Money(**lg.get("export_formalities", {"amount": 0, "currency": "CNY"})),
-            hs_code=lg.get("hs_code") or "", duty_pct=_num(lg.get("duty_pct")), vat_pct=_num(lg.get("vat_pct"), 20.0),
+            hs_code=lg.get("hs_code") or "", duty_pct=_num(lg.get("duty_pct")), vat_pct=_num(lg.get("vat_pct"), 22.0),
             util_fee_rub=_num(lg.get("util_fee_rub")), certification_rub=_num(lg.get("certification_rub")),
             weight_kg=_num(((p.logistics_params or {}).get("1.15") or (p.logistics_params or {}).get("1.14") or {}).get("value")) * p.qty,
             volume_m3=_num(lg.get("volume_m3")),
-            warranty_reserve_pct=p.warranty_reserve_pct if p.warranty_reserve_pct is not None else wr.get(p.machine_type, wr.get("default", 2.5)),
+            warranty_reserve_pct=p.warranty_reserve_pct if p.warranty_reserve_pct is not None else wr.get(p.machine_type, wr.get("default", 1.5)),
             service=service, batch_id=p.batch_id,
         ))
     batches = []

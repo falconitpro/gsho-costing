@@ -7,7 +7,6 @@ type Opt = { value: string; label: string };
 type Col = { key: string; label: string; type?: string; options?: Opt[]; nullable?: boolean };
 type Meta = { key: string; group: string; title: string; unit?: string; help?: string; type: string; nullable?: boolean; options?: Opt[];
   fields?: Col[]; columns?: Col[]; key_label?: string; editable?: boolean; editors?: string };
-type TplField = { code: string; name: string; section_no?: number; section?: string; is_l?: boolean };
 type ExpertRow = { cur: string; on: string; rate: string };
 const toExpertRows = (v: unknown): ExpertRow[] => Object.entries((v || {}) as Record<string, unknown>).flatMap(([cur, pts]) =>
   (Array.isArray(pts) ? pts as { on: string; rate: number }[] : Object.entries((pts || {}) as Record<string, number>).map(([on, rate]) => ({ on, rate })))
@@ -23,7 +22,6 @@ const num = (v: unknown) => (typeof v === "number" ? (Math.abs(v) >= 10000 ? fmt
 
 /** Короткая понятная запись значения для списка. */
 function summary(m: Meta, v: unknown): string {
-  if (m.type === "l_codes" && v == null) return "как в шаблоне RFQ";
   if (v == null || v === "") return m.nullable ? "не задано" : "—";
   switch (m.type) {
     case "bool": return v ? "да" : "нет";
@@ -55,7 +53,7 @@ function summary(m: Meta, v: unknown): string {
     case "dict_table": return Object.entries(v as Record<string, Record<string, unknown>>).map(([k, row]) =>
       `${k === "default" ? "остальные регионы" : k}: ${(m.columns || []).map((c) => `${c.label.split(",")[0].toLowerCase()} ${num(row?.[c.key])}`).join(", ")}`).join("; ") || "—";
     case "expert_points": { const rows = toExpertRows(v); return rows.length ? rows.map((r) => `${r.cur} на ${r.on}: ${r.rate.replace(".", ",")}`).join("; ") : "не заданы"; }
-    case "l_codes": return Array.isArray(v) ? `${v.length} полей: ${(v as string[]).slice(0, 12).join(", ")}${v.length > 12 ? " …" : ""}` : "как в шаблоне RFQ";
+
     default: { const s = JSON.stringify(v); return s.length > 90 ? s.slice(0, 90) + "…" : s; }
   }
 }
@@ -66,36 +64,6 @@ function Field({ col, value, onChange }: { col: Col; value: unknown; onChange: (
   if (col.type === "text") return <input value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} />;
   return <input type="number" step="any" value={value == null ? "" : String(value)} style={{ width: 120 }} placeholder={col.nullable ? "пусто — без ограничения" : ""}
     onChange={(e) => onChange(e.target.value === "" ? (col.nullable ? null : 0) : Number(e.target.value))} />;
-}
-
-/** Поля опросника для логиста (метка L): отметки по разделам шаблона RFQ. */
-function LCodesEditor({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
-  const [fields, setFields] = useState<TplField[]>([]);
-  const [q, setQ] = useState("");
-  useEffect(() => { api.get<{ fields: TplField[] }>("/api/deals/rfq/template").then((r) => {
-    setFields(r.fields);
-    if (!Array.isArray(value)) onChange(r.fields.filter((f) => f.is_l).map((f) => f.code));   // старт — отметки шаблона
-  }); }, []);
-  const sel = new Set(Array.isArray(value) ? value as string[] : []);
-  const toggle = (code: string) => { const n = new Set(sel); if (n.has(code)) n.delete(code); else n.add(code); onChange([...n]); };
-  const bySec = new Map<number, TplField[]>();
-  for (const f of fields) { if (q && !`${f.code} ${f.name}`.toLowerCase().includes(q.toLowerCase())) continue; const n = f.section_no ?? 0; if (!bySec.has(n)) bySec.set(n, []); bySec.get(n)!.push(f); }
-  return (
-    <div>
-      <div className="row" style={{ marginBottom: 6 }}><input placeholder="поиск поля" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
-        <span className="muted">отмечено {sel.size} из {fields.length}</span></div>
-      <div style={{ maxHeight: 420, overflowY: "auto", border: "1px solid #eee", borderRadius: 4 }}>
-        <table><tbody>{[...bySec.entries()].sort((a, b) => a[0] - b[0]).map(([no, fs]) => (
-          <Fragment key={no}>
-            <tr><td colSpan={2} style={{ background: "var(--accent-soft)", fontWeight: 600 }}>{no}. {(fs[0].section || "").split(" / ")[0]}
-              <button className="btn ghost" style={{ marginLeft: 8, padding: "0 6px" }} onClick={() => { const n = new Set(sel); const all = fs.every((f) => n.has(f.code)); fs.forEach((f) => (all ? n.delete(f.code) : n.add(f.code))); onChange([...n]); }}>
-                {fs.every((f) => sel.has(f.code)) ? "снять все" : "отметить все"}</button></td></tr>
-            {fs.map((f) => <tr key={f.code} style={{ cursor: "pointer" }} onClick={() => toggle(f.code)}>
-              <td style={{ width: 30 }}><input type="checkbox" checked={sel.has(f.code)} readOnly /></td>
-              <td>{f.code} {f.name} {sel.has(f.code) && <span className="badge">L</span>}</td></tr>)}
-          </Fragment>))}</tbody></table>
-      </div>
-    </div>);
 }
 
 /** Редактор значения по типу настройки. */
@@ -148,7 +116,6 @@ function Editor({ m, value, onChange }: { m: Meta; value: unknown; onChange: (v:
           <td><button className="btn ghost" onClick={() => put(rows.filter((_, j) => j !== i))}>×</button></td></tr>)}</tbody></table>
         <button className="btn ghost" onClick={() => put([...rows, { cur: "CNY", on: new Date(Date.now() + 90 * 864e5).toISOString().slice(0, 10), rate: "" }])}>+ точка</button></div>;
     }
-    case "l_codes": return <LCodesEditor value={value} onChange={onChange} />;
     case "dates": return <textarea rows={5} style={{ width: "100%" }} value={((value || []) as string[]).join("\n")} placeholder="2027-01-02"
       onChange={(e) => onChange(e.target.value.split(/\s+/).map((x) => x.trim()).filter(Boolean))} />;
     default: return <div><textarea rows={8} style={{ width: "100%", fontFamily: "monospace", fontSize: 12, borderColor: bad ? "var(--bad)" : undefined }} value={raw}
@@ -187,7 +154,7 @@ export default function SettingsPage({ me }: { me: Me }) {
         <h1>Настройки: ставки и нормативы</h1>
         <input placeholder="поиск настройки" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} />
       </div>
-      <p className="muted">Значения применяются к новым расчётам; каждое изменение сохраняется в истории с комментарием. ФД меняет пороги, сценарии и стоимость денег; КД — внешнюю комиссию, комиссию менеджера и поля для логиста; остальное — ГД или администратор. Ваши роли: {me.roles.map((r) => r.title).join(", ")}.</p>
+      <p className="muted">Значения применяются к новым расчётам; каждое изменение сохраняется в истории с комментарием. ФД меняет пороги, сценарии и стоимость денег; КД — внешнюю комиссию и комиссию менеджера; остальное — ГД или администратор. Ваши роли: {me.roles.map((r) => r.title).join(", ")}.</p>
       {msg && <div className="alert info">{msg}</div>}
       {meta.groups.map((g) => {
         const items = Object.values(meta.items).filter((m) => m.group === g && match(m));

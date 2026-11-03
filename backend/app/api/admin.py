@@ -24,8 +24,8 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 ADMIN = require_roles(Role.ADMIN, Role.GD)
 FD_ADMIN = require_roles(Role.ADMIN, Role.FD, Role.GD)
 SETTINGS_READ = require_roles(Role.ADMIN, Role.FD, Role.GD, Role.CD)
-# ключи, которые меняет КД (и ГД): комиссии внешняя и менеджера, поля для логиста
-CD_KEYS = {"external_commission_pct", "manager_commission_pct", "logistics_l_codes"}
+# ключи, которые меняет КД (и ГД): комиссии внешняя и менеджера
+CD_KEYS = {"external_commission_pct", "manager_commission_pct"}
 
 # ключи, которые может менять ФД (ставки стоимости денег, порог маржи, ΔK/Δt, лимиты)
 FD_KEYS = {"margin_threshold_pct", "scenario_dk", "scenario_dt", "use_historical_volatility", "vol_multipliers", "fx_weights",
@@ -66,8 +66,6 @@ def set_setting(key: str, body: SettingIn, db: Session = Depends(get_db), user: 
         raise HTTPException(403, "Этот параметр меняет " + ("КД или ГД" if key in CD_KEYS else "ФД, ГД или администратор" if key in FD_KEYS else "ГД или администратор"))
     if key == "fx_expert_points":
         body.value = settings_service.expert_points(body.value)
-    if key == "logistics_l_codes" and body.value is not None:
-        body.value = sorted({str(c).strip() for c in (body.value or []) if str(c).strip()})
     if key in ("gd_deal_limit_rub", "overhead_scale") and not user.has(Role.GD, Role.ADMIN):
         raise HTTPException(403, "Лимит и шкалу накладных утверждает ГД")
     before = settings_service.get(db, key)
@@ -139,7 +137,7 @@ async def hs_upload(file: UploadFile = File(...), valid_from: date = date.today(
         for old in db.scalars(select(HsCode).where(HsCode.code == row["code"], HsCode.valid_to.is_(None))).all():
             old.valid_to = valid_from
         db.add(HsCode(code=row["code"], description=row["description"], duty_pct=float(row.get("duty_pct") or 0),
-                      vat_pct=float(row.get("vat_pct") or 20), util_fee=row.get("util_fee", "").lower() in ("1", "да", "true"),
+                      vat_pct=float(row.get("vat_pct") or 22), util_fee=row.get("util_fee", "").lower() in ("1", "да", "true"),
                       licence_required=row.get("licence", "").lower() in ("1", "да", "true"),
                       certification=[c.strip() for c in (row.get("certification") or "").split(",") if c.strip()],
                       valid_from=valid_from, version_file=file.filename or ""))

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
 import type { Deal, Me } from "../types";
-import Questionnaire from "../components/Questionnaire";
+import TechParamsView from "../components/TechParamsView";
 import SpecTable from "../components/SpecTable";
 import { UndoButton, useUndoHistory } from "../undo";
 
@@ -24,7 +24,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const [forms, setForms] = useState<Record<string, PosForm>>(() => Object.fromEntries(positions.map((p) => {
     const l = (p.logistics || {}) as Partial<PosForm>;
     return [p.id, { domestic_logistics: (l.domestic_logistics as Money) || { amount: 0, currency: "CNY" }, export_formalities: (l.export_formalities as Money) || { amount: 0, currency: "CNY" },
-      hs_code: l.hs_code || "", duty_pct: l.duty_pct != null ? String(l.duty_pct) : "", vat_pct: l.vat_pct != null ? String(l.vat_pct) : "20", hs_manual_comment: "",
+      hs_code: l.hs_code || "", duty_pct: l.duty_pct != null ? String(l.duty_pct) : "", vat_pct: l.vat_pct != null ? String(l.vat_pct) : "22", hs_manual_comment: "",
       util_fee_rub: l.util_fee_rub || 0, certification_rub: l.certification_rub || 0, volume_m3: l.volume_m3 != null ? String(l.volume_m3) : "", comments: (l.comments as Record<string, string>) || {},
       util_applies: l.util_applies ?? null, util_base_rate_rub: l.util_base_rate_rub != null ? String(l.util_base_rate_rub) : "", util_coefficient: l.util_coefficient != null ? String(l.util_coefficient) : "" }];
   })));
@@ -111,7 +111,6 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
       {positions.map((p) => {
         const f = forms[p.id];
         if (!f) return null;
-        const lp = p.logistics_params || {};
         // проверка по истории (сохраняется при записи позиции): среднее и отклонение — рядом со статьёй
         const checks = ((p.logistics || {}) as { checks?: Record<string, { history_avg?: number; deviation_pct?: number; needs_comment?: boolean; n?: number }> }).checks || {};
         const ci = (k: string, ph = "комментарий") => <input placeholder={ph} disabled={!canEdit} value={f.comments[k] || ""} onChange={(e) => upd(p.id, { comments: { ...f.comments, [k]: e.target.value } })} />;
@@ -121,9 +120,9 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
           return <span className={c.needs_comment ? "badge warn" : "muted"} style={{ fontSize: 12 }}>ср. {fmtRub(c.history_avg)}{c.deviation_pct != null ? `, ${c.deviation_pct > 0 ? "+" : ""}${c.deviation_pct} %` : ""}</span>; };
         return (
           <div className="card" key={p.id}>
-            <h2 style={{ marginTop: 0 }}>{p.machine_type} {designation(p)} × {p.qty} <span className="muted">· данных для логиста (L): {Object.keys(lp).length}</span></h2>
-            <details style={{ marginBottom: 10 }} open={Object.keys(lp).length > 0}><summary className="muted" style={{ cursor: "pointer" }}>Технические данные из опросника (метка L)</summary>
-              <div style={{ marginTop: 6 }}><Questionnaire position={p} onlyL /></div></details>
+            <h2 style={{ marginTop: 0 }}>{p.machine_type} {designation(p)} × {p.qty} <span className="muted">· технических характеристик заполнено: {(p.tech_param_rows || []).filter((r) => r.value_ru || r.value_zh).length}</span></h2>
+            <details style={{ marginBottom: 10 }} open><summary className="muted" style={{ cursor: "pointer" }}>Технические характеристики позиции</summary>
+              <div style={{ marginTop: 6 }}><TechParamsView rows={p.tech_param_rows || []} /></div></details>
             <SpecTable refTitle="По истории / справочник" nameTitle="Статья" sections={[
               { title: "Китай: до границы", rows: [
                 { key: "dl", name: "Внутрикитайская логистика завод → граница", unit: "CNY", ref: hist("domestic_logistics"), filled: f.domestic_logistics.amount > 0, required: true,

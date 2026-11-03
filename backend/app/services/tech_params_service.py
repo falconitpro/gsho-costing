@@ -248,10 +248,8 @@ def rows_from_rfq(db: Session, pos: Position, parsed, user_id: Optional[str]) ->
 
 
 def l_codes(db: Session) -> Optional[set]:
-    """Коды полей для логиста (метка L) из настроек; None — как в шаблоне RFQ."""
-    from . import settings_service
-    v = settings_service.get(db, "logistics_l_codes")
-    return set(v) if isinstance(v, list) else None
+    """Коды полей с меткой L: как в шаблоне RFQ (логист видит всю таблицу технических характеристик, отдельная настройка не нужна)."""
+    return None
 
 
 def _field_value(code: str, text: str):

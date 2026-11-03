@@ -1,11 +1,12 @@
 import { Fragment, useState, type ReactNode } from "react";
 
-export type SpecRow = { key: string; name: ReactNode; unit?: ReactNode; ref?: ReactNode; value: ReactNode; comment?: ReactNode; filled: boolean; required?: boolean };
+export type SpecRow = { key: string; no?: string | number; name: ReactNode; unit?: ReactNode; ref?: ReactNode; value: ReactNode; comment?: ReactNode; filled: boolean; required?: boolean };
 export type SpecSection = { title: string; rows: SpecRow[] };
 
 /** Таблица в том же виде, что таблица технических характеристик: разделы со сворачиванием и счётчиком,
  *  № / Параметр / Ед. / справка / Значение / Комментарий; незаполненные строки — жёлтым, обязательные — красным. */
-export default function SpecTable({ sections, refTitle = "Справка", nameTitle = "Параметр" }: { sections: SpecSection[]; refTitle?: string; nameTitle?: string }) {
+export default function SpecTable({ sections, refTitle = "Справка", nameTitle = "Параметр", numbered = true, legend = true }:
+  { sections: SpecSection[]; refTitle?: string; nameTitle?: string; numbered?: boolean; legend?: boolean }) {
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   return (
     <div style={{ overflowX: "auto" }}>
@@ -19,14 +20,14 @@ export default function SpecTable({ sections, refTitle = "Справка", nameT
             return (
               <Fragment key={s.title}>
                 <tr style={{ background: "#f1f1f1", cursor: "pointer" }} onClick={() => setClosed({ ...closed, [s.title]: !isClosed })}>
-                  <td colSpan={6} style={{ fontWeight: 700, padding: "6px 8px" }}>{isClosed ? "▸" : "▾"} {si + 1}. {s.title}
+                  <td colSpan={6} style={{ fontWeight: 700, padding: "6px 8px" }}>{isClosed ? "▸" : "▾"} {numbered ? `${si + 1}. ` : ""}{s.title}
                     <span className="muted" style={{ fontWeight: 400 }}> · заполнено {filled} из {s.rows.length}</span></td>
                 </tr>
                 {!isClosed && s.rows.map((r) => {
                   const bg = !r.filled && r.required ? "#fde7e7" : !r.filled ? "#fff6d6" : undefined;
                   return (
                     <tr key={r.key} style={{ background: bg }}>
-                      <td className="muted">{si + 1}.{s.rows.indexOf(r) + 1}</td>
+                      <td className="muted">{r.no ?? `${si + 1}.${s.rows.indexOf(r) + 1}`}</td>
                       <td>{r.name}</td>
                       <td className="muted">{r.unit}</td>
                       <td style={{ fontSize: 12 }}>{r.ref}</td>
@@ -38,7 +39,7 @@ export default function SpecTable({ sections, refTitle = "Справка", nameT
           })}
         </tbody>
       </table>
-      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Цвета: жёлтый — не заполнено, красный — обязательное поле без значения. Разделы сворачиваются щелчком по заголовку.</div>
+      {legend && <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Цвета: жёлтый — не заполнено, красный — обязательное поле без значения. Разделы сворачиваются щелчком по заголовку.</div>}
     </div>
   );
 }

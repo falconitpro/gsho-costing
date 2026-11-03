@@ -60,7 +60,7 @@ def defaults(deal_id: str, pos_id: str, db: Session = Depends(get_db), user: Cur
 
 def _warranty(pos: Position, s: dict) -> dict:
     wr = s.get("warranty_reserve_pct_by_type") or {}
-    by_type = wr.get(pos.machine_type, wr.get("default", 2.5))
+    by_type = wr.get(pos.machine_type, wr.get("default", 1.5))
     pct = pos.warranty_reserve_pct if pos.warranty_reserve_pct is not None else by_type
     base = (pos.unit_price or 0) * (pos.qty or 1) + (pos.options_price or 0)
     return {"pct": pct, "by_type_pct": by_type, "overridden": pos.warranty_reserve_pct is not None,

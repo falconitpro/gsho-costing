@@ -379,7 +379,7 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion) -> str:
             model_factory="; ".join(_kp_model(p, company, db, factories) + ("" if company else f" / {factories[p.factory_id].name if p.factory_id in factories else ''}") for p in poss),
             qty=qty, configuration=("; ".join(o.get("name", "") for p in poss for o in (p.options or [])) or "базовая") + (f"; доукомплектование в РФ: {', '.join(local_opts)}" if local_opts else ""),
             basis=poss[0].basis if poss else "", delivery_days=base["delivery_days"], delivery_term_text="; ".join(terms) if terms else f"{base['delivery_days']} дн.",
-            unit_price_rub=v.price_rub / max(qty, 1), total_rub=v.price_rub, vat_pct=20.0,
+            unit_price_rub=v.price_rub / max(qty, 1), total_rub=v.price_rub, vat_pct=22.0,
             payment_terms="; ".join(_pay_text(l) for l in pay),
             warranty="; ".join(f"{p.warranty_months or '—'} мес. / {p.warranty_hours or '—'} м·ч" for p in poss),
             service_line=("включено в цену" if v.service_in_kp else None) if deal.service_flag else None,

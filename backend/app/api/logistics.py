@@ -161,7 +161,7 @@ def update_position_logistics(deal_id: str, pos_id: str, body: PositionLogistics
         data["vat_pct"] = body.vat_pct if body.vat_pct is not None else ref["vat_pct"]
     else:
         data["duty_pct"] = body.duty_pct or 0.0
-        data["vat_pct"] = body.vat_pct if body.vat_pct is not None else 20.0
+        data["vat_pct"] = body.vat_pct if body.vat_pct is not None else 22.0
     data["hs_check"] = chk
     # утилизационный сбор: начисляется → базовая ставка × коэффициент; не начисляется → 0
     applies = body.util_applies if body.util_applies is not None else bool(body.util_fee_rub or (ref and ref.get("util_fee")))
