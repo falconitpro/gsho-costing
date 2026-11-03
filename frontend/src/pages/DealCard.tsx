@@ -82,6 +82,19 @@ export default function DealCard({ me }: { me: Me }) {
     try { await api.post(`/api/deals/${deal!.id}/send-to-calc`); setErr(""); load(); }
     catch (e) { const d = (e as ApiError).detail as { errors?: string[] }; setErr(d?.errors ? d.errors.join(" ") : (e as Error).message); }
   }
+  async function removeOrArchive() {
+    const draft = deal!.status === "draft";
+    const reason = prompt(draft ? `Удалить черновик ${deal!.number}? Сделка пропадёт из списков и задач. Укажите причину:` : `Перенести сделку ${deal!.number} в архив? Её можно будет открыть и вернуть из архива. Укажите причину:`);
+    if (reason === null) return;
+    if (!reason.trim()) { setErr("Укажите причину"); return; }
+    try {
+      await api.post(`/api/deals/${deal!.id}/delete`, { reason });
+      if (draft) nav("/deals"); else { setErr("Сделка перенесена в архив"); load(); }
+    } catch (e) { setErr((e as Error).message); }
+  }
+  async function unarchive() {
+    try { await api.post(`/api/deals/${deal!.id}/unarchive`); setErr("Сделка возвращена из архива"); load(); } catch (e) { setErr((e as Error).message); }
+  }
   async function duplicate() {
     const comment = prompt("Дублировать заявку (новая заявка того же клиента: требования, технические характеристики, изображения, расчёты логиста и сервиса с пометкой «проверить»). Комментарий:") ?? null;
     if (comment === null) return;
@@ -109,9 +122,17 @@ export default function DealCard({ me }: { me: Me }) {
             <button className="btn ghost" title="если КП отправили вручную из своей почты" onClick={() => api.post(`/api/deals/${deal.id}/kp-sent`, { recipients: ["client"], sent_via: "outlook" }).then(load)}>Отметить: КП отправлено вручную</button>
           )}
           {(isOwner || has("cd")) && <button className="btn ghost" onClick={duplicate} title="Задача 9: новая заявка по тому же запросу клиента">Дублировать заявку</button>}
+          {has("cd", "gd") && !deal.archived_at && (has("gd") || !["contract", "execution", "closed"].includes(deal.status)) && (
+            <button className="btn secondary" onClick={removeOrArchive} title={deal.status === "draft" ? "удалить черновик сделки (КД, ЗГД)" : "удалить можно только черновик — сделка в другом статусе переносится в архив"}>
+              {deal.status === "draft" ? "Удалить сделку" : "В архив"}</button>)}
         </div>
       </div>
-      {err && <div className={"alert " + (err.startsWith("Сделка выиграна") || err.startsWith("Результат") || err.startsWith("Сделка возвращена") ? "info" : "error")}>{err}</div>}
+      {deal.archived_at && (
+        <div className="alert warn row" style={{ justifyContent: "space-between" }}>
+          <span>Сделка в архиве с {fmtDate(deal.archived_at)}{deal.archive_reason ? `: ${deal.archive_reason}` : ""}</span>
+          {has("cd", "gd") && <button className="btn ghost" onClick={unarchive}>Вернуть из архива</button>}
+        </div>)}
+      {err && <div className={"alert " + (err.startsWith("Сделка выиграна") || err.startsWith("Результат") || err.startsWith("Сделка возвращена") || err.startsWith("Сделка перенесена") ? "info" : "error")}>{err}</div>}
       <OutcomePanel deal={deal} me={me} onDone={(m) => { setErr(m); load(); if (m.startsWith("Сделка выиграна")) setTab("execution"); }} />
       <div style={{ margin: "6px 0" }}><KpActions dealId={deal.id} status={deal.status} canAct={isOwner || has("cd", "gd", "admin")} onDone={() => { load(); }} /></div>
       {["approved", "kp_sent"].includes(deal.status) && <KpRevisions dealId={deal.id} status={deal.status} onDone={() => { load(); }} />}

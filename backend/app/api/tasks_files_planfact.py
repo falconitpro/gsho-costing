@@ -45,7 +45,7 @@ def my_tasks(db: Session = Depends(get_db), user: CurrentUser = Depends(get_curr
 def board(db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.CD, Role.FD, Role.GD, Role.OBSERVER))):
     """Доска сделок для руководства: по статусам, с просрочками."""
     today = date.today()
-    deals = [d for d in db.scalars(select(Deal).order_by(Deal.updated_at.desc())).all() if can_see_deal(user, d)]
+    deals = [d for d in db.scalars(select(Deal).where(Deal.archived_at.is_(None)).order_by(Deal.updated_at.desc())).all() if can_see_deal(user, d)]
     tasks = db.scalars(select(Task).where(Task.done_at.is_(None))).all()
     by_deal: dict[str, list] = {}
     for t in tasks:

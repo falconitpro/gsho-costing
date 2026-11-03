@@ -885,3 +885,31 @@ def test_gd_adds_employee_and_access(client):
     _ok(client.patch(f"/api/admin/users/{u['id']}", headers=H(GD), json={"is_active": False}))
     assert not any(x["id"] == u["id"] for x in _ok(client.get("/api/team", headers=H(GD)))["users"])
     assert any(x["id"] == u["id"] and not x["is_active"] for x in _ok(client.get("/api/team?include_inactive=true", headers=H(GD)))["users"])
+
+
+def test_delete_draft_and_archive_others(client):
+    """КД и ЗГД: черновик удаляется, сделка в другом статусе переносится в архив и возвращается; менеджер не может."""
+    from app.db import SessionLocal
+    from app.models import Deal
+    from app.core.workflow import DealStatus
+    with SessionLocal() as db:
+        draft = db.query(Deal).filter(Deal.status == DealStatus.DRAFT, Deal.deleted_at.is_(None)).first()
+        other = db.query(Deal).filter(Deal.status != DealStatus.DRAFT, Deal.status.notin_([DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED]),
+                                      Deal.deleted_at.is_(None), Deal.archived_at.is_(None)).first()
+        if draft is None or other is None:
+            pytest.skip("нет подходящих сделок")
+        did, oid = draft.id, other.id
+    assert client.post(f"/api/deals/{did}/delete", headers=H(MGR), json={"reason": "x"}).status_code == 403
+    assert client.post(f"/api/deals/{did}/delete", headers=H(CD), json={"reason": ""}).status_code == 422
+    r = _ok(client.post(f"/api/deals/{did}/delete", headers=H(CD), json={"reason": "ошибочно заведена"}))
+    assert r["deleted"] and not r["archived"]
+    assert client.get(f"/api/deals/{did}", headers=H(GD)).status_code == 404
+    assert not any(d["id"] == did for d in _ok(client.get("/api/deals", headers=H(GD))))
+    r = _ok(client.post(f"/api/deals/{oid}/delete", headers=H(GD), json={"reason": "закупка перенесена"}))
+    assert r["archived"] and not r["deleted"]
+    assert not any(d["id"] == oid for d in _ok(client.get("/api/deals", headers=H(GD))))
+    assert any(d["id"] == oid for d in _ok(client.get("/api/deals?archived=true", headers=H(GD))))
+    assert _ok(client.get(f"/api/deals/{oid}", headers=H(GD)))["archived_at"]
+    assert client.post(f"/api/deals/{oid}/unarchive", headers=H(MGR)).status_code == 403
+    _ok(client.post(f"/api/deals/{oid}/unarchive", headers=H(CD)))
+    assert any(d["id"] == oid for d in _ok(client.get("/api/deals", headers=H(GD))))

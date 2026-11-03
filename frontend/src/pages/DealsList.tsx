@@ -6,6 +6,19 @@ import { STATUS_TITLES, type Deal, type Me } from "../types";
 
 type Row = Deal & { group?: string; parent_number?: string; related_count?: number };
 
+type SortKey = "number" | "date" | "client" | "site" | "status" | "kp_due" | "priority" | "version";
+const PRIO_ORDER: Record<string, number> = { low: 0, normal: 1, medium: 1, high: 2, urgent: 3, critical: 3 };
+const dealDate = (d: Row) => (d.requested_at || d.created_at || "") as string;
+const sortVal = (d: Row, k: SortKey): string | number => {
+  switch (k) {
+    case "number": return d.number; case "date": return dealDate(d); case "client": return d.client_name || "";
+    case "site": return d.site || ""; case "status": return d.status_detail || STATUS_TITLES[d.status] || d.status;
+    case "kp_due": return d.kp_due || ""; case "priority": return PRIO_ORDER[d.priority] ?? 1; case "version": return d.current_version_no || 0;
+  }
+};
+const COLS: [SortKey, string][] = [["number", "Номер"], ["date", "Дата"], ["client", "Клиент"], ["site", "Объект"], ["status", "Статус"],
+  ["kp_due", "Срок КП"], ["priority", "Приоритет"], ["version", "Версия"]];
+
 /** Задача 9: связанные заявки (исходная и её дубли) идут подряд — дубли сразу под исходной, с отступом. */
 function grouped(deals: Row[]): Row[] {
   const byGroup = new Map<string, Row[]>();
@@ -30,10 +43,22 @@ export default function DealsList({ me }: { me: Me }) {
   const nav = useNavigate();
   const isManager = me.roles.some((r) => r.code === "manager" || r.code === "gd");
 
-  useEffect(() => {
-    api.get<Row[]>("/api/deals").then(setDeals);
-    api.get<typeof clients>("/api/refs/clients").then(setClients);
-  }, []);
+  const [archived, setArchived] = useState(false);
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(() => {
+    try { const v = JSON.parse(localStorage.getItem("gsho.dealsSort") || ""); if (v?.key) return v; } catch { /* нет сохранённой сортировки */ }
+    return { key: "date", dir: -1 };
+  });
+  const toggleSort = (key: SortKey) => {
+    const next = { key, dir: (sort.key === key ? -sort.dir : key === "date" || key === "kp_due" || key === "priority" ? -1 : 1) as 1 | -1 };
+    setSort(next); try { localStorage.setItem("gsho.dealsSort", JSON.stringify(next)); } catch { /* хранилище недоступно */ }
+  };
+  const sorted = [...deals].sort((a, b) => {
+    const x = sortVal(a, sort.key), y = sortVal(b, sort.key);
+    const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "ru", { numeric: true });
+    return c * sort.dir || a.number.localeCompare(b.number, "ru", { numeric: true }) * -1;
+  });
+  useEffect(() => { api.get<Row[]>(`/api/deals${archived ? "?archived=true" : ""}`).then(setDeals); }, [archived]);
+  useEffect(() => { api.get<typeof clients>("/api/refs/clients").then(setClients); }, []);
 
   const [docs, setDocs] = useState<{ file: File; category: string }[]>([]);   // файлы от клиента — хранятся в сделке
   async function create() {
@@ -48,6 +73,10 @@ export default function DealsList({ me }: { me: Me }) {
     <>
       <div className="page-head">
         <h1>Сделки</h1>
+        <div className="tabs" style={{ margin: 0 }}>
+          <button className={!archived ? "active" : ""} onClick={() => setArchived(false)}>В работе</button>
+          <button className={archived ? "active" : ""} onClick={() => setArchived(true)}>Архив</button>
+        </div>
         {isManager && <div className="push"><button className="btn add" onClick={() => setShowNew(!showNew)}>Новая сделка</button></div>}
       </div>
       {showNew && (
@@ -91,18 +120,20 @@ export default function DealsList({ me }: { me: Me }) {
       )}
       <div className="card">
         <table>
-          <thead><tr><th>Номер</th><th>Клиент</th><th>Объект</th><th>Статус</th><th>Срок КП</th><th>Приоритет</th><th>Версия</th></tr></thead>
+          <thead><tr>{COLS.map(([k, t]) => (
+            <th key={k} onClick={() => toggleSort(k)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }} title="сортировать по столбцу">
+              {t} <span style={{ opacity: sort.key === k ? 1 : 0.35 }}>{sort.key === k ? (sort.dir === 1 ? "▲" : "▼") : "↕"}</span></th>))}</tr></thead>
           <tbody>
-            {grouped(deals).map((d) => (
+            {grouped(sorted).map((d) => (
               <tr key={d.id} style={d.parent_number ? { background: "#fafafa" } : undefined}>
                 <td style={d.parent_number ? { paddingLeft: 22 } : undefined}>{d.parent_number && <span className="muted">↳ </span>}<Link to={`/deals/${d.id}`}>{d.number}</Link>
                   {!d.parent_number && (d.related_count || 0) > 0 && <span className="badge" title="связанные заявки по одному запросу клиента" style={{ marginLeft: 6 }}>+{d.related_count} связ.</span>}
-                  {d.parent_number && <div className="muted" style={{ fontSize: 11 }}>дубль {d.parent_number}</div>}</td><td>{d.client_name}</td><td>{d.site}</td>
+                  {d.parent_number && <div className="muted" style={{ fontSize: 11 }}>дубль {d.parent_number}</div>}</td><td style={{ whiteSpace: "nowrap" }}>{fmtDate(dealDate(d))}</td><td>{d.client_name}</td><td>{d.site}</td>
                 <td><span className="badge accent">{d.status_detail || STATUS_TITLES[d.status] || d.status}</span></td>
                 <td>{fmtDate(d.kp_due)}</td><td>{lbl(PRIORITY, d.priority)}</td><td>{d.current_version_no}</td>
               </tr>
             ))}
-            {deals.length === 0 && <tr><td colSpan={7} className="muted">Сделок нет</td></tr>}
+            {deals.length === 0 && <tr><td colSpan={8} className="muted">{archived ? "В архиве сделок нет" : "Сделок нет"}</td></tr>}
           </tbody>
         </table>
       </div>

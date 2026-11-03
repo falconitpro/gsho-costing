@@ -397,6 +397,12 @@ class Deal(TimestampMixin, Base):
     contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
     factory_contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
     contract_steps: Mapped[dict] = mapped_column(JSONType, default=dict)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)   # удалена КД/ЗГД (в корзине, можно восстановить)
+    deleted_by: Mapped[Optional[str]] = mapped_column(String(36))
+    delete_reason: Mapped[str] = mapped_column(Text, default="")
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)   # не черновик — переносится в архив, а не удаляется
+    archived_by: Mapped[Optional[str]] = mapped_column(String(36))
+    archive_reason: Mapped[str] = mapped_column(Text, default="")
     legal_review: Mapped[dict] = mapped_column(JSONType, default=dict)   # проверка юриста: {status: in_review|ok|remarks, comment, by, at}   # подэтапы заключения контракта: код → {done, on, by, comment}
     execution_closed_at: Mapped[Optional[date]] = mapped_column(Date)
     contract_terms_changed: Mapped[bool] = mapped_column(Boolean, default=False)
