@@ -63,6 +63,15 @@ def position_payload(p) -> dict[str, Any]:
     d["tech_param_rows"] = [serialize(r) for r in (p.tech_param_rows or [])]        # задача 4
     d["local_options"] = [serialize(o) for o in (p.local_option_rows or [])]        # задача 6
     d["images"] = [serialize(i) for i in (p.image_rows or [])]                      # задача 10
+    # код ТН ВЭД из карточки оборудования каталога — подсказка логисту, пока в позиции код не введён
+    if not (p.logistics or {}).get("hs_code"):
+        from sqlalchemy import select
+        from sqlalchemy.orm import object_session
+        from ..models import EquipmentModel
+        db = object_session(p)
+        m = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == p.factory_id, EquipmentModel.model == p.model)) if db else None
+        if m is not None and m.default_hs_code:
+            d["catalog_hs"] = {**(m.hs_info or {}), "code": m.default_hs_code}
     return d
 
 

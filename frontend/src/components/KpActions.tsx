@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "../api";
 
 type Rcpt = { name: string; position: string; email: string };
@@ -14,7 +14,9 @@ export default function KpActions({ dealId, status, canAct, onDone }: { dealId: 
   const [format, setFormat] = useState("pdf");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [mailOn, setMailOn] = useState(false);
   const ready = ["approved", "kp_sent", "contract", "execution"].includes(status);
+  useEffect(() => { if (ready) api.get<{ mail_configured: boolean }>(`/api/deals/${dealId}/kp/recipients`).then((r) => setMailOn(r.mail_configured)).catch(() => undefined); }, [dealId, ready]);
   if (!ready) return null;
 
   async function build() {
@@ -43,7 +45,8 @@ export default function KpActions({ dealId, status, canAct, onDone }: { dealId: 
         {canAct && <button className="btn secondary" disabled={busy} onClick={build} title="пересобрать файл КП по утверждённой версии расчёта">Сформировать КП</button>}
         <a className="btn ghost" href={`/api/deals/${dealId}/kp/file?format=docx`}>Выгрузить КП: Word</a>
         <a className="btn ghost" href={`/api/deals/${dealId}/kp/file?format=pdf`}>PDF</a>
-        {canAct && status === "approved" && <button className="btn" disabled={busy} onClick={openSend}>Отправить клиенту</button>}
+        {canAct && status === "approved" && mailOn && <button className="btn" disabled={busy} onClick={openSend}>Отправить клиенту</button>}
+        {canAct && status === "approved" && !mailOn && <span className="muted" style={{ fontSize: 12 }}>выгрузите КП, отправьте из своей почты и нажмите «Отметить: КП отправлено вручную»</span>}
       </div>
       {msg && <div className="alert info" style={{ marginTop: 6 }}>{msg}</div>}
       {open && (

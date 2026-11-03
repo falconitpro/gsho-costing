@@ -536,7 +536,7 @@ def kp_recipients(deal_id: str, db: Session = Depends(get_db), user: CurrentUser
     for c in (deal.client.contacts if deal.client else []) or []:
         if c.get("email"):
             out.append({"name": c.get("name") or "", "position": c.get("position") or "", "email": c["email"], "phone": c.get("phone") or ""})
-    return {"recipients": out, "subject": f"Коммерческое предложение {deal.number}" + (f" — {deal.site}" if deal.site else ""),
+    return {"recipients": out, "mail_configured": _mail_provider() != "console", "subject": f"Коммерческое предложение {deal.number}" + (f" — {deal.site}" if deal.site else ""),
             "body": "Добрый день!\n\nНаправляем коммерческое предложение во вложении. Будем рады ответить на вопросы.\n\nС уважением,"}
 
 
@@ -558,6 +558,8 @@ def kp_send(deal_id: str, body: KpSendIn, db: Session = Depends(get_db), user: C
     deal = get_deal_or_404(db, deal_id, user)
     _kp_access(deal, user)
     ver = _approved_version(db, deal)
+    if _mail_provider() == "console":
+        raise HTTPException(409, "Почта не подключена — выгрузите КП и отправьте из своей почты, затем отметьте «КП отправлено вручную»")
     if deal.status != DealStatus.APPROVED:
         raise HTTPException(409, "КП уже отправлено — повторная отправка без смены статуса: выгрузите файл и отправьте вручную")
     to = [a.strip() for a in body.to + body.cc if a and a.strip()]

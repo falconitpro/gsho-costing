@@ -92,6 +92,12 @@ def test_full_flow(client, tmp_path):
         "domestic_logistics": {"amount": 48000, "currency": "CNY"}, "export_formalities": {"amount": 6000, "currency": "CNY"},
         "hs_code": "8704101090", "util_fee_rub": 1200000, "certification_rub": 850000}))
     assert lg["logistics"]["duty_pct"] == 5.0 and lg["logistics"]["vat_pct"] == 22.0   # ставки из справочника
+    # код ТН ВЭД вводит логист — он сохраняется и в карточке оборудования каталога (подсказка в следующих сделках)
+    from app.db import SessionLocal as _S
+    from app.models import EquipmentModel as _EM
+    with _S() as _db:
+        _m = _db.query(_EM).filter(_EM.model == "XDR80T").first()
+        assert _m is not None and _m.default_hs_code and _m.hs_info.get("code") == _m.default_hs_code
     # ручная ставка без комментария отклоняется
     r = client.put(f"/api/deals/{did}/logistics/positions/{pos['id']}", headers=H(LOG), json={"hs_code": "8704101090", "duty_pct": 2.0})
     assert r.status_code == 422
@@ -150,9 +156,10 @@ def test_full_flow(client, tmp_path):
     assert kf.status_code == 200 and kf.content[:2] == b"PK"
     rc = _ok(client.get(f"/api/deals/{did}/kp/recipients", headers=H(MGR)))
     assert rc["recipients"][0]["email"] == "mech@rudnik.example"
-    assert client.post(f"/api/deals/{did}/kp/send", headers=H(MGR), json={"to": ["не-адрес"], "format": "docx"}).status_code == 422
-    sent = _ok(client.post(f"/api/deals/{did}/kp/send", headers=H(MGR), json={"to": ["mech@rudnik.example"], "subject": rc["subject"], "body": rc["body"], "format": "docx"}))
-    assert sent["status"] == "kp_sent" and sent["sent_to"] == ["mech@rudnik.example"]
+    # почта не подключена — отправка из системы недоступна, КП отправляют вручную и отмечают
+    assert rc["mail_configured"] is False
+    assert client.post(f"/api/deals/{did}/kp/send", headers=H(MGR), json={"to": ["mech@rudnik.example"], "format": "docx"}).status_code == 409
+    assert _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": ["mech@rudnik.example"]}))["status"] == "kp_sent"
     card_cd = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(CD)))
     assert card_cd["kp_history"] and card_cd["kp_history"][0]["deal_number"] == deal["number"] and card_cd["kp_history"][0]["versions"]
     card_mgr = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(MGR)))

@@ -171,6 +171,7 @@ class EquipmentModel(TimestampMixin, Base):
     tech_params: Mapped[dict] = mapped_column(JSONType, default=dict)        # разделы RFQ 1–11 по кодам
     logistics_params: Mapped[dict] = mapped_column(JSONType, default=dict)   # поля с меткой L
     default_hs_code: Mapped[Optional[str]] = mapped_column(String(10))
+    hs_info: Mapped[dict] = mapped_column(JSONType, default=dict)            # код ТН ВЭД, введённый логистом: {code, description, duty_pct, vat_pct, util_applies}
     maintenance_regulations: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     default_hours_per_month: Mapped[Optional[float]] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(16), default="approved")      # approved | pending | archived
