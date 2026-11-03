@@ -71,7 +71,7 @@ export default function FactoriesPage({ me }: { me: Me }) {
 
   return (
     <>
-      <div className="row" style={{ justifyContent: "space-between" }}>
+      <div className="page-head">
         <h1>Заводы</h1>
         {editor && <button className="btn add" onClick={() => { setCur({ ...EMPTY, contacts: [{ ...EMPTY_CONTACT, roles: ["rfq"], primary: true }] }); setPrices([]); setMsg(""); }}>Добавить завод</button>}
       </div>
@@ -115,7 +115,7 @@ export default function FactoriesPage({ me }: { me: Me }) {
               <div className="card">
                 <div className="row" style={{ justifyContent: "space-between" }}>
                   <h2 style={{ margin: 0 }}>Контакты по направлениям</h2>
-                  {contactEditor && <button className="btn ghost" onClick={() => set({ contacts: [...cur.contacts, { ...EMPTY_CONTACT }] })}>+ контакт</button>}
+                  {contactEditor && <button className="btn add" onClick={() => set({ contacts: [...cur.contacts, { ...EMPTY_CONTACT }] })}>Контакт</button>}
                 </div>
                 <p className="muted" style={{ marginTop: 4 }}>Отметьте, по каким вопросам писать человеку. Запрос заводу уходит контактам «Заявки и КП»: в WeCom (ID внешнего контакта) и на почту.</p>
                 {cur.contacts.length === 0 && <div className="muted">Контактов нет</div>}

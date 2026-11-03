@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import FloatingScrollbar from "./components/FloatingScrollbar";
 import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { api, getDevUser, setDevUser } from "./api";
 import type { Me } from "./types";
@@ -74,6 +75,7 @@ export default function App() {
         {me && <span className="me muted" title={me.roles.map((r) => r.title).join(", ")}>{me.display_name}<small>{me.roles.map((r) => r.title).join(", ")}</small></span>}
         {!me && devUsers.length === 0 && <a className="btn" href="/api/auth/login">Войти через Microsoft 365</a>}
       </header>
+      <FloatingScrollbar />
       <main>
         {!me && err && <div className="alert info">{devUsers.length ? "Выберите пользователя в шапке (dev-режим)." : "Требуется вход."}</div>}
         {me && (

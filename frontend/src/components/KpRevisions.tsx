@@ -88,7 +88,7 @@ export default function KpRevisions({ dealId, status, onDone }: { dealId: string
                     <td><select value={a.mode} onChange={(e) => upd(v.id, { adjustments: c.adjustments.map((x, j) => (j === i ? { ...x, mode: e.target.value as Adj["mode"] } : x)) })}><option value="pct">%</option><option value="amount">RUB</option></select></td>
                     <td><input placeholder="подпись в КП (необязательно)" value={a.label} onChange={(e) => upd(v.id, { adjustments: c.adjustments.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} /></td>
                     <td><button className="btn ghost" onClick={() => upd(v.id, { adjustments: c.adjustments.filter((_, j) => j !== i) })}>×</button></td></tr>))}</tbody></table>
-                <button className="btn ghost" onClick={() => upd(v.id, { adjustments: [...c.adjustments, { kind: "discount", mode: "pct", value: "", label: "" }] })}>+ скидка / надбавка</button>
+                <button className="btn add" onClick={() => upd(v.id, { adjustments: [...c.adjustments, { kind: "discount", mode: "pct", value: "", label: "" }] })}>Скидка / надбавка</button>
                 <h3>Дополнительные услуги и позиции</h3>
                 <table><tbody>{c.extras.map((x, i) => (
                   <tr key={i}>
@@ -96,7 +96,7 @@ export default function KpRevisions({ dealId, status, onDone }: { dealId: string
                     <td><input inputMode="decimal" placeholder="цена, RUB" value={x.price_rub} disabled={x.included} style={{ width: 130 }} onChange={(e) => upd(v.id, { extras: c.extras.map((y, j) => (j === i ? { ...y, price_rub: e.target.value } : y)) })} /></td>
                     <td><label className="row"><input type="checkbox" checked={x.included} onChange={(e) => upd(v.id, { extras: c.extras.map((y, j) => (j === i ? { ...y, included: e.target.checked } : y)) })} /> включено в цену</label></td>
                     <td><button className="btn ghost" onClick={() => upd(v.id, { extras: c.extras.filter((_, j) => j !== i) })}>×</button></td></tr>))}</tbody></table>
-                <button className="btn ghost" onClick={() => upd(v.id, { extras: [...c.extras, { name: "", price_rub: "", included: false }] })}>+ услуга / позиция</button>
+                <button className="btn add" onClick={() => upd(v.id, { extras: [...c.extras, { name: "", price_rub: "", included: false }] })}>Услуга / позиция</button>
                 <h3>Комплектация</h3>
                 <textarea rows={2} style={{ width: "100%" }} value={c.configuration} onChange={(e) => upd(v.id, { configuration: e.target.value })} />
                 {v.service_flag && <label className="row"><input type="checkbox" checked={!!c.service_in_kp} onChange={(e) => upd(v.id, { service_in_kp: e.target.checked })} /> сервис до наработки отдельной строкой в КП</label>}

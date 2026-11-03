@@ -153,9 +153,9 @@ export default function CatalogPage({ me }: { me: Me }) {
         <div className="card">
           <p className="muted">Перечень технических характеристик по типу машины и обязательность параметров (задают КД и ЗГД). Общий шаблон — фиксированные параметры RFQ (разделы 1–11). Менеджер может изменить обязательность в конкретной сделке.</p>
           <div className="row"><select value={tplType} onChange={(e) => setTplType(e.target.value)}><option value="">Общий шаблон</option>{types.map((t) => <option key={t.id} value={t.id}>{t.name}{t.status === "pending" ? " (на подтверждение)" : ""}</option>)}</select>
-            {editor && <button className="btn ghost" onClick={() => { const n = prompt("Новый тип машины:"); if (n) api.post("/api/refs/machine-types", { name: n }).then(() => api.get<typeof types>("/api/refs/machine-types").then(setTypes)); }}>+ тип машины</button>}
+            {editor && <button className="btn add" onClick={() => { const n = prompt("Новый тип машины:"); if (n) api.post("/api/refs/machine-types", { name: n }).then(() => api.get<typeof types>("/api/refs/machine-types").then(setTypes)); }}>Тип машины</button>}
             {editor && <button className="btn" onClick={() => api.put(`/api/refs/tech-param-templates?machine_type_id=${tplType}`, tpl).then(() => setMsg("Шаблон сохранён")).catch((e) => setMsg(e.message))}>Сохранить шаблон</button>}
-            {editor && <button className="btn ghost" onClick={() => setTpl([...tpl, { no: (tpl[tpl.length - 1]?.no || 0) + 1, code: "", name_ru: "", name_zh: "", unit: "", required: false, section: "" }])}>+ строка</button>}</div>
+            {editor && <button className="btn add" onClick={() => setTpl([...tpl, { no: (tpl[tpl.length - 1]?.no || 0) + 1, code: "", name_ru: "", name_zh: "", unit: "", required: false, section: "" }])}>Строка</button>}</div>
           <table style={{ marginTop: 8 }}><thead><tr><th>№</th><th>Код</th><th>Параметр</th><th>参数</th><th>Ед.</th><th>Обязательный</th>{editor && <th />}</tr></thead>
             <tbody>{tpl.map((r, i) => (
               <tr key={r.id || i}><td>{r.no}</td><td>{r.code}</td>
