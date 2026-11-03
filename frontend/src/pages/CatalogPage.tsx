@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub, designation } from "../api";
 import { can, type Me } from "../types";
+import CatalogCard from "../components/CatalogCard";
 import CatalogAdd from "../components/CatalogAdd";
 
 type Tree = { factory_id: string; factory: string; types: { machine_type: string; models: { id: string; model: string; trademark?: string; brand_name: string; status: string; executions: { id: string; name: string; brand_name: string; status: string; params: number; images: number; source_deal_id: string | null }[] }[] }[] }[];
@@ -19,6 +20,7 @@ export default function CatalogPage({ me }: { me: Me }) {
   const [archive, setArchive] = useState<{ models: { id: string; model: string; trademark?: string; brand_name: string }[]; executions: { id: string; name: string; model_id: string }[] }>({ models: [], executions: [] });
   const [tree, setTree] = useState<Tree>([]);
   const [exec, setExec] = useState<Exec | null>(null);
+  const [modelId, setModelId] = useState("");   // карточка машины справа
   const [pending, setPending] = useState<{ id: string; name: string; model: string; source_deal_id: string | null; created_at: string }[]>([]);
   const [gl, setGl] = useState<Gl[]>([]);
   const [glQ, setGlQ] = useState("");
@@ -40,7 +42,7 @@ export default function CatalogPage({ me }: { me: Me }) {
   async function act(fn: () => Promise<unknown>, ok: string) {
     try { await fn(); setMsg(ok); loadTree(); if (tab === "archive") loadArchive(); } catch (e) { setMsg((e as Error).message); }
   }
-  const openExec = (id: string) => api.get<Exec>(`/api/catalog/executions/${id}`).then(setExec);
+  const openExec = (id: string) => api.get<Exec>(`/api/catalog/executions/${id}`).then((x) => { setExec(x); if (x.model?.id) setModelId(x.model.id); });
   async function decide(id: string, approve: boolean) {
     const brand = approve && editor ? prompt("Наименование под брендом компании (можно оставить пустым):", "") ?? "" : "";
     try { await api.post(`/api/catalog/executions/${id}/decision`, { approve, brand_name: brand || null }); setMsg(approve ? "Исполнение занесено в каталог" : "Отклонено"); api.get<typeof pending>("/api/catalog/pending").then(setPending); loadTree(); if (exec?.id === id) openExec(id); }
@@ -68,7 +70,8 @@ export default function CatalogPage({ me }: { me: Me }) {
                   <div key={t.machine_type} style={{ marginLeft: 12 }}><div className="muted">{t.machine_type}</div>
                     {t.models.map((m) => (
                       <div key={m.id} style={{ marginLeft: 12 }}>
-                        <b>{designation(m)}</b>{m.brand_name && <span className="badge accent" style={{ marginLeft: 4 }}>{m.brand_name}</span>}{m.status === "pending" && <span className="badge warn"> на проверке</span>}
+                        <b style={{ cursor: "pointer", color: modelId === m.id ? "var(--accent)" : undefined, textDecoration: "underline dotted" }} title="открыть карточку машины"
+                          onClick={() => { setModelId(m.id); setExec(null); }}>{designation(m)}</b>{m.brand_name && <span className="badge accent" style={{ marginLeft: 4 }}>{m.brand_name}</span>}{m.status === "pending" && <span className="badge warn"> на проверке</span>}
                         {editor && <button className="btn ghost" style={{ padding: "0 6px", marginLeft: 4 }} onClick={() => { const b = prompt("Наименование под брендом компании:", m.brand_name || ""); if (b !== null) api.patch(`/api/catalog/models/${m.id}`, { brand_name: b }).then(loadTree); }}>бренд</button>}
                         {editor && (
                           <div className="row" style={{ fontSize: 12, margin: "2px 0" }}>
@@ -87,8 +90,9 @@ export default function CatalogPage({ me }: { me: Me }) {
               </details>))}
           </div>
           <div>
-            {exec ? (
-              <div className="card">
+            {modelId ? (
+              <>
+                {exec && editor && (exec.status === "pending" || exec.status === "approved") && <div className="card">
                 <div className="row" style={{ justifyContent: "space-between" }}>
                   <h2 style={{ marginTop: 0 }}>{exec.model ? designation(exec.model) : ""} — {exec.name} {exec.brand_name && <span className="badge accent">{exec.brand_name}</span>} <span className={"badge " + (exec.status === "approved" ? "ok" : "warn")}>{exec.status}</span></h2>
                   {editor && exec.status === "pending" && <div className="row"><button className="btn" onClick={() => decide(exec.id, true)}>Подтвердить</button><button className="btn ghost" onClick={() => decide(exec.id, false)}>Отклонить</button></div>}
@@ -101,16 +105,10 @@ export default function CatalogPage({ me }: { me: Me }) {
                     <button className="btn ghost" disabled={!mergeExec} onClick={() => act(() => api.post(`/api/catalog/executions/${exec.id}/merge`, { into_id: mergeExec }).then(() => { setExec(null); setMergeExec(""); }), "Исполнения объединены; дубль в архиве")}>объединить</button>
                     <button className="btn ghost" onClick={() => act(() => api.patch(`/api/catalog/executions/${exec.id}`, { status: "archived" }).then(() => setExec(null)), "Исполнение в архиве")}>в архив</button>
                   </div>)}
-                <table><thead><tr><th>№</th><th>Параметр</th><th>Ед.</th><th>Значение</th><th>Обяз.</th><th>В РФ</th></tr></thead>
-                  <tbody>{exec.tech_params.map((r, i) => <tr key={i}><td>{r.no}</td><td>{r.name_ru}</td><td>{r.unit}</td><td><b>{r.value_ru}</b></td><td>{r.required ? "да" : ""}</td><td>{r.local_ru ? "да" : ""}</td></tr>)}</tbody></table>
-                {exec.factory_prices && <><h2>История цен и сроков завода</h2>
-                  <table><thead><tr><th>Дата</th><th className="num">Цена</th><th>Срок производства</th><th>Источник</th></tr></thead>
-                    <tbody>{exec.factory_prices.map((h, i) => <tr key={i}><td>{fmtDate(h.on)}</td><td className="num">{fmtRub(h.unit_price)} {h.currency}</td><td>{h.production_term?.value ? `${h.production_term.value} ${h.production_term.unit || ""}` : "—"}</td><td>{h.source}</td></tr>)}</tbody></table></>}
-                {exec.client_prices && <><h2>История цен клиентам</h2>
-                  <table><thead><tr><th>Дата</th><th>Сделка</th><th className="num">Цена за ед., RUB</th><th className="num">Кол-во</th><th>Срок</th><th>Результат</th></tr></thead>
-                    <tbody>{exec.client_prices.map((h, i) => <tr key={i}><td>{fmtDate(h.on)}</td><td>{h.deal_number}</td><td className="num">{fmtRub(h.unit_price_rub)}</td><td className="num">{h.qty}</td><td>{h.delivery_term}</td><td>{h.outcome || "—"}</td></tr>)}</tbody></table></>}
-              </div>
-            ) : <div className="card muted">Выберите исполнение слева</div>}
+                </div>}
+                <CatalogCard modelId={modelId} execId={exec?.id} onExec={(id) => openExec(id)} />
+              </>
+            ) : <div className="card muted">Нажмите на машину слева — откроется карточка: технические характеристики, фото и чертежи, опции и регламенты{editor ? ", цены и аналитическая справка" : ""}.</div>}
           </div>
         </div>
       )}

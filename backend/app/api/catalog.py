@@ -32,6 +32,39 @@ def catalog_tree(include_pending: bool = False, db: Session = Depends(get_db), u
     return cs.tree(db, include_pending=include_pending and user.can("catalog", 2))
 
 
+@router.get("/catalog/models/{model_id}/card")
+def model_card(model_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Карточка машины: исполнения с техническими характеристиками, фото и чертежами, опции РФ, регламенты;
+    КД и ЗГД — цены и сроки завода, цены клиентам и аналитическая справка."""
+    m = db.get(EquipmentModel, model_id)
+    if m is None or m.status == "archived":
+        raise HTTPException(404)
+    return cs.model_card(db, m, with_prices=user.has(Role.CD, Role.GD, Role.ADMIN))
+
+
+@router.get("/catalog/images/{attachment_id}")
+def catalog_image(attachment_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Фото и чертежи исполнения каталога: доступны всем, кто видит каталог (не только участникам сделки-источника)."""
+    import os
+    from fastapi.responses import FileResponse, RedirectResponse
+    from ..core.config import get_settings
+    from ..models import Attachment
+    used = any(im.get("attachment_id") == attachment_id for e in db.scalars(select(EquipmentExecution).where(EquipmentExecution.status != "archived")).all()
+               for im in (e.images or []))
+    att = db.get(Attachment, attachment_id) if used else None
+    if att is None or att.folder == "04_cost":
+        raise HTTPException(404)
+    s = get_settings()
+    if s.storage_provider != "local":
+        if att.storage_url:
+            return RedirectResponse(att.storage_url)
+        raise HTTPException(404)
+    full = os.path.join(s.storage_local_root, att.storage_path)
+    if not os.path.isfile(full):
+        raise HTTPException(404)
+    return FileResponse(full, filename=att.file_name)
+
+
 @router.get("/catalog/executions/{exec_id}")
 def execution(exec_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     ex = db.get(EquipmentExecution, exec_id)

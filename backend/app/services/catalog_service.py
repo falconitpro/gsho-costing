@@ -331,3 +331,96 @@ def add_equipment(db: Session, data: dict, user, editor: bool) -> tuple[Equipmen
     audit(db, user.id, None, "equipment_execution", ex.id, "catalog_add" if created else "catalog_add_existing",
           after={"factory": factory.name, "trademark": model.trademark, "model": model_name, "status": ex.status, "params": len(rows), "comment": data.get("comment") or ""})
     return ex, created
+
+
+# ------------------------------------------------------------------ карточка машины в каталоге: характеристики, фото, цены, справка
+
+def _term_days(term: dict) -> Optional[float]:
+    """Срок производства в календарных днях (для сравнения): недели × 7, рабочие дни × 1,4."""
+    try:
+        v = float((term or {}).get("value"))
+    except (TypeError, ValueError):
+        return None
+    unit = (term or {}).get("unit") or "calendar_days"
+    return v * 7 if unit == "weeks" else v * 1.4 if unit == "working_days" else v if unit == "calendar_days" else None
+
+
+def _stats(vals: list[float]) -> dict:
+    if not vals:
+        return {"n": 0}
+    return {"n": len(vals), "min": round(min(vals), 2), "max": round(max(vals), 2), "avg": round(sum(vals) / len(vals), 2)}
+
+
+def model_card(db: Session, model: EquipmentModel, with_prices: bool) -> dict:
+    from ..models import Attachment, ClientPriceHistory, FactoryPriceHistory, FxRate
+    factory = db.get(Factory, model.factory_id)
+    execs = db.scalars(select(EquipmentExecution).where(EquipmentExecution.model_id == model.id, EquipmentExecution.status != "archived")
+                       .order_by(EquipmentExecution.name)).all()
+    att_ids = {im.get("attachment_id") for e in execs for im in (e.images or []) if im.get("attachment_id")}
+    atts = {a.id: a for a in db.scalars(select(Attachment).where(Attachment.id.in_(att_ids))).all()} if att_ids else {}
+    out = {
+        "id": model.id, "model": model.model, "trademark": model.trademark or default_trademark(factory), "brand_name": model.brand_name,
+        "machine_type": model.machine_type, "status": model.status, "factory_id": model.factory_id, "factory": factory.name if factory else "",
+        "logistics_params": model.logistics_params or {}, "maintenance_regulations": model.maintenance_regulations or [],
+        "default_hours_per_month": model.default_hours_per_month,
+        "executions": [{
+            "id": e.id, "name": e.name, "brand_name": e.brand_name, "status": e.status, "tech_params": e.tech_params or [],
+            "local_options": e.local_options or [], "source_deal_id": e.source_deal_id,
+            "images": [{**im, "file_name": atts[im["attachment_id"]].file_name if im.get("attachment_id") in atts else "",
+                        "url": f"/api/catalog/images/{im['attachment_id']}" if im.get("attachment_id") in atts else ""} for im in (e.images or [])],
+        } for e in execs],
+        "with_prices": with_prices,
+    }
+    if not with_prices:
+        return out
+    exec_names = {e.id: e.name for e in execs}
+    fph = db.scalars(select(FactoryPriceHistory).where(FactoryPriceHistory.factory_id == model.factory_id, FactoryPriceHistory.model == model.model)
+                     .order_by(FactoryPriceHistory.on.desc())).all()
+    deal_numbers = {d.id: d.number for d in db.scalars(select(Deal).where(Deal.id.in_({h.deal_id for h in fph if h.deal_id}))).all()} if fph else {}
+    out["factory_prices"] = [{"on": h.on.isoformat(), "unit_price": h.unit_price, "currency": h.currency, "basis": h.basis,
+                              "production_term": h.production_term or {}, "production_days": _term_days(h.production_term or {}),
+                              "factory_payments": h.factory_payments or [], "source": h.source, "execution": exec_names.get(h.execution_id or "", ""),
+                              "deal_id": h.deal_id, "deal_number": deal_numbers.get(h.deal_id or "", "")} for h in fph]
+    cph = db.scalars(select(ClientPriceHistory).where(ClientPriceHistory.model == model.model,
+                                                      (ClientPriceHistory.factory_id == model.factory_id) | ClientPriceHistory.factory_id.is_(None))
+                     .order_by(ClientPriceHistory.on.desc())).all()
+    from ..models import Client
+    clients = {c.id: c.name for c in db.scalars(select(Client).where(Client.id.in_({h.client_id for h in cph}))).all()} if cph else {}
+    out["client_prices"] = [{"on": h.on.isoformat(), "deal_id": h.deal_id, "deal_number": h.deal_number, "client": clients.get(h.client_id, ""),
+                             "variant": h.variant_name, "qty": h.qty, "unit_price_rub": h.unit_price_rub, "total_rub": h.total_rub,
+                             "delivery_term": h.delivery_term, "kp_brand": h.kp_brand, "outcome": h.outcome, "chosen": h.chosen,
+                             "execution": exec_names.get(h.execution_id or "", "")} for h in cph]
+
+    # аналитическая справка
+    by_cur: dict[str, list] = {}
+    for h in reversed(fph):   # по возрастанию даты
+        by_cur.setdefault(h.currency, []).append(h)
+    factory_an = {}
+    for cur, hs in by_cur.items():
+        prices = [h.unit_price for h in hs]
+        first, last = hs[0], hs[-1]
+        factory_an[cur] = {**_stats(prices), "first": {"on": first.on.isoformat(), "price": first.unit_price},
+                           "last": {"on": last.on.isoformat(), "price": last.unit_price},
+                           "change_pct": round((last.unit_price / first.unit_price - 1) * 100, 1) if first.unit_price and len(hs) > 1 else None}
+    days = [d for d in (_term_days(h.production_term or {}) for h in fph) if d]
+    won = [h for h in cph if h.outcome == "won"]
+    lost = [h for h in cph if h.outcome == "lost"]
+    decided = len(won) + len(lost)
+    up = [h.unit_price_rub for h in cph if h.unit_price_rub]
+    an = {"factory": factory_an, "production_days": {**_stats(days), "last": days[0] if days else None},
+          "client": {"kp": len({(h.deal_id, h.version_no) for h in cph}), "deals": len({h.deal_id for h in cph}), "won": len(won), "lost": len(lost),
+                     "open": len([h for h in cph if not h.outcome]), "win_rate_pct": round(len(won) / decided * 100, 1) if decided else None,
+                     "price_rub": _stats(up), "won_price_rub": _stats([h.unit_price_rub for h in won if h.unit_price_rub]),
+                     "lost_price_rub": _stats([h.unit_price_rub for h in lost if h.unit_price_rub]),
+                     "qty_won": sum(h.qty or 0 for h in won), "last": cph[0].on.isoformat() if cph else None}}
+    # цена клиенту к цене завода в рублях по последнему курсу ЦБ (ориентир, без логистики и пошлин)
+    if fph and up:
+        lf = fph[0]
+        rate = 1.0 if lf.currency == "RUB" else (db.scalar(select(FxRate.rate).where(FxRate.currency == lf.currency).order_by(FxRate.on.desc()).limit(1)) or None)
+        if rate:
+            factory_rub = lf.unit_price * rate
+            an["price_ratio"] = {"factory_rub": round(factory_rub, 2), "rate": rate, "currency": lf.currency,
+                                 "client_avg_rub": an["client"]["price_rub"]["avg"],
+                                 "ratio": round(an["client"]["price_rub"]["avg"] / factory_rub, 2) if factory_rub else None}
+    out["analytics"] = an
+    return out
