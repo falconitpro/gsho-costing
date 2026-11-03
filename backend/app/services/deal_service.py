@@ -6,10 +6,11 @@ import tempfile
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from .. import adapters
+from ..core.config import get_settings
 from ..core.roles import Role
 from ..core.workflow import SlaDefaults, TaskSpec, TransitionResult
 from ..models import Approval, AuditLog, Deal, DealVersion, NotificationLog, Task, User
@@ -62,9 +63,7 @@ def apply_transition(db: Session, deal: Deal, tr: TransitionResult, user_id: str
     for spec in tr.tasks:
         assignee = _assignee(db, deal, spec)
         db.add(Task(deal_id=deal.id, role=spec.role.value, assignee_id=assignee, title=spec.title, block=spec.block, due=spec.due))
-        for n in tr.notifications:
-            if spec.role in n.roles:
-                notify(db, deal, assignee, n.event, n.channels, f"{deal.number}: {n.text}")
+        # уведомление о задаче отправляется автоматически при её создании (_task_notifications)
     for n in tr.notifications:
         if not any(n.roles and t.role in n.roles for t in tr.tasks):
             for role in n.roles:
@@ -79,23 +78,66 @@ def complete_tasks(db: Session, deal: Deal, block: str | None = None, role: str 
             t.done_at = datetime.now(timezone.utc)
 
 
-def notify(db: Session, deal: Deal | None, user_id: str | None, event: str, channels: list[str], text: str) -> None:
+# каналы уведомлений исполнителя (выбирают КД, ЗГД или администратор в карточке сотрудника)
+CHANNELS = {"app": "в системе", "email": "e-mail", "wecom": "WeCom", "wechat": "WeChat", "telegram": "Telegram", "whatsapp": "WhatsApp",
+            "max": "MAX", "sms": "SMS"}
+
+
+def _channels_of(user: User | None) -> list[str]:
+    chs = [("email" if c == "outlook" else c) for c in ((user.notify_channels if user else None) or ["app"])]
+    return list(dict.fromkeys(["app", *chs]))
+
+
+def notify(db: Session, deal: Deal | None, user_id: str | None, event: str, channels: list[str] | None, text: str) -> None:
+    """Уведомление исполнителю — во все каналы, выбранные в его карточке (e-mail, мессенджеры, в системе).
+    Канал без подключённой интеграции записывается в журнал со статусом «ожидает подключения»."""
     user = db.get(User, user_id) if user_id else None
-    allowed = set(user.notify_channels or []) if user else {"app"}
-    for ch in channels:
-        if ch not in allowed and ch != "app":
-            continue
+    contacts = (user.contacts or {}) if user else {}
+    for ch in _channels_of(user):
         row = NotificationLog(deal_id=deal.id if deal else None, user_id=user_id, event=event, channel=ch, text=text)
         try:
-            if ch == "outlook" and user:
+            if ch == "app":
+                row.status = "sent"
+            elif ch == "email" and user:
                 from ..adapters.mail import OutgoingMail
-                adapters.mail().send(OutgoingMail(to=[user.email], subject=text, body_html=f"<p>{text}</p>"))
+                to = [a for a in (user.email, contacts.get("extra_email")) if a]
+                adapters.mail().send(OutgoingMail(to=to, subject=text, body_html=f"<p>{text}</p>"))
+                row.status = "sent" if get_settings().mail_provider != "console" else "queued"
+                if row.status == "queued":
+                    row.error = "почта не подключена"
             elif ch == "wecom" and user and user.wecom_user_id:
                 adapters.messenger().notify([user.wecom_user_id], text)
-            row.status = "sent"
+                row.status = "sent" if get_settings().messenger_provider != "console" else "queued"
+                if row.status == "queued":
+                    row.error = "WeCom не подключён"
+            else:
+                address = {"wechat": contacts.get("wechat"), "telegram": contacts.get("telegram"), "whatsapp": contacts.get("whatsapp") or contacts.get("mobile"),
+                           "max": contacts.get("max") or contacts.get("mobile"), "sms": contacts.get("mobile"), "wecom": None}.get(ch)
+                row.status, row.error = "queued", ("канал не подключён" if address else "в карточке нет контакта для канала")
         except Exception as e:   # интеграция недоступна — остаётся в очереди
             row.status, row.error = "failed", str(e)[:500]
         db.add(row)
+
+
+def notify_new_task(db: Session, task: Task) -> None:
+    """Постановка задачи: уведомление исполнителю (или всем активным с ролью задачи, если исполнитель не назначен)."""
+    deal = db.get(Deal, task.deal_id) if task.deal_id else None
+    text = f"Новая задача{f' по сделке {deal.number}' if deal else ''}: {task.title}" + (f" (срок {task.due:%d.%m.%Y})" if task.due else "")
+    if task.assignee_id:
+        notify(db, deal, task.assignee_id, "task", None, text)
+        return
+    for u in db.scalars(select(User).where(User.is_active.is_(True))).all():
+        if task.role in (u.roles or []):
+            notify(db, deal, u.id, "task", None, text)
+
+
+@event.listens_for(Session, "before_flush")
+def _task_notifications(session: Session, flush_context, instances) -> None:
+    """Любая новая задача (из переходов статуса, исполнения, каталога, опций РФ) — сразу уведомление исполнителю."""
+    for obj in list(session.new):
+        if isinstance(obj, Task) and not getattr(obj, "_notified", False):
+            obj._notified = True
+            notify_new_task(session, obj)
 
 
 def ensure_folders(db: Session, deal: Deal) -> None:

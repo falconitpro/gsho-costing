@@ -47,6 +47,8 @@ class User(TimestampMixin, Base):
     visa_limit_rub: Mapped[Optional[float]] = mapped_column(Float)
     notify_channels: Mapped[list[str]] = mapped_column(JSONType, default=lambda: ["outlook", "wecom", "app"])
     wecom_user_id: Mapped[Optional[str]] = mapped_column(String(100))
+    # карточка контактов исполнителя: {position, department, mobile, work_phone, wechat, telegram, whatsapp, max, extra_email, note}
+    contacts: Mapped[dict] = mapped_column(JSONType, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
@@ -615,6 +617,26 @@ class Variant(TimestampMixin, Base):
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)       # служебный вариант «одно предложение» (задача 5)
 
     deal = relationship("Deal", back_populates="variants")
+
+
+class KpRevision(Base):
+    """Редакция КП (КД / ЗГД): скидки и надбавки, услуги, комплектация — с файлами и описанием изменений."""
+    __tablename__ = "kp_revisions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    version_id: Mapped[Optional[str]] = mapped_column(String(36))                 # утверждённая версия расчёта, от которой редакция
+    no: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    description: Mapped[str] = mapped_column(Text, default="")                    # что изменено и почему
+    changes: Mapped[dict] = mapped_column(JSONType, default=dict)                 # по предложениям: adjustments, extras, configuration, service_in_kp
+    price_before_rub: Mapped[Optional[float]] = mapped_column(Float)
+    price_rub: Mapped[Optional[float]] = mapped_column(Float)                     # итог КП без НДС после изменений
+    margin_pct: Mapped[Optional[float]] = mapped_column(Float)                    # маржа базового сценария по итоговой цене (ориентир)
+    prices: Mapped[dict] = mapped_column(JSONType, default=dict)                  # {variant_id: итог без НДС}
+    kp_path: Mapped[str] = mapped_column(String(1024), default="")
+    pdf_path: Mapped[str] = mapped_column(String(1024), default="")
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class DealVersion(Base):
