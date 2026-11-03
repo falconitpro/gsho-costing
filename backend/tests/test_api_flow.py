@@ -72,6 +72,7 @@ def test_full_flow(client, tmp_path):
     # задача 4: таблица теххарактеристик из RFQ, запрос заводу (файл), обязательные параметры
     tp = _ok(client.get(f"/api/deals/{did}/positions/{pos['id']}/tech-params", headers=H(MGR)))
     assert len(tp["rows"]) >= 50 and any(r["value_ru"] for r in tp["rows"]) and tp["missing_required"] == []
+    assert any(r["code"] == "1.5" and r["value_ru"] for r in tp["rows"])              # поле «L» (длина) — и в таблице для КП
     assert client.get(f"/api/deals/{did}/positions/{pos['id']}/tech-params/request/file", headers=H(MGR)).status_code == 200
     assert _ok(client.post(f"/api/deals/{did}/send-to-calc", headers=H(MGR)))["status"] == "logistics_calc"
     # задачи логиста и сервиса созданы

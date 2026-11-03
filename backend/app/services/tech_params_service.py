@@ -12,6 +12,7 @@ import csv
 import os
 import re
 import tempfile
+from functools import lru_cache
 from typing import Any, Optional
 
 from openpyxl import Workbook, load_workbook
@@ -103,24 +104,33 @@ def translate(db: Session, texts: list[str], src: str, dst: str, kind: str = "pa
 
 # ------------------------------------------------------------------ шаблоны перечня и строки позиции
 
-def ensure_general_template(db: Session) -> list[TechParamTemplate]:
-    """Стартовый перечень — фиксированные техпараметры RFQ (разделы 1–11); обязательные — по REQUIRED_CODES."""
-    rows = db.scalars(select(TechParamTemplate).where(TechParamTemplate.machine_type_id.is_(None)).order_by(TechParamTemplate.no)).all()
-    if rows:
-        return rows
-    from .rfq_import import REQUIRED_CODES
+@lru_cache(maxsize=1)
+def _general_fields() -> list[dict]:
+    """Поля разделов 1–11 встроенного шаблона RFQ (читаются из файла один раз за процесс)."""
     try:
         fields = template_fields(template_path(None))["fields"]
     except Exception:
         fields = []
-    no = 0
-    for f in fields:
-        sec = f.get("section_no") or 0
-        if not (1 <= sec <= 11) or f.get("is_l"):
-            continue
-        no += 1
-        rows.append(TechParamTemplate(machine_type_id=None, no=no, code=f["code"], name_ru=f.get("name") or f["code"], name_zh=f.get("name_zh") or "",
+    return [f for f in fields if 1 <= (f.get("section_no") or 0) <= 11]
+
+
+def ensure_general_template(db: Session) -> list[TechParamTemplate]:
+    """Стартовый перечень — фиксированные техпараметры RFQ (разделы 1–11); обязательные — по REQUIRED_CODES."""
+    rows = list(db.scalars(select(TechParamTemplate).where(TechParamTemplate.machine_type_id.is_(None)).order_by(TechParamTemplate.no)).all())
+    from .rfq_import import REQUIRED_CODES
+    wanted = _general_fields()   # включая поля «L»: габариты и массы нужны и в КП
+    have = {r.code for r in rows if r.code}
+    missing = [f for f in wanted if f["code"] not in have]
+    if rows and not missing:
+        return rows
+    for f in missing:
+        rows.append(TechParamTemplate(machine_type_id=None, no=0, code=f["code"], name_ru=f.get("name") or f["code"], name_zh=f.get("name_zh") or "",
                                       unit=(f.get("unit") or "").split(" / ")[0], required=f["code"] in REQUIRED_CODES, section=f.get("section") or ""))
+    # порядок — как в шаблоне RFQ (строки без кода, добавленные вручную, — в конце)
+    order = {f["code"]: i for i, f in enumerate(wanted)}
+    rows.sort(key=lambda r: (order.get(r.code, len(order)), r.no))
+    for i, r in enumerate(rows, 1):
+        r.no = i
     db.add_all(rows)
     db.flush()
     return rows
@@ -174,8 +184,8 @@ def rows_from_rfq(db: Session, pos: Position, parsed, user_id: Optional[str]) ->
         db.delete(r)
     no = 0
     for code, f in sorted(parsed.fields.items(), key=lambda kv: [int(x) for x in kv[0].split(".")]):
-        if not (1 <= f.section_no <= 11) or f.is_l:
-            continue
+        if not (1 <= f.section_no <= 11):
+            continue                         # поля «L» (габариты, массы) — и логисту, и в таблицу: это тоже теххарактеристики для КП
         no += 1
         v_ru, v_zh = f.value_ru, f.value_zh
         value_ru = "" if v_ru is None else str(v_ru).strip()
