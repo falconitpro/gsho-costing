@@ -19,7 +19,7 @@ class DealStatus(str, Enum):
     CALC_READY = "calc_ready"             # Расчёт сформирован
     CD_APPROVAL = "cd_approval"           # На утверждении КД
     FD_VISA = "fd_visa"                   # На визе финдиректора
-    GD_VISA = "gd_visa"                   # На визе гендиректора
+    GD_VISA = "gd_visa"                   # На визе ЗГД
     REWORK = "rework"                     # На доработке
     APPROVED = "approved"                 # Утверждено
     KP_SENT = "kp_sent"                   # КП отправлено
@@ -44,8 +44,8 @@ STATUS_TITLES = {
     DealStatus.SERVICE_CALC: "На расчёте сервиса",
     DealStatus.CALC_READY: "Расчёт сформирован",
     DealStatus.CD_APPROVAL: "На утверждении КД",
-    DealStatus.FD_VISA: "На визе финдиректора",
-    DealStatus.GD_VISA: "На визе гендиректора",
+    DealStatus.FD_VISA: "На визе ФД",
+    DealStatus.GD_VISA: "На визе ЗГД",
     DealStatus.REWORK: "На доработке",
     DealStatus.APPROVED: "Утверждено",
     DealStatus.KP_SENT: "КП отправлено",
@@ -126,6 +126,20 @@ class WorkflowError(Exception):
     pass
 
 
+ROLE_SHORT = {Role.MANAGER: "менеджер", Role.LOGISTICIAN: "логист", Role.SERVICE_HEAD: "сервис", Role.CD: "КД", Role.FD: "ФД", Role.GD: "ЗГД",
+              Role.ADMIN: "администратор", Role.OBSERVER: "наблюдатель", Role.PURCHASING: "закупки"}
+BLOCK_TITLES = {"manager": "менеджер", "logistics": "логистика", "service": "сервис", "pricing": "цена и условия (КД)", "gd": "ЗГД",
+                "visa": "виза", "kp": "КП", "contract": "контракт"}
+OUTCOME_TITLES = {"won": "выиграна", "lost": "проиграна", "cancelled": "отменена"}
+
+
+def role_title(r) -> str:
+    try:
+        return ROLE_SHORT[Role(r)]
+    except ValueError:
+        return str(r)
+
+
 # ------------------------------------------------------------------ проверки готовности
 
 def manager_checks(deal: dict[str, Any]) -> list[str]:
@@ -196,11 +210,11 @@ def block_completed(state: DealState, block: str, today: date, sla: SlaDefaults,
     elif block == "service":
         state.service_done = True
     else:
-        raise WorkflowError(f"Неизвестный блок {block}")
+        raise WorkflowError(f"Неизвестный блок: {block}")
     all_done = state.logistics_done and (state.service_done or not state.service_flag)
     if not all_done:
         status = DealStatus.SERVICE_CALC if state.logistics_done else DealStatus.LOGISTICS_CALC
-        return TransitionResult(status=status, audit=f"Блок «{block}» завершён, ожидание остальных")
+        return TransitionResult(status=status, audit=f"Блок «{BLOCK_TITLES.get(block, block)}» завершён, ожидание остальных")
     res = TransitionResult(status=DealStatus.CALC_READY, audit="Расчёт сформирован")
     res.tasks.append(TaskSpec(Role.CD, "Назначить цену и утвердить", add_business_days(today, sla.cd_days), "pricing"))
     res.notifications.append(Notification("calc_ready", [Role.CD], ["outlook", "wecom"], "Расчёт готов к утверждению"))
@@ -263,27 +277,41 @@ def visa_decision(state: DealState, by: Role, approved: bool, flags: dict[str, b
             res.tasks.append(TaskSpec(Role.GD, "Виза: ЗГД", add_business_days(today, step.sla_days), "visa"))
             res.notifications.append(Notification("visa_required", [Role.GD], ["outlook", "wecom"], "Требуется виза ЗГД"))
             return res
-        return rework(state, "pricing", f"Виза отклонена ({by.value})", today, sla)
+        return rework(state, "pricing", f"Виза отклонена ({ROLE_SHORT[by]})", today, sla)
     # виза получена: есть ли следующая ступень?
     steps = required_steps(ladder, flags)
     order = [s.status for s in steps]
     idx = order.index(state.status) if state.status in order else len(order)
     for s in steps[idx + 1:]:
-        res = TransitionResult(status=s.status, audit=f"Виза {by.value} получена, далее: {s.name}")
+        res = TransitionResult(status=s.status, audit=f"Виза {ROLE_SHORT[by]} получена, далее: {s.name}")
         res.tasks.append(TaskSpec(s.role, f"Виза: {s.name}", add_business_days(today, s.sla_days), "visa"))
         res.notifications.append(Notification("visa_required", [s.role], ["outlook", "wecom"], f"Требуется виза ({s.name})"))
         return res
     return approve(state, today, sla, by=by)
 
 
+def cd_insists_after_fd(state: DealState, today: date, sla: SlaDefaults,
+                        ladder: list[ApprovalStep] = DEFAULT_APPROVAL_LADDER) -> TransitionResult:
+    """ФД отказал (сделка на доработке у КД), КД настаивает на цене → виза ЗГД (условие fd_declined)."""
+    if state.status != DealStatus.REWORK:
+        raise WorkflowError("Настоять на цене можно после отказа ФД (сделка на доработке).")
+    step = next((s for s in ladder if s.role == Role.GD), None)
+    if step is None:
+        raise WorkflowError("В ступенях визации нет ступени ЗГД.")
+    res = TransitionResult(status=step.status, audit="ФД отказал, КД настаивает → виза ЗГД")
+    res.tasks.append(TaskSpec(Role.GD, "Виза: ЗГД (ФД отказал, КД настаивает)", add_business_days(today, step.sla_days), "visa"))
+    res.notifications.append(Notification("visa_required", [Role.GD], ["outlook", "wecom"], "Требуется виза ЗГД: ФД отказал, КД настаивает"))
+    return res
+
+
 def approve(state: DealState, today: date, sla: SlaDefaults, by: Role) -> TransitionResult:
     if state.in_execution:
         # задача 2: повторная визация после изменения условий контракта → возврат на стадию контракта
         back = DealStatus.EXECUTION if state.execution_started else DealStatus.CONTRACT
-        res = TransitionResult(status=back, new_version=True, audit=f"Изменённые условия контракта утверждены ({by.value})")
+        res = TransitionResult(status=back, new_version=True, audit=f"Изменённые условия контракта утверждены ({ROLE_SHORT[by]})")
         res.notifications.append(Notification("approved", [Role.MANAGER], ["outlook", "wecom"], "Изменённые условия контракта утверждены"))
         return res
-    res = TransitionResult(status=DealStatus.APPROVED, new_version=True, audit=f"Утверждено ({by.value})")
+    res = TransitionResult(status=DealStatus.APPROVED, new_version=True, audit=f"Утверждено ({ROLE_SHORT[by]})")
     res.tasks.append(TaskSpec(Role.MANAGER, "Отправить КП клиенту", add_business_days(today, sla.manager_rework_days), "kp"))
     res.notifications.append(Notification("approved", [Role.MANAGER], ["outlook", "wecom"], "Сделка утверждена, КП готово"))
     return res
@@ -298,7 +326,7 @@ def rework(state: DealState, block: str, reason: str, today: date, sla: SlaDefau
         raise WorkflowError("Укажите блок доработки: manager / logistics / service / pricing / gd.")
     days = {"manager": sla.manager_rework_days, "logistics": sla.logistics_days, "service": sla.service_days, "pricing": sla.cd_days,
             "gd": sla.gd_days}[block]
-    res = TransitionResult(status=DealStatus.REWORK, new_version=True, audit=f"Возврат на доработку ({block}): {reason}")
+    res = TransitionResult(status=DealStatus.REWORK, new_version=True, audit=f"Возврат на доработку ({BLOCK_TITLES.get(block, block)}): {reason}")
     res.tasks.append(TaskSpec(role, f"Доработка: {reason}", add_business_days(today, days), block))
     res.notifications.append(Notification("rework", [role], ["outlook", "wecom", "app"], f"Возврат на доработку: {reason}"))
     return res
@@ -324,11 +352,11 @@ def close(state: DealState, outcome: str, reason: str, today: Optional[date] = N
     status = {"won": DealStatus.CONTRACT, "lost": DealStatus.LOST, "cancelled": DealStatus.CANCELLED}.get(outcome)
     if status is None or not reason:
         raise WorkflowError("Укажите исход (won/lost/cancelled) и причину.")
-    res = TransitionResult(status=status, audit=f"Исход: {outcome} — {reason}")
+    res = TransitionResult(status=status, audit=f"Исход: {OUTCOME_TITLES.get(outcome, outcome)} — {reason}")
     if status == DealStatus.CONTRACT:
         today = today or date.today()
         sla = sla or SlaDefaults()
-        res.tasks.append(TaskSpec(Role.MANAGER, "Заключить контракт: внести номер и дату подписания", add_business_days(today, 5), "contract"))
+        res.tasks.append(TaskSpec(Role.MANAGER, "Заключение контракта: подготовка проекта контракта", add_business_days(today, 2), "contract"))
         res.notifications.append(Notification("won", [Role.FD], ["app", "outlook"], "Сделка выиграна: стадия заключения контракта, далее — факт платежей"))
         res.notifications.append(Notification("won", [Role.CD], ["app"], "Сделка выиграна: заключение контракта"))
     return res

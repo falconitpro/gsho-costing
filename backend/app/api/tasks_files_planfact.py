@@ -19,7 +19,7 @@ from ..core.workflow import DealStatus, STATUS_TITLES, overdue
 from ..db import get_db
 from ..models import Attachment, Deal, DealVersion, PlanFactEntry, Task
 from ..services import settings_service
-from ..services.deal_service import audit, notify
+from ..services.deal_service import audit
 from .common import can_see_deal, get_deal_or_404, serialize
 
 router = APIRouter(prefix="/api", tags=["tasks-files-planfact"])
@@ -50,6 +50,7 @@ def board(db: Session = Depends(get_db), user: CurrentUser = Depends(require_rol
     by_deal: dict[str, list] = {}
     for t in tasks:
         by_deal.setdefault(t.deal_id, []).append({"title": t.title, "role": t.role, "due": t.due.isoformat(), "overdue": overdue(t.due, today)})
+    from ..services.execution_service import status_detail
     columns = {s.value: {"title": STATUS_TITLES[s], "deals": []} for s in DealStatus}
     # задача 9: связанные заявки одного запроса клиента (исходная + дубли) — общий ключ группы и число связанных
     group_of = {d.id: (d.parent_deal_id or d.id) for d in deals}
@@ -60,7 +61,7 @@ def board(db: Session = Depends(get_db), user: CurrentUser = Depends(require_rol
     for d in deals:
         g = group_of[d.id]
         columns[d.status.value]["deals"].append({"id": d.id, "number": d.number, "client": d.client.name if d.client else None, "site": d.site,
-                                                 "priority": d.priority, "tasks": by_deal.get(d.id, []),
+                                                 "priority": d.priority, "tasks": by_deal.get(d.id, []), "status_detail": status_detail(d),
                                                  "overdue": any(t["overdue"] for t in by_deal.get(d.id, [])),
                                                  "group": g, "group_number": numbers.get(g, ""), "related": group_size.get(g, 1) - 1})
     return columns
@@ -68,21 +69,66 @@ def board(db: Session = Depends(get_db), user: CurrentUser = Depends(require_rol
 
 @router.post("/tasks/check-overdue")
 def check_overdue(db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.ADMIN, Role.GD))):
-    """Запускается планировщиком: просрочка → уведомление исполнителю и КД (Outlook + WeCom)."""
-    today = date.today()
-    n = 0
-    for t in db.scalars(select(Task).where(Task.done_at.is_(None), Task.overdue_notified.is_(False))).all():
-        if overdue(t.due, today):
-            deal = db.get(Deal, t.deal_id)
-            notify(db, deal, t.assignee_id, "task_overdue", ["outlook", "wecom"], f"{deal.number}: просрочена задача «{t.title}»")
-            from ..models import User
-            for u in db.scalars(select(User).where(User.is_active.is_(True))).all():
-                if "cd" in (u.roles or []):
-                    notify(db, deal, u.id, "task_overdue", ["outlook", "wecom"], f"{deal.number}: просрочена задача «{t.title}» ({t.role})")
-            t.overdue_notified = True
-            n += 1
+    """Ручной запуск проверки просрочек; автоматически выполняется фоновой задачей раз в час (main.py)."""
+    from ..services.deal_service import check_overdue_tasks
+    n = check_overdue_tasks(db)
     db.commit()
     return {"notified": n}
+
+
+@router.get("/reports/overdue")
+def overdue_report(date_from: Optional[date] = None, date_to: Optional[date] = None, user_id: str = "", db: Session = Depends(get_db),
+                   user: CurrentUser = Depends(get_current_user)):
+    """История просрочек выполнения задач по сотрудникам — только ЗГД.
+
+    Просрочка: задача выполнена позже срока или не выполнена, а срок прошёл. Исполнитель — назначенный сотрудник; задачи без
+    назначенного исполнителя показываются по роли («не назначен»). Период — по сроку задачи."""
+    from datetime import datetime as _dt
+    from ..core.workflow import role_title
+    from ..models import User
+    if not user.has(Role.GD):
+        raise HTTPException(403, "История просрочек доступна только ЗГД")
+    today = date.today()
+    users = {u.id: u for u in db.scalars(select(User)).all()}
+    q = select(Task)
+    if date_from:
+        q = q.where(Task.due >= date_from)
+    if date_to:
+        q = q.where(Task.due <= date_to)
+    deals = {d.id: d.number for d in db.scalars(select(Deal)).all()}
+    summary: dict[str, dict] = {}
+    rows = []
+    for t in db.scalars(q).all():
+        if not t.due:
+            continue
+        key = t.assignee_id or f"role:{t.role}"
+        if user_id and key != user_id:
+            continue
+        u = users.get(t.assignee_id) if t.assignee_id else None
+        s = summary.setdefault(key, {"user_id": key, "name": u.display_name if u else f"не назначен ({role_title(t.role)})",
+                                     "roles": [role_title(r) for r in (u.roles if u else [t.role])], "tasks": 0, "overdue": 0,
+                                     "open_overdue": 0, "days_total": 0, "days_max": 0})
+        s["tasks"] += 1
+        done_on = t.done_at.date() if isinstance(t.done_at, _dt) else t.done_at
+        late = (done_on - t.due).days if done_on else (today - t.due).days
+        if late <= 0:
+            continue
+        s["overdue"] += 1
+        s["days_total"] += late
+        s["days_max"] = max(s["days_max"], late)
+        if not done_on:
+            s["open_overdue"] += 1
+        rows.append({"user_id": key, "name": s["name"], "deal_id": t.deal_id, "deal_number": deals.get(t.deal_id, ""), "title": t.title,
+                     "role": role_title(t.role), "due": t.due.isoformat(), "done_on": done_on.isoformat() if done_on else None,
+                     "days_late": late, "open": not done_on, "notified": bool(t.overdue_notified)})
+    out = []
+    for s in summary.values():
+        s["overdue_pct"] = round(s["overdue"] / s["tasks"] * 100, 1) if s["tasks"] else 0.0
+        s["days_avg"] = round(s["days_total"] / s["overdue"], 1) if s["overdue"] else 0.0
+        out.append(s)
+    out.sort(key=lambda x: (-x["overdue"], -x["days_total"], x["name"]))
+    rows.sort(key=lambda r: (not r["open"], -r["days_late"]))
+    return {"summary": out, "rows": rows}
 
 
 # ------------------------------------------------------------------ файлы (локальное хранилище)
@@ -132,6 +178,30 @@ FACT_ROLES = {
 }
 
 
+def _allowed_items(user: CurrentUser) -> set[str]:
+    if user.has(Role.GD):
+        return {k for _, k, _ in COST_ITEMS}
+    allowed: set[str] = set()
+    for r in user.roles:
+        allowed |= FACT_ROLES["cost_item"].get(r.value, set())
+    return allowed
+
+
+@router.get("/deals/{deal_id}/fact/form")
+def fact_form(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Что пользователь может вносить в факт: статьи себестоимости по роли и (ФД) фактические платежи; записи, внесённые им."""
+    deal = get_deal_or_404(db, deal_id, user)
+    from ..core.workflow import POST_WIN_STATUSES
+    allowed = _allowed_items(user)
+    mine = db.scalars(select(PlanFactEntry).where(PlanFactEntry.deal_id == deal.id).order_by(PlanFactEntry.on)).all()
+    can_all = user.has(Role.CD, Role.FD, Role.GD)
+    return {"open": deal.status in POST_WIN_STATUSES and (not deal.plan_fact_closed or user.has(Role.FD)),
+            "closed": deal.plan_fact_closed, "items": [{"no": n, "code": k, "title": t} for n, k, t in COST_ITEMS if k in allowed],
+            "payments": user.can("execution_payments", 2), "can_close": user.has(Role.FD) and not deal.plan_fact_closed,
+            "can_report": can_all, "deviation_pct": settings_service.get(db, "plan_fact_deviation_pct"),
+            "entries": [serialize(e) for e in mine if can_all or e.entered_by == user.id]}
+
+
 @router.post("/deals/{deal_id}/fact", status_code=201)
 def add_fact(deal_id: str, body: FactIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
@@ -140,14 +210,12 @@ def add_fact(deal_id: str, body: FactIn, db: Session = Depends(get_db), user: Cu
         raise HTTPException(409, "Факт вносится после выигрыша (стадии контракта и исполнения)")
     if deal.plan_fact_closed and not user.has(Role.FD):
         raise HTTPException(403, "План/факт закрыт — редактирует только ФД")
+    if body.currency != "RUB" and not body.fx_rate:
+        raise HTTPException(422, "Для суммы в валюте укажите фактический курс")
     if body.kind == "cost_item":
-        allowed = set()
-        for r in user.roles:
-            allowed |= FACT_ROLES["cost_item"].get(r.value, set())
-        if user.has(Role.GD):
-            allowed = {k for _, k, _ in COST_ITEMS}
+        allowed = _allowed_items(user)
         if body.cost_item_code not in allowed:
-            raise HTTPException(403, f"Статья {body.cost_item_code} вносится другой ролью")
+            raise HTTPException(403, f"Статью «{next((t for _, k, t in COST_ITEMS if k == body.cost_item_code), body.cost_item_code)}» вносит другая роль")
     elif body.kind in ("payment_in", "payment_out", "fx") and not user.can("execution_payments", 2):
         raise HTTPException(403, "Фактические платежи вносит финансовый директор")
     thr = settings_service.get(db, "plan_fact_deviation_pct")
@@ -156,6 +224,23 @@ def add_fact(deal_id: str, body: FactIn, db: Session = Depends(get_db), user: Cu
     audit(db, user.id, deal.id, "fact", "new", "create", after=body.model_dump(mode="json"))
     db.commit()
     return {"entry": serialize(e), "deviation_threshold_pct": thr}
+
+
+@router.delete("/deals/{deal_id}/fact/{entry_id}")
+def delete_fact(deal_id: str, entry_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Ошибочная запись факта: удаляет автор (или ФД / ЗГД), пока план/факт не закрыт; запись остаётся в журнале действий."""
+    deal = get_deal_or_404(db, deal_id, user)
+    e = db.get(PlanFactEntry, entry_id)
+    if e is None or e.deal_id != deal.id:
+        raise HTTPException(404)
+    if deal.plan_fact_closed:
+        raise HTTPException(409, "План/факт закрыт")
+    if e.entered_by != user.id and not user.has(Role.FD, Role.GD):
+        raise HTTPException(403, "Удалить запись может её автор, ФД или ЗГД")
+    audit(db, user.id, deal.id, "fact", str(e.id)[:128], "delete", before=serialize(e))
+    db.delete(e)
+    db.commit()
+    return {"deleted": True}
 
 
 @router.get("/deals/{deal_id}/plan-fact")
@@ -177,7 +262,7 @@ def plan_fact(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = D
     fact_by_item: dict[str, float] = {}
     for f in facts:
         if f.kind == "cost_item" and f.cost_item_code:
-            fact_by_item[f.cost_item_code] = fact_by_item.get(f.cost_item_code, 0) + f.amount * (f.fx_rate or 1.0 if f.currency != "RUB" else 1.0)
+            fact_by_item[f.cost_item_code] = fact_by_item.get(f.cost_item_code, 0) + f.amount * ((f.fx_rate or 1.0) if f.currency != "RUB" else 1.0)
     for no, key, title in COST_ITEMS:
         plan_b, plan_p = base["items_rub"].get(key, 0), pess["items_rub"].get(key, 0)
         fact = fact_by_item.get(key)
@@ -241,7 +326,7 @@ def estimate_accuracy(db: Session = Depends(get_db), user: CurrentUser = Depends
         facts = db.scalars(select(PlanFactEntry).where(PlanFactEntry.deal_id == d.id, PlanFactEntry.kind == "cost_item")).all()
         by_item: dict[str, float] = {}
         for f in facts:
-            by_item[f.cost_item_code] = by_item.get(f.cost_item_code, 0) + f.amount
+            by_item[f.cost_item_code] = by_item.get(f.cost_item_code, 0) + f.amount * ((f.fx_rate or 1.0) if f.currency != "RUB" else 1.0)
         for k, fact in by_item.items():
             if base.get(k):
                 acc.setdefault(k, []).append(abs(fact - base[k]) / base[k] * 100)

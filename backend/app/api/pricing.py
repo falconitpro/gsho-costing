@@ -17,10 +17,10 @@ from ..calc.types import EVENT_TITLES, PaymentEvent
 from ..core.auth import CurrentUser, get_current_user, require_roles
 from ..core.roles import Role, filter_payload
 from ..core.workflow import (
-    ApprovalStep, DealState, DealStatus, cd_checks, cd_submit_price, price_changed_after_visa, rework as wf_rework, visa_decision,
+    ApprovalStep, DealState, DealStatus, cd_checks, cd_insists_after_fd, cd_submit_price, price_changed_after_visa, rework as wf_rework, visa_decision,
 )
 from ..db import get_db
-from ..models import Approval, Attachment, ClientPriceHistory, Deal, DealVersion, Factory, FactoryPriceHistory, FeedEntry, Position, Variant
+from ..models import Approval, Attachment, ClientPriceHistory, Deal, DealVersion, Factory, FactoryPriceHistory, FeedEntry, Position, User, Variant
 from ..services import settings_service
 from ..services.deal_calc import approval_flags, build_calc_input, run_calc
 from ..services.deal_service import apply_transition, audit, complete_tasks, create_version, ensure_folders, sla
@@ -94,6 +94,7 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
                           "positions": [{"id": p.id, "model": p.designation, "factory_payments": p.factory_payments, "factory_payments_offer": p.factory_payments_offer,
                                          "delivery_term": p.delivery_term, "production_term": p.production_term} for p in deal.positions]},
         "events": {e.value: t for e, t in EVENT_TITLES.items()},
+        "fd_declined": _fd_decline(db, deal),
     }
     return filter_payload(data, user)
 
@@ -188,7 +189,7 @@ def set_price(deal_id: str, body: PriceIn, db: Session = Depends(get_db), user: 
     elif body.mode == "margin":
         price = solve_price(inp, v.id, target_margin_pct=body.value)
     else:
-        raise HTTPException(422, "mode: amount | markup | margin")
+        raise HTTPException(422, "Способ задания цены: сумма, наценка или маржа")
     v.price_rub, v.price_mode = round(price, 2), body.mode
     reset = price_changed_after_visa(DealState(status=deal.status, service_flag=deal.service_flag))
     if reset and before.get("price_rub") != v.price_rub:
@@ -278,7 +279,7 @@ def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: Curren
     deal = get_deal_or_404(db, deal_id, user)
     by = Role.GD if deal.status == DealStatus.GD_VISA else Role.FD
     if by not in user.roles:
-        raise HTTPException(403, f"Виза этой ступени — роль {by.value}")
+        raise HTTPException(403, f"Виза этой ступени — {'ЗГД' if by == Role.GD else 'ФД'}")
     if not body.approved and not body.comment:
         raise HTTPException(422, "Отказ требует комментария")
     inp, res = run_calc(db, deal)
@@ -298,6 +299,44 @@ def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: Curren
         _finalize_contract_change(db, deal, user.id)
     elif tr.new_version:
         create_version(db, deal, "rework", user.id)
+    db.commit()
+    return {"status": deal.status.value}
+
+
+def _fd_decline(db: Session, deal: Deal) -> Optional[dict]:
+    """Последний отказ ФД по текущим ценам (сделка на доработке у КД): КД может настоять и передать на визу ЗГД."""
+    if deal.status != DealStatus.REWORK:
+        return None
+    last = db.scalars(select(Approval).where(Approval.deal_id == deal.id, Approval.reset_at.is_(None)).order_by(Approval.at.desc())).first()
+    if last is None or last.step != "financial" or last.approved:
+        return None
+    if any(abs((last.prices_snapshot or {}).get(v.id) or 0) != abs(v.price_rub or 0) for v in deal.variants if v.in_kp):
+        return None   # цена изменена после отказа — нужна обычная отправка на визу
+    u = db.get(User, last.user_id)
+    return {"comment": last.comment, "at": last.at.isoformat() if last.at else None, "user": u.display_name if u else ""}
+
+
+class InsistIn(BaseModel):
+    comment: str
+
+
+@router.post("/insist")
+def insist(deal_id: str, body: InsistIn, db: Session = Depends(get_db), user: CurrentUser = Depends(CD)):
+    """ФД отказал, КД настаивает: сделка уходит на визу ЗГД с той же ценой (ступень ЗГД, условие fd_declined)."""
+    deal = get_deal_or_404(db, deal_id, user)
+    if not body.comment.strip():
+        raise HTTPException(422, "Укажите, почему КД настаивает на цене")
+    if _fd_decline(db, deal) is None:
+        raise HTTPException(409, "Настоять можно только после отказа ФД, пока цена не менялась")
+    st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution, execution_started=deal.execution_started)
+    try:
+        tr = cd_insists_after_fd(st, date.today(), sla(db), _ladder(db))
+    except Exception as e:
+        raise HTTPException(409, str(e))
+    db.add(Approval(deal_id=deal.id, step="commercial", role="cd", user_id=user.id, approved=True, comment=f"КД настаивает: {body.comment}",
+                    prices_snapshot={v.id: v.price_rub for v in deal.variants}))
+    complete_tasks(db, deal, block="pricing")
+    apply_transition(db, deal, tr, user.id)
     db.commit()
     return {"status": deal.status.value}
 

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
+import { lbl, IMAGE_KIND, IMAGE_SOURCE } from "../labels";
 import { api, ApiError, designation, ru } from "../api";
 import { UndoButton, useUndoHistory } from "../undo";
 import type { Position, TechParamRow } from "../types";
@@ -186,7 +187,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
             </div>
             {images.length > 0 && (
               <select multiple value={reqImages} onChange={(e) => setReqImages([...e.target.selectedOptions].map((o) => o.value))} style={{ minWidth: 220, height: 80 }} title="файлы клиента, которые приложить к запросу">
-                {images.map((im) => <option key={im.id} value={im.id}>{im.caption || im.file_name || im.kind} ({im.source})</option>)}
+                {images.map((im) => <option key={im.id} value={im.id}>{im.caption || im.file_name || lbl(IMAGE_KIND, im.kind)} ({lbl(IMAGE_SOURCE, im.source)})</option>)}
               </select>
             )}
             <button className="btn" onClick={sendRequest} disabled={sending || reqFactories.length === 0 || (clientSelected.length > 0 && !clientChecked)}>Отправить запрос {reqFactories.length > 1 ? `${reqFactories.length} заводам` : "заводу"}</button>

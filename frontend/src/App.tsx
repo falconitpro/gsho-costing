@@ -12,6 +12,7 @@ import TeamPage from "./pages/TeamPage";
 import AccessPage from "./pages/AccessPage";
 import CatalogPage from "./pages/CatalogPage";
 import FactoriesPage from "./pages/FactoriesPage";
+import AdminPage from "./pages/AdminPage";
 
 export const MeContext = { current: null as Me | null };
 
@@ -58,6 +59,7 @@ export default function App() {
             <NavLink to="/factories">Заводы</NavLink>
             {has("admin", "fd", "gd", "cd") && <NavLink to="/settings">Настройки</NavLink>}
             {perm("access_admin", 2) && <NavLink to="/access">Уровни доступа</NavLink>}
+            {has("admin", "gd", "fd") && <NavLink to="/admin">Администрирование</NavLink>}
           </nav>
         )}
         <span className="spacer" />
@@ -88,6 +90,7 @@ export default function App() {
             <Route path="/catalog" element={<CatalogPage me={me} />} />
             <Route path="/factories" element={<FactoriesPage me={me} />} />
             {perm("access_admin", 2) && <Route path="/access" element={<AccessPage me={me} />} />}
+            <Route path="/admin" element={<AdminPage me={me} />} />
           </Routes>
         )}
       </main>

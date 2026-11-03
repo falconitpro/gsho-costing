@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { lbl, IMAGE_KIND, PRICE_SOURCE } from "../labels";
 import { api, designation, fmtDate, fmtRub } from "../api";
 import type { TechParamRow } from "../types";
 import TechParamsView from "./TechParamsView";
@@ -77,7 +78,7 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
               {isImage(im.file_name) && im.url ? <img src={im.url} alt={im.caption || im.file_name} style={{ width: "100%", height: 140, objectFit: "contain", background: "#fafafa" }} />
                 : <div style={{ height: 140, display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa" }}>{(im.file_name || "файл").split(".").pop()?.toUpperCase()}</div>}
               <div style={{ fontSize: 12, marginTop: 4 }}>{im.caption || im.file_name}</div>
-              <div className="muted" style={{ fontSize: 11 }}>{im.exec}{im.kind ? ` · ${im.kind}` : ""}</div>
+              <div className="muted" style={{ fontSize: 11 }}>{im.exec}{im.kind ? ` · ${lbl(IMAGE_KIND, im.kind)}` : ""}</div>
             </a>))}
         </div>))}
 
@@ -107,7 +108,7 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
             <tbody>{card.factory_prices.map((h, i) => <tr key={i}><td>{fmtDate(h.on)}</td><td>{h.execution || "—"}</td><td className="num"><b>{fmtRub(h.unit_price)}</b> {h.currency}</td><td>{h.basis}</td>
               <td>{h.production_term?.value != null ? `${h.production_term.value} ${UNITS[h.production_term.unit || "calendar_days"] || ""}` : "—"}</td>
               <td className="muted" style={{ fontSize: 12 }}>{(h.factory_payments || []).map((p) => `${p.share_pct} %`).join(" / ") || "—"}</td>
-              <td className="muted">{({ rfq: "RFQ", offer: "ответ завода", fact: "факт", price_list: "прайс" } as Record<string, string>)[h.source] || h.source}</td>
+              <td className="muted">{({ ...PRICE_SOURCE } as Record<string, string>)[h.source] || h.source}</td>
               <td>{h.deal_id ? <a href={`/deals/${h.deal_id}`}>{h.deal_number || "сделка"}</a> : "—"}</td></tr>)}</tbody></table></div> : <div className="muted">Цен завода по модели ещё нет</div>}
           <h3>Цены клиентам</h3>
           {card.client_prices?.length ? <div style={{ overflowX: "auto" }}><table><thead><tr><th>Дата КП</th><th>Сделка</th><th>Клиент</th><th>Предложение</th><th className="num">Кол-во</th><th className="num">Цена за ед., RUB</th><th className="num">Сумма, RUB</th><th>Срок</th><th>Подача</th><th>Результат</th></tr></thead>

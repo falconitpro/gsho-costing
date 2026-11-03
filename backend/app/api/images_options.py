@@ -184,9 +184,9 @@ def kp_settings(deal_id: str, body: KpSettingsIn, db: Session = Depends(get_db),
             raise HTTPException(422, {"message": "Задайте наименование под брендом компании в каталоге", "positions": missing})
     for k, v in body.model_dump(exclude_none=True).items():
         if k == "kp_brand" and v not in ("factory", "company"):
-            raise HTTPException(422, "kp_brand: factory | company")
+            raise HTTPException(422, "Бренд подачи: под маркой завода или под брендом компании")
         if k == "kp_images_mode" and v not in ("document", "attachment", "both"):
-            raise HTTPException(422, "kp_images_mode: document | attachment | both")
+            raise HTTPException(422, "Способ вложения: в документ, к письму или и то и другое")
         setattr(deal, k, v)
     audit(db, user.id, deal.id, "deal", deal.id, "kp_settings", after=body.model_dump(exclude_none=True))
     db.commit()
@@ -238,7 +238,7 @@ def add_option(deal_id: str, pos_id: str, body: LocalOptionIn, db: Session = Dep
         raise HTTPException(403)
     pos = _pos(db, deal, pos_id)
     if body.install_stage not in ("before_handover", "during_commissioning"):
-        raise HTTPException(422, "install_stage: before_handover | during_commissioning")
+        raise HTTPException(422, "Когда устанавливается: до передачи клиенту или во время ПНР")
     o = LocalOption(deal_id=deal.id, position_id=pos.id, **body.model_dump())
     db.add(o)
     db.flush()

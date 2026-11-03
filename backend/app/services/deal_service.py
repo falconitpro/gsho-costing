@@ -140,6 +140,33 @@ def _task_notifications(session: Session, flush_context, instances) -> None:
             notify_new_task(session, obj)
 
 
+def check_overdue_tasks(db: Session, today: date | None = None) -> int:
+    """Просроченные задачи: уведомление исполнителю (или всем с ролью задачи), КД и ЗГД — один раз на задачу."""
+    from ..core.workflow import overdue, role_title
+    today = today or date.today()
+    n = 0
+    users = db.scalars(select(User).where(User.is_active.is_(True))).all()
+    for t in db.scalars(select(Task).where(Task.done_at.is_(None), Task.overdue_notified.is_(False))).all():
+        if not t.due or not overdue(t.due, today):
+            continue
+        deal = db.get(Deal, t.deal_id) if t.deal_id else None
+        prefix = f"{deal.number}: " if deal else ""
+        text = f"{prefix}просрочена задача «{t.title}» (срок {t.due:%d.%m.%Y})"
+        if t.assignee_id:
+            notify(db, deal, t.assignee_id, "task_overdue", None, text)
+        else:
+            for u in users:
+                if t.role in (u.roles or []):
+                    notify(db, deal, u.id, "task_overdue", None, text)
+        who = next((u.display_name for u in users if u.id == t.assignee_id), "") or role_title(t.role)
+        for u in users:   # руководству — КД и ЗГД
+            if ({"cd", "gd"} & set(u.roles or [])) and u.id != t.assignee_id:
+                notify(db, deal, u.id, "task_overdue", None, f"{text} — исполнитель: {who}")
+        t.overdue_notified = True
+        n += 1
+    return n
+
+
 def ensure_folders(db: Session, deal: Deal) -> None:
     if deal.storage_folder:
         return

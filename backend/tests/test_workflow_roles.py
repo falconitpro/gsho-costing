@@ -131,3 +131,22 @@ def test_role_filtering():
     assert cd == payload
     assert denied_fields([Role.MANAGER, Role.CD]) == set()
     assert "cost_total_rub" in denied_fields([Role.ADMIN])
+
+
+def test_cd_insists_after_fd_decline_goes_to_gd():
+    """ФД отказал (доработка у КД) → КД настаивает → виза ЗГД; из другого статуса — ошибка."""
+    from app.core.workflow import cd_insists_after_fd
+    st = DealState(status=DealStatus.FD_VISA, service_flag=False)
+    r = visa_decision(st, Role.FD, False, {"margin_below_threshold": True}, TODAY, SLA)
+    assert r.status == DealStatus.REWORK
+    r2 = cd_insists_after_fd(DealState(status=DealStatus.REWORK, service_flag=False), TODAY, SLA)
+    assert r2.status == DealStatus.GD_VISA and r2.tasks[0].role == Role.GD
+    with pytest.raises(WorkflowError):
+        cd_insists_after_fd(DealState(status=DealStatus.CD_APPROVAL, service_flag=False), TODAY, SLA)
+    r3 = visa_decision(DealState(status=DealStatus.GD_VISA, service_flag=False), Role.GD, True, {"margin_below_threshold": True}, TODAY, SLA)
+    assert r3.status == DealStatus.APPROVED
+
+
+def test_gd_visa_status_title():
+    from app.core.workflow import STATUS_TITLES
+    assert STATUS_TITLES[DealStatus.GD_VISA] == "На визе ЗГД"

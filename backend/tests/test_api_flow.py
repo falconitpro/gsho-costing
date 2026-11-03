@@ -190,8 +190,24 @@ def test_full_flow(client, tmp_path):
     assert ex["status"] == "approved"
     tree = _ok(client.get("/api/catalog/tree", headers=H(MGR)))
     assert any(e["name"] == "XDR80T базовое" for f in tree for t in f["types"] for m in t["models"] for e in m["executions"])
-    out = _ok(client.post(f"/api/deals/{did}/outcome", headers=H(MGR), json={"outcome": "won", "reason": "лучшая цена"}))
+    assert client.post(f"/api/deals/{did}/outcome", headers=H(LOG), json={"outcome": "won", "reason": "x"}).status_code == 403
+    assert client.post(f"/api/deals/{did}/outcome", headers=H(CD), json={"outcome": "won", "reason": " "}).status_code == 422
+    out = _ok(client.post(f"/api/deals/{did}/outcome", headers=H(CD), json={"outcome": "won", "reason": "лучшая цена"}))   # КД отмечает результат
     assert out["status"] == "contract"
+    dw = _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))
+    assert dw["status_detail"] == "Заключение контракта · подготовка проекта контракта"
+    assert any(t["deal_id"] == did and "подготовка проекта контракта" in t["title"] for t in _ok(client.get("/api/tasks/my", headers=H(MGR))))
+    # подэтапы заключения контракта: по порядку, с правами и задачей следующему
+    cs = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(MGR)))["contract_steps"]
+    assert cs[0]["code"] == "draft" and cs[0]["state"] == "current" and all(c["state"] == "pending" for c in cs[1:])
+    _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "draft", "comment": "проект по КП"}))
+    _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "client_review"}))
+    assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "internal_approval"}).status_code == 403
+    r_ia = _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(CD), json={"code": "internal_approval", "comment": "условия = КП"}))
+    assert r_ia["status_detail"].endswith("контракт подписан клиентом")
+    assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "client_signed"}).status_code == 422   # нужен номер
+    assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "nope"}).status_code == 404
+    assert next(x for x in _ok(client.get("/api/deals", headers=H(MGR))) if x["id"] == did)["status_detail"].startswith("Заключение контракта")
     st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(MGR)))
     codes = {s["code"] for s in st["stages"]}
     assert {"contract_signed", "factory_contract", "client_advance", "factory_advance", "readiness", "border", "declaration", "delivery", "client_final", "commissioning"} <= codes
@@ -228,6 +244,17 @@ def test_full_flow(client, tmp_path):
     row = next(r for r in pf["rows"] if r["code"] == "intl_freight")
     assert row["fact"] == 2000000 and row["deviation_rub"] is not None
     assert any(e["kind"] == "payment_in" for e in pf["entries"])                     # платёж ФД попал в план/факт
+    # экран план/факта: что может вносить роль; валюта без курса — 422; ошибочную запись удаляет автор
+    fl = _ok(client.get(f"/api/deals/{did}/fact/form", headers=H(LOG)))
+    assert fl["open"] and "intl_freight" in {i["code"] for i in fl["items"]} and "service" not in {i["code"] for i in fl["items"]} and not fl["payments"]
+    assert not fl["can_report"] and all(e["entered_by"] for e in fl["entries"])
+    assert _ok(client.get(f"/api/deals/{did}/fact/form", headers=H(FD)))["payments"] and _ok(client.get(f"/api/deals/{did}/fact/form", headers=H(FD)))["can_close"]
+    assert client.post(f"/api/deals/{did}/fact", headers=H(LOG), json={"kind": "cost_item", "cost_item_code": "insurance", "amount": 100, "currency": "CNY", "on": "2027-03-01"}).status_code == 422
+    wrong = _ok(client.post(f"/api/deals/{did}/fact", headers=H(LOG), json={"kind": "cost_item", "cost_item_code": "insurance", "amount": 100, "currency": "CNY", "fx_rate": 12.0, "on": "2027-03-01"}), 201)
+    pf2 = _ok(client.get(f"/api/deals/{did}/plan-fact", headers=H(FD)))
+    assert next(r for r in pf2["rows"] if r["code"] == "insurance")["fact"] == 1200   # валюта × курс
+    assert client.delete(f"/api/deals/{did}/fact/{wrong['entry']['id']}", headers=H(MGR)).status_code == 403
+    _ok(client.delete(f"/api/deals/{did}/fact/{wrong['entry']['id']}", headers=H(LOG)))
     # закрытие — только КД
     assert client.post(f"/api/deals/{did}/execution/close", headers=H(MGR), json={}).status_code == 403
     assert _ok(client.post(f"/api/deals/{did}/execution/close", headers=H(CD), json={"reason": "исполнено"}))["status"] == "closed"
@@ -270,7 +297,16 @@ def test_low_margin_goes_to_fd_visa(client, tmp_path):
     sub = _ok(client.post(f"/api/deals/{did}/submit", headers=H(CD)))
     assert sub["status"] == "fd_visa" and sub["approval_flags"]["margin_below_threshold"]
     assert client.post(f"/api/deals/{did}/visa", headers=H(CD), json={"approved": True}).status_code == 403
-    assert _ok(client.post(f"/api/deals/{did}/visa", headers=H(FD), json={"approved": True, "comment": "стратегический клиент"}))["status"] == "approved"
+    # ФД отказывает → доработка у КД; КД настаивает на цене → виза ЗГД → утверждено
+    assert client.post(f"/api/deals/{did}/insist", headers=H(CD), json={"comment": "x"}).status_code == 409   # отказа ФД ещё нет
+    assert _ok(client.post(f"/api/deals/{did}/visa", headers=H(FD), json={"approved": False, "comment": "маржа ниже порога"}))["status"] == "rework"
+    calc_rw = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))
+    assert calc_rw["fd_declined"]["comment"] == "маржа ниже порога"
+    assert client.post(f"/api/deals/{did}/insist", headers=H(MGR), json={"comment": "x"}).status_code == 403
+    assert client.post(f"/api/deals/{did}/insist", headers=H(CD), json={"comment": ""}).status_code == 422
+    assert _ok(client.post(f"/api/deals/{did}/insist", headers=H(CD), json={"comment": "стратегический клиент, вход на рудник"}))["status"] == "gd_visa"
+    assert any(t["deal_id"] == did and t["block"] == "visa" for t in _ok(client.get("/api/tasks/my", headers=H("gd@example.com"))))
+    assert _ok(client.post(f"/api/deals/{did}/visa", headers=H("gd@example.com"), json={"approved": True, "comment": "согласовано"}))["status"] == "approved"
     # возврат на доработку создаёт версию и задачу логисту
     rw = _ok(client.post(f"/api/deals/{did}/rework", headers=H(CD), json={"block": "logistics", "reason": "уточнить фрахт"}))
     assert rw["status"] == "rework" and rw["version_no"] >= 2
@@ -638,3 +674,104 @@ def test_team_contacts_and_task_notifications(client):
     task_msgs = [r for r in log if d["number"] in r["text"]]
     assert {r["channel"] for r in task_msgs} >= {"app", "email", "wechat", "telegram"}
     assert next(r for r in task_msgs if r["channel"] == "app")["status"] == "sent"
+
+
+def test_admin_screens_and_overdue(client, tmp_path):
+    """Администрирование: сотрудники и роли, ТН ВЭД, курсы, шаблоны, журналы; автоматическая проверка просрочек."""
+    users = _ok(client.get("/api/admin/users", headers=H(ADM)))
+    assert client.get("/api/admin/users", headers=H(MGR)).status_code == 403
+    obs = next(u for u in users if u["email"] == "observer@example.com")
+    _ok(client.patch(f"/api/admin/users/{obs['id']}", headers=H(ADM), json={"roles": ["observer", "purchasing"]}))
+    assert client.patch(f"/api/admin/users/{obs['id']}", headers=H(ADM), json={"roles": ["nobody"]}).status_code == 422
+    adm = next(u for u in users if u["email"] == ADM)
+    assert client.patch(f"/api/admin/users/{adm['id']}", headers=H(ADM), json={"roles": ["observer"]}).status_code == 409
+    assert client.patch(f"/api/admin/users/{adm['id']}", headers=H(ADM), json={"is_active": False}).status_code == 409
+    nu = _ok(client.post("/api/admin/users", headers=H(ADM), json={"email": "new.logist@example.com", "display_name": "Новый Логист", "roles": ["logistician"]}), 201)
+    assert client.post("/api/admin/users", headers=H(ADM), json={"email": "new.logist@example.com", "display_name": "Дубль", "roles": ["logistician"]}).status_code == 409
+    _ok(client.patch(f"/api/admin/users/{nu['id']}", headers=H(ADM), json={"is_active": False}))
+    # ТН ВЭД: ручной код, загрузка CSV (с ошибочной строкой), выгрузка
+    _ok(client.post("/api/admin/hs", headers=H(ADM), json={"code": "8429 52 1000", "description": "Экскаваторы гусеничные", "duty_pct": 5, "vat_pct": 22, "util_fee": True}), 201)
+    hs = _ok(client.get("/api/admin/hs?q=842952", headers=H(ADM)))
+    assert hs["total"] == 1 and hs["rows"][0]["code"] == "8429521000"
+    csv_ = tmp_path / "hs.csv"
+    csv_.write_text("code;description;duty_pct;vat_pct;util_fee;licence;certification\n8429521000;Экскаваторы гусеничные;7,5;22;да;нет;ТР ТС 010/2011\n;пустой код;0;22;;;\n", encoding="utf-8")
+    with open(csv_, "rb") as f:
+        up = _ok(client.post("/api/admin/hs/upload", headers=H(ADM), files={"file": ("hs.csv", f)}))
+    assert up["imported"] == 1 and len(up["errors"]) == 1
+    hs = _ok(client.get("/api/admin/hs?q=8429521000", headers=H(ADM)))
+    assert hs["total"] == 1 and hs["rows"][0]["duty_pct"] == 7.5            # прежняя ставка закрыта, новая действует
+    ex = client.get("/api/admin/hs/export", headers=H(ADM))
+    assert ex.status_code == 200 and "8429521000" in ex.content.decode("utf-8-sig")
+    # курсы: сводка и ручной курс
+    summ = _ok(client.get("/api/admin/fx/summary", headers=H(FD)))
+    assert any(s["currency"] == "CNY" for s in summ)
+    _ok(client.post("/api/admin/fx/manual", headers=H(ADM), json={"on": "2026-11-03", "currency": "CNY", "rate": 11.5, "comment": "ЦБ недоступен"}), 201)
+    # шаблоны: неверный файл RFQ отклоняется, верный становится действующим, можно вернуть встроенный
+    bad = tmp_path / "bad.xlsx"
+    from openpyxl import Workbook
+    Workbook().save(bad)
+    with open(bad, "rb") as f:
+        assert client.post("/api/admin/templates/rfq", headers=H(ADM), files={"file": ("bad.xlsx", f)}).status_code == 422
+    from app.services.rfq_template import DEFAULT_TEMPLATE
+    with open(DEFAULT_TEMPLATE, "rb") as f:
+        t = _ok(client.post("/api/admin/templates/rfq", headers=H(ADM), files={"file": ("rfq v3.xlsx", f)}), 201)
+    tl = _ok(client.get("/api/admin/templates", headers=H(ADM)))
+    assert any(x["id"] == t["id"] and x["is_active"] and x["file_exists"] for x in tl["templates"]) and "rfq" in tl["kinds"]
+    assert client.get("/api/deals/rfq/template/file", headers=H(MGR)).status_code == 200
+    _ok(client.post("/api/admin/templates/rfq/reset", headers=H(ADM)))
+    assert not any(x["is_active"] for x in _ok(client.get("/api/admin/templates", headers=H(ADM)))["templates"] if x["kind"] == "rfq")
+    _ok(client.post(f"/api/admin/templates/{t['id']}/activate", headers=H(ADM)))
+    _ok(client.post("/api/admin/templates/rfq/reset", headers=H(ADM)))
+    # журналы
+    au = _ok(client.get("/api/admin/audit?entity=hs_codes", headers=H(ADM)))
+    assert au and all(a["entity"] == "hs_codes" for a in au) and au[0]["user_name"]
+    assert "hs_codes" in _ok(client.get("/api/admin/audit/entities", headers=H(ADM)))
+    assert _ok(client.get("/api/admin/audit?q=Экскаваторы", headers=H(ADM)))
+    assert isinstance(_ok(client.get("/api/admin/integrations/log", headers=H(ADM))), list)
+    assert "mape_by_item" in _ok(client.get("/api/reports/estimate-accuracy", headers=H(FD)))
+    # просрочки: просроченная задача → уведомление исполнителю и КД, один раз
+    from datetime import date, timedelta
+    from app.db import SessionLocal
+    from app.models import Deal, NotificationLog, Task, User
+    from app.services.deal_service import check_overdue_tasks
+    with SessionLocal() as db:
+        lg = db.query(User).filter(User.email == LOG).one()
+        t = Task(deal_id=db.query(Deal).first().id, role="logistician", assignee_id=lg.id, title="Тест просрочки", block="test", due=date.today() - timedelta(days=3))
+        db.add(t)
+        db.commit()
+        assert check_overdue_tasks(db) >= 1
+        db.commit()
+        assert db.query(NotificationLog).filter(NotificationLog.event == "task_overdue", NotificationLog.user_id == lg.id).count() >= 1
+        assert check_overdue_tasks(db) == 0          # повторно не уведомляет
+        t.done_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        db.commit()
+    assert "notified" in _ok(client.post("/api/tasks/check-overdue", headers=H(ADM)))
+    with SessionLocal() as db:   # просрочку получил и ЗГД
+        gd = db.query(User).filter(User.email == GD).one()
+        assert db.query(NotificationLog).filter(NotificationLog.event == "task_overdue", NotificationLog.user_id == gd.id).count() >= 1
+    # история просрочек по сотрудникам — только ЗГД
+    assert client.get("/api/reports/overdue", headers=H(CD)).status_code == 403
+    assert client.get("/api/reports/overdue", headers=H(ADM)).status_code == 403
+    rep = _ok(client.get("/api/reports/overdue", headers=H(GD)))
+    lg_row = next(s_ for s_ in rep["summary"] if s_["name"].startswith("Каталкина"))
+    assert lg_row["overdue"] >= 1 and lg_row["days_max"] >= 3
+    assert any(r["title"] == "Тест просрочки" and r["days_late"] == 3 and not r["open"] for r in rep["rows"])
+    only = _ok(client.get(f"/api/reports/overdue?user_id={lg_row['user_id']}", headers=H(GD)))
+    assert {r["user_id"] for r in only["rows"]} <= {lg_row["user_id"]}
+
+
+def test_outcome_lost_and_reopen(client):
+    """Проигранную сделку КД возвращает в работу; менеджер не может."""
+    from app.db import SessionLocal
+    from app.models import Deal
+    from app.core.workflow import DealStatus
+    with SessionLocal() as db:
+        d = db.query(Deal).filter(Deal.status == DealStatus.APPROVED).first()
+        if d is None:
+            pytest.skip("нет утверждённой сделки")
+        did = d.id
+    assert _ok(client.post(f"/api/deals/{did}/outcome", headers=H(GD), json={"outcome": "lost", "reason": "цена выше конкурентов"}))["status"] == "lost"
+    assert client.post(f"/api/deals/{did}/reopen", headers=H(MGR), json={"reason": "x"}).status_code == 403
+    assert client.post(f"/api/deals/{did}/reopen", headers=H(CD), json={"reason": ""}).status_code == 422
+    assert _ok(client.post(f"/api/deals/{did}/reopen", headers=H(CD), json={"reason": "клиент вернулся к переговорам"}))["status"] == "kp_sent"
+    assert client.post(f"/api/deals/{did}/reopen", headers=H(CD), json={"reason": "ещё раз"}).status_code == 409

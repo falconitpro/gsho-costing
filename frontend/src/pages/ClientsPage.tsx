@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
+import { lbl, OUTCOME } from "../labels";
 import { UndoButton, useUndoHistory } from "../undo";
 import { api, ApiError, fmtDate, fmtPct, fmtRub } from "../api";
 import type { Me } from "../types";
@@ -164,7 +165,7 @@ export default function ClientsPage({ me }: { me: Me }) {
                         <td>{fmtDate(h.latest.on)}</td><td><a href={`/deals/${h.deal_id}`} onClick={(e) => e.stopPropagation()}>{h.deal_number}</a>{h.variant && <div className="muted">{h.variant}{h.chosen && " ✓"}</div>}</td>
                         <td>{h.model}<div className="muted" style={{ fontSize: 11 }}>{h.latest.kp_brand === "company" ? "бренд компании" : h.factory}</div></td><td className="num">{h.qty}</td>
                         <td className="num">{fmtRub(h.latest.unit_price_rub)}</td><td className="num">{fmtRub(h.latest.total_rub)}</td><td className="muted" style={{ fontSize: 11 }}>{(h.latest.payment_terms || []).map(payText).join("; ")}</td>
-                        <td className="muted" style={{ fontSize: 11 }}>{h.latest.delivery_term}{latestDiff.length > 0 && <div style={{ color: "var(--accent)" }}>к v{h.versions[1]?.version_no}: {latestDiff.join("; ")}</div>}</td><td><span className={"badge " + (h.outcome === "won" ? "ok" : h.outcome ? "bad" : "")}>{h.outcome || "—"}</span></td><td>{h.manager}</td>
+                        <td className="muted" style={{ fontSize: 11 }}>{h.latest.delivery_term}{latestDiff.length > 0 && <div style={{ color: "var(--accent)" }}>к v{h.versions[1]?.version_no}: {latestDiff.join("; ")}</div>}</td><td><span className={"badge " + (h.outcome === "won" ? "ok" : h.outcome ? "bad" : "")}>{lbl(OUTCOME, h.outcome)}</span></td><td>{h.manager}</td>
                         <td>{h.latest.kp_path && <a href={`/api/files/${h.latest.kp_path}`} onClick={(e) => e.stopPropagation()}>v{h.latest.version_no}</a>}{h.versions.length > 1 && <span className="muted"> (+{h.versions.length - 1})</span>}</td>
                       </tr>
                       {open[key] && h.versions.slice(1).map((v, k) => { const d = verDiff(v, h.versions[k + 2]); return (

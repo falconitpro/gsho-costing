@@ -396,6 +396,7 @@ class Deal(TimestampMixin, Base):
     contract_number: Mapped[str] = mapped_column(String(128), default="")
     contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
     factory_contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
+    contract_steps: Mapped[dict] = mapped_column(JSONType, default=dict)   # подэтапы заключения контракта: код → {done, on, by, comment}
     execution_closed_at: Mapped[Optional[date]] = mapped_column(Date)
     contract_terms_changed: Mapped[bool] = mapped_column(Boolean, default=False)
     in_execution: Mapped[bool] = mapped_column(Boolean, default=False)              # сделка на стадии контракта/исполнения (возврат после повторной визы)

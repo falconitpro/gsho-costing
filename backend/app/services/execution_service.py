@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.roles import Role
-from ..core.workflow import add_business_days
+from ..core.workflow import DealStatus, add_business_days
 from ..models import Batch, Deal, ExecutionStage, LocalOption, PlanFactEntry, Position, Task
 from . import settings_service
 from .deal_calc import build_calc_input
@@ -43,6 +43,56 @@ STAGE_DEFS: dict[str, dict[str, Any]] = {
     "commissioning":     {"title": "ПНР", "level": "position", "event": "commissioning", "roles": ["service_head"], "kind": "date", "sort": 140},
     "closing":           {"title": "Закрытие", "level": "deal", "event": "", "roles": ["cd"], "kind": "date", "sort": 150},
 }
+# Подэтапы стадии «Заключение контракта» (по порядку): код → (название, кто отмечает, подсказка)
+CONTRACT_STEPS: list[dict[str, Any]] = [
+    {"code": "draft", "title": "Подготовка проекта контракта", "roles": ["manager", "cd", "gd"], "task_role": "manager",
+     "hint": "проект на основе утверждённого КП: предмет, цена, условия оплаты, сроки, гарантия"},
+    {"code": "client_review", "title": "Согласование проекта с клиентом", "roles": ["manager", "cd", "gd"], "task_role": "manager",
+     "hint": "проект направлен клиенту, замечания учтены"},
+    {"code": "internal_approval", "title": "Согласование условий внутри компании", "roles": ["cd", "fd", "gd"], "task_role": "cd",
+     "hint": "КД (и при необходимости ФД) подтверждает: условия контракта совпадают с КП; иначе — «Условия контракта отличаются от КП»"},
+    {"code": "client_signed", "title": "Контракт подписан клиентом", "roles": ["manager", "cd", "gd"], "task_role": "manager",
+     "hint": "номер контракта и дата подписания обязательны"},
+    {"code": "factory_signed", "title": "Контракт с заводом подписан", "roles": ["manager", "cd", "gd"], "task_role": "manager",
+     "hint": "дата подписания с заводом; от неё считаются аванс заводу и срок производства"},
+]
+CONTRACT_STEP_TITLES = {c["code"]: c["title"] for c in CONTRACT_STEPS}
+
+
+def contract_steps(db: Session, deal: Deal) -> list[dict[str, Any]]:
+    """Подэтапы заключения контракта с состоянием: выполнен / текущий / ожидает."""
+    from ..models import User
+    done = dict(deal.contract_steps or {})
+    if deal.contract_number and deal.contract_signed_at and "client_signed" not in done:
+        done["client_signed"] = {"done": True, "on": str(deal.contract_signed_at), "by": None, "comment": ""}
+    if deal.factory_contract_signed_at and "factory_signed" not in done:
+        done["factory_signed"] = {"done": True, "on": str(deal.factory_contract_signed_at), "by": None, "comment": ""}
+    names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    out, current_found = [], False
+    for c in CONTRACT_STEPS:
+        d = done.get(c["code"]) or {}
+        state = "done" if d.get("done") else ("pending" if current_found else "current")
+        if state == "current":
+            current_found = True
+        out.append({**c, "state": state, "on": d.get("on"), "by": names.get(d.get("by"), "") if d.get("by") else "", "comment": d.get("comment", "")})
+    return out
+
+
+def status_detail(deal: Deal) -> str:
+    """Подробный статус: на стадии контракта — текущий подэтап («Заключение контракта · Согласование с клиентом»)."""
+    from ..core.workflow import STATUS_TITLES
+    title = STATUS_TITLES.get(deal.status, str(deal.status))
+    if deal.status == DealStatus.CONTRACT:
+        done = dict(deal.contract_steps or {})
+        if deal.contract_number and deal.contract_signed_at:
+            done.setdefault("client_signed", {"done": True})
+        if deal.factory_contract_signed_at:
+            done.setdefault("factory_signed", {"done": True})
+        nxt = next((c for c in CONTRACT_STEPS if not (done.get(c["code"]) or {}).get("done")), None)
+        return f"{title} · {nxt['title'].lower() if nxt else 'всё подписано — можно начинать исполнение'}"
+    return title
+
+
 ADVANCE_EVENTS = {"contract", "client_prepayment", "lc_opened"}
 TITLES = {k: v["title"] for k, v in STAGE_DEFS.items()}
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { lbl, PRIORITY } from "../labels";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate } from "../api";
 import { STATUS_TITLES, type Deal, type Me } from "../types";
@@ -82,8 +83,8 @@ export default function DealsList({ me }: { me: Me }) {
                 <td style={d.parent_number ? { paddingLeft: 22 } : undefined}>{d.parent_number && <span className="muted">↳ </span>}<Link to={`/deals/${d.id}`}>{d.number}</Link>
                   {!d.parent_number && (d.related_count || 0) > 0 && <span className="badge" title="связанные заявки по одному запросу клиента" style={{ marginLeft: 6 }}>+{d.related_count} связ.</span>}
                   {d.parent_number && <div className="muted" style={{ fontSize: 11 }}>дубль {d.parent_number}</div>}</td><td>{d.client_name}</td><td>{d.site}</td>
-                <td><span className="badge accent">{STATUS_TITLES[d.status] || d.status}</span></td>
-                <td>{fmtDate(d.kp_due)}</td><td>{d.priority}</td><td>{d.current_version_no}</td>
+                <td><span className="badge accent">{d.status_detail || STATUS_TITLES[d.status] || d.status}</span></td>
+                <td>{fmtDate(d.kp_due)}</td><td>{lbl(PRIORITY, d.priority)}</td><td>{d.current_version_no}</td>
               </tr>
             ))}
             {deals.length === 0 && <tr><td colSpan={7} className="muted">Сделок нет</td></tr>}

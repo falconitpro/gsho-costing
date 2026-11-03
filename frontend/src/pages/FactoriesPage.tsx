@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { lbl, CATALOG_STATUS, PRICE_SOURCE } from "../labels";
 import { UndoButton, useUndoHistory } from "../undo";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
@@ -149,11 +150,11 @@ export default function FactoriesPage({ me }: { me: Me }) {
                 <div className="card">
                   <h2 style={{ marginTop: 0 }}>Модели в каталоге и цены</h2>
                   <div className="muted">Сделок с этим заводом: {cur.deals ?? 0}</div>
-                  {(cur.models || []).length > 0 && <div style={{ marginTop: 4 }}>{(cur.models || []).map((m) => <span key={m.id} className="badge" style={{ marginRight: 4 }}>{m.model}{m.status !== "approved" ? ` (${m.status})` : ""}</span>)}</div>}
+                  {(cur.models || []).length > 0 && <div style={{ marginTop: 4 }}>{(cur.models || []).map((m) => <span key={m.id} className="badge" style={{ marginRight: 4 }}>{m.model}{m.status !== "approved" ? ` (${lbl(CATALOG_STATUS, m.status)})` : ""}</span>)}</div>}
                   {prices.length > 0 && (
                     <table style={{ marginTop: 8 }}><thead><tr><th>Дата</th><th>Модель</th><th className="num">Цена</th><th>Базис</th><th>Срок производства</th><th>Источник</th></tr></thead>
                       <tbody>{prices.map((p, i) => <tr key={i}><td>{fmtDate(p.on)}</td><td>{p.model}</td><td className="num">{fmtRub(p.unit_price)} {p.currency}</td><td>{p.basis}</td>
-                        <td>{p.production_term?.value ? `${p.production_term.value} ${p.production_term.unit === "weeks" ? "нед." : "дн."}` : "—"}</td><td className="muted">{p.source}</td></tr>)}</tbody></table>)}
+                        <td>{p.production_term?.value ? `${p.production_term.value} ${p.production_term.unit === "weeks" ? "нед." : "дн."}` : "—"}</td><td className="muted">{lbl(PRICE_SOURCE, p.source)}</td></tr>)}</tbody></table>)}
                 </div>)}
             </>
           )}

@@ -186,7 +186,7 @@ async def import_apply(deal_id: str, pos_id: str, file: UploadFile = File(...), 
     try:
         mp = json.loads(mapping)
     except json.JSONDecodeError:
-        raise HTTPException(422, "mapping: JSON {sheet, header_row, first_row, last_row, columns:{key: index}}")
+        raise HTTPException(422, "Не задано сопоставление столбцов (лист, строка заголовков, диапазон строк, столбцы)")
     sel = [int(x) for x in selected_rows.split(",") if x.strip()] if selected_rows else None
     path = _tmp(file)
     try:
