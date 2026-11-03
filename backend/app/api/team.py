@@ -31,10 +31,15 @@ def _card(u: User, viewer: CurrentUser) -> dict:
 
 
 @router.get("")
-def team(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Справочник сотрудников с контактами (виден всем пользователям системы)."""
-    rows = db.scalars(select(User).where(User.is_active.is_(True)).order_by(User.display_name)).all()
-    return {"users": [_card(u, user) for u in rows], "channels": CHANNELS}
+def team(include_inactive: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Справочник сотрудников с контактами (виден всем пользователям системы). ЗГД и администратор добавляют сотрудников,
+    назначают роли и индивидуальные доступы — им видны и отключённые учётные записи."""
+    manage = user.has(Role.GD, Role.ADMIN)
+    q = select(User).order_by(User.display_name)
+    if not (manage and include_inactive):
+        q = q.where(User.is_active.is_(True))
+    roles = [{"code": r.value, "title": t} for r, t in ROLE_TITLES.items()]
+    return {"users": [_card(u, user) for u in db.scalars(q).all()], "channels": CHANNELS, "can_manage": manage, "roles": roles}
 
 
 class ContactsIn(BaseModel):
