@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, ApiError, fmtDate, fmtRub } from "../api";
+import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
 import { DELIVERY_START, PRODUCTION_START, STATUS_TITLES, TERM_UNITS, can, type Deal, type Me, type Position } from "../types";
 import ApprovalScreen from "./ApprovalScreen";
 import LogisticsBlock from "./LogisticsBlock";
@@ -189,13 +189,13 @@ export default function DealCard({ me }: { me: Me }) {
               <tbody>{(deal.positions || []).map((p) => {
                 const pr = (p.price_reference || {}) as { last_price?: number; deviation_pct?: number; comment?: string };
                 const dt = p.delivery_term || {};
-                return (<tr key={p.id}><td>{factories[p.factory_id] || p.factory_id.slice(0, 8)}</td><td>{p.machine_type} <b>{p.model}</b>{p.execution_id && <span className="badge" title="из каталога"> каталог</span>}</td><td className="num">{p.qty}</td>
+                return (<tr key={p.id}><td>{factories[p.factory_id] || p.factory_id.slice(0, 8)}</td><td>{p.machine_type} <b>{designation(p)}</b>{p.execution_id && <span className="badge" title="из каталога"> каталог</span>}</td><td className="num">{p.qty}</td>
                   <td className="num">{fmtRub(p.unit_price)}</td><td>{p.currency}</td><td className="num">{fmtRub(p.options_price)}</td><td>{p.basis}</td><td>{posTerm(p)}</td>
                   <td className="muted">{TERM_UNITS[dt.unit || "calendar_days"]} {DELIVERY_START[dt.start_event || "client_contract"]} (+10 %, до недели)</td>
                   <td>{pr.last_price ? <>посл. {fmtRub(pr.last_price)} ({pr.deviation_pct} %) {pr.comment && <span className="muted">— {pr.comment}</span>}</> : <span className="muted">нет истории</span>}</td>
                   <td>{p.rfq_import_id ? <span className="badge accent">RFQ</span> : p.offer_id ? <span className="badge">ответ завода</span> : <span className="badge">вручную</span>}</td>
                   {editable && <td className="row"><button className="btn ghost" onClick={() => setPosForm(p)}>изменить</button>
-                    <button className="btn ghost" onClick={() => { if (confirm(`Удалить позицию ${p.model}?`)) api.del(`/api/deals/${deal.id}/positions/${p.id}`).then(load); }}>удалить</button></td>}</tr>);
+                    <button className="btn ghost" onClick={() => { if (confirm(`Удалить позицию ${designation(p)}?`)) api.del(`/api/deals/${deal.id}/positions/${p.id}`).then(load); }}>удалить</button></td>}</tr>);
               })}</tbody>
             </table>
           </div>
@@ -217,7 +217,7 @@ export default function DealCard({ me }: { me: Me }) {
           )}
           {(deal.positions || []).map((p) => (
             <div className="card" key={"q" + p.id}>
-              <h2 style={{ marginTop: 0 }}>{p.machine_type} {p.model} × {p.qty}</h2>
+              <h2 style={{ marginTop: 0 }}>{p.machine_type} {designation(p)} × {p.qty}</h2>
               {can(me, "tech_params") && <TechParamsTable dealId={deal.id} position={p} canEdit={canTech} onChanged={load} />}
               <div style={{ marginTop: 14 }}>{can(me, "images") && <ImagesBlock dealId={deal.id} position={p} me={me} onChanged={load} />}</div>
               <div style={{ marginTop: 14 }}>{can(me, "local_options") && <LocalOptionsBlock dealId={deal.id} position={p} me={me} onChanged={load} />}</div>
@@ -239,7 +239,7 @@ export default function DealCard({ me }: { me: Me }) {
 
       {tab === "offers" && (
         <>
-          {(deal.positions || []).map((p) => <div className="card" key={"o" + p.id}><h2 style={{ marginTop: 0 }}>{p.model} × {p.qty}</h2><OffersBlock dealId={deal.id} position={p} me={me} onChanged={load} /></div>)}
+          {(deal.positions || []).map((p) => <div className="card" key={"o" + p.id}><h2 style={{ marginTop: 0 }}>{designation(p)} × {p.qty}</h2><OffersBlock dealId={deal.id} position={p} me={me} onChanged={load} /></div>)}
           {(deal.positions || []).length === 0 && <div className="card muted">Сначала добавьте позицию</div>}
         </>
       )}

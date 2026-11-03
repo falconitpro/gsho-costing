@@ -72,13 +72,13 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     for p in deal.positions:
         for k, c in ((p.logistics or {}).get("checks") or {}).items():
             if c.get("comment"):
-                comments.append({"from": "логист", "item": k, "ref": p.model, "comment": c["comment"]})
+                comments.append({"from": "логист", "item": k, "ref": p.designation, "comment": c["comment"]})
         if (p.price_reference or {}).get("comment"):
-            comments.append({"from": "менеджер", "item": "цена завода", "ref": p.model, "comment": p.price_reference["comment"]})
+            comments.append({"from": "менеджер", "item": "цена завода", "ref": p.designation, "comment": p.price_reference["comment"]})
     checks = cd_checks(_cd_deal_dict(deal))
     terms = {}
     for vid, scen in res.variants.items():
-        terms[vid] = [{"position_id": pc.position_id, "model": next((p.model for p in deal.positions if p.id == pc.position_id), ""),
+        terms[vid] = [{"position_id": pc.position_id, "model": next((p.designation for p in deal.positions if p.id == pc.position_id), ""),
                        "delivery_term": pc.delivery_term.model_dump(mode="json") if pc.delivery_term else None,
                        "events": {k: v.isoformat() for k, v in pc.events.items()}} for pc in scen["base"].positions]
     data = {
@@ -91,7 +91,7 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
                           "default_client": settings_service.get(db, "default_client_payment_scheme"),
                           "default_factory": settings_service.get(db, "default_factory_payment_scheme"),
                           "advance_guarantee_default": settings_service.get(db, "advance_guarantee_cost"),
-                          "positions": [{"id": p.id, "model": p.model, "factory_payments": p.factory_payments, "factory_payments_offer": p.factory_payments_offer,
+                          "positions": [{"id": p.id, "model": p.designation, "factory_payments": p.factory_payments, "factory_payments_offer": p.factory_payments_offer,
                                          "delivery_term": p.delivery_term, "production_term": p.production_term} for p in deal.positions]},
         "events": {e.value: t for e, t in EVENT_TITLES.items()},
     }
@@ -100,7 +100,7 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
 
 def _cd_deal_dict(deal: Deal) -> dict:
     return {"payment_terms_set": payment_terms_set(deal),
-            "positions": [{"model": p.model, "factory_payments": p.factory_payments,
+            "positions": [{"model": p.designation, "factory_payments": p.factory_payments,
                            "local_options": [{"name": o.name, "cost": o.cost, "supplier_lead_days": o.supplier_lead_days} for o in (p.local_option_rows or [])]}
                           for p in deal.positions]}
 
@@ -438,7 +438,7 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion) -> str:
 def _kp_model(p: Position, company: bool, db: Session, factories: dict) -> str:
     if company:
         return kp_model_name(p, db) or p.model
-    return p.model
+    return p.designation
 
 
 def _pay_text(l: dict) -> str:

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
 from ..db import get_db
-from ..models import EquipmentExecution, EquipmentModel, FactoryPriceHistory, Glossary, MachineType, TechParamTemplate
+from ..models import EquipmentExecution, EquipmentModel, Factory, FactoryPriceHistory, Glossary, MachineType, TechParamTemplate
 from ..services import catalog_service as cs, tech_params_service as tps
 from ..services.deal_service import audit
 from .common import get_deal_or_404, serialize
@@ -90,6 +90,7 @@ def execution_patch(exec_id: str, body: ExecutionPatch, db: Session = Depends(ge
 
 class ModelPatch(BaseModel):
     brand_name: Optional[str] = None
+    trademark: Optional[str] = None
     machine_type_id: Optional[str] = None
     status: Optional[str] = None
     names: Optional[dict] = None
@@ -107,6 +108,8 @@ def model_patch(model_id: str, body: ModelPatch, db: Session = Depends(get_db), 
         mt = db.get(MachineType, body.machine_type_id)
         if mt:
             m.machine_type = mt.name
+    if body.trademark:
+        cs.remember_trademark(db.get(Factory, m.factory_id), body.trademark)
     audit(db, user.id, None, "equipment_model", m.id, "update", after=body.model_dump(exclude_none=True))
     db.commit()
     return serialize(m)
@@ -198,6 +201,7 @@ class EquipmentIn(BaseModel):
     factory_name: str = ""
     factory_address: str = ""
     machine_type: str = ""
+    trademark: str = ""
     model: str
     execution_name: str = ""
     brand_name: str = ""
@@ -305,7 +309,7 @@ async def catalog_import_apply(file: UploadFile = File(...), mapping: str = Form
                 continue
             try:
                 ex, created = cs.add_equipment(db, {"factory_id": None if cell("factory") else default_factory_id, "factory_name": cell("factory"),
-                                                    "machine_type": cell("machine_type"), "model": cell("model"), "execution_name": cell("execution"),
+                                                    "machine_type": cell("machine_type"), "model": cell("model"), "trademark": cell("trademark"), "execution_name": cell("execution"),
                                                     "brand_name": cell("brand_name"), "unit_price": cell("unit_price") or None,
                                                     "currency": cell("currency") or "CNY", "basis": cell("basis"),
                                                     "production_days": cell("production_days") or None}, user, editor)

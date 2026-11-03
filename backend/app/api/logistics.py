@@ -194,7 +194,7 @@ def item_history(deal_id: str, item: str, route: str = "", machine_type: str = "
 def complete(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(LOGIST)):
     deal = get_deal_or_404(db, deal_id, user)
     _ensure_logistics_stage(deal)
-    missing = [p.model for p in deal.positions if not (p.logistics or {}).get("hs_code")]
+    missing = [p.designation for p in deal.positions if not (p.logistics or {}).get("hs_code")]
     if missing:
         raise HTTPException(422, {"message": "Не задан код ТН ВЭД", "positions": missing})
     if any(p.batch_id is None for p in deal.positions):

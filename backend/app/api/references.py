@@ -112,7 +112,7 @@ def client_card(client_id: str, db: Session = Depends(get_db), user: CurrentUser
         for v in d.variants:
             if v.price_rub:
                 last_kp.append({"deal": d.number, "variant": v.name, "price_rub": v.price_rub, "on": d.updated_at.isoformat() if d.updated_at else None,
-                                "status": d.status.value, "models": [p.model for p in d.positions if p.id in v.position_ids]})
+                                "status": d.status.value, "models": [p.designation for p in d.positions if p.id in v.position_ids]})
         if is_won(d) and d.approved_version_id:
             ver = db.get(DealVersion, d.approved_version_id)
             if ver:
@@ -204,6 +204,7 @@ class FactoryIn(BaseModel):
     default_currency: str = "CNY"
     default_basis: str = ""
     machine_types: list[str] = Field(default_factory=list)
+    trademarks: list[str] = Field(default_factory=list)      # торговые марки (первая — по умолчанию для позиций и каталога)
     typical_production_days: Optional[int] = None
     rating: Optional[float] = None
     notes: str = ""
@@ -220,6 +221,12 @@ def _apply_factory(f: Factory, body: FactoryIn, user: Optional[CurrentUser] = No
     data = body.model_dump()
     if user is not None and not user.can("factory_price_history"):
         data.pop("bank_details", None)                   # реквизиты не видны роли — и не перезаписываются ею
+    marks: list[str] = []
+    for t in data.get("trademarks") or []:
+        t = (t or "").strip()
+        if t and t.lower() not in {m.lower() for m in marks}:
+            marks.append(t)
+    data["trademarks"] = marks
     for k, v in data.items():
         setattr(f, k, v)
     # отправка из системы (запрос заводу): WeCom-контакты по направлению «Заявки» первыми

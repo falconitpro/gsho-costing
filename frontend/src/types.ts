@@ -54,7 +54,7 @@ export interface PositionImage {
 }
 
 export interface Position {
-  id: string; factory_id: string; model: string; machine_type: string; qty: number; unit_price: number; currency: string;
+  id: string; factory_id: string; trademark?: string; model: string; machine_type: string; qty: number; unit_price: number; currency: string;
   options_price: number; options?: { code?: string; name?: string; value?: number | null }[]; basis: string; production_days: number; delivery_days: number; batch_id: string | null;
   production_term?: ProductionTerm; delivery_term?: DeliveryTerm; factory_payments?: PaymentLine[]; factory_payments_offer?: PaymentLine[];
   execution_id?: string | null; offer_id?: string | null;

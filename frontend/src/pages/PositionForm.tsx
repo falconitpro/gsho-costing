@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, ApiError, fmtDate, fmtRub } from "../api";
+import { api, ApiError, designation, fmtDate, fmtRub } from "../api";
 import { DELIVERY_START, PRODUCTION_START, TERM_UNITS, type Position } from "../types";
 import { collectFields, cmpCode, type RfqFieldData } from "../components/Questionnaire";
 
-type Factory = { id: string; name: string };
-type Tree = { factory_id: string; factory: string; types: { machine_type: string; models: { id: string; model: string; executions: { id: string; name: string; params: number }[] }[] }[] }[];
+type Factory = { id: string; name: string; trademarks?: string[] };
+type Tree = { factory_id: string; factory: string; trademarks?: string[]; types: { machine_type: string; models: { id: string; model: string; trademark?: string; executions: { id: string; name: string; params: number }[] }[] }[] }[];
 type PriceRef = {
   factory_prices: { on: string; unit_price: number; currency: string; basis: string; production_term: { value?: number; unit?: string }; source: string }[] | null;
   client_prices: { on: string; deal_number: string; unit_price_rub: number | null; qty: number; outcome: string | null; kp_brand: string }[] | null;
@@ -23,6 +23,10 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
   const [schema, setSchema] = useState<Schema | null>(null);
   const [factories, setFactories] = useState<Factory[]>([]);
   const [factoryId, setFactoryId] = useState(position?.factory_id || "");
+  const [trademark, setTrademark] = useState(position?.trademark || "");
+  // сопоставление «завод → торговые марки»: при выборе завода подставляется его марка
+  const pickFactory = (id: string) => { setFactoryId(id); const f = factories.find((x) => x.id === id); set("0.7", f?.name || ""); setTrademark(f?.trademarks?.[0] || ""); };
+  const marks = factories.find((x) => x.id === factoryId)?.trademarks || [];
   const [vals, setVals] = useState<Record<string, string>>({});
   const [optNames, setOptNames] = useState<Record<string, string>>({});
   const [open, setOpen] = useState<Record<number, boolean>>({ 0: true, 1: true, 13: true, 14: true });
@@ -93,7 +97,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
       const optPerUnit = options.reduce((s, o) => s + (o.value || 0), 0) || num("12.6") || 0;
       const cur = (vals["13.1"] || "CNY").toUpperCase().slice(0, 3);
       const body = {
-        factory_id: fid, model: vals["1.2"], machine_type: vals["1.1"] || "", qty, unit_price: num("13.5"), currency: CURRENCIES.includes(cur) ? cur : "CNY",
+        factory_id: fid, trademark: trademark.trim(), model: vals["1.2"], machine_type: vals["1.1"] || "", qty, unit_price: num("13.5"), currency: CURRENCIES.includes(cur) ? cur : "CNY",
         options, options_price: optPerUnit * qty, basis: vals["13.2"] || "FCA", delivery_point: vals["13.3"] || "",
         production_days: num("14.1") || 90, delivery_days: num("14.2") || 10, warranty_months: num("14.4"), warranty_hours: num("14.5"), zip_price: num("13.8"),
         production_term: prod.unit === "date" ? { unit: "date", fixed_date: prod.fixed_date || null, start_event: prod.start_event } : { value: Number(prod.value) || num("14.1") || 90, unit: prod.unit, start_event: prod.start_event },
@@ -117,10 +121,17 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
     const code = f.code, v = vals[code] ?? "";
     if (code === "0.7") return (
       <div className="row">
-        <select value={factoryId} onChange={(e) => { setFactoryId(e.target.value); set("0.7", factories.find((x) => x.id === e.target.value)?.name || ""); }}>
-          <option value="">— выбрать завод или ввести —</option>{factories.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        <select value={factoryId} onChange={(e) => pickFactory(e.target.value)}>
+          <option value="">— выбрать завод или ввести —</option>{factories.map((x) => <option key={x.id} value={x.id}>{x.name}{x.trademarks?.length ? ` (${x.trademarks.join(", ")})` : ""}</option>)}
         </select>
         {!factoryId && <input value={v} placeholder="новый завод: полное наименование" onChange={(e) => set(code, e.target.value)} />}
+      </div>);
+    if (code === "1.2") return (
+      <div className="row" style={{ flexWrap: "wrap" }}>
+        <input list="pf-marks" value={trademark} placeholder="торговая марка" style={{ width: 130 }} title="Торговая марка оборудования — по сопоставлению с заводом; можно изменить" onChange={(e) => setTrademark(e.target.value)} />
+        <datalist id="pf-marks">{marks.map((m) => <option key={m} value={m} />)}</datalist>
+        <input value={v} placeholder="модель" onChange={(e) => set(code, e.target.value)} />
+        {(trademark || v) && <span className="muted" style={{ fontSize: 12 }}>обозначение: <b>{designation({ trademark, model: v })}</b></span>}
       </div>);
     if (code === "13.1") return <select value={v || "CNY"} onChange={(e) => set(code, e.target.value)}>{CURRENCIES.map((c) => <option key={c}>{c}</option>)}</select>;
     if (code === "13.2") return <select value={v || "FCA"} onChange={(e) => set(code, e.target.value)}>{["EXW", "FCA", "CPT", "CIP", "DAP", "DDP"].map((b) => <option key={b}>{b}</option>)}</select>;
@@ -132,7 +143,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
   return (
     <div className="card" style={{ borderColor: "var(--accent)" }}>
       <div className="row" style={{ justifyContent: "space-between" }}>
-        <h2 style={{ marginTop: 0 }}>{position ? `Позиция ${position.model}: правка полей опросника` : "Новая позиция: ввод полей опросника вручную"}</h2>
+        <h2 style={{ marginTop: 0 }}>{position ? `Позиция ${designation(position)}: правка полей опросника` : "Новая позиция: ввод полей опросника вручную"}</h2>
         <span className="muted">заполнено {filledCount} из {schema.fields.length} · обязательные: завод, модель, кол-во, цена</span>
       </div>
       <p className="muted" style={{ marginTop: 0 }}>Те же поля, что в шаблоне RFQ ({schema.title || "RU-ZH"}). Метка <span className="badge">L</span> — данные для логиста. Заполняйте то, что известно; остальное можно дополнить позже или импортом файла.</p>
@@ -161,9 +172,9 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
       <div className="grid cols-3" style={{ marginTop: 10 }}>
         <label className="f">Исполнение из каталога (заполняет технические характеристики; затем их можно изменить)
           <select value={execId} onChange={(e) => { setExecId(e.target.value); const found = tree.flatMap((f) => f.types.flatMap((t) => t.models.flatMap((m) => m.executions.map((x) => ({ f, t, m, x }))))).find((z) => z.x.id === e.target.value);
-            if (found) { setFactoryId(found.f.factory_id); set("0.7", found.f.factory); set("1.1", found.t.machine_type); set("1.2", found.m.model); } }}>
+            if (found) { setFactoryId(found.f.factory_id); set("0.7", found.f.factory); setTrademark(found.m.trademark || found.f.trademarks?.[0] || ""); set("1.1", found.t.machine_type); set("1.2", found.m.model); } }}>
             <option value="">— не использовать —</option>
-            {tree.map((f) => f.types.map((t) => t.models.map((m) => m.executions.map((x) => <option key={x.id} value={x.id}>{f.factory} › {t.machine_type} › {m.model} › {x.name} ({x.params} парам.)</option>))))}
+            {tree.map((f) => f.types.map((t) => t.models.map((m) => m.executions.map((x) => <option key={x.id} value={x.id}>{f.factory} › {t.machine_type} › {designation(m)} › {x.name} ({x.params} парам.)</option>))))}
           </select></label>
         <label className="f">Срок производства (задача 3): значение, единица, точка отсчёта
           <div className="row">

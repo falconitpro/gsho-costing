@@ -10,14 +10,14 @@ type Factory = {
   id?: string; name: string; name_zh: string; short_name: string; address: string; address_zh: string; country: string; province: string; city: string;
   website: string; uscc: string; supplier_status: string; contacts: Contact[]; payment_terms: unknown[];
   bank_details: { beneficiary?: string; bank?: string; swift?: string; account?: string; bank_address?: string };
-  default_currency: string; default_basis: string; machine_types: string[]; typical_production_days: number | null; rating: number | null;
+  default_currency: string; default_basis: string; machine_types: string[]; trademarks: string[]; typical_production_days: number | null; rating: number | null;
   notes: string; is_active: boolean; models?: { id: string; model: string; machine_type: string; status: string }[]; deals?: number;
 };
 type Price = { on: string; model: string; unit_price: number; currency: string; basis: string; production_term: { value?: number; unit?: string }; source: string };
 
 const EMPTY_CONTACT: Contact = { name: "", name_zh: "", position: "", roles: [], phone: "", mobile: "", email: "", wechat: "", wecom_id: "", whatsapp: "", telegram: "", language: "zh", primary: false, comment: "" };
 const EMPTY: Factory = { name: "", name_zh: "", short_name: "", address: "", address_zh: "", country: "CN", province: "", city: "", website: "", uscc: "",
-  supplier_status: "manufacturer", contacts: [], payment_terms: [], bank_details: {}, default_currency: "CNY", default_basis: "FCA", machine_types: [],
+  supplier_status: "manufacturer", contacts: [], payment_terms: [], bank_details: {}, default_currency: "CNY", default_basis: "FCA", machine_types: [], trademarks: [],
   typical_production_days: null, rating: null, notes: "", is_active: true };
 const STATUS: Record<string, string> = { manufacturer: "завод-изготовитель", official_dealer: "официальный дилер", trader: "торговая компания" };
 
@@ -50,7 +50,7 @@ export default function FactoriesPage({ me }: { me: Me }) {
   }
   const set = (p: Partial<Factory>) => cur && setCur({ ...cur, ...p });
   const setC = (i: number, p: Partial<Contact>) => cur && setCur({ ...cur, contacts: cur.contacts.map((c, j) => (j === i ? { ...c, ...p } : c)) });
-  const shown = list.filter((f) => (!q || `${f.name} ${f.name_zh} ${f.short_name} ${f.city} ${f.province}`.toLowerCase().includes(q.toLowerCase()))
+  const shown = list.filter((f) => (!q || `${f.name} ${f.name_zh} ${f.short_name} ${f.city} ${f.province} ${(f.trademarks || []).join(" ")}`.toLowerCase().includes(q.toLowerCase()))
     && (!roleFilter || (f.contacts || []).some((c) => (c.roles || []).includes(roleFilter))));
   const field = (label: string, key: keyof Factory, ph = "") => (
     <label className="f">{label}<input value={String(cur?.[key] ?? "")} placeholder={ph} disabled={!editor} onChange={(e) => set({ [key]: e.target.value } as Partial<Factory>)} /></label>);
@@ -64,13 +64,13 @@ export default function FactoriesPage({ me }: { me: Me }) {
       {msg && <div className="alert info">{msg}</div>}
       <div className="grid" style={{ gridTemplateColumns: "360px 1fr" }}>
         <div className="card">
-          <div className="row"><input placeholder="поиск: название, город" value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="row"><input placeholder="поиск: название, марка, город" value={q} onChange={(e) => setQ(e.target.value)} />
             <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} title="есть контакт по направлению"><option value="">все</option>{Object.entries(roles).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></div>
           <table style={{ marginTop: 6 }}><tbody>{shown.map((f) => {
             const rfq = (f.contacts || []).find((c) => (c.roles || []).includes("rfq"));
             return (
               <tr key={f.id} style={{ cursor: "pointer", background: cur?.id === f.id ? "var(--accent-soft)" : undefined, opacity: f.is_active === false ? 0.5 : 1 }} onClick={() => open(f.id!)}>
-                <td><b>{f.short_name || f.name}</b>{f.name_zh && <div className="muted" style={{ fontSize: 11 }}>{f.name_zh}</div>}
+                <td><b>{f.short_name || f.name}</b>{(f.trademarks || []).map((t) => <span key={t} className="badge accent" style={{ marginLeft: 4 }}>{t}</span>)}{f.name_zh && <div className="muted" style={{ fontSize: 11 }}>{f.name_zh}</div>}
                   <div className="muted" style={{ fontSize: 11 }}>{[f.city, f.province].filter(Boolean).join(", ")}{rfq ? ` · заявки: ${rfq.name}` : " · нет контакта по заявкам"}</div></td>
                 <td className="muted" style={{ fontSize: 11 }}>{(f.contacts || []).length} конт.</td></tr>);
           })}{shown.length === 0 && <tr><td className="muted">Не найдено</td></tr>}</tbody></table>
@@ -86,6 +86,8 @@ export default function FactoriesPage({ me }: { me: Me }) {
                   {field("Единый код юрлица (统一社会信用代码)", "uscc", "18 знаков")}{field("Сайт", "website", "https://")}
                   {field("Провинция", "province")}{field("Город", "city")}{field("Страна", "country")}
                   {field("Адрес (рус./EN)", "address")}{field("Адрес (中文)", "address_zh")}
+                  <label className="f">Торговые марки (через запятую; первая — по умолчанию)<input value={(cur.trademarks || []).join(", ")} placeholder="напр. SHILI" disabled={!editor}
+                    onChange={(e) => set({ trademarks: e.target.value.split(",").map((x) => x.trimStart()) })} /></label>
                   <label className="f">Что выпускает (типы машин через запятую)<input value={cur.machine_types.join(", ")} disabled={!editor} onChange={(e) => set({ machine_types: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} /></label>
                   <label className="f">Валюта / базис по умолчанию<div className="row"><select value={cur.default_currency} disabled={!editor} onChange={(e) => set({ default_currency: e.target.value })}>{["CNY", "USD", "EUR", "RUB"].map((c) => <option key={c}>{c}</option>)}</select>
                     <select value={cur.default_basis} disabled={!editor} onChange={(e) => set({ default_basis: e.target.value })}>{["EXW", "FCA", "CPT", "CIP", "DAP", "DDP"].map((b) => <option key={b}>{b}</option>)}</select></div></label>

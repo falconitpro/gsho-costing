@@ -475,7 +475,7 @@ def build_request_xlsx(db: Session, pos: Position, factory: Optional[Factory], d
     ws.title = "Техданные 技术参数"
     ws["A1"] = f"Запрос технических характеристик / 技术参数询价 — {deal_number}"
     ws["A1"].font = Font(bold=True, size=13)
-    ws["A2"] = f"Завод / 工厂: {(factory.name_zh or factory.name) if factory else ''}   Модель / 型号: {pos.model}   Кол-во / 数量: {pos.qty}"
+    ws["A2"] = f"Завод / 工厂: {(factory.name_zh or factory.name) if factory else ''}   Модель / 型号: {pos.designation}   Кол-во / 数量: {pos.qty}"
     ws["A3"] = "Просим заполнить столбцы «Значение / 数值» и «Комментарий / 备注» по каждому параметру с учётом требований заказчика. 请根据客户要求填写每项参数的数值和备注。"
     if request_images:
         ws["A4"] = "Просим приложить фото, рендеры и габаритные чертежи предлагаемой машины. 请附上所报机型的照片、效果图和外形尺寸图。"
@@ -508,7 +508,7 @@ def send_request(db: Session, deal, pos: Position, factory: Factory, file_path: 
     from ..models import Attachment, FeedEntry
     from .deal_service import ensure_folders
     result: dict[str, Any] = {"wecom": None, "mail": None}
-    text = f"Запрос технических характеристик по сделке {deal.number}: {pos.model} × {pos.qty}. 技术参数询价，请填写附件并回复。"
+    text = f"Запрос технических характеристик по сделке {deal.number}: {pos.designation} × {pos.qty}. 技术参数询价，请填写附件并回复。"
     if via_wecom and factory.wecom_external_ids:
         try:
             result["wecom"] = adapters.messenger().send_to_external(factory.wecom_external_ids[0], text, deal.number)
@@ -538,7 +538,7 @@ def send_request(db: Session, deal, pos: Position, factory: Factory, file_path: 
     except Exception as e:
         result["file"] = f"ошибка хранилища: {e}"
     db.add(FeedEntry(deal_id=deal.id, kind="wecom" if via_wecom else "mail_out", direction="out", counterparty=factory.name,
-                     subject=f"Запрос заводу: {pos.model}", body=text + (f" Вложения: {len(image_paths)} изобр." if image_paths else ""), user_id=user_id))
+                     subject=f"Запрос заводу: {pos.designation}", body=text + (f" Вложения: {len(image_paths)} изобр." if image_paths else ""), user_id=user_id))
     return result
 
 

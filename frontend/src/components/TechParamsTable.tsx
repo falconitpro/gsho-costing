@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useState } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, designation } from "../api";
 import type { Position, TechParamRow } from "../types";
 
 type Preview = { sheets: { name: string; rows: unknown[][]; total_rows: number; mapping: { header_row: number; first_row: number; columns: Record<string, number>; source?: string } }[];
   columns: { key: string; title: string }[] };
-type Factory = { id: string; name: string };
+type Factory = { id: string; name: string; trademarks?: string[] };
+const fname = (f?: Factory) => (f ? f.name + (f.trademarks?.length ? ` (${f.trademarks.join(", ")})` : "") : "—");
 
 const COLS: { key: keyof TechParamRow; title: string; w?: number }[] = [
   { key: "no", title: "№", w: 50 }, { key: "name_ru", title: "Параметр" }, { key: "unit", title: "Ед.", w: 70 },
@@ -94,7 +95,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
   return (
     <div>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-        <span className="muted">Технические характеристики: заполнено значений {filled} из {rows.length}
+        <span className="muted"><b>{designation(position)}</b> · {fname(factories.find((f) => f.id === position.factory_id))} · Технические характеристики: заполнено значений {filled} из {rows.length}
           {missing.length > 0 && <> · <span className="badge bad">не заполнены обязательные: {missing.slice(0, 4).join(", ")}{missing.length > 4 ? " …" : ""}</span></>}
           {rows.some((r) => r.translation_status === "machine") && <> · <span className="badge warn">машинный перевод — проверьте</span></>}
           {rows.some((r) => r.req_status === "mismatch") && <> · <span className="badge" style={{ background: "#ffd9b3" }}>не соответствует требованию: {rows.filter((r) => r.req_status === "mismatch").length}</span></>}</span>
@@ -154,9 +155,17 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
         <div className="card" style={{ marginTop: 10 }}>
           <b>Запрос заводу (RU + ZH)</b> <span className="muted">— требования заказчика, пустой столбец «Значение», просьба приложить фото и чертежи. Отправка через WeCom и e-mail; по каждому заводу создаётся ответ-кандидат.</span>
           <div className="row" style={{ marginTop: 6 }}>
-            <select multiple value={reqFactories} onChange={(e) => setReqFactories([...e.target.selectedOptions].map((o) => o.value))} style={{ minWidth: 260, height: 80 }}>
-              {factories.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-            </select>
+            {/* заводы — из выпадающего списка; несколько заводов добавляются по одному, лишний убирается крестиком */}
+            <div>
+              <select value="" onChange={(e) => e.target.value && setReqFactories([...reqFactories, e.target.value])} style={{ minWidth: 280 }}>
+                <option value="">{reqFactories.length ? "+ добавить ещё завод…" : "— выбрать завод —"}</option>
+                {factories.filter((f) => !reqFactories.includes(f.id)).map((f) => <option key={f.id} value={f.id}>{fname(f)}</option>)}
+              </select>
+              <div className="row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
+                {reqFactories.map((id) => <span key={id} className="badge accent">{fname(factories.find((f) => f.id === id))}{id === position.factory_id ? " — завод позиции" : ""}
+                  <button className="btn ghost" style={{ padding: "0 4px", marginLeft: 2 }} title="убрать" onClick={() => setReqFactories(reqFactories.filter((x) => x !== id))}>×</button></span>)}
+              </div>
+            </div>
             {images.length > 0 && (
               <select multiple value={reqImages} onChange={(e) => setReqImages([...e.target.selectedOptions].map((o) => o.value))} style={{ minWidth: 220, height: 80 }} title="файлы клиента, которые приложить к запросу">
                 {images.map((im) => <option key={im.id} value={im.id}>{im.caption || im.file_name || im.kind} ({im.source})</option>)}
@@ -196,7 +205,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
             <input type="file" accept=".xlsx,.xlsm,.csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
             {wizard === "factory_answer" && offers.length > 0 && (
               <select value={offerId} onChange={(e) => setOfferId(e.target.value)}>
-                <option value="">ответ завода позиции ({factories.find((f) => f.id === position.factory_id)?.name || "—"})</option>
+                <option value="">ответ завода позиции ({fname(factories.find((f) => f.id === position.factory_id))})</option>
                 {offers.map((o) => <option key={o.id} value={o.id}>ответ: {o.factory}</option>)}
               </select>
             )}

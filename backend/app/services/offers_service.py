@@ -65,6 +65,9 @@ def duplicate_deal(db: Session, deal: Deal, user_id: str, offer_id: Optional[str
         if offer:
             np_.factory_id, np_.model, np_.unit_price, np_.currency, np_.basis = offer.factory_id, offer.model or p.model, offer.unit_price or p.unit_price, offer.currency, offer.basis
             np_.production_term = offer.production_term or p.production_term
+            if offer.factory_id != p.factory_id:
+                from .catalog_service import resolve_trademark
+                np_.trademark = resolve_trademark(db, offer.factory_id, np_.model)
             np_.factory_payments_offer = offer.factory_payments or []
             np_.offer_id = offer.id
             np_.price_reference = {}
@@ -186,6 +189,9 @@ def select_offers(db: Session, deal: Deal, offer_ids: list[str], user_id: str, c
     first, rest = offers[0], offers[1:]
     pos = next((p for p in deal.positions if p.id == first.source_position_id), deal.positions[0] if deal.positions else None)
     if pos is not None:
+        if first.factory_id != pos.factory_id:
+            from .catalog_service import resolve_trademark
+            pos.trademark = resolve_trademark(db, first.factory_id, first.model or pos.model)
         pos.factory_id, pos.model = first.factory_id, first.model or pos.model
         if first.unit_price:
             pos.unit_price, pos.currency, pos.basis = first.unit_price, first.currency, first.basis
@@ -222,10 +228,10 @@ def kp_brand_check(deal: Deal, factories: dict[str, str], db: Optional[Session] 
         return warnings
     for p in deal.positions:
         if not kp_model_name(p, db):
-            warnings.append(f"{p.model}: не задано наименование под брендом компании в каталоге")
+            warnings.append(f"{p.designation}: не задано наименование под брендом компании в каталоге")
         for img in p.image_rows or []:
             if img.in_kp and (img.has_factory_logo or img.source == "factory"):
-                warnings.append(f"{p.model}: файл «{img.caption or img.attachment_id[:8]}» помечен как файл завода / с логотипом — подтвердите вложение")
+                warnings.append(f"{p.designation}: файл «{img.caption or img.attachment_id[:8]}» помечен как файл завода / с логотипом — подтвердите вложение")
     return warnings
 
 

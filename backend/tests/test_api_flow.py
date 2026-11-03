@@ -486,6 +486,18 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     assert _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(MGR)))["bank_details"] == {"swift": "BKCHCNBJ"}   # …и не стирает их
     assert all("bank_details" not in f_ for f_ in _ok(client.get("/api/refs/factories", headers=H(LOG))))
     assert "rfq" in _ok(client.get("/api/refs/factories/contact-roles", headers=H(MGR)))
+    # --- торговые марки: сопоставление «завод → марка», обозначение = марка + модель
+    mk = _ok(client.put(f"/api/refs/factories/{fz['id']}", headers=H(MGR), json={**{k: card[k] for k in ("name", "name_zh", "contacts")},
+                                                                                  "trademarks": [" SHILI ", "shili", "", "SL"]}))
+    assert mk["trademarks"] == ["SHILI", "SL"]
+    cl0 = _ok(client.get("/api/refs/clients", headers=H(MGR)))[0]
+    dtm = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": cl0["id"], "site": "марки"}), 201)
+    ptm = _ok(client.post(f"/api/deals/{dtm['id']}/positions", headers=H(MGR), json={"factory_id": fz["id"], "model": "FL-0.5(C)",
+                                                                                     "machine_type": "Погрузчик", "unit_price": 100000}), 201)
+    assert ptm["trademark"] == "SHILI"                                        # подставлена по заводу
+    ptm2 = _ok(client.patch(f"/api/deals/{dtm['id']}/positions/{ptm['id']}", headers=H(MGR), json={"trademark": "XGMA"}))
+    assert ptm2["trademark"] == "XGMA"
+    assert "XGMA" in _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(MGR)))["trademarks"]   # новая марка запомнена за заводом
     # --- настройки: у каждого ключа есть понятное название и группа
     meta = _ok(client.get("/api/admin/settings/meta", headers=H(FD)))
     assert meta["items"]["margin_threshold_pct"]["title"] == "Порог маржи" and not [k for k, v in meta["items"].items() if v["group"] == "Прочее"]

@@ -179,7 +179,7 @@ def kp_settings(deal_id: str, body: KpSettingsIn, db: Session = Depends(get_db),
         raise HTTPException(403, "Бренд подачи и вложения в КП задаёт КД или ГД")
     from ..services.offers_service import kp_model_name
     if body.kp_brand == "company":
-        missing = [p.model for p in deal.positions if not kp_model_name(p, db)]
+        missing = [p.designation for p in deal.positions if not kp_model_name(p, db)]
         if missing:
             raise HTTPException(422, {"message": "Задайте наименование под брендом компании в каталоге", "positions": missing})
     for k, v in body.model_dump(exclude_none=True).items():
@@ -216,10 +216,10 @@ def _option_tasks(db: Session, deal, pos: Position, o: LocalOption, user_id: str
     """Задачи на этапе расчёта: менеджеру — КП поставщиков, сервису — оценка установки, КД — утвердить стоимость."""
     existing = {t.block for t in db.scalars(select(Task).where(Task.deal_id == deal.id, Task.done_at.is_(None))).all()}
     today = date.today()
-    specs = [(Role.MANAGER, deal.manager_id, f"Запросить КП поставщиков опции «{o.name}» ({pos.model})", f"local_option_quote:{o.id}", 2)]
+    specs = [(Role.MANAGER, deal.manager_id, f"Запросить КП поставщиков опции «{o.name}» ({pos.designation})", f"local_option_quote:{o.id}", 2)]
     if o.needs_install:
-        specs.append((Role.SERVICE_HEAD, deal.service_head_id, f"Оценить время и стоимость установки опции «{o.name}» ({pos.model})", f"local_option_install_est:{o.id}", 2))
-    specs.append((Role.CD, None, f"Утвердить стоимость опции РФ «{o.name}» ({pos.model})", f"local_option_approve:{o.id}", 2))
+        specs.append((Role.SERVICE_HEAD, deal.service_head_id, f"Оценить время и стоимость установки опции «{o.name}» ({pos.designation})", f"local_option_install_est:{o.id}", 2))
+    specs.append((Role.CD, None, f"Утвердить стоимость опции РФ «{o.name}» ({pos.designation})", f"local_option_approve:{o.id}", 2))
     from ..services.deal_service import _assignee
     from ..core.workflow import TaskSpec
     for role, assignee, title, block, days in specs:
