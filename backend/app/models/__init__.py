@@ -215,7 +215,7 @@ class FactoryPriceHistory(Base):
 
 
 class ClientPriceHistory(Base):
-    """История цен, предложенных клиентам (задача 7/8): по каждой отправленной версии КП. Видят КД и ГД."""
+    """История цен, предложенных клиентам (задача 7/8): по каждой отправленной версии КП. Видят КД и ЗГД."""
     __tablename__ = "client_price_history"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), index=True)
@@ -311,7 +311,7 @@ class Glossary(TimestampMixin, Base):
 
 
 class TechParamTemplate(Base):
-    """Шаблон перечня технических характеристик по типу машины (задача 4). Обязательность задают КД/ГД."""
+    """Шаблон перечня технических характеристик по типу машины (задача 4). Обязательность задают КД/ЗГД."""
     __tablename__ = "tech_param_templates"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     machine_type_id: Mapped[Optional[str]] = mapped_column(ForeignKey("machine_types.id"), index=True)   # NULL = общий шаблон
@@ -507,7 +507,7 @@ class LocalOption(TimestampMixin, Base):
 
 
 class PositionImage(Base):
-    """Изображения и чертежи позиции (задача 10); выбор для КП делает КД/ГД."""
+    """Изображения и чертежи позиции (задача 10); выбор для КП делает КД/ЗГД."""
     __tablename__ = "position_images"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
@@ -525,7 +525,7 @@ class PositionImage(Base):
 
 
 class FactoryOffer(TimestampMixin, Base):
-    """Ответ завода на запрос клиента (задача 9): кандидат для сравнения «параметр × завод» и отбора КД/ГД."""
+    """Ответ завода на запрос клиента (задача 9): кандидат для сравнения «параметр × завод» и отбора КД/ЗГД."""
     __tablename__ = "factory_offers"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)

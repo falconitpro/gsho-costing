@@ -148,7 +148,7 @@ def test_full_flow(client, tmp_path):
     card_cd = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(CD)))
     assert card_cd["kp_history"] and card_cd["kp_history"][0]["deal_number"] == deal["number"] and card_cd["kp_history"][0]["versions"]
     card_mgr = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(MGR)))
-    assert "kp_history" not in card_mgr and "last_kp" not in card_mgr                # историю КП видят только КД и ГД
+    assert "kp_history" not in card_mgr and "last_kp" not in card_mgr                # историю КП видят только КД и ЗГД
     # задача 7: занесение в каталог — менеджер предлагает, КД подтверждает
     cand = _ok(client.get(f"/api/deals/{did}/catalog/candidates", headers=H(MGR)))
     assert cand[0]["model"] == "XDR80T"
@@ -403,7 +403,7 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
 
 
 def test_access_levels_admin(client):
-    """Задача 11: матрица прав в интерфейсе — правило по роли, исключение для сотрудника, защита ГД, предпросмотр."""
+    """Задача 11: матрица прав в интерфейсе — правило по роли, исключение для сотрудника, защита ЗГД, предпросмотр."""
     assert client.get("/api/admin/access", headers=H(CD)).status_code == 403
     m = _ok(client.get("/api/admin/access", headers=H(GD)))
     assert any(g["code"] == "client_price_history" for g in m["groups"]) and any(r["role"] == "gd" for r in m["roles"])
@@ -545,7 +545,7 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     snap = ((pl.get("tech_params") or {}).get("_rfq") or {}).get("fields") or {}
     if "1.1" in snap:
         assert snap["1.1"]["value"] == "Самосвал шахтный"
-    # --- настройки: КД меняет внешнюю комиссию, комиссию КД — только ГД; экспертные точки — в едином виде
+    # --- настройки: КД меняет внешнюю комиссию, комиссию КД — только ЗГД; экспертные точки — в едином виде
     _ok(client.put("/api/admin/settings/external_commission_pct", headers=H(CD), json={"value": 2.5, "comment": "тест"}))
     assert client.put("/api/admin/settings/cd_commission_pct", headers=H(CD), json={"value": 1.0}).status_code == 403
     mt = _ok(client.get("/api/admin/settings/meta", headers=H(CD)))
@@ -555,7 +555,7 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     assert _ok(client.get("/api/admin/settings", headers=H(FD)))["fx_expert_points"] == {"CNY": [{"on": "2027-03-31", "rate": 12.5}]}
     s_ = _ok(client.get("/api/admin/settings", headers=H(FD)))
     assert s_["commissioning_days"] == 5 and s_["unplanned_reserve_pct"] == 3.0 and s_["sla_days"]["logistics"] == 1
-    # --- удалять строки таблицы технических характеристик могут только КД, ГД и администратор
+    # --- удалять строки таблицы технических характеристик могут только КД, ЗГД и администратор
     rows4 = _ok(client.get(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR)))["rows"]
     assert client.put(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR), json=rows4[1:]).status_code == 403
     assert len(_ok(client.put(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(CD), json=rows4[1:]))["rows"]) == len(rows4) - 1

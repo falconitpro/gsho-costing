@@ -221,7 +221,7 @@ class ApprovalStep:
 DEFAULT_APPROVAL_LADDER = [
     ApprovalStep("Коммерческая", Role.CD, "always", 1, DealStatus.CD_APPROVAL),
     ApprovalStep("Финансовая", Role.FD, "margin_below_threshold|cash_gap_above_limit", 1, DealStatus.FD_VISA),
-    ApprovalStep("Генеральная", Role.GD, "deal_above_gd_limit|fd_declined|overhead_override", 1, DealStatus.GD_VISA),
+    ApprovalStep("ЗГД", Role.GD, "deal_above_gd_limit|fd_declined|overhead_override", 1, DealStatus.GD_VISA),
 ]
 
 
@@ -259,9 +259,9 @@ def visa_decision(state: DealState, by: Role, approved: bool, flags: dict[str, b
         if by == Role.FD and cd_insists:
             flags = dict(flags, fd_declined=True)
             step = next(s for s in ladder if s.role == Role.GD)
-            res = TransitionResult(status=step.status, audit="ФД отказал, КД настаивает → виза ГД")
-            res.tasks.append(TaskSpec(Role.GD, "Виза: Генеральная", add_business_days(today, step.sla_days), "visa"))
-            res.notifications.append(Notification("visa_required", [Role.GD], ["outlook", "wecom"], "Требуется виза ГД"))
+            res = TransitionResult(status=step.status, audit="ФД отказал, КД настаивает → виза ЗГД")
+            res.tasks.append(TaskSpec(Role.GD, "Виза: ЗГД", add_business_days(today, step.sla_days), "visa"))
+            res.notifications.append(Notification("visa_required", [Role.GD], ["outlook", "wecom"], "Требуется виза ЗГД"))
             return res
         return rework(state, "pricing", f"Виза отклонена ({by.value})", today, sla)
     # виза получена: есть ли следующая ступень?
@@ -290,7 +290,7 @@ def approve(state: DealState, today: date, sla: SlaDefaults, by: Role) -> Transi
 
 
 def rework(state: DealState, block: str, reason: str, today: date, sla: SlaDefaults) -> TransitionResult:
-    """Возврат на доработку (КД или ГД, на любом этапе). Создаёт новую версию расчёта."""
+    """Возврат на доработку (КД или ЗГД, на любом этапе). Создаёт новую версию расчёта."""
     if not reason:
         raise WorkflowError("Укажите причину возврата.")
     role = {"manager": Role.MANAGER, "logistics": Role.LOGISTICIAN, "service": Role.SERVICE_HEAD, "pricing": Role.CD}.get(block)

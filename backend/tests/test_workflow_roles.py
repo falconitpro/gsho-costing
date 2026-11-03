@@ -105,14 +105,14 @@ def test_access_matrix_overrides_and_gd_inherits_cd():
     from app.core.roles import effective_perms, EDIT, READ, NONE
     cd = effective_perms([Role.CD])
     gd = effective_perms([Role.GD])
-    assert all(gd[g] >= lvl for g, lvl in cd.items())            # ГД ⊇ КД
+    assert all(gd[g] >= lvl for g, lvl in cd.items())            # ЗГД ⊇ КД
     mgr = effective_perms([Role.MANAGER])
     assert mgr["client_price_history"] == NONE and mgr["factory_price_history"] == READ and mgr["payment_terms"] == READ
     # правило из БД и исключение сотрудника
     rules = {"manager": {"client_price_history": READ}}
     assert effective_perms([Role.MANAGER], rules)["client_price_history"] == READ
     assert effective_perms([Role.MANAGER], rules, {"client_price_history": NONE})["client_price_history"] == NONE
-    # защита: право на уровни доступа у ГД нельзя снять
+    # защита: право на уровни доступа у ЗГД нельзя снять
     assert effective_perms([Role.GD], {"gd": {"access_admin": NONE}})["access_admin"] == EDIT
     # фильтрация по правам: открыли менеджеру историю КП — ключи проходят
     payload = {"kp_history": [1], "calc_result": {}, "price_rub": 1}

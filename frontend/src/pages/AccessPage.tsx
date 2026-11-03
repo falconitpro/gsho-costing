@@ -9,7 +9,7 @@ type Matrix = {
   users: { id: string; display_name: string; roles: string[]; is_active: boolean }[]; note: string;
 };
 
-/** Задача 11: уровни доступа как данные — матрица «роль × группа полей», исключения для сотрудников, предпросмотр. Меняют администратор и ГД. */
+/** Задача 11: уровни доступа как данные — матрица «роль × группа полей», исключения для сотрудников, предпросмотр. Меняют администратор и ЗГД. */
 export default function AccessPage({ me }: { me: Me }) {
   const [m, setM] = useState<Matrix | null>(null);
   const [tab, setTab] = useState<"roles" | "overrides" | "preview">("roles");

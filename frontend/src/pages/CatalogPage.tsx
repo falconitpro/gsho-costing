@@ -12,7 +12,7 @@ type Exec = { id: string; name: string; brand_name: string; status: string; tech
 type Gl = { id: string; term_ru: string; term_zh: string; kind: string; status: string };
 type TplRow = { id?: string; no: number; code: string; name_ru: string; name_zh: string; unit: string; required: boolean; section: string };
 
-/** Задача 7: каталог производитель → тип → модель → исполнение, подтверждение КД/ГД, история цен; задача 4: глоссарий и шаблоны (обязательность). */
+/** Задача 7: каталог производитель → тип → модель → исполнение, подтверждение КД/ЗГД, история цен; задача 4: глоссарий и шаблоны (обязательность). */
 export default function CatalogPage({ me }: { me: Me }) {
   const [tab, setTab] = useState<"tree" | "add" | "pending" | "glossary" | "templates" | "archive">("tree");
   const [mergeExec, setMergeExec] = useState("");
@@ -63,7 +63,7 @@ export default function CatalogPage({ me }: { me: Me }) {
       {tab === "tree" && (
         <div className="grid" style={{ gridTemplateColumns: "380px 1fr" }}>
           <div className="card">
-            {tree.length === 0 && <div className="muted">Каталог пуст — модели появляются после отправки КП (менеджер предлагает, КД/ГД подтверждает)</div>}
+            {tree.length === 0 && <div className="muted">Каталог пуст — модели появляются после отправки КП (менеджер предлагает, КД/ЗГД подтверждает)</div>}
             {tree.map((f) => (
               <details key={f.factory_id} open><summary style={{ fontWeight: 700, cursor: "pointer" }}>{f.factory}</summary>
                 {f.types.map((t) => (
@@ -150,7 +150,7 @@ export default function CatalogPage({ me }: { me: Me }) {
       )}
       {tab === "templates" && (
         <div className="card">
-          <p className="muted">Перечень технических характеристик по типу машины и обязательность параметров (задают КД и ГД). Общий шаблон — фиксированные параметры RFQ (разделы 1–11). Менеджер может изменить обязательность в конкретной сделке.</p>
+          <p className="muted">Перечень технических характеристик по типу машины и обязательность параметров (задают КД и ЗГД). Общий шаблон — фиксированные параметры RFQ (разделы 1–11). Менеджер может изменить обязательность в конкретной сделке.</p>
           <div className="row"><select value={tplType} onChange={(e) => setTplType(e.target.value)}><option value="">Общий шаблон</option>{types.map((t) => <option key={t.id} value={t.id}>{t.name}{t.status === "pending" ? " (на подтверждение)" : ""}</option>)}</select>
             {editor && <button className="btn ghost" onClick={() => { const n = prompt("Новый тип машины:"); if (n) api.post("/api/refs/machine-types", { name: n }).then(() => api.get<typeof types>("/api/refs/machine-types").then(setTypes)); }}>+ тип машины</button>}
             {editor && <button className="btn" onClick={() => api.put(`/api/refs/tech-param-templates?machine_type_id=${tplType}`, tpl).then(() => setMsg("Шаблон сохранён")).catch((e) => setMsg(e.message))}>Сохранить шаблон</button>}

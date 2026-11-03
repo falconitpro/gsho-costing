@@ -63,7 +63,7 @@ def matrix(db: Session) -> dict[str, Any]:
         "groups": [{"code": g, "title": t, "fields": sorted(keys)} for g, (t, keys) in FIELD_GROUPS.items()],
         "levels": [{"level": l, "title": t} for l, t in LEVEL_TITLES.items()],
         "roles": roles_out,
-        "note": "ГД наследует права КД; группу «Уровни доступа» нельзя закрыть для ГД и администратора.",
+        "note": "ЗГД наследует права КД; группу «Уровни доступа» нельзя закрыть для ЗГД и администратора.",
     }
 
 
@@ -74,7 +74,7 @@ def set_rule(db: Session, role: str, group: str, level: int, user_id: Optional[s
     if level not in LEVEL_TITLES:
         raise ValueError("Уровень: 0, 1 или 2")
     if group in PROTECTED.get(role_enum, set()) and level < EDIT:
-        raise ValueError("Это право нельзя снять с ГД/администратора")
+        raise ValueError("Это право нельзя снять с ЗГД/администратора")
     row = db.scalar(select(AccessRule).where(AccessRule.role == role, AccessRule.field_group == group))
     if row is None:
         row = AccessRule(role=role, field_group=group, level=level, changed_by=user_id)
@@ -93,7 +93,7 @@ def set_override(db: Session, user: User, group: str, level: int, valid_to: Opti
         raise ValueError("Уровень: 0, 1 или 2")
     user_roles = {Role(r) for r in (user.roles or [])}
     if any(group in PROTECTED.get(r, set()) for r in user_roles) and level < EDIT:
-        raise ValueError("Это право нельзя снять с ГД/администратора")
+        raise ValueError("Это право нельзя снять с ЗГД/администратора")
     row = db.scalar(select(AccessUserOverride).where(AccessUserOverride.user_id == user.id, AccessUserOverride.field_group == group))
     if row is None:
         row = AccessUserOverride(user_id=user.id, field_group=group, level=level, valid_to=valid_to, comment=comment, created_by=created_by)

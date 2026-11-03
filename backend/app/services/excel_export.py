@@ -461,7 +461,7 @@ class ExcelExporter:
             ws.cell(row, 1, "Требуемые ступени по результату расчёта:").font = BOLD
             row += 1
             ap = self.res.approval
-            for name, flag in (("Коммерческая (КД)", ap.commercial), ("Финансовая (ФД)", ap.financial), ("Генеральная (ГД)", ap.general)):
+            for name, flag in (("Коммерческая (КД)", ap.commercial), ("Финансовая (ФД)", ap.financial), ("ЗГД", ap.general)):
                 ws.cell(row, 1, name)
                 ws.cell(row, 2, "требуется" if flag else "не требуется")
                 row += 1

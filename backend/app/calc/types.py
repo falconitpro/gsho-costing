@@ -211,7 +211,7 @@ DEFAULT_OVERHEAD_SCALE = [
 class Thresholds(BaseModel):
     margin_threshold_pct: float = 3.0
     cash_gap_limit_rub: Optional[float] = None   # лимит ФД
-    gd_deal_limit_rub: Optional[float] = None    # лимит суммы сделки для визы ГД
+    gd_deal_limit_rub: Optional[float] = None    # лимит суммы сделки для визы ЗГД
     factory_price_deviation_pct: float = 10.0
     logistics_deviation_pct: float = 15.0
     plan_fact_deviation_pct: float = 10.0
@@ -295,7 +295,7 @@ class VariantInput(BaseModel):
         default_factory=lambda: [PaymentLine(**l) for l in DEFAULT_CLIENT_PAYMENTS]
     )
     client_payments_default: bool = False   # условия клиента взяты из типовой схемы (КД не задал)
-    overhead_pct_override: Optional[float] = None   # КД переопределил с комментарием → виза ГД
+    overhead_pct_override: Optional[float] = None   # КД переопределил с комментарием → виза ЗГД
     overhead_override_comment: str = ""
 
 

@@ -201,7 +201,7 @@ def approval_flags(result) -> dict[str, bool]:
     return {
         "margin_below_threshold": any("ниже порога" in r for r in ap.reasons),
         "cash_gap_above_limit": any("разрыв" in r for r in ap.reasons),
-        "deal_above_gd_limit": any("лимита ГД" in r for r in ap.reasons),
+        "deal_above_gd_limit": any("лимита ЗГД" in r for r in ap.reasons),
         "overhead_override": any("накладных" in r for r in ap.reasons),
     }
 

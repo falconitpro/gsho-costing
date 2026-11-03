@@ -112,7 +112,7 @@ def save_rows(deal_id: str, pos_id: str, rows: list[RowIn], db: Session = Depend
         keep.add(row.id)
     removed = [row for rid, row in existing.items() if rid not in keep]
     if removed and not user.has(Role.ADMIN, Role.CD, Role.GD):
-        raise HTTPException(403, "Удалять строки таблицы технических характеристик могут КД, ГД или администратор")
+        raise HTTPException(403, "Удалять строки таблицы технических характеристик могут КД, ЗГД или администратор")
     for row in removed:
         db.delete(row)
     db.flush()
@@ -407,10 +407,10 @@ class SelectIn(BaseModel):
 
 @router.post("/offers/select")
 def offers_select(deal_id: str, body: SelectIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """КД/ГД отбирает заводы для КП: первый — в эту заявку, остальные — отдельные заявки (дублирование)."""
+    """КД/ЗГД отбирает заводы для КП: первый — в эту заявку, остальные — отдельные заявки (дублирование)."""
     deal = get_deal_or_404(db, deal_id, user)
     if not user.can("factory_offers", 2):
-        raise HTTPException(403, "Заводы для КП отбирает КД или ГД")
+        raise HTTPException(403, "Заводы для КП отбирает КД или ЗГД")
     if deal.status not in (DealStatus.DRAFT, DealStatus.REWORK, DealStatus.LOGISTICS_CALC, DealStatus.SERVICE_CALC, DealStatus.CALC_READY):
         raise HTTPException(409, "Отбор заводов выполняется до утверждения КП")
     try:

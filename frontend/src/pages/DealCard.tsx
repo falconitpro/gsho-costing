@@ -264,7 +264,7 @@ export default function DealCard({ me }: { me: Me }) {
       {tab === "catalog" && (
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Занесение оборудования в каталог</h2>
-          <p className="muted">Отметьте, что занести: новую модель и/или новое исполнение (набор технических характеристик). После подтверждения менеджера запись уходит КД/ГД на проверку; до подтверждения в подборе не участвует. История цен пишется автоматически.</p>
+          <p className="muted">Отметьте, что занести: новую модель и/или новое исполнение (набор технических характеристик). После подтверждения менеджера запись уходит КД/ЗГД на проверку; до подтверждения в подборе не участвует. История цен пишется автоматически.</p>
           <table><thead><tr><th /><th>Модель</th><th>Модель в каталоге</th><th>Исполнение</th><th>Параметров заполнено</th><th>Название исполнения</th></tr></thead>
             <tbody>{cand.map((c) => (
               <tr key={c.position_id}><td><input type="checkbox" checked={!!candSel[c.position_id]} disabled={c.execution_exists || !!c.pending_execution_id} onChange={(e) => setCandSel({ ...candSel, [c.position_id]: e.target.checked })} /></td>
