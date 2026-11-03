@@ -559,3 +559,10 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     rows4 = _ok(client.get(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR)))["rows"]
     assert client.put(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR), json=rows4[1:]).status_code == 403
     assert len(_ok(client.put(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(CD), json=rows4[1:]))["rows"]) == len(rows4) - 1
+    # --- карточка машины в каталоге: характеристики для всех; цены и аналитическая справка — КД и ЗГД
+    tree_ = _ok(client.get("/api/catalog/tree", headers=H(MGR)))
+    mid = tree_[0]["types"][0]["models"][0]["id"]
+    cm = _ok(client.get(f"/api/catalog/models/{mid}/card", headers=H(MGR)))
+    assert cm["executions"] and not cm["with_prices"] and "factory_prices" not in cm
+    cc = _ok(client.get(f"/api/catalog/models/{mid}/card", headers=H(CD)))
+    assert cc["with_prices"] and "factory" in cc["analytics"] and "client" in cc["analytics"] and isinstance(cc["factory_prices"], list)
