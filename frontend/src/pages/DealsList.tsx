@@ -6,18 +6,18 @@ import { STATUS_TITLES, type Deal, type Me } from "../types";
 
 type Row = Deal & { group?: string; parent_number?: string; related_count?: number };
 
-type SortKey = "number" | "date" | "client" | "site" | "status" | "kp_due" | "priority" | "version";
+type SortKey = "number" | "date" | "client" | "status" | "kp_due" | "priority" | "version";
 const PRIO_ORDER: Record<string, number> = { low: 0, normal: 1, medium: 1, high: 2, urgent: 3, critical: 3 };
 const dealDate = (d: Row) => (d.requested_at || d.created_at || "") as string;
 const sortVal = (d: Row, k: SortKey): string | number => {
   switch (k) {
     case "number": return d.number; case "date": return dealDate(d); case "client": return d.client_name || "";
-    case "site": return d.site || ""; case "status": return d.status_detail || STATUS_TITLES[d.status] || d.status;
+    case "status": return d.status_detail || STATUS_TITLES[d.status] || d.status;
     case "kp_due": return d.kp_due || ""; case "priority": return PRIO_ORDER[d.priority] ?? 1; case "version": return d.current_version_no || 0;
   }
 };
-const COLS: [SortKey, string][] = [["number", "Номер"], ["date", "Дата"], ["client", "Клиент"], ["site", "Объект"], ["status", "Статус"],
-  ["kp_due", "Срок КП"], ["priority", "Приоритет"], ["version", "Версия"]];
+const COLS: [SortKey, string, number?][] = [["number", "Номер", 130], ["date", "Дата запроса", 110], ["kp_due", "Срок КП", 100], ["client", "Клиент"],
+  ["priority", "Приоритет", 100], ["status", "Статус"], ["version", "Версия", 70]];
 
 /** Задача 9: связанные заявки (исходная и её дубли) идут подряд — дубли сразу под исходной, с отступом. */
 function grouped(deals: Row[]): Row[] {
@@ -38,7 +38,7 @@ export default function DealsList({ me }: { me: Me }) {
   const [deals, setDeals] = useState<Row[]>([]);
   const [clients, setClients] = useState<{ id: string; name: string; sites: { name: string }[] }[]>([]);
   const [showNew, setShowNew] = useState(false);
-  const [form, setForm] = useState({ client_id: "", site: "", contact: "", kp_due: "", priority: "normal", service_flag: false, target_hours: "" });
+  const [form, setForm] = useState({ client_id: "", contact: "", kp_due: "", priority: "normal", service_flag: false, target_hours: "" });
   const [err, setErr] = useState("");
   const nav = useNavigate();
   const isManager = me.roles.some((r) => r.code === "manager" || r.code === "gd");
@@ -88,7 +88,6 @@ export default function DealsList({ me }: { me: Me }) {
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>
-            <label className="f">Объект / месторождение<input value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} /></label>
             <label className="f">Контактное лицо<input value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} /></label>
             <label className="f">Срок КП<input type="date" value={form.kp_due} onChange={(e) => setForm({ ...form, kp_due: e.target.value })} /></label>
             <label className="f">Приоритет
@@ -120,17 +119,17 @@ export default function DealsList({ me }: { me: Me }) {
       )}
       <div className="card">
         <table>
-          <thead><tr>{COLS.map(([k, t]) => (
-            <th key={k} onClick={() => toggleSort(k)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }} title="сортировать по столбцу">
+          <thead><tr>{COLS.map(([k, t, w]) => (
+            <th key={k} onClick={() => toggleSort(k)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", width: w, minWidth: w }} title="сортировать по столбцу">
               {t} <span style={{ opacity: sort.key === k ? 1 : 0.35 }}>{sort.key === k ? (sort.dir === 1 ? "▲" : "▼") : "↕"}</span></th>))}</tr></thead>
           <tbody>
             {grouped(sorted).map((d) => (
               <tr key={d.id} style={d.parent_number ? { background: "#fafafa" } : undefined}>
-                <td style={d.parent_number ? { paddingLeft: 22 } : undefined}>{d.parent_number && <span className="muted">↳ </span>}<Link to={`/deals/${d.id}`}>{d.number}</Link>
+                <td style={{ whiteSpace: "nowrap", ...(d.parent_number ? { paddingLeft: 22 } : {}) }}>{d.parent_number && <span className="muted">↳ </span>}<Link to={`/deals/${d.id}`}>{d.number}</Link>
                   {!d.parent_number && (d.related_count || 0) > 0 && <span className="badge" title="связанные заявки по одному запросу клиента" style={{ marginLeft: 6 }}>+{d.related_count} связ.</span>}
-                  {d.parent_number && <div className="muted" style={{ fontSize: 11 }}>дубль {d.parent_number}</div>}</td><td style={{ whiteSpace: "nowrap" }}>{fmtDate(dealDate(d))}</td><td>{d.client_name}</td><td>{d.site}</td>
-                <td><span className="badge accent">{d.status_detail || STATUS_TITLES[d.status] || d.status}</span></td>
-                <td>{fmtDate(d.kp_due)}</td><td>{lbl(PRIORITY, d.priority)}</td><td>{d.current_version_no}</td>
+                  {d.parent_number && <div className="muted" style={{ fontSize: 11 }}>дубль {d.parent_number}</div>}</td><td style={{ whiteSpace: "nowrap" }}>{fmtDate(dealDate(d))}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{fmtDate(d.kp_due)}</td><td>{d.client_name}</td><td>{lbl(PRIORITY, d.priority)}</td>
+                <td><span className="badge accent">{d.status_detail || STATUS_TITLES[d.status] || d.status}</span></td><td>{d.current_version_no}</td>
               </tr>
             ))}
             {deals.length === 0 && <tr><td colSpan={8} className="muted">{archived ? "В архиве сделок нет" : "Сделок нет"}</td></tr>}

@@ -640,7 +640,7 @@ def kp_recipients(deal_id: str, db: Session = Depends(get_db), user: CurrentUser
     for c in (deal.client.contacts if deal.client else []) or []:
         if c.get("email"):
             out.append({"name": c.get("name") or "", "position": c.get("position") or "", "email": c["email"], "phone": c.get("phone") or ""})
-    return {"recipients": out, "mail_configured": _mail_provider() != "console", "subject": f"Коммерческое предложение {deal.number}" + (f" — {deal.site}" if deal.site else ""),
+    return {"recipients": out, "mail_configured": _mail_provider() != "console", "subject": f"Коммерческое предложение {deal.number}",
             "body": "Добрый день!\n\nНаправляем коммерческое предложение во вложении. Будем рады ответить на вопросы.\n\nС уважением,"}
 
 

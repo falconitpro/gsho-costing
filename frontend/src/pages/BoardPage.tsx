@@ -3,7 +3,7 @@ import { lbl, PRIORITY, ROLE } from "../labels";
 import { Link } from "react-router-dom";
 import { api, fmtDate } from "../api";
 
-type Col = { title: string; deals: { id: string; number: string; client: string; site: string; priority: string; overdue: boolean; status_detail?: string; tasks: { title: string; role: string; due: string; overdue: boolean }[];
+type Col = { title: string; deals: { id: string; number: string; client: string; priority: string; overdue: boolean; status_detail?: string; tasks: { title: string; role: string; due: string; overdue: boolean }[];
   group?: string; group_number?: string; related?: number }[] };
 
 export default function BoardPage() {
@@ -21,7 +21,7 @@ export default function BoardPage() {
               <div key={d.id} className={"deal" + (d.overdue ? " overdue" : "")}>
                 <Link to={`/deals/${d.id}`}><b>{d.number}</b></Link> <span className="badge">{lbl(PRIORITY, d.priority)}</span>{d.status_detail && d.status_detail.includes("·") && <div className="muted" style={{ fontSize: 12 }}>{d.status_detail.split("·")[1].trim()}</div>}
                 {(d.related || 0) > 0 && <span className="badge" title={`одна группа заявок по запросу клиента ${d.group_number}`} style={{ marginLeft: 4 }}>запрос {d.group_number}: +{d.related}</span>}
-                <div className="muted">{d.client} · {d.site}</div>
+                <div className="muted">{d.client}</div>
                 {d.tasks.map((t, i) => <div key={i} style={{ fontSize: 12 }}>• {t.title} — {lbl(ROLE, t.role)}, до {fmtDate(t.due)}{t.overdue ? " ⚠" : ""}</div>)}
               </div>
             ))}

@@ -118,10 +118,10 @@ export default function ClientsPage({ me }: { me: Me }) {
           </div>
         )}
         <div className="card">
-          <table><thead><tr><th>Наименование</th><th>ИНН</th><th>Объекты</th></tr></thead>
+          <table><thead><tr><th>Наименование</th><th>ИНН</th></tr></thead>
             <tbody>{clients.map((c) => (
               <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => api.get<Card>(`/api/refs/clients/${c.id}`).then(setCard)}>
-                <td>{c.name}</td><td>{c.inn}</td><td>{(c.sites || []).map((s) => s.name).join(", ")}</td></tr>))}</tbody></table>
+                <td>{c.name}</td><td>{c.inn}</td></tr>))}</tbody></table>
         </div>
       </div>
       <div>

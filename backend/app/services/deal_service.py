@@ -171,7 +171,7 @@ def ensure_folders(db: Session, deal: Deal) -> None:
     if deal.storage_folder:
         return
     st = adapters.storage()
-    folder = st.deal_folder(deal.client.name, deal.requested_at.year, deal.number, deal.site)
+    folder = st.deal_folder(deal.client.name, deal.requested_at.year, deal.number, "")
     st.ensure_deal_folders(folder)
     st.set_permissions(folder, "04_cost", [])   # менеджера нет в списке доступа к 04
     deal.storage_folder = folder

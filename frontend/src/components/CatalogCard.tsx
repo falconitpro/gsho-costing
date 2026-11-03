@@ -103,8 +103,6 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
           <div className="row" style={{ flexWrap: "wrap" }}>
             <select value={newDeal.client_id} onChange={(x) => setNewDeal({ ...newDeal, client_id: x.target.value })}><option value="">— клиент —</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
             <label className="row">кол-во <input type="number" min={1} value={newDeal.qty} onChange={(x) => setNewDeal({ ...newDeal, qty: x.target.value })} style={{ width: 70 }} /></label>
-            <input placeholder="объект / месторождение" value={newDeal.site} list="cat-sites" onChange={(x) => setNewDeal({ ...newDeal, site: x.target.value })} />
-            <datalist id="cat-sites">{(clients.find((c) => c.id === newDeal.client_id)?.sites || []).map((s0) => <option key={s0.name} value={s0.name} />)}</datalist>
             <label className="row">срок КП <input type="date" value={newDeal.kp_due} onChange={(x) => setNewDeal({ ...newDeal, kp_due: x.target.value })} /></label>
             <input placeholder="комментарий" value={newDeal.comment} onChange={(x) => setNewDeal({ ...newDeal, comment: x.target.value })} style={{ width: 220 }} />
             <button className="btn" disabled={!newDeal.client_id} onClick={createDeal}>Создать заявку</button>
