@@ -26,6 +26,9 @@ export default function DealCard({ me }: { me: Me }) {
   const [priceComment, setPriceComment] = useState("");
   const [variantName, setVariantName] = useState("");
   const [posForm, setPosForm] = useState<"new" | Position | null>(null);
+  // несколько позиций: наименование в перечне открывает таблицу технических характеристик этой позиции ниже
+  const [activePos, setActivePos] = useState<string>("");
+  const openPos = (id: string) => { setActivePos(id); setTimeout(() => document.getElementById("pos-" + id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50); };
   const [factories, setFactories] = useState<Record<string, string>>({});
   const [wishes, setWishes] = useState("");
   const [altChoice, setAltChoice] = useState<{ id: string; name: string; price_rub: number | null; positions: number }[] | null>(null);
@@ -177,7 +180,9 @@ export default function DealCard({ me }: { me: Me }) {
         </div>
       )}
 
-      {tab === "positions" && (
+      {tab === "positions" && (() => { const multi = (deal.positions || []).length > 1;
+        const shownPos = (deal.positions || []).find((x) => x.id === activePos) || (deal.positions || [])[0];
+        return (
         <>
           <div className="card">
             <div className="row" style={{ justifyContent: "space-between" }}>
@@ -189,7 +194,8 @@ export default function DealCard({ me }: { me: Me }) {
               <tbody>{(deal.positions || []).map((p) => {
                 const pr = (p.price_reference || {}) as { last_price?: number; deviation_pct?: number; comment?: string };
                 const dt = p.delivery_term || {};
-                return (<tr key={p.id}><td>{factories[p.factory_id] || p.factory_id.slice(0, 8)}</td><td>{p.machine_type} <b>{designation(p)}</b>{p.execution_id && <span className="badge" title="из каталога"> каталог</span>}</td><td className="num">{p.qty}</td>
+                return (<tr key={p.id} style={multi && shownPos?.id === p.id ? { background: "var(--accent-soft)" } : undefined}><td>{factories[p.factory_id] || p.factory_id.slice(0, 8)}</td><td>{multi ? <a href={"#pos-" + p.id} title="открыть технические характеристики позиции" onClick={(e) => { e.preventDefault(); openPos(p.id); }}
+                    style={{ fontWeight: shownPos?.id === p.id ? 700 : 400 }}>{p.machine_type} <b>{designation(p)}</b></a> : <>{p.machine_type} <b>{designation(p)}</b></>}{p.execution_id && <span className="badge" title="из каталога"> каталог</span>}</td><td className="num">{p.qty}</td>
                   <td className="num">{fmtRub(p.unit_price)}</td><td>{p.currency}</td><td className="num">{fmtRub(p.options_price)}</td><td>{p.basis}</td><td>{posTerm(p)}</td>
                   <td className="muted">{TERM_UNITS[dt.unit || "calendar_days"]} {DELIVERY_START[dt.start_event || "client_contract"]} (+10 %, до недели)</td>
                   <td>{pr.last_price ? <>посл. {fmtRub(pr.last_price)} ({pr.deviation_pct} %) {pr.comment && <span className="muted">— {pr.comment}</span>}</> : <span className="muted">нет истории</span>}</td>
@@ -215,9 +221,16 @@ export default function DealCard({ me }: { me: Me }) {
               {rfqPreview && <RfqPreview data={rfqPreview} />}
             </div>
           )}
-          {(deal.positions || []).map((p) => (
-            <div className="card" key={"q" + p.id}>
-              <h2 style={{ marginTop: 0 }}>{p.machine_type} {designation(p)} × {p.qty}</h2>
+          {(deal.positions || []).filter((p) => !multi || p.id === shownPos?.id).map((p) => (
+            <div className="card" key={"q" + p.id} id={"pos-" + p.id} style={{ scrollMarginTop: 80 }}>
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <h2 style={{ marginTop: 0 }}>{p.machine_type} {designation(p)} × {p.qty}</h2>
+                {multi && <div className="row">
+                  <span className="muted">позиция {(deal.positions || []).findIndex((x) => x.id === p.id) + 1} из {(deal.positions || []).length}:</span>
+                  <select value={p.id} onChange={(e) => openPos(e.target.value)}>
+                    {(deal.positions || []).map((x, i) => <option key={x.id} value={x.id}>{i + 1}. {x.machine_type} {designation(x)}</option>)}</select>
+                </div>}
+              </div>
               {can(me, "tech_params") && <TechParamsTable dealId={deal.id} position={p} canEdit={canTech} onChanged={load} />}
               <div style={{ marginTop: 14 }}>{can(me, "images") && <ImagesBlock dealId={deal.id} position={p} me={me} onChanged={load} />}</div>
               <div style={{ marginTop: 14 }}>{can(me, "local_options") && <LocalOptionsBlock dealId={deal.id} position={p} me={me} onChanged={load} />}</div>
@@ -234,8 +247,7 @@ export default function DealCard({ me }: { me: Me }) {
               <p className="muted">Минимум два предложения; состав позиций каждого можно изменить через API/КД. Условия оплаты и цену по каждому предложению задаёт КД.</p>
             </div>
           )}
-        </>
-      )}
+        </>); })()}
 
       {tab === "offers" && (
         <>
