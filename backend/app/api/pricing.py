@@ -353,8 +353,41 @@ def _finalize_approval(db: Session, deal: Deal, user_id: str) -> DealVersion:
     return ver
 
 
-def _build_kp_file(db: Session, deal: Deal, ver: DealVersion) -> str:
+def revision_totals(deal: Deal, ver: DealVersion, changes: dict) -> dict:
+    """Итоги редакции КП по предложениям: стоимость оборудования, услуги, скидки / надбавки, итог и маржа (ориентир)."""
+    res = ver.calc_result or {}
+    out = {}
+    for v in deal.variants:
+        if not v.in_kp or v.price_rub is None:
+            continue
+        ch = (changes or {}).get(v.id) or {}
+        base = float(v.price_rub)
+        extras = [(str(e.get("name") or "").strip(), (float(e["price_rub"]) if e.get("price_rub") not in (None, "") else None))
+                  for e in ch.get("extras") or [] if str(e.get("name") or "").strip()]
+        subtotal = base + sum(a for _, a in extras if a)
+        adj = []
+        for a in ch.get("adjustments") or []:
+            try:
+                val = float(a.get("value") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not val:
+                continue
+            amount = subtotal * val / 100.0 if a.get("mode") == "pct" else val
+            sign = -1 if a.get("kind") == "discount" else 1
+            label = a.get("label") or (("Скидка" if sign < 0 else "Надбавка") + (f" {val:g} %" if a.get("mode") == "pct" else ""))
+            adj.append((label, round(sign * amount, 2)))
+        total = round(subtotal + sum(x for _, x in adj), 2)
+        cost = ((res.get("variants") or {}).get(v.id) or {}).get("base", {}).get("cost_total_rub")
+        out[v.id] = {"name": v.name, "base": base, "extras": extras, "adjustments": adj, "total": total,
+                     "cost": cost, "margin_pct": round((total - cost) / total * 100, 2) if cost and total else None,
+                     "configuration": (ch.get("configuration") or "").strip(), "service_in_kp": ch.get("service_in_kp")}
+    return out
+
+
+def _build_kp_file(db: Session, deal: Deal, ver: DealVersion, changes: Optional[dict] = None, revision_no: int = 0) -> str:
     s = settings_service.get_all(db)
+    rev = revision_totals(deal, ver, changes) if changes is not None else {}
     res = ver.calc_result
     factories = {f.id: f for f in db.scalars(select(Factory)).all()}
     company = deal.kp_brand == "company"
@@ -384,6 +417,14 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion) -> str:
             warranty="; ".join(f"{p.warranty_months or '—'} мес. / {p.warranty_hours or '—'} м·ч" for p in poss),
             service_line=("включено в цену" if v.service_in_kp else None) if deal.service_flag else None,
         ))
+        r = rev.get(v.id)
+        if r:   # редакция КП: услуги, скидки / надбавки, комплектация
+            kv = variants[-1]
+            kv.base_total_rub, kv.extra_lines, kv.adjustments, kv.total_rub = r["base"], r["extras"], r["adjustments"], r["total"]
+            if r["configuration"]:
+                kv.configuration = r["configuration"]
+            if r["service_in_kp"] is not None and deal.service_flag:
+                kv.service_line = "включено в цену" if r["service_in_kp"] else None
     tech: dict[str, list[tuple[str, str, str]]] = {}
     images: dict[str, list[tuple[str, str]]] = {}
     attach_files: list[str] = []
@@ -421,7 +462,7 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion) -> str:
     forbidden = [factories[p.factory_id].name for p in deal.positions if p.factory_id in factories] + \
                 [factories[p.factory_id].name_zh for p in deal.positions if p.factory_id in factories and factories[p.factory_id].name_zh] if company else []
     data = KpData(
-        kp_no=f"КП-{deal.number[2:]}", kp_date=today.strftime("%d.%m.%Y"), valid_until=(today + timedelta(days=s["kp_validity_days"])).strftime("%d.%m.%Y"),
+        kp_no=f"КП-{deal.number[2:]}" + (f"/{revision_no}" if revision_no else ""), kp_date=today.strftime("%d.%m.%Y"), valid_until=(today + timedelta(days=s["kp_validity_days"])).strftime("%d.%m.%Y"),
         client=deal.client.name, site=deal.site, manager=deal.manager_id, manager_contact="", intro_text=s.get("kp_intro_text") or
         "Уважаемые коллеги! Благодарим за запрос и направляем коммерческое предложение на поставку горношахтного оборудования.",
         variants=variants, tech_specs=tech, service_block=service_block, delivery_terms=delivery_terms,
@@ -429,10 +470,11 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion) -> str:
         signatures="Коммерческий директор ________________", requisites=s.get("company_requisites", ""),
         single_offer=single, images=images, brand_company=company, forbidden_words=[w for w in forbidden if w],
     )
-    ver.kp_meta = {"kp_brand": deal.kp_brand, "kp_images_mode": deal.kp_images_mode, "images_in_document": sum(len(v) for v in images.values()),
-                   "attachments": [os.path.basename(f) for f in attach_files]}
+    if not revision_no:
+        ver.kp_meta = {"kp_brand": deal.kp_brand, "kp_images_mode": deal.kp_images_mode, "images_in_document": sum(len(v) for v in images.values()),
+                       "attachments": [os.path.basename(f) for f in attach_files]}
     tmpdir = tempfile.mkdtemp()
-    return build_kp(data, os.path.join(tmpdir, f"{deal.number}_КП_v{ver.version_no}.docx"))
+    return build_kp(data, os.path.join(tmpdir, f"{deal.number}_КП_v{ver.version_no}" + (f"_ред{revision_no}" if revision_no else "") + ".docx"))
 
 
 def _kp_model(p: Position, company: bool, db: Session, factories: dict) -> str:
@@ -534,11 +576,14 @@ def kp_build(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
 
 
 @router.get("/kp/file")
-def kp_file(deal_id: str, format: str = "docx", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """«Выгрузить КП»: Word (docx) или PDF."""
+def kp_file(deal_id: str, format: str = "docx", original: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """«Выгрузить КП»: Word (docx) или PDF — актуальная редакция (если КП изменяли) или КП утверждённой версии."""
     from fastapi.responses import FileResponse
     deal = get_deal_or_404(db, deal_id, user)
     ver = _approved_version(db, deal)
+    last = None if original else _last_revision(db, deal, ver)
+    if last is not None:
+        return _revision_file(db, deal, last, format)
     path = _kp_local(db, deal, ver)
     db.commit()
     name = f"{deal.number}_КП_v{ver.version_no}"
@@ -586,8 +631,11 @@ def kp_send(deal_id: str, body: KpSendIn, db: Session = Depends(get_db), user: C
     bad = [a for a in to if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", a)]
     if not body.to or bad:
         raise HTTPException(422, "Укажите получателей с корректными e-mail" + (f": {', '.join(bad)}" if bad else ""))
-    docx = _kp_local(db, deal, ver)
-    files = [docx] if body.format == "docx" else [_kp_pdf(db, deal, ver, docx)] if body.format == "pdf" else [docx, _kp_pdf(db, deal, ver, docx)]
+    last = _last_revision(db, deal, ver)
+    docx = (adapters.storage().download(last.kp_path, os.path.join(tempfile.mkdtemp(), os.path.basename(last.kp_path))) if last
+            else _kp_local(db, deal, ver))
+    pdf = (lambda: _to_pdf(docx)) if last else (lambda: _kp_pdf(db, deal, ver, docx))
+    files = [docx] if body.format == "docx" else [pdf()] if body.format == "pdf" else [docx, pdf()]
     subject = body.subject or f"Коммерческое предложение {deal.number}"
     html_body = "".join(f"<p>{html.escape(par).replace(chr(10), '<br>')}</p>" for par in (body.body or "").split("\n\n"))
     try:
@@ -623,3 +671,121 @@ def set_report_date(deal_id: str, body: ReportDateIn, db: Session = Depends(get_
           {"report_date": str(body.report_date) if body.report_date else None})
     db.commit()
     return {"report_date": deal.report_date.isoformat() if deal.report_date else None}
+
+
+# ------------------------------------------------------------------ редакции КП (КД / ЗГД): скидки, надбавки, услуги, комплектация
+
+def _last_revision(db: Session, deal: Deal, ver: DealVersion):
+    from ..models import KpRevision
+    return db.scalar(select(KpRevision).where(KpRevision.deal_id == deal.id, KpRevision.version_id == ver.id).order_by(KpRevision.no.desc()).limit(1))
+
+
+def _revision_file(db: Session, deal: Deal, rev, format: str):
+    from fastapi.responses import FileResponse
+    name = f"{deal.number}_КП_ред{rev.no}"
+    local = adapters.storage().download(rev.kp_path, os.path.join(tempfile.mkdtemp(), os.path.basename(rev.kp_path)))
+    if format != "pdf":
+        return FileResponse(local, filename=name + ".docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    if rev.pdf_path:
+        try:
+            return FileResponse(adapters.storage().download(rev.pdf_path, os.path.join(tempfile.mkdtemp(), os.path.basename(rev.pdf_path))),
+                                filename=name + ".pdf", media_type="application/pdf")
+        except Exception:
+            pass
+    pdf = _to_pdf(local)
+    try:
+        rev.pdf_path = adapters.storage().upload(pdf, deal.storage_folder, "05_kp", os.path.basename(pdf)).path
+        db.commit()
+    except Exception:
+        pass
+    return FileResponse(pdf, filename=name + ".pdf", media_type="application/pdf")
+
+
+def _cd_gd(user: CurrentUser) -> None:
+    if not user.has(Role.CD, Role.GD):
+        raise HTTPException(403, "Изменяют КП КД или ЗГД")
+
+
+@router.get("/kp/revisions")
+def kp_revisions(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """История КП: исходное КП утверждённой версии и все редакции — дата, автор, цена, изменения, файлы."""
+    from ..models import KpRevision, User
+    deal = get_deal_or_404(db, deal_id, user)
+    ver = db.get(DealVersion, deal.approved_version_id) if deal.approved_version_id else None
+    if ver is None:
+        return {"rows": [], "variants": [], "can_edit": False}
+    users = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    base_total = sum(float(v.price_rub or 0) for v in deal.variants if v.in_kp and v.price_rub is not None)
+    cost = None
+    try:
+        cost = sum(((ver.calc_result or {}).get("variants") or {}).get(v.id, {}).get("base", {}).get("cost_total_rub") or 0
+                   for v in deal.variants if v.in_kp and v.price_rub is not None)
+    except Exception:
+        pass
+    rows = [{"id": None, "no": 0, "at": ver.created_at.isoformat() if ver.created_at else None, "author": users.get(ver.created_by or "", ""),
+             "description": f"КП по утверждённой версии расчёта {ver.version_no}", "price_rub": base_total, "price_before_rub": None,
+             "margin_pct": round((base_total - cost) / base_total * 100, 2) if cost and base_total else None, "has_file": bool(ver.kp_path),
+             "changes": {}, "sent_at": None}]
+    for r in db.scalars(select(KpRevision).where(KpRevision.deal_id == deal.id, KpRevision.version_id == ver.id).order_by(KpRevision.no)).all():
+        rows.append({"id": r.id, "no": r.no, "at": r.created_at.isoformat() if r.created_at else None, "author": users.get(r.created_by or "", ""),
+                     "description": r.description, "price_rub": r.price_rub, "price_before_rub": r.price_before_rub, "margin_pct": r.margin_pct,
+                     "has_file": bool(r.kp_path), "changes": r.changes, "sent_at": r.sent_at.isoformat() if r.sent_at else None})
+    variants = [{"id": v.id, "name": v.name, "price_rub": v.price_rub, "service_flag": deal.service_flag, "service_in_kp": v.service_in_kp,
+                 "configuration": "; ".join(o.get("name", "") for p in deal.positions if p.id in v.position_ids for o in (p.options or [])) or "базовая"}
+                for v in deal.variants if v.in_kp and v.price_rub is not None]
+    return {"rows": rows, "variants": variants, "can_edit": user.has(Role.CD, Role.GD) and deal.status in (DealStatus.APPROVED, DealStatus.KP_SENT),
+            "threshold_pct": settings_service.get(db, "margin_threshold_pct")}
+
+
+class KpRevisionIn(BaseModel):
+    changes: dict = {}          # {variant_id: {adjustments: [{kind, mode, value, label}], extras: [{name, price_rub}], configuration, service_in_kp}}
+    description: str = ""
+
+
+@router.post("/kp/revisions/preview")
+def kp_revision_preview(deal_id: str, body: KpRevisionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    deal = get_deal_or_404(db, deal_id, user)
+    _cd_gd(user)
+    ver = _approved_version(db, deal)
+    return {"variants": revision_totals(deal, ver, body.changes), "threshold_pct": settings_service.get(db, "margin_threshold_pct")}
+
+
+@router.post("/kp/revisions", status_code=201)
+def kp_revision_create(deal_id: str, body: KpRevisionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Новая редакция КП: файл КП с изменениями (скидки, надбавки, услуги, комплектация), цена, маржа, описание изменений."""
+    from ..models import KpRevision
+    deal = get_deal_or_404(db, deal_id, user)
+    _cd_gd(user)
+    if deal.status not in (DealStatus.APPROVED, DealStatus.KP_SENT):
+        raise HTTPException(409, "КП изменяют после утверждения расчёта (до заключения контракта)")
+    if not body.description.strip():
+        raise HTTPException(422, "Опишите, что изменено в КП")
+    ver = _approved_version(db, deal)
+    totals = revision_totals(deal, ver, body.changes)
+    prev = _last_revision(db, deal, ver)
+    before = prev.price_rub if prev else sum(float(v.price_rub or 0) for v in deal.variants if v.in_kp and v.price_rub is not None)
+    no = (prev.no if prev else 0) + 1
+    path = _build_kp_file(db, deal, ver, body.changes, revision_no=no)
+    ensure_folders(db, deal)
+    stored = adapters.storage().upload(path, deal.storage_folder, "05_kp", os.path.basename(path))
+    db.add(Attachment(deal_id=deal.id, folder="05_kp", entity="version", entity_id=ver.id, file_name=os.path.basename(path),
+                      storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=user.id))
+    total = round(sum(t["total"] for t in totals.values()), 2)
+    cost = sum(t["cost"] or 0 for t in totals.values())
+    rev = KpRevision(deal_id=deal.id, version_id=ver.id, no=no, created_by=user.id, description=body.description.strip(), changes=body.changes,
+                     price_before_rub=before, price_rub=total, margin_pct=round((total - cost) / total * 100, 2) if cost and total else None,
+                     prices={k: t["total"] for k, t in totals.items()}, kp_path=stored.path)
+    db.add(rev)
+    audit(db, user.id, deal.id, "kp", ver.id, "kp_revision", {"price_rub": before}, {"no": no, "price_rub": total, "description": rev.description})
+    db.commit()
+    return {"id": rev.id, "no": no, "price_rub": total, "margin_pct": rev.margin_pct}
+
+
+@router.get("/kp/revisions/{rev_id}/file")
+def kp_revision_file(deal_id: str, rev_id: str, format: str = "docx", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from ..models import KpRevision
+    deal = get_deal_or_404(db, deal_id, user)
+    rev = db.get(KpRevision, rev_id)
+    if rev is None or rev.deal_id != deal.id:
+        raise HTTPException(404)
+    return _revision_file(db, deal, rev, format)

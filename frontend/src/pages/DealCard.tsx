@@ -9,6 +9,7 @@ import PositionForm from "./PositionForm";
 import Questionnaire from "../components/Questionnaire";
 import TechParamsTable from "../components/TechParamsTable";
 import KpActions from "../components/KpActions";
+import KpRevisions from "../components/KpRevisions";
 import ExecutionTab from "../components/ExecutionTab";
 import { ImagesBlock, LocalOptionsBlock, OffersBlock, RelatedDeals } from "../components/ImagesLocalOptions";
 import { payText } from "../components/PaymentTermsEditor";
@@ -122,6 +123,7 @@ export default function DealCard({ me }: { me: Me }) {
       </div>
       {err && <div className="alert error">{err}</div>}
       <div style={{ margin: "6px 0" }}><KpActions dealId={deal.id} status={deal.status} canAct={isOwner || has("cd", "gd", "admin")} onDone={() => { load(); }} /></div>
+      {["approved", "kp_sent"].includes(deal.status) && <KpRevisions dealId={deal.id} status={deal.status} onDone={() => { load(); }} />}
       {(deal.checks || []).length > 0 && editable && <div className="alert warn">Перед отправкой на расчёт: {deal.checks!.join(" ")}</div>}
       <RelatedDeals dealId={deal.id} me={me} />
 

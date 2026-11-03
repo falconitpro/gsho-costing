@@ -210,6 +210,12 @@ def approval_flags(result) -> dict[str, bool]:
 
 def excel_meta(deal: Deal, version_no: int, approvals: list[dict]) -> dict[str, Any]:
     meta: dict[str, Any] = {"version_no": version_no, "approvals": approvals, "target_hours": deal.target_hours or 10000}
+    # человекочитаемые названия вместо служебных идентификаторов (позиции, партии, заводы)
+    from sqlalchemy.orm import object_session
+    from ..models import Factory
+    db = object_session(deal)
+    fac = {f.id: f.name for f in db.query(Factory).filter(Factory.id.in_({p.factory_id for p in deal.positions})).all()} if db else {}
+    meta["names"] = {**{p.id: p.designation for p in deal.positions}, **{b.id: b.name for b in deal.batches}, **fac}
     meta["rfq_sources"] = {p.id: (p.tech_params or {}).get("_source_file", "") for p in deal.positions}
     meta["rfq_fields"] = {p.id: {**(p.tech_params or {}), **(p.logistics_params or {})} for p in deal.positions}
     meta["rfq_fields"] = {pid: {k: v for k, v in f.items() if not k.startswith("_")} for pid, f in meta["rfq_fields"].items()}
@@ -219,7 +225,7 @@ def excel_meta(deal: Deal, version_no: int, approvals: list[dict]) -> dict[str, 
     comments = []
     for p in deal.positions:
         for item, chk in ((p.logistics or {}).get("checks") or {}).items():
-            comments.append({"item": item, "ref": p.id, **chk})
+            comments.append({"item": item, "ref": p.designation, **chk})
     for b in deal.batches:
         for item, chk in ((b.items or {}).get("checks") or {}).items():
             comments.append({"item": item, "ref": b.name, **chk})

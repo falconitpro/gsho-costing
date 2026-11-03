@@ -51,6 +51,9 @@ class KpVariant:
     warranty: str
     service_line: Optional[str] = None     # «включено в цену» или сумма
     delivery_term_text: str = ""           # задача 3: «105 календарных дней с даты открытия аккредитива» по позициям
+    extra_lines: list = field(default_factory=list)    # редакция КП: [(наименование, сумма RUB или None — «включено»)]
+    adjustments: list = field(default_factory=list)    # редакция КП: [(подпись «Скидка 5 %», сумма RUB со знаком)]
+    base_total_rub: Optional[float] = None             # стоимость оборудования до услуг и скидок / надбавок
 
 
 @dataclass
@@ -161,6 +164,20 @@ def build_kp(data: KpData, path: str) -> str:
     ]
     if any(v.service_line for v in data.variants):
         rows.append(["Сервис до наработки"] + [v.service_line or "—" for v in data.variants])
+    money = lambda x: f"{x:,.0f}".replace(",", " ")   # noqa: E731
+    if any(v.extra_lines or v.adjustments for v in data.variants):
+        rows.append(["Стоимость оборудования, RUB без НДС"] + [money(v.base_total_rub if v.base_total_rub is not None else v.total_rub) for v in data.variants])
+        names = list(dict.fromkeys(n for v in data.variants for n, _ in v.extra_lines))
+        for n in names:
+            vals = []
+            for v in data.variants:
+                amt = next((a for nn, a in v.extra_lines if nn == n), "—")
+                vals.append("включено в цену" if amt is None else amt if amt == "—" else money(amt))
+            rows.append([n] + vals)
+        labels = list(dict.fromkeys(lbl for v in data.variants for lbl, _ in v.adjustments))
+        for lbl in labels:
+            vals = [next((("−" if a < 0 else "+") + money(abs(a)) for ll, a in v.adjustments if ll == lbl), "—") for v in data.variants]
+            rows.append([lbl] + vals)
     rows.append(["Итого, RUB без НДС"] + [f"{v.total_rub:,.0f}".replace(",", " ") for v in data.variants])
     rows.append([f"Итого, RUB с НДС {data.variants[0].vat_pct:.0f} %"] +
                 [f"{v.total_rub * (1 + v.vat_pct / 100):,.0f}".replace(",", " ") for v in data.variants])

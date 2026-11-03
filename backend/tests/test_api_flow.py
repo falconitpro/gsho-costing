@@ -158,10 +158,24 @@ def test_full_flow(client, tmp_path):
     assert client.get(f"/api/deals/{did}/kp/file?format=docx").status_code == 200
     rc = _ok(client.get(f"/api/deals/{did}/kp/recipients", headers=H(MGR)))
     assert rc["recipients"][0]["email"] == "mech@rudnik.example"
+    # изменение КП (КД): скидка 5 % и доп. услуга — новая редакция с файлом, ценой, маржой; история КП
+    rv0 = _ok(client.get(f"/api/deals/{did}/kp/revisions", headers=H(CD)))
+    vid0 = rv0["variants"][0]["id"]
+    ch = {vid0: {"adjustments": [{"kind": "discount", "mode": "pct", "value": 5}], "extras": [{"name": "Обучение операторов", "price_rub": 300000}],
+                 "configuration": "базовая + система пожаротушения"}}
+    assert client.post(f"/api/deals/{did}/kp/revisions", headers=H(MGR), json={"changes": ch, "description": "скидка"}).status_code == 403
+    pv = _ok(client.post(f"/api/deals/{did}/kp/revisions/preview", headers=H(CD), json={"changes": ch}))["variants"][vid0]
+    assert pv["total"] == round((pv["base"] + 300000) * 0.95, 2) and pv["margin_pct"] is not None
+    nr = _ok(client.post(f"/api/deals/{did}/kp/revisions", headers=H(CD), json={"changes": ch, "description": "Скидка 5 % по запросу клиента, обучение"}), 201)
+    assert nr["no"] == 1 and nr["price_rub"] == pv["total"]
+    hist = _ok(client.get(f"/api/deals/{did}/kp/revisions", headers=H(CD)))["rows"]
+    assert [r["no"] for r in hist] == [0, 1] and hist[1]["price_before_rub"] == hist[0]["price_rub"]
+    assert client.get(f"/api/deals/{did}/kp/revisions/{nr['id']}/file?format=docx", headers=H(MGR)).content[:2] == b"PK"
     # почта не подключена — отправка из системы недоступна, КП отправляют вручную и отмечают
     assert rc["mail_configured"] is False
     assert client.post(f"/api/deals/{did}/kp/send", headers=H(MGR), json={"to": ["mech@rudnik.example"], "format": "docx"}).status_code == 409
     assert _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": ["mech@rudnik.example"]}))["status"] == "kp_sent"
+    assert _ok(client.get(f"/api/deals/{did}/kp/revisions", headers=H(CD)))["rows"][1]["sent_at"]   # в историю цен ушла редакция
     card_cd = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(CD)))
     assert card_cd["kp_history"] and card_cd["kp_history"][0]["deal_number"] == deal["number"] and card_cd["kp_history"][0]["versions"]
     card_mgr = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(MGR)))
@@ -601,3 +615,26 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     assert cm["executions"] and not cm["with_prices"] and "factory_prices" not in cm
     cc = _ok(client.get(f"/api/catalog/models/{mid}/card", headers=H(CD)))
     assert cc["with_prices"] and "factory" in cc["analytics"] and "client" in cc["analytics"] and isinstance(cc["factory_prices"], list)
+
+
+def test_team_contacts_and_task_notifications(client):
+    """Карточка контактов исполнителя; каналы выбирают КД / ЗГД / администратор; новая задача — уведомление по каналам."""
+    t = _ok(client.get("/api/team", headers=H(MGR)))
+    log_u = next(u for u in t["users"] if u["email"] == LOG)
+    assert "wechat" in t["channels"] and log_u["contacts"]["mobile"] == ""
+    _ok(client.put(f"/api/team/{log_u['id']}/contacts", headers=H(LOG), json={"contacts": {"mobile": "+7 900 111-22-33", "wechat": "oksana_k", "telegram": "@oksana"}}))
+    assert client.put(f"/api/team/{log_u['id']}/contacts", headers=H(MGR), json={"contacts": {"mobile": "1"}}).status_code == 403
+    assert client.put(f"/api/team/{log_u['id']}/channels", headers=H(LOG), json={"channels": ["email"]}).status_code == 403
+    c = _ok(client.put(f"/api/team/{log_u['id']}/channels", headers=H(CD), json={"channels": ["email", "wechat", "telegram"]}))
+    assert c["notify_channels"] == ["app", "email", "wechat", "telegram"] and c["contacts"]["wechat"] == "oksana_k"
+    # новая задача логисту (заявка на расчёт) — уведомления по всем его каналам
+    clients = _ok(client.get("/api/refs/clients", headers=H(MGR)))
+    factories = _ok(client.get("/api/refs/factories", headers=H(MGR)))
+    d = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "уведомления"}), 201)
+    _ok(client.post(f"/api/deals/{d['id']}/positions", headers=H(MGR), json={"factory_id": factories[0]["id"], "model": "N-1", "machine_type": "ПДМ",
+                                                                            "unit_price": 100000}), 201)
+    _ok(client.post(f"/api/deals/{d['id']}/send-to-calc", headers=H(MGR)))
+    log = _ok(client.get(f"/api/team/{log_u['id']}/notifications", headers=H(LOG)))["log"]
+    task_msgs = [r for r in log if d["number"] in r["text"]]
+    assert {r["channel"] for r in task_msgs} >= {"app", "email", "wechat", "telegram"}
+    assert next(r for r in task_msgs if r["channel"] == "app")["status"] == "sent"

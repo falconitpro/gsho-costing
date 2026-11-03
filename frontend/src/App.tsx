@@ -8,6 +8,7 @@ import TasksPage from "./pages/TasksPage";
 import BoardPage from "./pages/BoardPage";
 import SettingsPage from "./pages/SettingsPage";
 import ClientsPage from "./pages/ClientsPage";
+import TeamPage from "./pages/TeamPage";
 import AccessPage from "./pages/AccessPage";
 import CatalogPage from "./pages/CatalogPage";
 import FactoriesPage from "./pages/FactoriesPage";
@@ -51,6 +52,8 @@ export default function App() {
             <NavLink to="/tasks">Мои задачи</NavLink>
             {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
             <NavLink to="/clients">Клиенты</NavLink>
+
+            <NavLink to="/team">Сотрудники</NavLink>
             <NavLink to="/catalog">Каталог</NavLink>
             <NavLink to="/factories">Заводы</NavLink>
             {has("admin", "fd", "gd", "cd") && <NavLink to="/settings">Настройки</NavLink>}
@@ -79,6 +82,8 @@ export default function App() {
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/board" element={<BoardPage />} />
             <Route path="/clients" element={<ClientsPage me={me} />} />
+
+            <Route path="/team" element={<TeamPage me={me} />} />
             <Route path="/settings" element={<SettingsPage me={me} />} />
             <Route path="/catalog" element={<CatalogPage me={me} />} />
             <Route path="/factories" element={<FactoriesPage me={me} />} />

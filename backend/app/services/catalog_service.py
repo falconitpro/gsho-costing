@@ -48,9 +48,16 @@ def record_client_prices(db: Session, deal: Deal, user_id: Optional[str]) -> Non
     ver = db.get(DealVersion, deal.approved_version_id) if deal.approved_version_id else None
     res = (ver.calc_result if ver else {}) or {}
     factories = {f.id: f.name for f in db.scalars(select(Factory)).all()}
+    # если КП изменяли (редакции КД / ЗГД) — в историю идут цены последней редакции
+    from ..models import KpRevision
+    rev = db.scalar(select(KpRevision).where(KpRevision.deal_id == deal.id, KpRevision.version_id == (ver.id if ver else None))
+                    .order_by(KpRevision.no.desc()).limit(1)) if ver else None
+    if rev is not None and rev.sent_at is None:
+        rev.sent_at = datetime.now(timezone.utc)
     for v in deal.variants:
         if not v.in_kp or v.price_rub is None:
             continue
+        v_price = float((rev.prices or {}).get(v.id, v.price_rub)) if rev else v.price_rub
         poss = [p for p in deal.positions if p.id in v.position_ids]
         total_qty = sum(p.qty for p in poss) or 1
         base = ((res.get("variants") or {}).get(v.id) or {}).get("base") or {}
@@ -58,14 +65,16 @@ def record_client_prices(db: Session, deal: Deal, user_id: Optional[str]) -> Non
         for p in poss:
             pc = pos_cost.get(p.id, {})
             share = pc.get("price_rub") if pc.get("price_rub") is not None else v.price_rub * p.qty / total_qty
+            if rev is not None and v.price_rub:
+                share = share * v_price / v.price_rub   # скидки / надбавки редакции — пропорционально
             term = ((pc.get("delivery_term") or {}).get("text")) or f"{base.get('delivery_days', '')} дн."
             db.add(ClientPriceHistory(
                 client_id=deal.client_id, deal_id=deal.id, deal_number=deal.number, version_id=ver.id if ver else None,
-                version_no=ver.version_no if ver else deal.current_version_no, kp_no=f"КП-{deal.number[2:]}", variant_id=v.id,
+                version_no=ver.version_no if ver else deal.current_version_no, kp_no=f"КП-{deal.number[2:]}" + (f"/{rev.no}" if rev else ""), variant_id=v.id,
                 variant_name="" if v.is_default else v.name, factory_id=p.factory_id, factory_name=factories.get(p.factory_id, ""),
                 model=p.model, execution_id=p.execution_id, qty=p.qty, unit_price_rub=round(share / max(p.qty, 1), 2), total_rub=round(share, 2),
                 payment_terms=v.client_payments or deal.client_payments or [], delivery_term=term, kp_brand=deal.kp_brand or "factory",
-                kp_path=ver.kp_path if ver else "", manager_id=deal.manager_id, on=date.today(), outcome=deal.outcome,
+                kp_path=(rev.kp_path if rev else ver.kp_path if ver else ""), manager_id=deal.manager_id, on=date.today(), outcome=deal.outcome,
             ))
 
 
