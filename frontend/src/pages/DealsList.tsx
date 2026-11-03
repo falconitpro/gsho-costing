@@ -48,7 +48,7 @@ export default function DealsList({ me }: { me: Me }) {
     <>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h1>Сделки</h1>
-        {isManager && <button className="btn" onClick={() => setShowNew(!showNew)}>+ Новая сделка</button>}
+        {isManager && <button className="btn add" onClick={() => setShowNew(!showNew)}>Новая сделка</button>}
       </div>
       {showNew && (
         <div className="card">

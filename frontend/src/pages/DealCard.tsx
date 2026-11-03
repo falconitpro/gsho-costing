@@ -182,9 +182,9 @@ export default function DealCard({ me }: { me: Me }) {
         return (
         <>
           <div className="card">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <h2 style={{ marginTop: 0 }}>Позиции</h2>
-              {editable && <button className="btn" onClick={() => setPosForm("new")}>+ Добавить вручную / из каталога</button>}
+            <div className="section-head">
+              <h2>Позиции</h2>
+              {editable && <button className="btn add" onClick={() => setPosForm("new")}>Добавить вручную / из каталога</button>}
             </div>
             <table>
               <thead><tr><th>Завод</th><th>Тип / модель</th><th className="num">Кол-во</th><th className="num">Цена за ед.</th><th>Валюта</th><th className="num">Опции</th><th>Базис</th><th>Срок производства</th><th>Срок клиенту</th><th>Справка по цене</th><th>Источник</th>{editable && <th />}</tr></thead>

@@ -102,6 +102,7 @@ async def upload_document(deal_id: str, file: UploadFile = File(...), category: 
         deal.legal_review = {"status": "in_review", "comment": "", "by": None, "at": None}
     elif category in LEGAL_CATEGORIES and deal.manager_id and deal.manager_id != user.id:
         notify(db, deal, deal.manager_id, "legal_doc", None, f"{deal.number}: юрист загрузил «{CATEGORIES[category]}» — {name}")
+    db.flush()
     audit(db, user.id, deal.id, "deal_doc", att.id, "upload", after={"category": CATEGORIES[category], "file": name, "comment": comment})
     db.commit()
     return {"documents": _rows(db, deal), "review": _review(db, deal)}
