@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
-from ..core.workflow import DealState, DealStatus, close_execution, contract_terms_changed, start_execution
+from ..core.workflow import DealState, DealStatus, close_execution, contract_terms_changed, role_title, start_execution
 from ..db import get_db
 from ..models import Approval, Deal, ExecutionStage
 from ..services import execution_service as ex
@@ -52,7 +52,8 @@ def stages(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
         for d in db.scalars(select(Deal).where(Deal.request_group_id == deal.request_group_id, Deal.id != deal.id)).all():
             related.append({"id": d.id, "number": d.number, "status": d.status.value})
     return {"stages": rows, "status": deal.status.value, "contract_number": deal.contract_number, "contract_signed_at": deal.contract_signed_at,
-            "factory_contract_signed_at": deal.factory_contract_signed_at, "won_variant_id": deal.won_variant_id, "related": related}
+            "factory_contract_signed_at": deal.factory_contract_signed_at, "won_variant_id": deal.won_variant_id, "related": related,
+            "contract_steps": ex.contract_steps(db, deal), "status_detail": ex.status_detail(deal)}
 
 
 @router.patch("/contract")
@@ -72,6 +73,69 @@ def contract(deal_id: str, body: ContractIn, db: Session = Depends(get_db), user
     db.commit()
     db.refresh(deal)
     return deal_payload(deal, user)
+
+
+class ContractStepIn(BaseModel):
+    code: str
+    done: bool = True
+    on: Optional[date] = None
+    comment: str = ""
+    contract_number: Optional[str] = None       # для «Контракт подписан клиентом»
+
+
+@router.post("/contract-step")
+def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Подэтап заключения контракта выполнен (или отметка снята): задача следующему ответственному, запись в ленту и журнал."""
+    from datetime import timedelta
+    from ..core.roles import Role as _R
+    from ..core.workflow import add_business_days
+    from ..models import FeedEntry, Task
+    deal = get_deal_or_404(db, deal_id, user)
+    if deal.status != DealStatus.CONTRACT:
+        raise HTTPException(409, "Подэтапы отмечаются на стадии «Заключение контракта»")
+    step = next((c for c in ex.CONTRACT_STEPS if c["code"] == body.code), None)
+    if step is None:
+        raise HTTPException(404, "Неизвестный подэтап")
+    is_owner = user.has(_R.MANAGER) and deal.manager_id == user.id
+    allowed = user.has(_R.GD) or any(user.has(_R(r)) for r in step["roles"] if r != "manager") or ("manager" in step["roles"] and is_owner)
+    if not allowed:
+        raise HTTPException(403, f"Подэтап «{step['title']}» отмечают: {', '.join(role_title(r) for r in step['roles'])}")
+    on = body.on or date.today()
+    steps = dict(deal.contract_steps or {})
+    if body.done:
+        if body.code == "client_signed":
+            number = (body.contract_number or deal.contract_number or "").strip()
+            if not number:
+                raise HTTPException(422, "Укажите номер контракта")
+            deal.contract_number, deal.contract_signed_at = number, on
+        if body.code == "factory_signed":
+            deal.factory_contract_signed_at = on
+        steps[body.code] = {"done": True, "on": on.isoformat(), "by": user.id, "comment": body.comment}
+    else:
+        steps.pop(body.code, None)
+        if body.code == "client_signed":
+            deal.contract_signed_at = None
+        if body.code == "factory_signed":
+            deal.factory_contract_signed_at = None
+    deal.contract_steps = steps
+    audit(db, user.id, deal.id, "deal", deal.id, "contract_step", None, {"step": step["title"], "done": body.done, "on": on.isoformat(), "comment": body.comment})
+    db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"Заключение контракта: {step['title']}" + ("" if body.done else " — отметка снята"),
+                     body=body.comment, user_id=user.id))
+    # задачи: закрываем задачи стадии контракта, ставим задачу следующему ответственному
+    complete_tasks(db, deal, block="contract")
+    rows = ex.contract_steps(db, deal)
+    nxt = next((r for r in rows if r["state"] == "current"), None)
+    if nxt:
+        days = 5 if nxt["code"] in ("client_review", "factory_signed") else 2
+        assignee = deal.manager_id if nxt["task_role"] == "manager" else None
+        db.add(Task(deal_id=deal.id, role=nxt["task_role"], assignee_id=assignee, title=f"Заключение контракта: {nxt['title'].lower()}", block="contract",
+                    due=add_business_days(date.today(), days)))
+    elif deal.contract_number and deal.contract_signed_at:
+        db.add(Task(deal_id=deal.id, role="manager", assignee_id=deal.manager_id, title="Контракт подписан — начать исполнение", block="contract",
+                    due=date.today() + timedelta(days=1)))
+    ex.rebuild_stages(db, deal)
+    db.commit()
+    return {"contract_steps": ex.contract_steps(db, deal), "status_detail": ex.status_detail(deal)}
 
 
 @router.post("/start")
@@ -110,7 +174,7 @@ def set_actual(deal_id: str, stage_id: str, body: ActualIn, db: Session = Depend
     if st is None or st.deal_id != deal.id:
         raise HTTPException(404)
     if not ex.can_set(user, st):
-        raise HTTPException(403, f"Этап «{st.title}» отмечают: {', '.join(st.responsible_roles)}")
+        raise HTTPException(403, f"Этап «{st.title}» отмечают: {', '.join(role_title(r) for r in st.responsible_roles)}")
     if ex.STAGE_DEFS[st.code]["kind"] in ("payment_in", "payment_out") and body.actual_on and body.actual_amount is None:
         raise HTTPException(422, "Укажите фактическую сумму платежа")
     ex.set_actual(db, deal, st, body.actual_on, body.actual_amount, body.note, user)
@@ -134,7 +198,7 @@ def refine(deal_id: str, stage_id: str, body: RefineIn, db: Session = Depends(ge
     if st is None or st.deal_id != deal.id:
         raise HTTPException(404)
     if not (ex.can_set(user, st) or user.has(Role.CD)):
-        raise HTTPException(403, f"Дату этапа «{st.title}» уточняют: {', '.join(st.responsible_roles)}")
+        raise HTTPException(403, f"Дату этапа «{st.title}» уточняют: {', '.join(role_title(r) for r in st.responsible_roles)}")
     if st.actual_on:
         raise HTTPException(409, "Этап уже выполнен — уточнять нечего")
     before = st.refined_on

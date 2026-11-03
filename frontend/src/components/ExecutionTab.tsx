@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { lbl, STATUS } from "../labels";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Deal, type Me, type Stage } from "../types";
 
 type Resp = { stages: Stage[]; status: string; contract_number: string; contract_signed_at: string | null; factory_contract_signed_at: string | null; won_variant_id: string | null;
-  related: { id: string; number: string; status: string }[] };
+  related: { id: string; number: string; status: string }[]; contract_steps: CStep[]; status_detail: string };
+type CStep = { code: string; title: string; roles: string[]; hint: string; state: "done" | "current" | "pending"; on: string | null; by: string; comment: string };
 const ROLE_T: Record<string, string> = { manager: "менеджер", logistician: "логист", service_head: "сервис", fd: "ФД", cd: "КД", gd: "ЗГД", purchasing: "закупки" };
 
 /** Задача 2: стадия «Заключение и исполнение контракта» — реквизиты контракта, лента этапов с плановыми и фактическими датами,
@@ -15,6 +17,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
   const [reason, setReason] = useState("");
   const [refine, setRefine] = useState<Record<string, { on: string; note: string }>>({});
   const [err, setErr] = useState("");
+  const [step, setStep] = useState<Record<string, { on: string; comment: string; number: string }>>({});
   const isMgr = me.roles.some((r) => r.code === "manager") && deal.manager_id === me.id;
   const isCdGd = me.roles.some((r) => r.code === "cd" || r.code === "gd");
   const load = () => api.get<Resp>(`/api/deals/${deal.id}/execution/stages`).then(setData).catch((e) => setErr(e.message));
@@ -24,12 +27,43 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
   const groups: Record<string, Stage[]> = {};
   for (const s of data.stages) { const k = s.batch ? `Партия: ${s.batch}` : s.position ? `Позиция: ${s.position}` : "Сделка"; (groups[k] ||= []).push(s); }
   const done = data.stages.filter((s) => s.done).length;
+  const canStep = (c: CStep) => me.roles.some((r) => r.code === "gd" || (r.code !== "manager" && c.roles.includes(r.code))) || (isMgr && c.roles.includes("manager"));
+  const sv = (c: CStep) => step[c.code] || { on: new Date().toISOString().slice(0, 10), comment: "", number: form.contract_number };
+  const markStep = (c: CStep, done: boolean) => act(() => api.post(`/api/deals/${deal.id}/execution/contract-step`, { code: c.code, done, on: sv(c).on, comment: sv(c).comment, contract_number: sv(c).number || null }));
+  const allSigned = data.contract_steps.find((c) => c.code === "client_signed")?.state === "done";
   return (
     <>
       {err && <div className="alert error">{err}</div>}
+      {deal.status === "contract" && (
+        <div className="card" style={{ borderColor: "var(--accent)" }}>
+          <h2 style={{ marginTop: 0 }}>Заключение контракта <span className="badge accent">{data.status_detail.split("·")[1]?.trim() || "в работе"}</span></h2>
+          <p className="muted">Подэтапы идут по порядку; отметка этапа ставит задачу следующему ответственному. Номер и дата подписания с клиентом обязательны для начала исполнения; дата подписания с заводом — основание для аванса заводу и срока производства.</p>
+          <table>
+            <thead><tr><th style={{ width: 28 }} /><th>Подэтап</th><th>Кто отмечает</th><th>Дата</th><th>Отметил / комментарий</th><th /></tr></thead>
+            <tbody>{data.contract_steps.map((c, i) => {
+              const v = sv(c);
+              const editable = canStep(c) && c.state !== "done";
+              return (
+                <tr key={c.code} style={{ background: c.state === "current" ? "var(--accent-soft)" : undefined, opacity: c.state === "pending" ? 0.75 : 1 }}>
+                  <td style={{ textAlign: "center", fontSize: 18 }}>{c.state === "done" ? "✅" : c.state === "current" ? "▶" : i + 1}</td>
+                  <td><b>{c.title}</b><div className="muted" style={{ fontSize: 12 }}>{c.hint}</div></td>
+                  <td style={{ fontSize: 12 }}>{c.roles.map((r) => ROLE_T[r] || r).join(", ")}</td>
+                  <td>{c.state === "done" ? fmtDate(c.on) : editable ? <input type="date" value={v.on} onChange={(e) => setStep({ ...step, [c.code]: { ...v, on: e.target.value } })} /> : "—"}</td>
+                  <td style={{ fontSize: 12 }}>{c.state === "done" ? <>{c.by}{c.comment && <div className="muted">{c.comment}</div>}</> : editable && <>
+                    {c.code === "client_signed" && <input placeholder="номер контракта" value={v.number} onChange={(e) => setStep({ ...step, [c.code]: { ...v, number: e.target.value } })} style={{ width: 150, marginRight: 4 }} />}
+                    <input placeholder="комментарий" value={v.comment} onChange={(e) => setStep({ ...step, [c.code]: { ...v, comment: e.target.value } })} style={{ width: 200 }} /></>}</td>
+                  <td>{c.state === "done" ? (canStep(c) && <button className="btn ghost" onClick={() => markStep(c, false)}>снять отметку</button>)
+                    : editable && <button className={"btn " + (c.state === "current" ? "" : "secondary")} disabled={c.code === "client_signed" && !v.number.trim()} onClick={() => markStep(c, true)}>Выполнено</button>}</td>
+                </tr>);
+            })}</tbody>
+          </table>
+          {(isMgr || isCdGd) && <div className="row" style={{ marginTop: 10 }}>
+            <button className="btn" disabled={!allSigned} title={allSigned ? "" : "сначала отметьте «Контракт подписан клиентом»"} onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/start`))}>Контракт подписан — начать исполнение</button>
+            {!allSigned && <span className="muted" style={{ fontSize: 12 }}>доступно после подписания контракта клиентом</span>}</div>}
+        </div>)}
       <div className="grid cols-2">
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Контракт</h2>
+          <h2 style={{ marginTop: 0 }}>Реквизиты контракта</h2>
           <div className="grid cols-2">
             <label className="f">Номер контракта<input value={form.contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_number: e.target.value })} /></label>
             <label className="f">Дата подписания с клиентом<input type="date" value={form.contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_signed_at: e.target.value })} /></label>
@@ -40,7 +74,6 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
           {(isMgr || isCdGd) && (
             <div className="row" style={{ marginTop: 8 }}>
               <button className="btn secondary" onClick={() => act(() => api.patch(`/api/deals/${deal.id}/execution/contract`, { ...form, contract_signed_at: form.contract_signed_at || null, factory_contract_signed_at: form.factory_contract_signed_at || null, won_variant_id: form.won_variant_id || null }))}>Сохранить реквизиты</button>
-              {deal.status === "contract" && <button className="btn" onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/start`))} disabled={!form.contract_number || !form.contract_signed_at}>Контракт подписан — начать исполнение</button>}
             </div>
           )}
           {(deal.status === "contract" || deal.status === "execution") && (isMgr || isCdGd) && (
@@ -52,7 +85,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
           {deal.status === "execution" && can(me, "execution_close", 2) && (
             <div className="row" style={{ marginTop: 10 }}><button className="btn" onClick={() => { const r = prompt("Комментарий к закрытию:") || ""; act(() => api.post(`/api/deals/${deal.id}/execution/close`, { reason: r })); }}>Закрыть сделку (КД)</button></div>
           )}
-          {data.related.length > 0 && <div className="muted" style={{ marginTop: 8 }}>Связанные заявки: {data.related.map((r) => `${r.number} (${r.status})`).join(", ")}</div>}
+          {data.related.length > 0 && <div className="muted" style={{ marginTop: 8 }}>Связанные заявки: {data.related.map((r) => `${r.number} (${lbl(STATUS, r.status)})`).join(", ")}</div>}
         </div>
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Ход исполнения</h2>

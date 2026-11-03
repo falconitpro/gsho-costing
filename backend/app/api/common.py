@@ -83,6 +83,8 @@ def deal_payload(deal: Deal, user: CurrentUser, extra: dict[str, Any] | None = N
     data["batches"] = [serialize(b) for b in deal.batches]
     data["offer"] = next((serialize(v) for v in deal.variants if v.is_default), None)   # задача 5: одно предложение без выбора вариантов
     data["payment_terms_set"] = payment_terms_set(deal)
+    from ..services.execution_service import status_detail
+    data["status_detail"] = status_detail(deal)
     if extra:
         data.update(extra)
     # менеджер видит цену только после утверждения

@@ -50,6 +50,7 @@ def board(db: Session = Depends(get_db), user: CurrentUser = Depends(require_rol
     by_deal: dict[str, list] = {}
     for t in tasks:
         by_deal.setdefault(t.deal_id, []).append({"title": t.title, "role": t.role, "due": t.due.isoformat(), "overdue": overdue(t.due, today)})
+    from ..services.execution_service import status_detail
     columns = {s.value: {"title": STATUS_TITLES[s], "deals": []} for s in DealStatus}
     # задача 9: связанные заявки одного запроса клиента (исходная + дубли) — общий ключ группы и число связанных
     group_of = {d.id: (d.parent_deal_id or d.id) for d in deals}
@@ -60,7 +61,7 @@ def board(db: Session = Depends(get_db), user: CurrentUser = Depends(require_rol
     for d in deals:
         g = group_of[d.id]
         columns[d.status.value]["deals"].append({"id": d.id, "number": d.number, "client": d.client.name if d.client else None, "site": d.site,
-                                                 "priority": d.priority, "tasks": by_deal.get(d.id, []),
+                                                 "priority": d.priority, "tasks": by_deal.get(d.id, []), "status_detail": status_detail(d),
                                                  "overdue": any(t["overdue"] for t in by_deal.get(d.id, [])),
                                                  "group": g, "group_number": numbers.get(g, ""), "related": group_size.get(g, 1) - 1})
     return columns
@@ -73,6 +74,61 @@ def check_overdue(db: Session = Depends(get_db), user: CurrentUser = Depends(req
     n = check_overdue_tasks(db)
     db.commit()
     return {"notified": n}
+
+
+@router.get("/reports/overdue")
+def overdue_report(date_from: Optional[date] = None, date_to: Optional[date] = None, user_id: str = "", db: Session = Depends(get_db),
+                   user: CurrentUser = Depends(get_current_user)):
+    """История просрочек выполнения задач по сотрудникам — только ЗГД.
+
+    Просрочка: задача выполнена позже срока или не выполнена, а срок прошёл. Исполнитель — назначенный сотрудник; задачи без
+    назначенного исполнителя показываются по роли («не назначен»). Период — по сроку задачи."""
+    from datetime import datetime as _dt
+    from ..core.workflow import role_title
+    from ..models import User
+    if not user.has(Role.GD):
+        raise HTTPException(403, "История просрочек доступна только ЗГД")
+    today = date.today()
+    users = {u.id: u for u in db.scalars(select(User)).all()}
+    q = select(Task)
+    if date_from:
+        q = q.where(Task.due >= date_from)
+    if date_to:
+        q = q.where(Task.due <= date_to)
+    deals = {d.id: d.number for d in db.scalars(select(Deal)).all()}
+    summary: dict[str, dict] = {}
+    rows = []
+    for t in db.scalars(q).all():
+        if not t.due:
+            continue
+        key = t.assignee_id or f"role:{t.role}"
+        if user_id and key != user_id:
+            continue
+        u = users.get(t.assignee_id) if t.assignee_id else None
+        s = summary.setdefault(key, {"user_id": key, "name": u.display_name if u else f"не назначен ({role_title(t.role)})",
+                                     "roles": [role_title(r) for r in (u.roles if u else [t.role])], "tasks": 0, "overdue": 0,
+                                     "open_overdue": 0, "days_total": 0, "days_max": 0})
+        s["tasks"] += 1
+        done_on = t.done_at.date() if isinstance(t.done_at, _dt) else t.done_at
+        late = (done_on - t.due).days if done_on else (today - t.due).days
+        if late <= 0:
+            continue
+        s["overdue"] += 1
+        s["days_total"] += late
+        s["days_max"] = max(s["days_max"], late)
+        if not done_on:
+            s["open_overdue"] += 1
+        rows.append({"user_id": key, "name": s["name"], "deal_id": t.deal_id, "deal_number": deals.get(t.deal_id, ""), "title": t.title,
+                     "role": role_title(t.role), "due": t.due.isoformat(), "done_on": done_on.isoformat() if done_on else None,
+                     "days_late": late, "open": not done_on, "notified": bool(t.overdue_notified)})
+    out = []
+    for s in summary.values():
+        s["overdue_pct"] = round(s["overdue"] / s["tasks"] * 100, 1) if s["tasks"] else 0.0
+        s["days_avg"] = round(s["days_total"] / s["overdue"], 1) if s["overdue"] else 0.0
+        out.append(s)
+    out.sort(key=lambda x: (-x["overdue"], -x["days_total"], x["name"]))
+    rows.sort(key=lambda r: (not r["open"], -r["days_late"]))
+    return {"summary": out, "rows": rows}
 
 
 # ------------------------------------------------------------------ файлы (локальное хранилище)
@@ -159,7 +215,7 @@ def add_fact(deal_id: str, body: FactIn, db: Session = Depends(get_db), user: Cu
     if body.kind == "cost_item":
         allowed = _allowed_items(user)
         if body.cost_item_code not in allowed:
-            raise HTTPException(403, f"Статья {body.cost_item_code} вносится другой ролью")
+            raise HTTPException(403, f"Статью «{next((t for _, k, t in COST_ITEMS if k == body.cost_item_code), body.cost_item_code)}» вносит другая роль")
     elif body.kind in ("payment_in", "payment_out", "fx") and not user.can("execution_payments", 2):
         raise HTTPException(403, "Фактические платежи вносит финансовый директор")
     thr = settings_service.get(db, "plan_fact_deviation_pct")

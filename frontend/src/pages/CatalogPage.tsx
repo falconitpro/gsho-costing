@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { lbl, CATALOG_STATUS, GLOSSARY_KIND } from "../labels";
 import { api, fmtDate, fmtRub, designation } from "../api";
 import { can, type Me } from "../types";
 import CatalogCard from "../components/CatalogCard";
@@ -94,7 +95,7 @@ export default function CatalogPage({ me }: { me: Me }) {
               <>
                 {exec && editor && (exec.status === "pending" || exec.status === "approved") && <div className="card">
                 <div className="row" style={{ justifyContent: "space-between" }}>
-                  <h2 style={{ marginTop: 0 }}>{exec.model ? designation(exec.model) : ""} — {exec.name} {exec.brand_name && <span className="badge accent">{exec.brand_name}</span>} <span className={"badge " + (exec.status === "approved" ? "ok" : "warn")}>{exec.status}</span></h2>
+                  <h2 style={{ marginTop: 0 }}>{exec.model ? designation(exec.model) : ""} — {exec.name} {exec.brand_name && <span className="badge accent">{exec.brand_name}</span>} <span className={"badge " + (exec.status === "approved" ? "ok" : "warn")}>{lbl(CATALOG_STATUS, exec.status)}</span></h2>
                   {editor && exec.status === "pending" && <div className="row"><button className="btn" onClick={() => decide(exec.id, true)}>Подтвердить</button><button className="btn ghost" onClick={() => decide(exec.id, false)}>Отклонить</button></div>}
                 </div>
                 {editor && exec.status === "approved" && (
@@ -142,7 +143,7 @@ export default function CatalogPage({ me }: { me: Me }) {
               <select value={glNew.kind} onChange={(e) => setGlNew({ ...glNew, kind: e.target.value })}><option value="param">параметр</option><option value="unit">единица</option><option value="value">значение</option><option value="phrase">фраза</option></select>
               <button className="btn" disabled={!glNew.term_ru || !glNew.term_zh} onClick={() => api.post("/api/refs/glossary", { ...glNew, status: "confirmed" }).then(() => { setGlNew({ term_ru: "", term_zh: "", kind: "param" }); loadGl(); })}>Добавить</button></>}</div>
           <table style={{ marginTop: 8 }}><thead><tr><th>RU</th><th>CN</th><th>Тип</th><th>Статус</th><th /></tr></thead>
-            <tbody>{gl.map((g) => <tr key={g.id} style={{ background: g.status === "machine" ? "#f3e8ff" : undefined }}><td>{g.term_ru}</td><td>{g.term_zh}</td><td>{g.kind}</td><td><span className={"badge " + (g.status === "confirmed" ? "ok" : "warn")}>{g.status === "confirmed" ? "подтверждён" : "машинный"}</span></td>
+            <tbody>{gl.map((g) => <tr key={g.id} style={{ background: g.status === "machine" ? "#f3e8ff" : undefined }}><td>{g.term_ru}</td><td>{g.term_zh}</td><td>{lbl(GLOSSARY_KIND, g.kind)}</td><td><span className={"badge " + (g.status === "confirmed" ? "ok" : "warn")}>{g.status === "confirmed" ? "подтверждён" : "машинный"}</span></td>
               <td className="row">{can(me, "glossary", 2) && g.status === "machine" && <button className="btn ghost" onClick={() => { const z = prompt("Перевод CN:", g.term_zh); if (z !== null) api.post(`/api/refs/glossary/${g.id}/confirm?term_zh=${encodeURIComponent(z)}`).then(loadGl); }}>подтвердить</button>}
                 {can(me, "glossary", 2) && <button className="btn ghost" onClick={() => api.del(`/api/refs/glossary/${g.id}`).then(loadGl)}>×</button>}</td></tr>)}
               {gl.length === 0 && <tr><td colSpan={5} className="muted">Пусто</td></tr>}</tbody></table>

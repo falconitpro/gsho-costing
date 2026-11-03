@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { lbl, FX_SOURCE, IMAGE_KIND, IMAGE_SOURCE, OUTCOME, STATUS } from "../labels";
 import { api, fmtDate, fmtPct, fmtRub, designation } from "../api";
 import { COST_ITEMS, EVENT_TITLES, can, type CalcResponse, type Deal, type Me, type ScenarioResult } from "../types";
 import CashflowChart from "../components/CashflowChart";
@@ -93,7 +94,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Курс ЦБ на {fmtDate(calc.input.fx.as_of)}</h2>
           {Object.entries(calc.input.fx.rates).filter(([c]) => c !== "RUB").map(([c, r]) => <div key={c}>{c}: <b>{r.toFixed(4)}</b></div>)}
-          {calc.input.fx.source !== "cbr" && <span className="badge warn">{calc.input.fx.source}</span>}
+          {calc.input.fx.source !== "cbr" && <span className="badge warn">{lbl(FX_SOURCE, calc.input.fx.source)}</span>}
         </div>
         {(calc.warnings.length > 0 || calc.result.approval.reasons.length > 0 || cdChecks.length > 0) && (
           <div className="card">
@@ -240,7 +241,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
             <div className="card"><h2 style={{ marginTop: 0 }}>История цен заводов</h2>
               <table><tbody>{(calc.factory_price_history || []).map((h, i) => <tr key={i}><td>{h.model}</td><td className="num">{fmtRub(h.unit_price)} {h.currency}</td><td>{fmtDate(h.on)}</td></tr>)}</tbody></table>
               {calc.client_kp_history && <><h2>История КП этому клиенту</h2>
-              <table><tbody>{calc.client_kp_history.map((h, i) => <tr key={i}><td>{h.deal}{h.version_no ? ` v${h.version_no}` : ""}</td><td>{h.variant}</td><td className="num">{fmtRub(h.price_rub)}</td><td>{h.status}</td><td>{fmtDate(h.on)}</td></tr>)}</tbody></table></>}
+              <table><tbody>{calc.client_kp_history.map((h, i) => <tr key={i}><td>{h.deal}{h.version_no ? ` v${h.version_no}` : ""}</td><td>{h.variant}</td><td className="num">{fmtRub(h.price_rub)}</td><td>{lbl(OUTCOME, h.status)}</td><td>{fmtDate(h.on)}</td></tr>)}</tbody></table></>}
             </div>
           </div>
         )}
@@ -314,7 +315,7 @@ function KpSettings({ deal, calc, reload }: { deal: Deal; calc: CalcResponse; re
             <option value="document">в документ КП</option><option value="attachment">отдельными файлами к письму</option><option value="both">и в документ, и к письму</option></select></label>
       </div>
       <p className="muted">Файлы для КП отмечаются в карточке позиции (вкладка «Позиции…», блок «Изображения и чертежи»). Если ничего не отмечено — в КП ничего не вкладывается.</p>
-      {selected.length > 0 ? <ul>{selected.map((i) => <li key={i.id}>{i.model}: {i.caption || i.file_name} <span className="muted">({i.kind}, {i.source}{i.has_factory_logo ? ", логотип завода" : ""})</span></li>)}</ul> : <div className="muted">Файлы в КП не выбраны</div>}
+      {selected.length > 0 ? <ul>{selected.map((i) => <li key={i.id}>{i.model}: {i.caption || i.file_name} <span className="muted">({lbl(IMAGE_KIND, i.kind)}, {lbl(IMAGE_SOURCE, i.source)}{i.has_factory_logo ? ", логотип завода" : ""})</span></li>)}</ul> : <div className="muted">Файлы в КП не выбраны</div>}
     </div>
   );
 }

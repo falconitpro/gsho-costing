@@ -458,7 +458,7 @@ def access_set_override(body: AccessOverrideIn, db: Session = Depends(get_db), u
         try:
             valid_to = datetime.fromisoformat(body.valid_to)
         except ValueError:
-            raise HTTPException(422, "valid_to: дата в формате ГГГГ-ММ-ДД")
+            raise HTTPException(422, "Срок действия: дата в формате ГГГГ-ММ-ДД")
     try:
         row = access_service.set_override(db, u, body.group, body.level, valid_to, body.comment, user.id)
     except ValueError as e:
@@ -496,6 +496,6 @@ def access_preview(role: Optional[str] = None, user_id: Optional[str] = None, db
         perms = effective_perms({Role(role)}, access_service.rules(db))
         who = role
     else:
-        raise HTTPException(422, "Укажите role или user_id")
+        raise HTTPException(422, "Укажите роль или сотрудника")
     return {"who": who, "perms": [{"group": g, "title": FIELD_GROUPS[g][0], "level": lvl, "level_title": LEVEL_TITLES[lvl]} for g, lvl in perms.items()],
             "denied_fields": sorted(denied_fields_for(perms))}

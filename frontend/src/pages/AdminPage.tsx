@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { COST_ITEMS, type Me } from "../types";
+import { AUDIT_ACTION, AUDIT_ENTITY, INTEGRATION, OPERATION, STATUS, lbl } from "../labels";
 
 type U = { id: string; email: string; display_name: string; roles: string[]; is_active: boolean; visa_limit_rub: number | null; last_seen_at: string | null };
 type Role = { code: string; title: string };
@@ -12,7 +13,10 @@ type Audit = { id: number; at: string; user_name: string; deal_number: string | 
 type Integ = { id: string; at: string; system: string; operation: string; ok: boolean; details: unknown };
 
 const SOURCE: Record<string, string> = { cbr: "ЦБ РФ", manual: "вручную" };
-const short = (v: unknown) => { const s = v == null ? "" : JSON.stringify(v); return s.length > 160 ? s.slice(0, 160) + "…" : s; };
+/** Значения журнала по-русски: статус сделки — названием, а не кодом. */
+const human = (v: unknown): unknown => (v && typeof v === "object" && !Array.isArray(v) && "status" in (v as Record<string, unknown>)
+  ? { ...(v as Record<string, unknown>), status: lbl(STATUS, String((v as Record<string, unknown>).status)) } : v);
+const short = (v: unknown) => { const s = v == null ? "" : JSON.stringify(human(v)); return s.length > 160 ? s.slice(0, 160) + "…" : s; };
 
 /** Администрирование: сотрудники и роли, справочник ТН ВЭД, курсы, шаблоны, журнал действий и интеграций, отчёт точности оценок. */
 export default function AdminPage({ me }: { me: Me }) {
@@ -21,7 +25,7 @@ export default function AdminPage({ me }: { me: Me }) {
   const tabs: [string, string, boolean][] = [
     ["users", "Сотрудники и роли", isAdmin], ["hs", "Справочник ТН ВЭД", isAdmin], ["fx", "Курсы валют", has("admin", "gd", "fd")],
     ["templates", "Шаблоны", isAdmin], ["audit", "Журнал действий", isAdmin], ["integrations", "Журнал интеграций", isAdmin],
-    ["accuracy", "Точность оценок", has("fd", "gd")],
+    ["accuracy", "Точность оценок", has("fd", "gd")], ["overdue", "Просрочки сотрудников", has("gd")],
   ];
   const visible = tabs.filter((t) => t[2]);
   const [tab, setTab] = useState(visible[0]?.[0] || "");
@@ -37,6 +41,7 @@ export default function AdminPage({ me }: { me: Me }) {
       {tab === "audit" && <AuditLog />}
       {tab === "integrations" && <Integrations />}
       {tab === "accuracy" && <Accuracy />}
+      {tab === "overdue" && <Overdue />}
     </>
   );
 }
@@ -244,7 +249,7 @@ function AuditLog() {
     <div className="card">
       <p className="muted">Все изменения данных: кто, когда, что было и что стало. Журнал только для чтения, изменить записи нельзя (это защищено на уровне базы данных).</p>
       <div className="row" style={{ marginBottom: 8, flexWrap: "wrap" }}>
-        <select value={f.entity} onChange={(e) => setF({ ...f, entity: e.target.value })}><option value="">все объекты</option>{entities.map((e) => <option key={e}>{e}</option>)}</select>
+        <select value={f.entity} onChange={(e) => setF({ ...f, entity: e.target.value })}><option value="">все объекты</option>{entities.map((e) => <option key={e} value={e}>{lbl(AUDIT_ENTITY, e)}</option>)}</select>
         <input placeholder="поиск: сделка, сотрудник, значение" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} style={{ width: 280 }} />
         <select value={f.limit} onChange={(e) => setF({ ...f, limit: e.target.value })}>{["100", "200", "500", "1000"].map((n) => <option key={n} value={n}>последние {n}</option>)}</select>
       </div>
@@ -252,9 +257,9 @@ function AuditLog() {
         <tbody>{rows.map((r) => (
           <tr key={r.id} onClick={() => setOpen(open === r.id ? null : r.id)} style={{ cursor: "pointer" }}>
             <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{new Date(r.at).toLocaleString("ru-RU")}</td><td>{r.user_name}</td><td>{r.deal_number || ""}</td>
-            <td style={{ fontSize: 12 }}>{r.entity}<div className="muted">{r.entity_id}</div></td><td>{r.action}{r.comment && <div className="muted" style={{ fontSize: 12 }}>{r.comment}</div>}</td>
+            <td style={{ fontSize: 12 }}>{lbl(AUDIT_ENTITY, r.entity)}<div className="muted">{r.entity_id}</div></td><td>{lbl(AUDIT_ACTION, r.action)}{r.comment && <div className="muted" style={{ fontSize: 12 }}>{r.comment}</div>}</td>
             <td style={{ fontSize: 11, maxWidth: 520 }}>{open === r.id
-              ? <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify({ было: r.before, стало: r.after }, null, 1)}</pre>
+              ? <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify({ было: human(r.before), стало: human(r.after) }, null, 1)}</pre>
               : <>{r.before != null && <span className="muted">{short(r.before)} → </span>}{short(r.after)}</>}</td></tr>))}</tbody></table>
     </div>
   );
@@ -268,10 +273,10 @@ function Integrations() {
   return (
     <div className="card">
       <p className="muted">Обмены с внешними сервисами: курсы ЦБ, Яндекс Переводчик, реестр организаций (DaData), почта, WeCom. Ошибки подсвечены.</p>
-      <select value={sys} onChange={(e) => setSys(e.target.value)} style={{ marginBottom: 8 }}><option value="">все системы</option>{systems.map((s) => <option key={s}>{s}</option>)}</select>
+      <select value={sys} onChange={(e) => setSys(e.target.value)} style={{ marginBottom: 8 }}><option value="">все системы</option>{systems.map((s) => <option key={s} value={s}>{lbl(INTEGRATION, s)}</option>)}</select>
       <table><thead><tr><th>Когда</th><th>Система</th><th>Операция</th><th>Результат</th><th>Подробности</th></tr></thead>
         <tbody>{rows.filter((r) => !sys || r.system === sys).map((r) => (
-          <tr key={r.id}><td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{new Date(r.at).toLocaleString("ru-RU")}</td><td>{r.system}</td><td>{r.operation}</td>
+          <tr key={r.id}><td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{new Date(r.at).toLocaleString("ru-RU")}</td><td>{lbl(INTEGRATION, r.system)}</td><td>{lbl(OPERATION, r.operation)}</td>
             <td><span className={"badge " + (r.ok ? "ok" : "bad")}>{r.ok ? "успешно" : "ошибка"}</span></td><td style={{ fontSize: 11 }}>{short(r.details)}</td></tr>))}</tbody></table>
     </div>
   );
@@ -290,6 +295,48 @@ function Accuracy() {
       {Object.keys(d.mape_by_item).length === 0 ? <div className="muted">Пока нет данных: нужен хотя бы один закрытый план/факт с фактом по статьям.</div> : (
         <table><thead><tr><th>Статья</th><th className="num">Средняя ошибка, %</th></tr></thead>
           <tbody>{COST_ITEMS.filter(([, k]) => d.mape_by_item[k] != null).map(([n, k, t]) => <tr key={k}><td>{n}. {t}</td><td className="num">{d.mape_by_item[k].toFixed(1).replace(".", ",")}</td></tr>)}</tbody></table>)}
+    </div>
+  );
+}
+
+type OvSum = { user_id: string; name: string; roles: string[]; tasks: number; overdue: number; open_overdue: number; days_total: number; days_max: number; days_avg: number; overdue_pct: number };
+type OvRow = { user_id: string; name: string; deal_id: string; deal_number: string; title: string; role: string; due: string; done_on: string | null; days_late: number; open: boolean };
+
+/** История просрочек выполнения задач по каждому сотруднику — только ЗГД. */
+function Overdue() {
+  const [d, setD] = useState<{ summary: OvSum[]; rows: OvRow[] } | null>(null);
+  const [f, setF] = useState({ from: "", to: "" });
+  const [sel, setSel] = useState("");
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    const qs = new URLSearchParams(); if (f.from) qs.set("date_from", f.from); if (f.to) qs.set("date_to", f.to);
+    api.get<typeof d>(`/api/reports/overdue?${qs}`).then(setD).catch((e) => setErr(e.message));
+  }, [f]);
+  if (err) return <div className="alert error">{err}</div>;
+  if (!d) return null;
+  const rows = d.rows.filter((r) => !sel || r.user_id === sel);
+  return (
+    <div className="card">
+      <p className="muted">Просрочка — задача выполнена позже срока или не выполнена, а срок прошёл. Дни просрочки — календарные. Раздел виден только ЗГД. Уведомления о просрочке получают исполнитель, КД и ЗГД (проверка раз в час, одно уведомление на задачу).</p>
+      <div className="row" style={{ marginBottom: 8 }}>
+        <label className="row">срок задачи с <input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></label>
+        <label className="row">по <input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></label>
+        {(f.from || f.to) && <button className="btn ghost" onClick={() => setF({ from: "", to: "" })}>за всё время</button>}
+      </div>
+      <table>
+        <thead><tr><th>Сотрудник</th><th className="num">Задач</th><th className="num">Просрочено</th><th className="num">Доля</th><th className="num">Сейчас просрочено</th><th className="num">Средняя просрочка, дн.</th><th className="num">Максимум, дн.</th></tr></thead>
+        <tbody>{d.summary.map((s) => (
+          <tr key={s.user_id} onClick={() => setSel(sel === s.user_id ? "" : s.user_id)} style={{ cursor: "pointer", background: sel === s.user_id ? "var(--accent-soft)" : undefined }}>
+            <td><b>{s.name}</b><div className="muted" style={{ fontSize: 12 }}>{s.roles.join(", ")}</div></td><td className="num">{s.tasks}</td>
+            <td className="num">{s.overdue ? <span className="badge warn">{s.overdue}</span> : 0}</td><td className="num">{s.overdue_pct.toFixed(1).replace(".", ",")} %</td>
+            <td className="num">{s.open_overdue ? <span className="badge bad">{s.open_overdue}</span> : 0}</td><td className="num">{s.days_avg.toFixed(1).replace(".", ",")}</td><td className="num">{s.days_max}</td></tr>))}</tbody>
+      </table>
+      <h3>{sel ? `Просроченные задачи: ${d.summary.find((s) => s.user_id === sel)?.name}` : "Все просроченные задачи"}</h3>
+      {rows.length === 0 ? <div className="muted">Просрочек нет.</div> : (
+        <table><thead><tr><th>Сотрудник</th><th>Сделка</th><th>Задача</th><th>Срок</th><th>Выполнена</th><th className="num">Просрочка, дн.</th></tr></thead>
+          <tbody>{rows.map((r, i) => (
+            <tr key={i}><td>{r.name}</td><td>{r.deal_id ? <a href={`/deals/${r.deal_id}`}>{r.deal_number}</a> : ""}</td><td>{r.title}</td><td>{fmtDate(r.due)}</td>
+              <td>{r.open ? <span className="badge bad">не выполнена</span> : fmtDate(r.done_on)}</td><td className="num"><b>{r.days_late}</b></td></tr>))}</tbody></table>)}
     </div>
   );
 }

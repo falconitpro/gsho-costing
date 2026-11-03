@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { lbl, IMAGE_KIND, IMAGE_SOURCE, OUTCOME, STATUS } from "../labels";
 import { api, fmtRub } from "../api";
 import { can, type LocalOption, type Me, type Position, type PositionImage } from "../types";
 
@@ -31,7 +32,7 @@ export function ImagesBlock({ dealId, position, me, onChanged }: { dealId: strin
             {im.is_image ? <a href={im.url} target="_blank" rel="noreferrer"><img src={im.url} alt={im.caption} style={{ width: "100%", height: 110, objectFit: "cover", borderRadius: 4 }} /></a>
               : <a href={im.url} target="_blank" rel="noreferrer" className="badge">{im.file_name}</a>}
             <div style={{ fontSize: 12, marginTop: 4 }}>{im.caption || <span className="muted">без подписи</span>}</div>
-            <div className="muted" style={{ fontSize: 11 }}>{im.kind} · {im.source}{im.has_factory_logo && " · логотип завода"}{im.send_to_factory && " · отправлено заводу"}</div>
+            <div className="muted" style={{ fontSize: 11 }}>{lbl(IMAGE_KIND, im.kind)} · {lbl(IMAGE_SOURCE, im.source)}{im.has_factory_logo && " · логотип завода"}{im.send_to_factory && " · отправлено заводу"}</div>
             {canSelect && <label className="row" style={{ fontSize: 12 }}><input type="checkbox" checked={im.in_kp} onChange={(e) => patch(im, { in_kp: e.target.checked })} /> в КП
               {im.in_kp && <input type="number" value={im.kp_order} style={{ width: 50, padding: 2 }} onChange={(e) => patch(im, { kp_order: Number(e.target.value) })} title="порядок" />}</label>}
             {canUpload && <div className="row" style={{ fontSize: 12 }}><label><input type="checkbox" checked={im.has_factory_logo} onChange={(e) => patch(im, { has_factory_logo: e.target.checked })} /> логотип завода</label>
@@ -183,7 +184,7 @@ export function RelatedDeals({ dealId, me }: { dealId: string; me: Me }) {
     <div className="card">
       <b>Связанные заявки по этому запросу клиента</b> <span className="muted">— при выигрыше одной остальные закрываются автоматически</span>
       <table style={{ marginTop: 6 }}><tbody>{rows.map((r) => (
-        <tr key={r.id} style={{ fontWeight: r.current ? 700 : 400 }}><td><a href={`/deals/${r.id}`}>{r.number}</a></td><td>{r.models.join(", ")}</td><td><span className="badge">{r.status}</span> {r.outcome}</td>
+        <tr key={r.id} style={{ fontWeight: r.current ? 700 : 400 }}><td><a href={`/deals/${r.id}`}>{r.number}</a></td><td>{r.models.join(", ")}</td><td><span className="badge">{lbl(STATUS, r.status)}</span> {r.outcome ? lbl(OUTCOME, r.outcome) : ""}</td>
           {can(me, "price") && <td className="num">{r.price_rub != null ? fmtRub(r.price_rub) : "—"}</td>}</tr>))}</tbody></table>
     </div>
   );

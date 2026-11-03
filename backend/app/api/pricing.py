@@ -189,7 +189,7 @@ def set_price(deal_id: str, body: PriceIn, db: Session = Depends(get_db), user: 
     elif body.mode == "margin":
         price = solve_price(inp, v.id, target_margin_pct=body.value)
     else:
-        raise HTTPException(422, "mode: amount | markup | margin")
+        raise HTTPException(422, "Способ задания цены: сумма, наценка или маржа")
     v.price_rub, v.price_mode = round(price, 2), body.mode
     reset = price_changed_after_visa(DealState(status=deal.status, service_flag=deal.service_flag))
     if reset and before.get("price_rub") != v.price_rub:
@@ -279,7 +279,7 @@ def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: Curren
     deal = get_deal_or_404(db, deal_id, user)
     by = Role.GD if deal.status == DealStatus.GD_VISA else Role.FD
     if by not in user.roles:
-        raise HTTPException(403, f"Виза этой ступени — роль {by.value}")
+        raise HTTPException(403, f"Виза этой ступени — {'ЗГД' if by == Role.GD else 'ФД'}")
     if not body.approved and not body.comment:
         raise HTTPException(422, "Отказ требует комментария")
     inp, res = run_calc(db, deal)

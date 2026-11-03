@@ -112,6 +112,7 @@ def list_deals(status: Optional[str] = None, db: Session = Depends(get_db), user
     q = select(Deal).order_by(Deal.created_at.desc())
     if status:
         q = q.where(Deal.status == DealStatus(status))
+    from ..services.execution_service import status_detail
     deals = [d for d in db.scalars(q).all() if _visible(user, d)]
     out = []
     numbers = {d.id: d.number for d in deals}
@@ -122,6 +123,7 @@ def list_deals(status: Optional[str] = None, db: Session = Depends(get_db), user
     for d in deals:
         row = serialize(d, exclude={"client_payments", "bank_guarantee", "operating_conditions", "scenario_override"})
         row["client_name"] = d.client.name if d.client else None
+        row["status_detail"] = status_detail(d)
         # задача 9: группировка связанных заявок в списке
         row["group"] = d.parent_deal_id or d.id
         row["parent_number"] = numbers.get(d.parent_deal_id, "") if d.parent_deal_id else ""
@@ -458,7 +460,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     pos.price_reference = _price_ref(db, pos, price_comment)
     if pos.price_reference.get("needs_comment") and not price_comment:
         db.commit()
-        raise HTTPException(422, {"message": "Отклонение цены завода от истории выше порога — укажите комментарий (price_comment)",
+        raise HTTPException(422, {"message": "Отклонение цены завода от истории выше порога — укажите комментарий",
                                   "price_reference": pos.price_reference, "preview": parsed.to_dict()})
     pos.production_term = {"value": pos.production_days, "unit": "calendar_days", "start_event": "factory_contract"}
     db.add(pos)
@@ -584,9 +586,13 @@ class OutcomeIn(BaseModel):
 @router.post("/{deal_id}/outcome")
 def outcome_ep(deal_id: str, body: OutcomeIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
-    _editable_by_manager(deal, user)
+    # исход сделки отмечают менеджер сделки, КД и ЗГД
+    if not (user.has(Role.CD, Role.GD) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):
+        raise HTTPException(403, "Результат сделки отмечают менеджер сделки, КД или ЗГД")
+    if not body.reason.strip():
+        raise HTTPException(422, "Укажите причину")
     if body.outcome == "won" and deal.has_alternatives and not body.won_variant_id:
-        raise HTTPException(422, "Укажите, какое предложение выбрал клиент (won_variant_id)")
+        raise HTTPException(422, "Укажите, какое предложение выбрал клиент")
     try:
         tr = wf_close(DealState(status=deal.status, service_flag=deal.service_flag), body.outcome, body.reason, date.today(), sla(db))
     except Exception as e:
@@ -617,6 +623,30 @@ def outcome_ep(deal_id: str, body: OutcomeIn, db: Session = Depends(get_db), use
                     closed_related.append(d.number)
     db.commit()
     return {"status": deal.status.value, "closed_related": closed_related}
+
+
+class ReopenIn(BaseModel):
+    reason: str
+
+
+@router.post("/{deal_id}/reopen")
+def reopen(deal_id: str, body: ReopenIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Вернуть в работу проигранную или отменённую сделку (ошибочная отметка, клиент вернулся) — КД или ЗГД; статус «КП отправлено»."""
+    deal = get_deal_or_404(db, deal_id, user)
+    if not user.has(Role.CD, Role.GD):
+        raise HTTPException(403, "Вернуть сделку в работу могут КД или ЗГД")
+    if deal.status not in (DealStatus.LOST, DealStatus.CANCELLED):
+        raise HTTPException(409, "Вернуть в работу можно проигранную или отменённую сделку")
+    if not body.reason.strip():
+        raise HTTPException(422, "Укажите причину")
+    before = deal.status.value
+    deal.status, deal.outcome, deal.outcome_reason = DealStatus.KP_SENT, None, ""
+    audit(db, user.id, deal.id, "deal", deal.id, "status", {"status": before}, {"status": "kp_sent"}, f"Возвращена в работу: {body.reason}")
+    db.add(FeedEntry(deal_id=deal.id, kind="system", subject="Сделка возвращена в работу", body=body.reason, user_id=user.id))
+    from ..services.catalog_service import update_client_price_outcome
+    update_client_price_outcome(db, deal)
+    db.commit()
+    return {"status": deal.status.value}
 
 
 class DuplicateIn(BaseModel):

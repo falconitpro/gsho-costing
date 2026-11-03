@@ -141,8 +141,8 @@ def _task_notifications(session: Session, flush_context, instances) -> None:
 
 
 def check_overdue_tasks(db: Session, today: date | None = None) -> int:
-    """Просроченные задачи: уведомление исполнителю (или всем с ролью задачи) и КД — один раз на задачу."""
-    from ..core.workflow import overdue
+    """Просроченные задачи: уведомление исполнителю (или всем с ролью задачи), КД и ЗГД — один раз на задачу."""
+    from ..core.workflow import overdue, role_title
     today = today or date.today()
     n = 0
     users = db.scalars(select(User).where(User.is_active.is_(True))).all()
@@ -158,9 +158,10 @@ def check_overdue_tasks(db: Session, today: date | None = None) -> int:
             for u in users:
                 if t.role in (u.roles or []):
                     notify(db, deal, u.id, "task_overdue", None, text)
-        for u in users:
-            if "cd" in (u.roles or []) and u.id != t.assignee_id:
-                notify(db, deal, u.id, "task_overdue", None, f"{text} — исполнитель: {t.role}")
+        who = next((u.display_name for u in users if u.id == t.assignee_id), "") or role_title(t.role)
+        for u in users:   # руководству — КД и ЗГД
+            if ({"cd", "gd"} & set(u.roles or [])) and u.id != t.assignee_id:
+                notify(db, deal, u.id, "task_overdue", None, f"{text} — исполнитель: {who}")
         t.overdue_notified = True
         n += 1
     return n

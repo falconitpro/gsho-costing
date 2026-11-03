@@ -190,8 +190,24 @@ def test_full_flow(client, tmp_path):
     assert ex["status"] == "approved"
     tree = _ok(client.get("/api/catalog/tree", headers=H(MGR)))
     assert any(e["name"] == "XDR80T базовое" for f in tree for t in f["types"] for m in t["models"] for e in m["executions"])
-    out = _ok(client.post(f"/api/deals/{did}/outcome", headers=H(MGR), json={"outcome": "won", "reason": "лучшая цена"}))
+    assert client.post(f"/api/deals/{did}/outcome", headers=H(LOG), json={"outcome": "won", "reason": "x"}).status_code == 403
+    assert client.post(f"/api/deals/{did}/outcome", headers=H(CD), json={"outcome": "won", "reason": " "}).status_code == 422
+    out = _ok(client.post(f"/api/deals/{did}/outcome", headers=H(CD), json={"outcome": "won", "reason": "лучшая цена"}))   # КД отмечает результат
     assert out["status"] == "contract"
+    dw = _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))
+    assert dw["status_detail"] == "Заключение контракта · подготовка проекта контракта"
+    assert any(t["deal_id"] == did and "подготовка проекта контракта" in t["title"] for t in _ok(client.get("/api/tasks/my", headers=H(MGR))))
+    # подэтапы заключения контракта: по порядку, с правами и задачей следующему
+    cs = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(MGR)))["contract_steps"]
+    assert cs[0]["code"] == "draft" and cs[0]["state"] == "current" and all(c["state"] == "pending" for c in cs[1:])
+    _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "draft", "comment": "проект по КП"}))
+    _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "client_review"}))
+    assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "internal_approval"}).status_code == 403
+    r_ia = _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(CD), json={"code": "internal_approval", "comment": "условия = КП"}))
+    assert r_ia["status_detail"].endswith("контракт подписан клиентом")
+    assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "client_signed"}).status_code == 422   # нужен номер
+    assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "nope"}).status_code == 404
+    assert next(x for x in _ok(client.get("/api/deals", headers=H(MGR))) if x["id"] == did)["status_detail"].startswith("Заключение контракта")
     st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(MGR)))
     codes = {s["code"] for s in st["stages"]}
     assert {"contract_signed", "factory_contract", "client_advance", "factory_advance", "readiness", "border", "declaration", "delivery", "client_final", "commissioning"} <= codes
@@ -730,3 +746,32 @@ def test_admin_screens_and_overdue(client, tmp_path):
         t.done_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
         db.commit()
     assert "notified" in _ok(client.post("/api/tasks/check-overdue", headers=H(ADM)))
+    with SessionLocal() as db:   # просрочку получил и ЗГД
+        gd = db.query(User).filter(User.email == GD).one()
+        assert db.query(NotificationLog).filter(NotificationLog.event == "task_overdue", NotificationLog.user_id == gd.id).count() >= 1
+    # история просрочек по сотрудникам — только ЗГД
+    assert client.get("/api/reports/overdue", headers=H(CD)).status_code == 403
+    assert client.get("/api/reports/overdue", headers=H(ADM)).status_code == 403
+    rep = _ok(client.get("/api/reports/overdue", headers=H(GD)))
+    lg_row = next(s_ for s_ in rep["summary"] if s_["name"].startswith("Каталкина"))
+    assert lg_row["overdue"] >= 1 and lg_row["days_max"] >= 3
+    assert any(r["title"] == "Тест просрочки" and r["days_late"] == 3 and not r["open"] for r in rep["rows"])
+    only = _ok(client.get(f"/api/reports/overdue?user_id={lg_row['user_id']}", headers=H(GD)))
+    assert {r["user_id"] for r in only["rows"]} <= {lg_row["user_id"]}
+
+
+def test_outcome_lost_and_reopen(client):
+    """Проигранную сделку КД возвращает в работу; менеджер не может."""
+    from app.db import SessionLocal
+    from app.models import Deal
+    from app.core.workflow import DealStatus
+    with SessionLocal() as db:
+        d = db.query(Deal).filter(Deal.status == DealStatus.APPROVED).first()
+        if d is None:
+            pytest.skip("нет утверждённой сделки")
+        did = d.id
+    assert _ok(client.post(f"/api/deals/{did}/outcome", headers=H(GD), json={"outcome": "lost", "reason": "цена выше конкурентов"}))["status"] == "lost"
+    assert client.post(f"/api/deals/{did}/reopen", headers=H(MGR), json={"reason": "x"}).status_code == 403
+    assert client.post(f"/api/deals/{did}/reopen", headers=H(CD), json={"reason": ""}).status_code == 422
+    assert _ok(client.post(f"/api/deals/{did}/reopen", headers=H(CD), json={"reason": "клиент вернулся к переговорам"}))["status"] == "kp_sent"
+    assert client.post(f"/api/deals/{did}/reopen", headers=H(CD), json={"reason": "ещё раз"}).status_code == 409
