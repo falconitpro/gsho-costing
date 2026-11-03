@@ -31,6 +31,7 @@ h1 { font-size: 20px; margin: 0 0 12px; }
 h2 { font-size: 16px; margin: 18px 0 8px; }
 .card { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 14px; }
 .grid { display: grid; gap: 14px; }
+.grid > * { min-width: 0; }
 .grid.cols-2 { grid-template-columns: 1fr 1fr; }
 .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 900px) { .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; } }

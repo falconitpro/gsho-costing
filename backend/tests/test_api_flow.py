@@ -154,6 +154,8 @@ def test_full_flow(client, tmp_path):
     _ok(client.post(f"/api/deals/{did}/kp/build", headers=H(MGR)))
     kf = client.get(f"/api/deals/{did}/kp/file?format=docx", headers=H(MGR))
     assert kf.status_code == 200 and kf.content[:2] == b"PK"
+    # обычная ссылка (без заголовка dev-пользователя) — по сессии, выданной при работе с API: скачивание КП и Excel работает
+    assert client.get(f"/api/deals/{did}/kp/file?format=docx").status_code == 200
     rc = _ok(client.get(f"/api/deals/{did}/kp/recipients", headers=H(MGR)))
     assert rc["recipients"][0]["email"] == "mech@rudnik.example"
     # почта не подключена — отправка из системы недоступна, КП отправляют вручную и отмечают
