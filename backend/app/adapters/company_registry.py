@@ -57,7 +57,7 @@ class DaDataRegistry(CompanyRegistry):
 
     def find_by_inn(self, inn: str) -> list[CompanyInfo]:
         import httpx
-        r = httpx.post(self.URL, json={"query": inn, "count": 5}, timeout=self.timeout,
+        r = httpx.post(self.URL, json={"query": inn, "count": 20}, timeout=self.timeout,   # головная + филиалы
                        headers={"Authorization": f"Token {self.api_key}", "Content-Type": "application/json", "Accept": "application/json"})
         r.raise_for_status()
         return [parse_dadata(s) for s in (r.json().get("suggestions") or [])]
