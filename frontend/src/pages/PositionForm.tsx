@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { api, ApiError, designation, fmtDate, fmtRub } from "../api";
 import { DELIVERY_START, PRODUCTION_START, TERM_UNITS, type Position } from "../types";
 import { collectFields, cmpCode, type RfqFieldData } from "../components/Questionnaire";
@@ -29,6 +29,8 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
   const marks = factories.find((x) => x.id === factoryId)?.trademarks || [];
   const [vals, setVals] = useState<Record<string, string>>({});
   const [optNames, setOptNames] = useState<Record<string, string>>({});
+  const [reqs, setReqs] = useState<Record<string, string>>({});       // требования заказчика по кодам
+  const [comms, setComms] = useState<Record<string, string>>({});     // комментарии по кодам
   const [open, setOpen] = useState<Record<number, boolean>>({ 0: true, 1: true, 13: true, 14: true });
   const [priceComment, setPriceComment] = useState("");
   const [advance, setAdvance] = useState({ pct: 30, days: 5 });
@@ -50,10 +52,22 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
   useEffect(() => {
     if (!position) return;
     const v: Record<string, string> = {}, names: Record<string, string> = {};
-    for (const f of collectFields(position)) { if (f.value != null && f.value !== "") v[f.code] = String(f.value); if (f.section_no === 12 && f.name) names[f.code] = f.name; }
+    const rq: Record<string, string> = {}, cm: Record<string, string> = {};
+    for (const f of collectFields(position)) {
+      if (f.value != null && f.value !== "") v[f.code] = String(f.value); if (f.section_no === 12 && f.name) names[f.code] = f.name;
+      if (f.requirement != null && f.requirement !== "") rq[f.code] = String(f.requirement); if (f.comment != null && f.comment !== "") cm[f.code] = String(f.comment);
+    }
     v["1.1"] ??= position.machine_type; v["1.2"] ??= position.model; v["13.4"] ??= String(position.qty); v["13.5"] ??= String(position.unit_price);
     v["13.1"] ??= position.currency; v["13.2"] ??= position.basis; v["14.1"] ??= String(position.production_days); v["14.2"] ??= String(position.delivery_days);
-    setVals(v); setOptNames(names);
+    setVals(v); setOptNames(names); setReqs(rq); setComms(cm);
+    // строки таблицы технических характеристик (в т.ч. правки в ней) — приоритетнее снимка импорта
+    api.get<{ rows: { code: string; value_ru: string; customer_requirement_ru: string; comment_ru: string }[] }>(`/api/deals/${dealId}/positions/${position.id}/tech-params`)
+      .then((r) => {
+        const byCode = r.rows.filter((x) => x.code);
+        setVals((s) => { const n = { ...s }; for (const x of byCode) if (x.value_ru) n[x.code] = x.value_ru; return n; });
+        setReqs((s) => { const n = { ...s }; for (const x of byCode) if (x.customer_requirement_ru) n[x.code] = x.customer_requirement_ru; return n; });
+        setComms((s) => { const n = { ...s }; for (const x of byCode) if (x.comment_ru) n[x.code] = x.comment_ru; return n; });
+      }).catch(() => undefined);
   }, [position]);
 
   const bySection = useMemo(() => {
@@ -75,6 +89,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
   const num = (code: string) => { const n = Number((vals[code] || "").replace(/\s/g, "").replace(",", ".")); return isNaN(n) ? null : n; };
   const valid = (factoryId || vals["0.7"]) && vals["1.2"] && (num("13.5") || 0) > 0 && (num("13.4") || 0) > 0;
   const filledCount = Object.values(vals).filter((v) => v !== "").length;
+  const reqCount = Object.values(reqs).filter((v) => v !== "").length;
 
   async function save() {
     if (!schema) return;
@@ -87,11 +102,15 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
       }
       const tech_params: Record<string, unknown> = {}, logistics_params: Record<string, unknown> = {};
       const options: { code: string; name: string; value: number | null }[] = [];
+      const form_rows: { code: string; value: string; requirement: string; comment: string }[] = [];
       for (const f of schema.fields) {
-        const raw = vals[f.code]; if (raw == null || raw === "") continue;
+        const raw = vals[f.code] ?? "", rq = reqs[f.code] ?? "", cm = comms[f.code] ?? "";
+        form_rows.push({ code: f.code, value: raw, requirement: rq, comment: cm });
+        if (raw === "" && rq === "" && cm === "") continue;
         const isNum = schema.numeric.includes(f.code);
-        const value = isNum && num(f.code) != null ? num(f.code) : raw;
-        const entry = { code: f.code, section: f.section, section_no: f.section_no, name: f.section_no === 12 ? (optNames[f.code] || f.name) : f.name, name_zh: f.name_zh, unit: f.unit, value, is_l: !!f.is_l };
+        const value = raw === "" ? null : isNum && num(f.code) != null ? num(f.code) : raw;
+        const entry = { code: f.code, section: f.section, section_no: f.section_no, name: f.section_no === 12 ? (optNames[f.code] || f.name) : f.name, name_zh: f.name_zh, unit: f.unit, value,
+          requirement: rq || null, comment: cm || null, is_l: !!f.is_l };
         (f.is_l ? logistics_params : tech_params)[f.code] = entry;
         if (f.section_no === 12 && f.code !== "12.6") options.push({ code: f.code, name: optNames[f.code] || f.name || f.code, value: typeof value === "number" ? value : null });
       }
@@ -106,7 +125,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
         delivery_term: dterm,
         factory_payments: [{ no: 1, share_pct: advance.pct, event: "factory_contract", offset_days: advance.days }, { no: 2, share_pct: 100 - advance.pct, event: "readiness", offset_days: 0 }],
         execution_id: execId || null,
-        price_comment: priceComment, tech_params, logistics_params,
+        price_comment: priceComment, tech_params, logistics_params, form_rows,
       };
       if (position) await api.patch(`/api/deals/${dealId}/positions/${position.id}`, body);
       else await api.post(`/api/deals/${dealId}/positions`, body);
@@ -145,38 +164,55 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
     if (code === "13.2") return <select value={v || "FCA"} onChange={(e) => set(code, e.target.value)}>{["EXW", "FCA", "CPT", "CIP", "DAP", "DDP"].map((b) => <option key={b}>{b}</option>)}</select>;
     const yesno = (f.unit || "").toLowerCase().startsWith("да/нет");
     if (yesno) return <select value={v} onChange={(e) => set(code, e.target.value)}><option value="">—</option><option>Да</option><option>Нет</option></select>;
-    return <input value={v} type={schema.numeric.includes(code) ? "text" : "text"} inputMode={schema.numeric.includes(code) ? "decimal" : undefined} onChange={(e) => set(code, e.target.value)} />;
+    return <input style={{ width: "100%" }} value={v} type="text" inputMode={schema.numeric.includes(code) ? "decimal" : undefined} onChange={(e) => set(code, e.target.value)} />;
   };
 
   return (
     <div className="card" style={{ borderColor: "var(--accent)" }}>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h2 style={{ marginTop: 0 }}>{position ? `Позиция ${designation(position)}: правка полей опросника` : "Новая позиция: ввод полей опросника вручную"}</h2>
-        <span className="muted">заполнено {filledCount} из {schema.fields.length} · обязательные: завод, модель, кол-во, цена</span>
+        <span className="muted">заполнено {filledCount} из {schema.fields.length}{reqCount ? ` · требований заказчика: ${reqCount}` : ""} · обязательные: завод, модель, кол-во, цена</span>
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>Те же поля, что в шаблоне RFQ ({schema.title || "RU-ZH"}). Метка <span className="badge">L</span> — данные для логиста. Заполняйте то, что известно; остальное можно дополнить позже или импортом файла.</p>
+      <p className="muted" style={{ marginTop: 0 }}>Те же поля, что в шаблоне RFQ ({schema.title || "RU-CN"}). Метка <span className="badge">L</span> — данные для логиста. Заполняйте то, что известно; остальное можно дополнить позже или импортом файла.</p>
       <div className="row" style={{ marginBottom: 8 }}>
         <button className="btn ghost" onClick={() => setOpen(Object.fromEntries([...bySection.keys()].map((k) => [k, true])))}>развернуть все разделы</button>
         <button className="btn ghost" onClick={() => setOpen({})}>свернуть</button>
         <a className="btn ghost" href="/api/deals/rfq/template/file">скачать пустой шаблон RFQ для завода</a>
       </div>
-      {[...bySection.entries()].sort((a, b) => a[0] - b[0]).map(([no, fs]) => {
-        const filledHere = fs.filter((f) => vals[f.code]).length;
-        return (
-          <details key={no} open={!!open[no]} onToggle={(e) => setOpen((o) => ({ ...o, [no]: (e.target as HTMLDetailsElement).open }))} style={{ marginBottom: 6 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 600 }}>{no}. {(schema.sections.find((s) => s.no === no)?.title || fs[0].section || "").split(" / ")[0]} <span className="muted">· {filledHere}/{fs.length}</span></summary>
-            <div className="grid cols-3" style={{ marginTop: 8 }}>
-              {fs.map((f) => (
-                <label className="f" key={f.code} title={f.name_zh}>
-                  <span>{f.code} {f.name || (no === 12 ? "Опция" : no === 10 ? "Параметр рабочего оборудования" : "")}{f.unit && f.unit !== "—" ? `, ${f.unit.split(" / ")[0]}` : ""} {f.is_l && <span className="badge">L</span>}{schema.required.includes(f.code) && <span style={{ color: "var(--accent)" }}> *</span>}</span>
-                  {no === 12 && f.code !== "12.6" && <input placeholder="наименование опции" value={optNames[f.code] || ""} onChange={(e) => setOptNames({ ...optNames, [f.code]: e.target.value })} />}
-                  {input(f)}
-                </label>
-              ))}
-            </div>
-          </details>
-        );
-      })}
+      {/* тот же вид, что у таблицы после загрузки файла: разделы, № / параметр / ед. / требования заказчика / значение / комментарий */}
+      <div style={{ overflowX: "auto" }}>
+        <table>
+          <thead><tr><th style={{ width: 60 }}>№</th><th>Параметр</th><th style={{ width: 80 }}>Ед.</th><th>Требования заказчика</th><th>Значение</th><th>Комментарий</th></tr></thead>
+          <tbody>
+            {[...bySection.entries()].sort((a, b) => a[0] - b[0]).map(([no, fs]) => {
+              const filledHere = fs.filter((f) => vals[f.code]).length;
+              const title = (schema.sections.find((s) => s.no === no)?.title || fs[0].section || "").split(" / ")[0];
+              return (
+                <Fragment key={no}>
+                  <tr style={{ cursor: "pointer", background: "var(--accent-soft)" }} onClick={() => setOpen((o) => ({ ...o, [no]: !o[no] }))}>
+                    <td colSpan={6} style={{ fontWeight: 600 }}>{open[no] ? "▾" : "▸"} {no}. {title} <span className="muted" style={{ fontWeight: 400 }}>· заполнено {filledHere} из {fs.length}
+                      {fs.some((f) => reqs[f.code]) && ` · требований заказчика: ${fs.filter((f) => reqs[f.code]).length}`}</span></td>
+                  </tr>
+                  {open[no] && fs.map((f) => {
+                    const req = schema.required.includes(f.code), empty = !vals[f.code];
+                    return (
+                      <tr key={f.code} style={{ background: empty && req ? "#fde7e7" : empty ? "#fff6d6" : undefined }} title={f.name_zh}>
+                        <td>{f.code} {f.is_l && <span className="badge" title="данные для логиста">L</span>}</td>
+                        <td>{no === 12 && f.code !== "12.6"
+                          ? <input style={{ width: "100%" }} placeholder="наименование опции" value={optNames[f.code] || ""} onChange={(e) => setOptNames({ ...optNames, [f.code]: e.target.value })} />
+                          : <>{f.name || (no === 10 ? "Параметр рабочего оборудования" : "")}{req && <span style={{ color: "var(--accent)" }}> *</span>}</>}
+                          {f.name_zh && <div className="muted" style={{ fontSize: 11 }}>{f.name_zh}</div>}</td>
+                        <td className="muted">{f.unit && f.unit !== "—" ? f.unit.split(" / ")[0] : ""}</td>
+                        <td><input style={{ width: "100%" }} value={reqs[f.code] || ""} onChange={(e) => setReqs({ ...reqs, [f.code]: e.target.value })} /></td>
+                        <td>{input(f)}</td>
+                        <td><input style={{ width: "100%" }} value={comms[f.code] || ""} onChange={(e) => setComms({ ...comms, [f.code]: e.target.value })} /></td>
+                      </tr>);
+                  })}
+                </Fragment>);
+            })}
+          </tbody>
+        </table>
+      </div>
       <div className="grid cols-3" style={{ marginTop: 10 }}>
         <label className="f">Исполнение из каталога (заполняет технические характеристики; затем их можно изменить)
           <select value={execId} onChange={(e) => { setExecId(e.target.value); const found = tree.flatMap((f) => f.types.flatMap((t) => t.models.flatMap((m) => m.executions.map((x) => ({ f, t, m, x }))))).find((z) => z.x.id === e.target.value);

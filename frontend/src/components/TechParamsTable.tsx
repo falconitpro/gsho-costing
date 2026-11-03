@@ -111,7 +111,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
           <div className="row">
             <button className="btn ghost" onClick={() => { setWizard("requirements"); setPreview(null); setOfferId(""); }}>Импорт требований клиента</button>
             <button className="btn ghost" onClick={() => { setWizard("factory_answer"); setPreview(null); setOfferId(""); }}>Импорт ответа завода</button>
-            <a className="btn ghost" href={`${base}/request/file`}>Файл запроса RU+ZH</a>
+            <a className="btn ghost" href={`${base}/request/file`}>Файл запроса RU+CN</a>
             <a className="btn ghost" href={`/api/deals/${dealId}/positions/${position.id}/rfq/file`} title="шаблон RFQ с требованиями заказчика из таблицы; строки «в РФ» помечены">RFQ с требованиями</a>
             <button className="btn ghost" onClick={addRow}>+ строка</button>
             <button className="btn" onClick={save} disabled={!dirty}>Сохранить таблицу</button>
@@ -152,7 +152,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
                       </select>)
                     : canEdit ? <input style={{ width: "100%", padding: 4, ...vStyle(c.key) }} value={String(r[c.key] ?? "")} type={c.key === "no" ? "number" : "text"}
                       onChange={(e) => upd(i, { [c.key]: c.key === "no" ? Number(e.target.value) : e.target.value } as Partial<TechParamRow>)}
-                      title={c.key === "name_ru" && r.name_zh ? r.name_zh : c.key === "value_ru" ? [vTitle, r.value_zh ? `ZH: ${r.value_zh}` : ""].filter(Boolean).join(" · ") || undefined : undefined} />
+                      title={c.key === "name_ru" && r.name_zh ? r.name_zh : c.key === "value_ru" ? [vTitle, r.value_zh ? `CN: ${r.value_zh}` : ""].filter(Boolean).join(" · ") || undefined : undefined} />
                       : <span style={{ padding: "1px 4px", borderRadius: 3, ...vStyle(c.key) }} title={c.key === "value_ru" ? vTitle : undefined}>{String(r[c.key] ?? "")}</span>}
                     {c.key === "value_ru" && r.value_zh && r.value_zh !== r.value_ru && <div className="muted" style={{ fontSize: 11 }}>{r.value_zh}{r.translation_status === "machine" && canEdit && <> · <a href="#" onClick={(e) => { e.preventDefault(); api.post(`${base}/verify/${r.id}`).then(load); }}>перевод верный</a></>}</div>}
                   </td>
@@ -168,7 +168,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
 
       {canEdit && (
         <div className="card" style={{ marginTop: 10 }}>
-          <b>Запрос заводу (RU + ZH)</b> <span className="muted">— требования заказчика, пустой столбец «Значение», просьба приложить фото и чертежи. Отправка через WeCom и e-mail; по каждому заводу создаётся ответ-кандидат.</span>
+          <b>Запрос заводу (RU + CN)</b> <span className="muted">— требования заказчика, пустой столбец «Значение», просьба приложить фото и чертежи. Отправка через WeCom и e-mail; по каждому заводу создаётся ответ-кандидат.</span>
           <div className="row" style={{ marginTop: 6 }}>
             {/* заводы — из выпадающего списка; несколько заводов добавляются по одному, лишний убирается крестиком */}
             <div>

@@ -12,7 +12,7 @@
 | POST | `/catalog/executions/{id}/decision`; PATCH `/catalog/executions/{id}`, `/catalog/models/{id}` | КД, ГД | Подтверждение занесения, наименование под брендом компании |
 | GET/POST | `/refs/machine-types`, `POST …/{id}/approve` | любая / КД, ГД | Типы машин (заводятся по ходу работы) |
 | GET/PUT | `/refs/tech-param-templates?machine_type_id=` | любая / КД, ГД | Шаблоны технических характеристик и обязательность |
-| GET/POST/DELETE | `/refs/glossary`, `POST …/{id}/confirm` | по праву `glossary` | Глоссарий RU↔ZH |
+| GET/POST/DELETE | `/refs/glossary`, `POST …/{id}/confirm` | по праву `glossary` | Глоссарий RU↔CN |
 | POST | `/deals/{id}/payment-terms` | КД, ГД | Условия оплаты клиента и завода, БГ на аванс, точка отсчёта срока поставки (задачи 1, 3) |
 | GET/PUT/POST/DELETE | `/admin/access`, `…/{role}/{group}`, `…/overrides`, `…/preview` | администратор, ГД | Уровни доступа (задача 11) |
 

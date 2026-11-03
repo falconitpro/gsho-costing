@@ -2,8 +2,8 @@
 
 Таблица: № / Параметр (RU) / Ед. изм. / Требования заказчика / Значение (RU) / Комментарий.
 Порядок работы: менеджер заполняет требования (вручную или импортом файла клиента) → формирует двуязычный запрос
-заводу (RU+ZH; строки «реализуется в России» не попадают) → завод заполняет значения → менеджер загружает ответ
-(вручную или импортом), значения переводятся ZH→RU через глоссарий, затем переводчик (машинный перевод — на проверку).
+заводу (RU+CN; строки «реализуется в России» не попадают) → завод заполняет значения → менеджер загружает ответ
+(вручную или импортом), значения переводятся CN→RU через глоссарий, затем переводчик (машинный перевод — на проверку).
 Импорт таблиц — с предпросмотром и выбором столбцов/строк; сопоставление строк по № и названию.
 """
 from __future__ import annotations
@@ -285,6 +285,27 @@ def rows_follow_position(pos: Position) -> None:
             r.value_ru = normalize_country(country)
 
 
+def apply_form_rows(pos: Position, form_rows: list[dict], user_id: Optional[str], skip_empty: bool = False) -> int:
+    """Ручной ввод в форме-таблице: значение, требование заказчика и комментарий — в строки таблицы технических
+    характеристик по коду (тот же вид и те же данные, что после загрузки файла). Возвращает число изменённых строк."""
+    by_code = {str(f.get("code") or "").strip(): f for f in form_rows if f.get("code")}
+    changed = 0
+    for r in pos.tech_param_rows or []:
+        f = by_code.get((r.code or "").strip())
+        if f is None or (skip_empty and not any(str(f.get(k) or "").strip() for k in ("value", "requirement", "comment"))):
+            continue
+        new = {"value_ru": str(f.get("value") or "").strip(), "customer_requirement_ru": str(f.get("requirement") or "").strip(),
+               "comment_ru": str(f.get("comment") or "").strip()}
+        if any(getattr(r, k) != v for k, v in new.items()):
+            if r.value_ru != new["value_ru"] and r.translation_status == "machine":
+                r.translation_status = "verified"
+            for k, v in new.items():
+                setattr(r, k, v)
+            r.filled_by = user_id
+            changed += 1
+    return changed
+
+
 def row_dicts(pos: Position) -> list[dict]:
     out = [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in sorted(pos.tech_param_rows or [], key=lambda r: r.no)]
     for r in out:                       # строки, созданные до появления разделов, — раздел по коду поля
@@ -412,7 +433,7 @@ def _match(rows: list[PositionTechParam], no: Any, name: Any, synonyms: dict[str
 
 def apply_import(db: Session, pos: Position, path: str, filename: str, mapping: dict, user_id: Optional[str], target: str = "requirements",
                  selected_rows: Optional[list[int]] = None, add_unmatched: bool = True) -> dict:
-    """Применяет выбранное сопоставление. target: requirements (файл клиента) | factory_answer (ответ завода, ZH→RU)."""
+    """Применяет выбранное сопоставление. target: requirements (файл клиента) | factory_answer (ответ завода, CN→RU)."""
     sheets = read_table(path, filename)
     sheet = next((s for s in sheets if s["name"] == mapping.get("sheet")), sheets[0])
     cols: dict[str, int] = {k: int(v) for k, v in (mapping.get("columns") or {}).items() if v is not None and v != ""}
@@ -484,7 +505,7 @@ def apply_import(db: Session, pos: Position, path: str, filename: str, mapping: 
                 else:
                     r.comment_ru = c
             r.source, r.filled_by = "factory_answer", user_id
-    # перевод ответа завода ZH→RU: глоссарий → переводчик
+    # перевод ответа завода CN→RU: глоссарий → переводчик
     if zh_values:
         tr = translate(db, [t for _, _, t in zh_values], "zh", "ru", kind="value", user_id=user_id)
         for (r, field, _), (text, status) in zip(zh_values, tr):

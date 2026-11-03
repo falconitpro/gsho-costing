@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-# название (как выводим) → синонимы: EN, ZH, коды ISO, прилагательные
+# название (как выводим) → синонимы: EN, CN, коды ISO, прилагательные
 COUNTRIES: dict[str, tuple[str, ...]] = {
     "Китай": ("china", "prc", "p.r.c", "p. r. china", "chinese", "cn", "chn", "кнр", "китайская народная республика", "китай", "中国", "中國", "中华人民共和国", "中华"),
     "Россия": ("russia", "russian federation", "ru", "rus", "рф", "российская федерация", "россия", "俄罗斯"),

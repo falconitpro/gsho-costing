@@ -37,7 +37,7 @@ def fill_rfq_template(dst: str, values: dict[str, Any], spare_parts: Optional[li
         if c is not None:
             rows_by_code[str(c).strip()] = r
     def put(r: int, c: int, val: Any) -> None:
-        """Запись с учётом объединённых ячеек (у строк 12.x «Значение» объединено по ZH/RU)."""
+        """Запись с учётом объединённых ячеек (у строк 12.x «Значение» объединено по CN/RU)."""
         for rng in ws.merged_cells.ranges:
             if rng.min_row <= r <= rng.max_row and rng.min_col <= c <= rng.max_col:
                 ws.cell(rng.min_row, rng.min_col).value = val
@@ -93,7 +93,7 @@ LOCAL_RU_NOTE = "Реализуется в России — не заполня�
 
 
 def fill_rfq_requirements(dst: str, rows: list[dict], src: Optional[str] = None) -> str:
-    """Задача 4: RFQ на основе таблицы позиции — требования заказчика (RU/ZH) по кодам; строки «в РФ» помечены и не заполняются заводом."""
+    """Задача 4: RFQ на основе таблицы позиции — требования заказчика (RU/CN) по кодам; строки «в РФ» помечены и не заполняются заводом."""
     shutil.copyfile(template_path(src), dst)
     wb = load_workbook(dst)
     ws = next((w for w in wb.worksheets if "тех" in w.title.lower()), wb.worksheets[0])

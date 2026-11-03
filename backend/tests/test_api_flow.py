@@ -307,7 +307,7 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     assert client.patch(f"/api/deals/{did}/positions/{pid}/images/{img['id']}", headers=H(MGR), json={"in_kp": True}).status_code == 403
     _ok(client.patch(f"/api/deals/{did}/positions/{pid}/images/{img['id']}", headers=H(CD), json={"in_kp": True, "kp_order": 1}))
     assert client.post(f"/api/deals/{did}/positions/{pid}/images", headers=H(FD), files={"file": ("x.png", b"123", "image/png")}).status_code == 403
-    # задача 9: запрос двум заводам (файл RU+ZH, строка опции РФ не включена), ответ второго завода, сравнение, отбор КД
+    # задача 9: запрос двум заводам (файл RU+CN, строка опции РФ не включена), ответ второго завода, сравнение, отбор КД
     # файлы клиента без подтверждения проверки — 422 (задача 10)
     r = client.post(f"/api/deals/{did}/positions/{pid}/tech-params/request", headers=H(MGR), json={"factory_ids": [factories[0]["id"]], "image_ids": [img["id"]]})
     assert r.status_code == 422 and "client_files" in r.json()["detail"]
@@ -526,3 +526,9 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     tp2 = _ok(client.get(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR)))
     assert next(r for r in tp2["rows"] if r["code"] == "1.1")["value_ru"] == "ПДМ"     # и обратно: карточка позиции → таблица
     assert "Китай" in _ok(client.get("/api/refs/countries", headers=H(MGR)))
+    # --- ручной ввод формой-таблицей: значения, требования заказчика и комментарии — в те же строки таблицы
+    _ok(client.patch(f"/api/deals/{deal['id']}/positions/{pid}", headers=H(MGR), json={"form_rows": [
+        {"code": "1.5", "value": "8 300", "requirement": "не более 8 500", "comment": "по чертежу"}]}))
+    r15 = next(r for r in _ok(client.get(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR)))["rows"] if r["code"] == "1.5")
+    assert (r15["value_ru"], r15["customer_requirement_ru"], r15["comment_ru"]) == ("8 300", "не более 8 500", "по чертежу")
+    assert r15["req_status"] == "match"

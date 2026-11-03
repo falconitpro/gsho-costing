@@ -54,7 +54,7 @@ export default function CatalogPage({ me }: { me: Me }) {
         <button className={tab === "tree" ? "active" : ""} onClick={() => setTab("tree")}>Производитель → тип → модель → исполнение</button>
         {contributor && <button className={tab === "add" ? "active" : ""} onClick={() => setTab("add")}>+ Добавить оборудование</button>}
         {editor && <button className={tab === "pending" ? "active" : ""} onClick={() => setTab("pending")}>На подтверждение ({pending.length})</button>}
-        {can(me, "glossary") && <button className={tab === "glossary" ? "active" : ""} onClick={() => setTab("glossary")}>Глоссарий RU ↔ ZH</button>}
+        {can(me, "glossary") && <button className={tab === "glossary" ? "active" : ""} onClick={() => setTab("glossary")}>Глоссарий RU ↔ CN</button>}
         <button className={tab === "templates" ? "active" : ""} onClick={() => setTab("templates")}>Шаблоны технических характеристик</button>
         {editor && <button className={tab === "archive" ? "active" : ""} onClick={() => setTab("archive")}>Архив</button>}
       </div>
@@ -143,9 +143,9 @@ export default function CatalogPage({ me }: { me: Me }) {
             {can(me, "glossary", 2) && <><input placeholder="термин RU" value={glNew.term_ru} onChange={(e) => setGlNew({ ...glNew, term_ru: e.target.value })} /><input placeholder="中文" value={glNew.term_zh} onChange={(e) => setGlNew({ ...glNew, term_zh: e.target.value })} />
               <select value={glNew.kind} onChange={(e) => setGlNew({ ...glNew, kind: e.target.value })}><option value="param">параметр</option><option value="unit">единица</option><option value="value">значение</option><option value="phrase">фраза</option></select>
               <button className="btn" disabled={!glNew.term_ru || !glNew.term_zh} onClick={() => api.post("/api/refs/glossary", { ...glNew, status: "confirmed" }).then(() => { setGlNew({ term_ru: "", term_zh: "", kind: "param" }); loadGl(); })}>Добавить</button></>}</div>
-          <table style={{ marginTop: 8 }}><thead><tr><th>RU</th><th>ZH</th><th>Тип</th><th>Статус</th><th /></tr></thead>
+          <table style={{ marginTop: 8 }}><thead><tr><th>RU</th><th>CN</th><th>Тип</th><th>Статус</th><th /></tr></thead>
             <tbody>{gl.map((g) => <tr key={g.id} style={{ background: g.status === "machine" ? "#f3e8ff" : undefined }}><td>{g.term_ru}</td><td>{g.term_zh}</td><td>{g.kind}</td><td><span className={"badge " + (g.status === "confirmed" ? "ok" : "warn")}>{g.status === "confirmed" ? "подтверждён" : "машинный"}</span></td>
-              <td className="row">{can(me, "glossary", 2) && g.status === "machine" && <button className="btn ghost" onClick={() => { const z = prompt("Перевод ZH:", g.term_zh); if (z !== null) api.post(`/api/refs/glossary/${g.id}/confirm?term_zh=${encodeURIComponent(z)}`).then(loadGl); }}>подтвердить</button>}
+              <td className="row">{can(me, "glossary", 2) && g.status === "machine" && <button className="btn ghost" onClick={() => { const z = prompt("Перевод CN:", g.term_zh); if (z !== null) api.post(`/api/refs/glossary/${g.id}/confirm?term_zh=${encodeURIComponent(z)}`).then(loadGl); }}>подтвердить</button>}
                 {can(me, "glossary", 2) && <button className="btn ghost" onClick={() => api.del(`/api/refs/glossary/${g.id}`).then(loadGl)}>×</button>}</td></tr>)}
               {gl.length === 0 && <tr><td colSpan={5} className="muted">Пусто</td></tr>}</tbody></table>
         </div>
