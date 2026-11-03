@@ -23,23 +23,34 @@ from .common import serialize
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 ADMIN = require_roles(Role.ADMIN, Role.GD)
 FD_ADMIN = require_roles(Role.ADMIN, Role.FD, Role.GD)
+SETTINGS_READ = require_roles(Role.ADMIN, Role.FD, Role.GD, Role.CD)
+# ключи, которые меняет КД (и ГД): комиссии внешняя и менеджера
+CD_KEYS = {"external_commission_pct", "manager_commission_pct"}
 
 # ключи, которые может менять ФД (ставки стоимости денег, порог маржи, ΔK/Δt, лимиты)
 FD_KEYS = {"margin_threshold_pct", "scenario_dk", "scenario_dt", "use_historical_volatility", "vol_multipliers", "fx_weights",
            "fx_history_years", "key_rate_pct", "pboc_rate_pct", "foreign_rates_pct", "fx_expert_points", "financing_rate_pct",
-           "deposit_rate_pct", "conversion_fee_pct", "transfer_fee_rub", "guarantee_rate_pct", "cash_gap_limit_rub",
+           "deposit_rate_pct", "conversion_fee_pct", "transfer_fee", "guarantee_rate_pct", "cash_gap_limit_rub",
            "overhead_actual_pct_last_year", "warranty_reserve_pct_by_type", "unplanned_reserve_pct"}
 
 
 @router.get("/settings")
-def settings_all(db: Session = Depends(get_db), user: CurrentUser = Depends(FD_ADMIN)):
+def settings_all(db: Session = Depends(get_db), user: CurrentUser = Depends(SETTINGS_READ)):
     return settings_service.get_all(db)
 
 
 @router.get("/settings/meta")
-def settings_meta(user: CurrentUser = Depends(FD_ADMIN)):
-    """Названия, описания, единицы, группы и типы полей — для понятного экрана «Настройки»."""
-    return settings_service.meta()
+def settings_meta(user: CurrentUser = Depends(SETTINGS_READ)):
+    """Названия, описания, единицы, группы и типы полей — для понятного экрана «Настройки»; editable — может ли пользователь менять."""
+    m = settings_service.meta()
+    for k, it in m["items"].items():
+        it["editable"] = _can_set(user, k)
+        it["editors"] = "КД или ГД" if k in CD_KEYS else "ФД, ГД" if k in FD_KEYS else "ГД"
+    return m
+
+
+def _can_set(user: CurrentUser, key: str) -> bool:
+    return user.has(Role.ADMIN, Role.GD) or (key in FD_KEYS and user.has(Role.FD)) or (key in CD_KEYS and user.has(Role.CD))
 
 
 class SettingIn(BaseModel):
@@ -48,11 +59,13 @@ class SettingIn(BaseModel):
 
 
 @router.put("/settings/{key}")
-def set_setting(key: str, body: SettingIn, db: Session = Depends(get_db), user: CurrentUser = Depends(FD_ADMIN)):
+def set_setting(key: str, body: SettingIn, db: Session = Depends(get_db), user: CurrentUser = Depends(SETTINGS_READ)):
     if key not in settings_service.DEFAULTS:
         raise HTTPException(404, "Неизвестный ключ")
-    if not user.has(Role.ADMIN, Role.GD) and key not in FD_KEYS:
-        raise HTTPException(403, "Этот параметр меняет администратор")
+    if not _can_set(user, key):
+        raise HTTPException(403, "Этот параметр меняет " + ("КД или ГД" if key in CD_KEYS else "ФД, ГД или администратор" if key in FD_KEYS else "ГД или администратор"))
+    if key == "fx_expert_points":
+        body.value = settings_service.expert_points(body.value)
     if key in ("gd_deal_limit_rub", "overhead_scale") and not user.has(Role.GD, Role.ADMIN):
         raise HTTPException(403, "Лимит и шкалу накладных утверждает ГД")
     before = settings_service.get(db, key)
@@ -63,7 +76,7 @@ def set_setting(key: str, body: SettingIn, db: Session = Depends(get_db), user: 
 
 
 @router.get("/settings/{key}/history")
-def setting_history(key: str, db: Session = Depends(get_db), user: CurrentUser = Depends(FD_ADMIN)):
+def setting_history(key: str, db: Session = Depends(get_db), user: CurrentUser = Depends(SETTINGS_READ)):
     return [serialize(r) for r in settings_service.history(db, key)]
 
 
@@ -124,7 +137,7 @@ async def hs_upload(file: UploadFile = File(...), valid_from: date = date.today(
         for old in db.scalars(select(HsCode).where(HsCode.code == row["code"], HsCode.valid_to.is_(None))).all():
             old.valid_to = valid_from
         db.add(HsCode(code=row["code"], description=row["description"], duty_pct=float(row.get("duty_pct") or 0),
-                      vat_pct=float(row.get("vat_pct") or 20), util_fee=row.get("util_fee", "").lower() in ("1", "да", "true"),
+                      vat_pct=float(row.get("vat_pct") or 22), util_fee=row.get("util_fee", "").lower() in ("1", "да", "true"),
                       licence_required=row.get("licence", "").lower() in ("1", "да", "true"),
                       certification=[c.strip() for c in (row.get("certification") or "").split(",") if c.strip()],
                       valid_from=valid_from, version_file=file.filename or ""))

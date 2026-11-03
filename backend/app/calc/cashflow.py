@@ -57,12 +57,21 @@ def build_cashflow(flows: list[Flow], fin: FinanceSettings, guarantee_cost_rub: 
     flows = sorted(flows, key=lambda f: f.on)
 
     # комиссии за конвертацию и перевод
+    def transfer_fee(amount: float) -> float:
+        """Комиссия за перевод: фиксированная сумма, процент от суммы перевода или и то и другое."""
+        fee = 0.0
+        if fin.transfer_fee_mode in ("fixed", "both"):
+            fee += fin.transfer_fee_rub
+        if fin.transfer_fee_mode in ("pct", "both"):
+            fee += abs(amount) * fin.transfer_fee_pct / 100.0
+        return fee
+
     for f in flows:
         if f.amount_rub < 0 and f.currency != "RUB":
             res.conversion_fees_rub += abs(f.amount_rub) * fin.conversion_fee_pct / 100.0
-            res.transfer_fees_rub += fin.transfer_fee_rub
+            res.transfer_fees_rub += transfer_fee(f.amount_rub)
         elif f.amount_rub < 0 and f.kind == "factory":
-            res.transfer_fees_rub += fin.transfer_fee_rub
+            res.transfer_fees_rub += transfer_fee(f.amount_rub)
 
     # точная интеграция по датам платежей
     r_fin = fin.financing_rate_pct / 100.0

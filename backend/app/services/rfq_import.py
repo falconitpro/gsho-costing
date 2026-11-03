@@ -113,6 +113,20 @@ class RfqParsed:
     def filled_count(self) -> int:
         return sum(1 for f in self.fields.values() if f.value not in (None, ""))
 
+    def apply_l_codes(self, codes) -> "RfqParsed":
+        """Метка L по настройке «Поля для логиста» (вместо колонки L файла); codes=None — как в файле."""
+        if codes is None:
+            return self
+        codes = set(codes)
+        merged = {**self.tech_params, **self.logistics_params}
+        self.tech_params, self.logistics_params = {}, {}
+        for code, f in self.fields.items():
+            f.is_l = code in codes
+        for code, e in merged.items():
+            is_l = code in codes
+            (self.logistics_params if is_l else self.tech_params)[code] = {**e, "is_l": is_l}
+        return self
+
     def to_dict(self) -> dict:
         return {
             "template_version": self.template_version, "title": self.title, "sections": self.sections,

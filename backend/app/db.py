@@ -35,6 +35,21 @@ def init_db() -> None:
     sync_enums()
     Base.metadata.create_all(engine)
     add_missing_columns()
+    vat_22_once()
+
+
+def vat_22_once() -> None:
+    """С 2026 года НДС в РФ — 22 %: однократно переводит действующие ставки справочника ТН ВЭД с 20 % на 22 %."""
+    from sqlalchemy.orm import Session
+    from .models import HsCode, RateSetting
+    with Session(engine) as db:
+        if db.query(RateSetting).filter(RateSetting.key == "_migration_vat22").first():
+            return
+        db.query(HsCode).filter(HsCode.valid_to.is_(None), HsCode.vat_pct == 20).update({HsCode.vat_pct: 22}, synchronize_session=False)
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)   # закрытая запись — служебная отметка, в настройки не попадает
+        db.add(RateSetting(key="_migration_vat22", value=True, comment="НДС 20 → 22 % в справочнике ТН ВЭД", valid_from=now, valid_to=now))
+        db.commit()
 
 
 def sync_enums() -> None:

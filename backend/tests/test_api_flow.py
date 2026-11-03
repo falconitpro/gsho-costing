@@ -91,7 +91,7 @@ def test_full_flow(client, tmp_path):
     lg = _ok(client.put(f"/api/deals/{did}/logistics/positions/{pos['id']}", headers=H(LOG), json={
         "domestic_logistics": {"amount": 48000, "currency": "CNY"}, "export_formalities": {"amount": 6000, "currency": "CNY"},
         "hs_code": "8704101090", "util_fee_rub": 1200000, "certification_rub": 850000}))
-    assert lg["logistics"]["duty_pct"] == 5.0 and lg["logistics"]["vat_pct"] == 20.0   # ставки из справочника
+    assert lg["logistics"]["duty_pct"] == 5.0 and lg["logistics"]["vat_pct"] == 22.0   # ставки из справочника
     # ручная ставка без комментария отклоняется
     r = client.put(f"/api/deals/{did}/logistics/positions/{pos['id']}", headers=H(LOG), json={"hs_code": "8704101090", "duty_pct": 2.0})
     assert r.status_code == 422
@@ -116,7 +116,7 @@ def test_full_flow(client, tmp_path):
     base = calc["result"]["variants"][var["id"]]["base"]
     assert set(base["items_rub"]) == {"factory_price", "domestic_logistics", "export_formalities", "intl_freight", "insurance", "customs_duty",
                                       "import_vat", "broker_util", "certification", "rf_delivery", "finance", "service", "warranty_reserve", "overhead",
-                                      "local_completion"}
+                                      "local_completion", "external_commission", "manager_commission", "cd_commission"}
     assert base["items_rub"]["service"] > 0 and base["items_rub"]["customs_duty"] > 0 and base["cash_gap"]["amount_rub"] < 0
     assert calc["result"]["fx_components"] and calc["threshold_pct"] == 3.0
     assert base["defaults_used"]["client_payments"] is True and any("типовой схеме" in w for w in calc["warnings"])
@@ -545,3 +545,17 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     snap = ((pl.get("tech_params") or {}).get("_rfq") or {}).get("fields") or {}
     if "1.1" in snap:
         assert snap["1.1"]["value"] == "Самосвал шахтный"
+    # --- настройки: КД меняет внешнюю комиссию, комиссию КД — только ГД; экспертные точки — в едином виде
+    _ok(client.put("/api/admin/settings/external_commission_pct", headers=H(CD), json={"value": 2.5, "comment": "тест"}))
+    assert client.put("/api/admin/settings/cd_commission_pct", headers=H(CD), json={"value": 1.0}).status_code == 403
+    mt = _ok(client.get("/api/admin/settings/meta", headers=H(CD)))
+    assert mt["items"]["external_commission_pct"]["editable"] and not mt["items"]["cd_commission_pct"]["editable"]
+    assert mt["items"]["region_norms"]["type"] == "dict_table" and mt["items"]["fx_expert_points"]["type"] == "expert_points"
+    _ok(client.put("/api/admin/settings/fx_expert_points", headers=H(FD), json={"value": {"cny": {"2027-03-31": 12.5}}}))
+    assert _ok(client.get("/api/admin/settings", headers=H(FD)))["fx_expert_points"] == {"CNY": [{"on": "2027-03-31", "rate": 12.5}]}
+    s_ = _ok(client.get("/api/admin/settings", headers=H(FD)))
+    assert s_["commissioning_days"] == 5 and s_["unplanned_reserve_pct"] == 3.0 and s_["sla_days"]["logistics"] == 1
+    # --- удалять строки таблицы технических характеристик могут только КД, ГД и администратор
+    rows4 = _ok(client.get(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR)))["rows"]
+    assert client.put(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR), json=rows4[1:]).status_code == 403
+    assert len(_ok(client.put(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(CD), json=rows4[1:]))["rows"]) == len(rows4) - 1

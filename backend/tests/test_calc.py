@@ -161,3 +161,28 @@ def test_service_calc():
     assert r.reserve_fx.amount == pytest.approx(r.spare_parts_fx.amount * 0.05)
     assert len(r.rows) == 20 and sum(row.visits for row in r.rows) == 20
     assert r.total_rub_part == r.labour_rub + r.visits_rub
+
+
+def test_commissions_and_transfer_fee_modes():
+    """Статьи 16–18: внешняя комиссия от цены клиента, комиссии менеджера и КД — от себестоимости (статьи 1–15);
+    комиссия за перевод — фикс, процент или и то и другое."""
+    inp = sample_deal()
+    base0 = calc_deal(inp).variants["V1"]["base"]
+    inp2 = sample_deal()
+    inp2.external_commission_pct, inp2.manager_commission_pct, inp2.cd_commission_pct = 2.0, 1.0, 0.5
+    b = calc_deal(inp2).variants["V1"]["base"]
+    assert b.items_rub["external_commission"] == pytest.approx(b.price_rub * 0.02, abs=1.0)
+    cost_1_15 = sum(v for k, v in b.items_rub.items() if k not in ("external_commission", "manager_commission", "cd_commission"))
+    assert b.items_rub["manager_commission"] == pytest.approx(cost_1_15 * 0.01, abs=1.0)
+    assert b.items_rub["cd_commission"] == pytest.approx(cost_1_15 * 0.005, abs=1.0)
+    assert b.cost_total_rub > base0.cost_total_rub and b.margin_pct < base0.margin_pct
+    assert b.cost_total_rub == pytest.approx(sum(p.total_rub for p in b.positions), abs=1.0)
+
+    flows = [Flow(on=date(2027, 1, 10), amount_rub=-1_000_000, kind="factory", currency="CNY", fx_amount=80_000)]
+    from app.calc.types import FinanceSettings
+    fixed = build_cashflow(flows, FinanceSettings(transfer_fee_rub=3000, transfer_fee_mode="fixed"))
+    pct = build_cashflow(flows, FinanceSettings(transfer_fee_rub=3000, transfer_fee_pct=0.1, transfer_fee_mode="pct"))
+    both = build_cashflow(flows, FinanceSettings(transfer_fee_rub=3000, transfer_fee_pct=0.1, transfer_fee_mode="both"))
+    assert fixed.transfer_fees_rub == pytest.approx(3000)
+    assert pct.transfer_fees_rub == pytest.approx(1000)
+    assert both.transfer_fees_rub == pytest.approx(4000)

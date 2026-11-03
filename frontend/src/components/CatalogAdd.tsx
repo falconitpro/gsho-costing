@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { UndoButton, useUndoHistory } from "../undo";
 import { api, designation } from "../api";
 import { TERM_UNITS } from "../types";
 
@@ -27,9 +28,10 @@ export default function CatalogAdd({ editor, onAdded }: { editor: boolean; onAdd
   const [notes, setNotes] = useState<{ severity: string; message: string }[]>([]);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const history = useUndoHistory({ form, rows }, (st) => { setForm(st.form); setRows(st.rows); });
 
   const loadTemplate = (mtId = "") => api.get<{ rows: { no: number; code: string; name_ru: string; unit: string; section: string; required: boolean }[] }>(`/api/refs/tech-param-templates?machine_type_id=${mtId}`)
-    .then((r) => setRows(r.rows.map((t) => ({ ...t, value_ru: "", section: t.section && !/^\d+\./.test(t.section) ? `${t.code.split(".")[0]}. ${t.section}` : t.section || "Дополнительные параметры" }))));
+    .then((r) => { history.accept(); setRows(r.rows.map((t) => ({ ...t, value_ru: "", section: t.section && !/^\d+\./.test(t.section) ? `${t.code.split(".")[0]}. ${t.section}` : t.section || "Дополнительные параметры" }))); });
   useEffect(() => {
     api.get<Factory[]>("/api/refs/factories").then(setFactories);
     api.get<typeof types>("/api/refs/machine-types").then(setTypes);
@@ -154,7 +156,7 @@ export default function CatalogAdd({ editor, onAdded }: { editor: boolean; onAdd
         </div>
         <div className="row" style={{ marginTop: 8 }}>
           <button className="btn ghost" onClick={() => setRows([...rows, { code: "", name_ru: "", unit: "", value_ru: "", section: "Дополнительные параметры" }])}>+ параметр</button>
-          <button className="btn" disabled={busy || !form.model || (!form.factory_id && !form.factory_name)} onClick={add}>Добавить в каталог</button>
+          <button className="btn" disabled={busy || !form.model || (!form.factory_id && !form.factory_name)} onClick={add}>Добавить в каталог</button><UndoButton h={history} />
           <span className="muted">заполнено параметров: {rows.filter((r) => r.value_ru).length} из {rows.length}</span>
         </div>
         {err && <div className="alert error">{err}</div>}

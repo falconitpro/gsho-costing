@@ -266,7 +266,7 @@ class HsCode(Base):
     code: Mapped[str] = mapped_column(String(10), index=True)
     description: Mapped[str] = mapped_column(Text)
     duty_pct: Mapped[float] = mapped_column(Float, default=0)
-    vat_pct: Mapped[float] = mapped_column(Float, default=20)
+    vat_pct: Mapped[float] = mapped_column(Float, default=22)
     util_fee: Mapped[bool] = mapped_column(Boolean, default=False)
     licence_required: Mapped[bool] = mapped_column(Boolean, default=False)
     certification: Mapped[list[str]] = mapped_column(JSONType, default=list)  # ТР ТС 010/2011, ЭПБ, ПСМ

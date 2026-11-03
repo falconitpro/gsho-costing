@@ -31,6 +31,7 @@ class ServiceCalcIn(BaseModel):
     commissioning_rub: float = 0.0
     training_rub: float = 0.0
     region_key: str = "default"
+    warranty_reserve_pct: float | None = None   # гарантийные случаи по позиции, % от цены завода; None — по настройке типа машины
     save_regulations_to_catalog: bool = True
     show_in_kp: bool = False
 
@@ -52,7 +53,18 @@ def defaults(deal_id: str, pos_id: str, db: Session = Depends(get_db), user: Cur
         "spare_parts": (pos.service_calc or {}).get("spare_parts", []),
         "rates": s["labour_rates_rub_per_hour"], "region_norms": s["region_norms"].get(deal.region, s["region_norms"]["default"]),
         "unplanned_reserve_pct": s["unplanned_reserve_pct"], "training_rfq": (pos.tech_params or {}).get("14.8", {}).get("value"),
+        # гарантийные случаи: % от цены завода (статья 13 себестоимости) — по позиции или по типу машины из настроек
+        "warranty": _warranty(pos, s),
     }
+
+
+def _warranty(pos: Position, s: dict) -> dict:
+    wr = s.get("warranty_reserve_pct_by_type") or {}
+    by_type = wr.get(pos.machine_type, wr.get("default", 1.5))
+    pct = pos.warranty_reserve_pct if pos.warranty_reserve_pct is not None else by_type
+    base = (pos.unit_price or 0) * (pos.qty or 1) + (pos.options_price or 0)
+    return {"pct": pct, "by_type_pct": by_type, "overridden": pos.warranty_reserve_pct is not None,
+            "factory_price": base, "currency": pos.currency, "amount": round(base * pct / 100.0, 2)}
 
 
 @router.post("/positions/{pos_id}/calc")
@@ -77,6 +89,8 @@ def calc(deal_id: str, pos_id: str, body: ServiceCalcIn, db: Session = Depends(g
         commissioning_rub=body.commissioning_rub, training_rub=body.training_rub, unplanned_reserve_pct=d["unplanned_reserve_pct"],
     )
     res = calc_service(inp)
+    if "warranty_reserve_pct" in body.model_fields_set:
+        pos.warranty_reserve_pct = body.warranty_reserve_pct
     pos.service_calc = {**(pos.service_calc or {}), "input": inp.model_dump(mode="json"), "result": res.model_dump(mode="json"),
                         "show_in_kp": body.show_in_kp}
     if body.save_regulations_to_catalog:

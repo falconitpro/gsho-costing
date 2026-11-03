@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { UndoButton, useUndoHistory } from "../undo";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
 
@@ -30,6 +31,7 @@ export default function FactoriesPage({ me }: { me: Me }) {
   const [cur, setCur] = useState<Factory | null>(null);
   const [prices, setPrices] = useState<Price[]>([]);
   const [msg, setMsg] = useState("");
+  const history = useUndoHistory({ cur }, (st) => setCur(st.cur), cur?.id || (cur ? "new" : null));
   const editor = me.roles.some((r) => ["manager", "logistician", "cd", "gd", "admin"].includes(r.code));
   const load = () => api.get<Factory[]>("/api/refs/factories").then(setList);
   useEffect(() => { load(); api.get<Record<string, string>>("/api/refs/factories/contact-roles").then(setRoles); }, []);
@@ -141,7 +143,7 @@ export default function FactoriesPage({ me }: { me: Me }) {
                   </div>
                 </div>)}
 
-              {editor && <div className="row" style={{ marginBottom: 12 }}><button className="btn" onClick={save} disabled={!cur.name}>Сохранить завод</button><button className="btn ghost" onClick={() => setCur(null)}>закрыть</button></div>}
+              {editor && <div className="row" style={{ marginBottom: 12 }}><button className="btn" onClick={save} disabled={!cur.name}>Сохранить завод</button><UndoButton h={history} /><button className="btn ghost" onClick={() => setCur(null)}>закрыть</button></div>}
 
               {cur.id && (
                 <div className="card">

@@ -254,7 +254,7 @@ async def catalog_import_preview(file: UploadFile = File(...), db: Session = Dep
         parsed = None
         if (file.filename or "").lower().endswith((".xlsx", ".xlsm")):
             try:
-                parsed = parse_rfq(path)
+                parsed = parse_rfq(path).apply_l_codes(tps.l_codes(db))
             except Exception:
                 parsed = None
         if parsed is not None and len(parsed.fields) >= 20 and parsed.position.get("model"):

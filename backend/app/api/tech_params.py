@@ -34,7 +34,7 @@ def _pos(db: Session, deal, pos_id: str) -> Position:
 
 
 def _can_edit(user: CurrentUser, deal) -> None:
-    if user.has(Role.GD, Role.CD):
+    if user.has(Role.GD, Role.CD, Role.ADMIN):
         return
     if not (user.can("tech_params", 2) and user.has(Role.MANAGER) and deal.manager_id == user.id):
         raise HTTPException(403, "Таблицу технических характеристик ведёт менеджер сделки")
@@ -110,9 +110,11 @@ def save_rows(deal_id: str, pos_id: str, rows: list[RowIn], db: Session = Depend
                 setattr(row, k, v)
             row.filled_by = user.id
         keep.add(row.id)
-    for rid, row in existing.items():
-        if rid not in keep:
-            db.delete(row)
+    removed = [row for rid, row in existing.items() if rid not in keep]
+    if removed and not user.has(Role.ADMIN, Role.CD, Role.GD):
+        raise HTTPException(403, "Удалять строки таблицы технических характеристик могут КД, ГД или администратор")
+    for row in removed:
+        db.delete(row)
     db.flush()
     db.refresh(pos)
     synced = tps.sync_position(db, pos)   # тип машины / модель из таблицы — в позицию (перечень позиций, все роли); страна — названием
