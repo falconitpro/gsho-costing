@@ -108,8 +108,9 @@ class VariantIn(BaseModel):
 
 
 @router.get("")
-def list_deals(status: Optional[str] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+def list_deals(status: Optional[str] = None, archived: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     q = select(Deal).order_by(Deal.created_at.desc())
+    q = q.where(Deal.archived_at.isnot(None)) if archived else q.where(Deal.archived_at.is_(None))
     if status:
         q = q.where(Deal.status == DealStatus(status))
     from ..services.execution_service import status_detail
@@ -707,7 +708,7 @@ def related(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Dep
     if not deal.request_group_id:
         return []
     out = []
-    for d in db.scalars(select(Deal).where(Deal.request_group_id == deal.request_group_id).order_by(Deal.number)).all():
+    for d in db.scalars(select(Deal).where(Deal.request_group_id == deal.request_group_id, Deal.deleted_at.is_(None)).order_by(Deal.number)).all():
         row = {"id": d.id, "number": d.number, "status": d.status.value, "outcome": d.outcome, "parent_deal_id": d.parent_deal_id,
                "factories": sorted({p.factory_id for p in d.positions}), "models": [p.designation for p in d.positions], "current": d.id == deal.id}
         if user.can("price"):

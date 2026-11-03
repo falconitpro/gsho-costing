@@ -35,7 +35,7 @@ export const AUDIT_ENTITY: Dict = { deal: "сделка", position: "позиц�
 export const AUDIT_ACTION: Dict = { create: "создание", update: "изменение", delete: "удаление", status: "смена статуса", price: "цена", upload: "загрузка",
   upsert: "запись", manual: "ручной ввод", reset: "сброс", activate: "включение", contract: "реквизиты контракта", contract_step: "подэтап контракта",
   plan_fact_close: "закрытие план/факта", select: "отбор", merge: "объединение", approve: "подтверждение", reject: "отклонение", send: "отправка",
-  import: "импорт", payment_terms: "условия оплаты", visa: "виза", rework: "возврат", actual: "факт этапа", refine: "уточнение даты", legal_review: "юридическая проверка", remove: "удаление" };
+  import: "импорт", payment_terms: "условия оплаты", visa: "виза", rework: "возврат", actual: "факт этапа", refine: "уточнение даты", legal_review: "юридическая проверка", remove: "удаление", archive: "перенос в архив", unarchive: "возврат из архива", restore: "восстановление" };
 export const INTEGRATION: Dict = { cbr: "ЦБ РФ", translator: "Яндекс Переводчик", yandex_translate: "Яндекс Переводчик", dadata: "DaData", registry: "реестр организаций",
   mail: "почта", smtp: "почта", wecom: "WeCom", graph: "Microsoft Graph", storage: "хранилище", hs_lookup: "поиск ТН ВЭД" };
 export const OPERATION: Dict = { daily: "курс на день", history: "история курсов", translate: "перевод", lookup: "поиск", send: "отправка", upload: "загрузка",

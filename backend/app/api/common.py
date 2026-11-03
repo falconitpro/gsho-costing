@@ -35,6 +35,8 @@ def serialize(obj, exclude: set[str] | None = None) -> dict[str, Any]:
 
 
 def can_see_deal(user: CurrentUser, deal: Deal) -> bool:
+    if getattr(deal, "deleted_at", None):   # удалённая сделка — только в корзине (КД, ЗГД)
+        return False
     if user.has(Role.CD, Role.FD, Role.GD):
         return True
     if user.has(Role.MANAGER) and deal.manager_id == user.id:
