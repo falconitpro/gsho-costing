@@ -127,7 +127,7 @@ class WorkflowError(Exception):
 
 
 ROLE_SHORT = {Role.MANAGER: "менеджер", Role.LOGISTICIAN: "логист", Role.SERVICE_HEAD: "сервис", Role.CD: "КД", Role.FD: "ФД", Role.GD: "ЗГД",
-              Role.ADMIN: "администратор", Role.OBSERVER: "наблюдатель", Role.PURCHASING: "закупки"}
+              Role.ADMIN: "администратор", Role.OBSERVER: "наблюдатель", Role.PURCHASING: "закупки", Role.LAWYER: "юрист"}
 BLOCK_TITLES = {"manager": "менеджер", "logistics": "логистика", "service": "сервис", "pricing": "цена и условия (КД)", "gd": "ЗГД",
                 "visa": "виза", "kp": "КП", "contract": "контракт"}
 OUTCOME_TITLES = {"won": "выиграна", "lost": "проиграна", "cancelled": "отменена"}

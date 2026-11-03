@@ -14,10 +14,11 @@ import KpRevisions from "../components/KpRevisions";
 import PlanFactTab from "../components/PlanFactTab";
 import OutcomePanel from "../components/OutcomePanel";
 import ExecutionTab from "../components/ExecutionTab";
+import DocumentsTab, { REVIEW_BADGE } from "../components/DocumentsTab";
 import { ImagesBlock, LocalOptionsBlock, OffersBlock, RelatedDeals } from "../components/ImagesLocalOptions";
 import { payText } from "../components/PaymentTermsEditor";
 
-type Tab = "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "catalog" | "feed" | "versions";
+type Tab = "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "documents" | "catalog" | "feed" | "versions";
 const POST_WIN = ["contract", "execution", "closed"];
 
 export default function DealCard({ me }: { me: Me }) {
@@ -98,6 +99,7 @@ export default function DealCard({ me }: { me: Me }) {
         <div>
           <h1 style={{ marginBottom: 2 }}>{deal.number} · {deal.client_name}{deal.parent_deal_id && <span className="badge" style={{ marginLeft: 6 }}>дубликат</span>}</h1>
           <span className="badge accent">{deal.status_detail || STATUS_TITLES[deal.status]}</span> <span className="muted">{deal.site} · срок КП {fmtDate(deal.kp_due)} · версия {deal.current_version_no}{deal.contract_number && ` · контракт ${deal.contract_number}`}</span>
+          {deal.legal_review?.status && <> <span className={"badge " + (REVIEW_BADGE[deal.legal_review.status] || "")} title={deal.legal_review.comment || ""}>юрист: {{ in_review: "на проверке", ok: "замечаний нет", remarks: "есть замечания" }[deal.legal_review.status] || deal.legal_review.status}</span></>}
         </div>
         <div className="row">
           {editable && deal.status !== "approved" && deal.status !== "kp_sent" && (
@@ -126,6 +128,7 @@ export default function DealCard({ me }: { me: Me }) {
         {POST_WIN.includes(deal.status) && <button className={tab === "execution" ? "active" : ""} onClick={() => setTab("execution")}>Контракт и исполнение</button>}
         {POST_WIN.includes(deal.status) && <button className={tab === "planfact" ? "active" : ""} onClick={() => setTab("planfact")}>План/факт</button>}
         {["kp_sent", ...POST_WIN, "lost"].includes(deal.status) && (isOwner || has("cd")) && <button className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>В каталог</button>}
+        {can(me, "legal_docs") && <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>Документы клиента и юридические</button>}
         <button className={tab === "feed" ? "active" : ""} onClick={() => setTab("feed")}>Лента</button>
         <button className={tab === "versions" ? "active" : ""} onClick={() => setTab("versions")}>Версии и файлы</button>
       </div>
@@ -255,6 +258,7 @@ export default function DealCard({ me }: { me: Me }) {
       {tab === "pricing" && <ApprovalScreen key={me.id} deal={deal} me={me} reload={load} />}
       {tab === "execution" && <ExecutionTab key={me.id} deal={deal} me={me} reload={load} />}
       {tab === "planfact" && <PlanFactTab key={me.id} deal={deal} />}
+      {tab === "documents" && <DocumentsTab deal={deal} me={me} onChanged={load} />}
 
       {tab === "catalog" && (
         <div className="card">
@@ -304,9 +308,9 @@ function RfqPreview({ data }: { data: Record<string, unknown> }) {
     <div style={{ marginTop: 10 }}>
       <div className="muted">Версия шаблона: {String(data.template_version)} · ЗИП: {(data.spare_parts as unknown[]).length} строк</div>
       {errors.map((e, i) => <div key={i} className={"alert " + (e.severity === "error" ? "error" : "warn")}>{e.message}</div>)}
-      <table><thead><tr><th>Код</th><th>Параметр</th><th>Значение</th><th>Ед.</th><th>L</th></tr></thead>
+      <table><thead><tr><th>Код</th><th>Параметр</th><th>Значение</th><th>Ед.</th><th>Для логиста</th></tr></thead>
         <tbody>{Object.entries(fields).map(([code, f]) => (
-          <tr key={code} style={{ background: missing.includes(code) ? "#fde7e7" : undefined }}><td>{code}</td><td>{f.label_ru}</td><td>{f.value == null ? <span className="badge bad">пусто</span> : String(f.value)}</td><td>{f.unit}</td><td>{f.is_l ? "L" : ""}</td></tr>))}</tbody></table>
+          <tr key={code} style={{ background: missing.includes(code) ? "#fde7e7" : undefined }}><td>{code}</td><td>{f.label_ru}</td><td>{f.value == null ? <span className="badge bad">пусто</span> : String(f.value)}</td><td>{f.unit}</td><td>{f.is_l ? "да" : ""}</td></tr>))}</tbody></table>
     </div>
   );
 }

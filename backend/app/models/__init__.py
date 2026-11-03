@@ -396,7 +396,8 @@ class Deal(TimestampMixin, Base):
     contract_number: Mapped[str] = mapped_column(String(128), default="")
     contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
     factory_contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
-    contract_steps: Mapped[dict] = mapped_column(JSONType, default=dict)   # подэтапы заключения контракта: код → {done, on, by, comment}
+    contract_steps: Mapped[dict] = mapped_column(JSONType, default=dict)
+    legal_review: Mapped[dict] = mapped_column(JSONType, default=dict)   # проверка юриста: {status: in_review|ok|remarks, comment, by, at}   # подэтапы заключения контракта: код → {done, on, by, comment}
     execution_closed_at: Mapped[Optional[date]] = mapped_column(Date)
     contract_terms_changed: Mapped[bool] = mapped_column(Boolean, default=False)
     in_execution: Mapped[bool] = mapped_column(Boolean, default=False)              # сделка на стадии контракта/исполнения (возврат после повторной визы)
@@ -724,8 +725,10 @@ class Attachment(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
     folder: Mapped[str] = mapped_column(String(32))     # 01_rfq | 02_logistics | 03_service | 04_cost | 05_kp | 06_mail | 07_fact
-    entity: Mapped[str] = mapped_column(String(32), default="")   # batch | position | version | message
+    entity: Mapped[str] = mapped_column(String(32), default="")   # batch | position | version | message | deal_doc
     entity_id: Mapped[Optional[str]] = mapped_column(String(36))
+    category: Mapped[str] = mapped_column(String(32), default="")   # документы сделки: tender | contract_form | client_spec | client_other | disagreements | legal_opinion | contract_signed
+    comment: Mapped[str] = mapped_column(Text, default="")
     file_name: Mapped[str] = mapped_column(String(255))
     storage_path: Mapped[str] = mapped_column(String(1024))
     storage_url: Mapped[str] = mapped_column(String(1024), default="")

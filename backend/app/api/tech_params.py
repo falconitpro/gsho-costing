@@ -118,6 +118,8 @@ def save_rows(deal_id: str, pos_id: str, rows: list[RowIn], db: Session = Depend
     db.flush()
     db.refresh(pos)
     synced = tps.sync_position(db, pos)   # тип машины / модель из таблицы — в позицию (перечень позиций, все роли); страна — названием
+    from ..services.offers_service import offer_from_position
+    offer_from_position(db, deal, pos, user.id, "из таблицы технических характеристик")   # значения завода → «Заводы и ответы»
     audit(db, user.id, deal.id, "tech_params", pos.id, "save", after={"rows": len(rows), **synced})
     db.commit()
     db.refresh(pos)
@@ -215,6 +217,11 @@ async def import_apply(deal_id: str, pos_id: str, file: UploadFile = File(...), 
         db.flush()
         db.refresh(pos)
         res["synced"] = tps.sync_position(db, pos)   # строки позиции (после восстановления снимка) → позиция
+        if target == "factory_answer" and not offer_id:   # ответ завода позиции → вкладка «Заводы и ответы»
+            from ..services.offers_service import offer_from_position
+            o_ = offer_from_position(db, deal, pos, user.id, f"импорт ответа завода: {file.filename or ''}")
+            if o_ is not None:
+                res["offer_id"] = o_.id
         from ..services.countries import is_country_row, normalize_country
         for r in res.get("rows") or []:          # и в ответе (в т.ч. ответ другого завода) — страна названием
             if is_country_row(r.get("code") or "", r.get("name_ru") or "") and (r.get("value_ru") or r.get("value_zh")):
@@ -301,15 +308,29 @@ def send_request(deal_id: str, pos_id: str, body: RequestIn, db: Session = Depen
 
 
 @router.get("/positions/{pos_id}/tech-params/request/file")
-def request_file(deal_id: str, pos_id: str, factory_id: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Скачать файл запроса (без отправки) — например, чтобы отправить вручную."""
+def request_file(deal_id: str, pos_id: str, factory_id: str = "", factory_ids: str = "", db: Session = Depends(get_db),
+                 user: CurrentUser = Depends(get_current_user)):
+    """Скачать файл запроса (без отправки) — например, чтобы отправить вручную.
+    Несколько заводов (factory_ids через запятую) — ZIP с отдельным двуязычным Excel на каждый завод."""
+    import zipfile
     from fastapi.responses import FileResponse
     deal = get_deal_or_404(db, deal_id, user)
     pos = _pos(db, deal, pos_id)
-    factory = db.get(Factory, factory_id or pos.factory_id)
-    path, _ = tps.build_request_xlsx(db, pos, factory, deal.number, user.id)
+    ids = [x for x in (factory_ids or "").split(",") if x] or [factory_id or pos.factory_id]
+    factories = [f for f in (db.get(Factory, i) for i in dict.fromkeys(ids)) if f] or [None]
+    paths = []
+    for f in factories:
+        path, _ = tps.build_request_xlsx(db, pos, f, deal.number, user.id)
+        paths.append((path, f))
     db.commit()
-    return FileResponse(path, filename=os.path.basename(path))
+    if len(paths) == 1:
+        return FileResponse(paths[0][0], filename=os.path.basename(paths[0][0]))
+    dst = os.path.join(tempfile.mkdtemp(), f"{deal.number}_запросы_заводам.zip")
+    with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as z:
+        for path, f in paths:
+            base, ext = os.path.splitext(os.path.basename(path))
+            z.write(path, f"{base}_{(f.name if f else 'завод')[:40]}{ext}".replace("/", "_"))
+    return FileResponse(dst, filename=os.path.basename(dst))
 
 
 @router.get("/positions/{pos_id}/rfq/file")

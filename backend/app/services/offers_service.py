@@ -245,3 +245,38 @@ def kp_model_name(p: Position, db: Optional[Session]) -> str:
         return ex.brand_name
     m = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == p.factory_id, EquipmentModel.model == p.model))
     return (m.brand_name if m else "") or ""
+
+
+def offer_from_position(db: Session, deal: Deal, pos: Position, user_id: Optional[str], source: str = "") -> Optional[FactoryOffer]:
+    """Вкладка «Заводы и ответы» заполняется и с вкладки «Технические характеристики»: значения завода в таблице позиции,
+    импорт ответа завода или RFQ становятся ответом завода позиции (цена, срок, условия, параметры). Отобранный или
+    отклонённый ответ не меняется."""
+    if not pos.factory_id:
+        return None
+    rows = sorted(pos.tech_param_rows or [], key=lambda r: r.no or 0)
+    filled = [r for r in rows if (r.value_ru or r.value_zh) and not r.local_ru]
+    o = db.scalar(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id, FactoryOffer.factory_id == pos.factory_id,
+                                             FactoryOffer.source_position_id == pos.id))
+    if o is None:
+        if not filled and not pos.unit_price:
+            return None
+        o = FactoryOffer(deal_id=deal.id, source_position_id=pos.id, factory_id=pos.factory_id)
+        db.add(o)
+    elif o.status in ("selected", "rejected"):
+        return o
+    o.model = pos.model or o.model
+    if pos.unit_price:
+        o.unit_price, o.currency = pos.unit_price, pos.currency or o.currency
+    o.basis = pos.basis or o.basis
+    o.production_term = pos.production_term or ({"value": pos.production_days, "unit": "calendar_days"} if pos.production_days else o.production_term)
+    o.factory_payments = pos.factory_payments_offer or o.factory_payments or []
+    o.params = [{"no": r.no, "code": r.code, "name_ru": r.name_ru, "name_zh": r.name_zh, "unit": r.unit,
+                 "customer_requirement_ru": r.customer_requirement_ru, "value_ru": r.value_ru, "value_zh": r.value_zh,
+                 "comment_ru": r.comment_ru, "comment_zh": r.comment_zh, "translation_status": r.translation_status} for r in rows if not r.local_ru]
+    if filled:
+        o.status = "answered"
+        o.answer_received_at = o.answer_received_at or datetime.now(timezone.utc)
+    if source and source not in (o.comment or ""):
+        o.comment = ((o.comment + "; ") if o.comment else "") + source
+    db.flush()
+    return o

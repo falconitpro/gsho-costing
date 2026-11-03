@@ -35,9 +35,11 @@ export default function DealsList({ me }: { me: Me }) {
     api.get<typeof clients>("/api/refs/clients").then(setClients);
   }, []);
 
+  const [docs, setDocs] = useState<{ file: File; category: string }[]>([]);   // файлы от клиента — хранятся в сделке
   async function create() {
     try {
       const d = await api.post<Deal>("/api/deals", { ...form, kp_due: form.kp_due || null, target_hours: form.target_hours ? Number(form.target_hours) : null });
+      for (const x of docs) await api.upload(`/api/deals/${d.id}/documents`, x.file, { category: x.category, comment: "загружено при заведении сделки" });
       nav(`/deals/${d.id}`);
     } catch (e) { setErr((e as Error).message); }
   }
@@ -69,6 +71,19 @@ export default function DealsList({ me }: { me: Me }) {
               <div className="row"><input type="checkbox" checked={form.service_flag} onChange={(e) => setForm({ ...form, service_flag: e.target.checked })} />
                 <input type="number" value={form.target_hours} placeholder="10000" disabled={!form.service_flag} onChange={(e) => setForm({ ...form, target_hours: e.target.value })} /></div>
             </label>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <b>Файлы от клиента</b> <span className="muted">(если есть: тендерная документация, типовая форма договора, ТЗ — сохраняются в сделке; тендер и форму договора проверит юрист)</span>
+            <div className="row" style={{ marginTop: 4 }}><input type="file" multiple onChange={(e) => { setDocs([...docs, ...(Array.from(e.target.files || []) as File[]).map((file) => ({ file, category: /догов|contract/i.test(file.name) ? "contract_form" : /тендер|tender|документац/i.test(file.name) ? "tender" : /тз|техническ|spec/i.test(file.name) ? "client_spec" : "client_other" }))]); e.target.value = ""; }} /></div>
+            {docs.map((x, i) => (
+              <div key={i} className="row" style={{ marginTop: 4 }}>
+                <span>{x.file.name}</span>
+                <select value={x.category} onChange={(e) => setDocs(docs.map((y, j) => (j === i ? { ...y, category: e.target.value } : y)))}>
+                  <option value="tender">Тендерная документация</option><option value="contract_form">Типовая форма договора клиента</option>
+                  <option value="client_spec">Техническое задание клиента</option><option value="client_other">Прочие файлы клиента</option>
+                </select>
+                <button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => setDocs(docs.filter((_, j) => j !== i))}>×</button>
+              </div>))}
           </div>
           {err && <div className="alert error">{err}</div>}
           <div className="row" style={{ marginTop: 10 }}><button className="btn" onClick={create} disabled={!form.client_id}>Создать</button></div>
