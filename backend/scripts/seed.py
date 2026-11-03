@@ -12,15 +12,18 @@ from app.db import SessionLocal, init_db
 from app.models import Client, Factory, FxRate, HsCode, PaymentScheme, User
 
 USERS = [
-    ("manager@example.com", "Иванов Иван (менеджер)", ["manager"]),
-    ("logist@example.com", "Петров Пётр (логист)", ["logistician"]),
-    ("service@example.com", "Сидоров Сергей (сервис)", ["service_head"]),
-    ("cd@example.com", "Кузнецова Анна (КД)", ["cd"]),
-    ("fd@example.com", "Смирнов Олег (ФД)", ["fd"]),
-    ("gd@example.com", "Орлов Дмитрий (ГД)", ["gd"]),
+    ("manager@example.com", "Бочаров Егор (менеджер)", ["manager"]),
+    ("logist@example.com", "Каталкина Оксана (логист)", ["logistician"]),
+    ("service@example.com", "Шереметьев Дмитрий (сервис)", ["service_head"]),
+    ("cd@example.com", "Волохов Сергей (КД)", ["cd"]),
+    ("fd@example.com", "Склярова Ирина (ФД)", ["fd"]),
+    ("gd@example.com", "Добров Евгений (ЗГД)", ["gd"]),
     ("admin@example.com", "Администратор", ["admin"]),
     ("observer@example.com", "Наблюдатель", ["observer"]),
 ]
+# прежние демонстрационные имена — при повторном запуске заменяются на актуальные (имена, заданные вручную, не трогаем)
+OLD_NAMES = {"Иванов Иван (менеджер)", "Петров Пётр (логист)", "Сидоров Сергей (сервис)", "Кузнецова Анна (КД)", "Смирнов Олег (ФД)",
+             "Орлов Дмитрий (ГД)", "Орлов Дмитрий (ЗГД)"}
 HS = [
     ("8704101090", "Автомобили-самосвалы для эксплуатации в условиях бездорожья, прочие", 5.0, 22.0, True, ["ТР ТС 010/2011", "ПСМ"]),
     ("8429519000", "Погрузчики одноковшовые фронтальные, прочие", 0.0, 22.0, True, ["ТР ТС 010/2011", "ПСМ"]),
@@ -40,8 +43,11 @@ def run() -> None:
     init_db()
     with SessionLocal() as db:
         for email, name, roles in USERS:
-            if not db.scalar(select(User).where(User.email == email)):
+            u = db.scalar(select(User).where(User.email == email))
+            if not u:
                 db.add(User(external_id=email, email=email, display_name=name, roles=roles))
+            elif u.display_name in OLD_NAMES:
+                u.display_name = name
         db.flush()
         mgr = db.scalar(select(User).where(User.email == "manager@example.com"))
         if not db.scalar(select(Client).where(Client.inn == "7701234567")):

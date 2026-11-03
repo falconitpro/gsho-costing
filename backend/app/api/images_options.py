@@ -38,10 +38,10 @@ def _pos(db: Session, deal, pos_id: str) -> Position:
 @router.post("/positions/{pos_id}/images", status_code=201)
 async def upload_image(deal_id: str, pos_id: str, file: UploadFile = File(...), kind: str = Form("photo"), source: str = Form("own"),
                        caption: str = Form(""), has_factory_logo: bool = Form(False), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Загружают менеджер, КД, ГД: фото, рендеры, чертежи (PDF/DWG/DXF — как вложение без предпросмотра)."""
+    """Загружают менеджер, КД, ЗГД: фото, рендеры, чертежи (PDF/DWG/DXF — как вложение без предпросмотра)."""
     deal = get_deal_or_404(db, deal_id, user)
     if not user.can("images", 2):
-        raise HTTPException(403, "Файлы загружают менеджер, КД и ГД")
+        raise HTTPException(403, "Файлы загружают менеджер, КД и ЗГД")
     pos = _pos(db, deal, pos_id)
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in IMAGE_EXT:
@@ -79,7 +79,7 @@ async def upload_offer_image(deal_id: str, offer_id: str, file: UploadFile = Fil
     from ..models import FactoryOffer
     deal = get_deal_or_404(db, deal_id, user)
     if not user.can("images", 2):
-        raise HTTPException(403, "Файлы загружают менеджер, КД и ГД")
+        raise HTTPException(403, "Файлы загружают менеджер, КД и ЗГД")
     offer = db.get(FactoryOffer, offer_id)
     if offer is None or offer.deal_id != deal.id:
         raise HTTPException(404, "Ответ завода не найден")
@@ -138,14 +138,14 @@ class ImagePatch(BaseModel):
 
 @router.patch("/positions/{pos_id}/images/{image_id}")
 def patch_image(deal_id: str, pos_id: str, image_id: str, body: ImagePatch, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Подписи и отметки — менеджер/КД/ГД; выбор «В КП» и порядок — только КД/ГД."""
+    """Подписи и отметки — менеджер/КД/ЗГД; выбор «В КП» и порядок — только КД/ЗГД."""
     deal = get_deal_or_404(db, deal_id, user)
     img = db.get(PositionImage, image_id)
     if img is None or img.position_id != pos_id or img.deal_id != deal.id:
         raise HTTPException(404)
     data = body.model_dump(exclude_none=True)
     if ("in_kp" in data or "kp_order" in data) and not user.can("kp_images_select", 2):
-        raise HTTPException(403, "Файлы для КП выбирает КД или ГД")
+        raise HTTPException(403, "Файлы для КП выбирает КД или ЗГД")
     if not user.can("images", 2):
         raise HTTPException(403)
     for k, v in data.items():
@@ -173,10 +173,10 @@ class KpSettingsIn(BaseModel):
 
 @router.patch("/kp-settings")
 def kp_settings(deal_id: str, body: KpSettingsIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Бренд подачи и способ вложения изображений в КП — КД или ГД."""
+    """Бренд подачи и способ вложения изображений в КП — КД или ЗГД."""
     deal = get_deal_or_404(db, deal_id, user)
     if not user.can("kp_images_select", 2):
-        raise HTTPException(403, "Бренд подачи и вложения в КП задаёт КД или ГД")
+        raise HTTPException(403, "Бренд подачи и вложения в КП задаёт КД или ЗГД")
     from ..services.offers_service import kp_model_name
     if body.kp_brand == "company":
         missing = [p.designation for p in deal.positions if not kp_model_name(p, db)]

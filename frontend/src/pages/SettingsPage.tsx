@@ -154,7 +154,7 @@ export default function SettingsPage({ me }: { me: Me }) {
         <h1>Настройки: ставки и нормативы</h1>
         <input placeholder="поиск настройки" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} />
       </div>
-      <p className="muted">Значения применяются к новым расчётам; каждое изменение сохраняется в истории с комментарием. ФД меняет пороги, сценарии и стоимость денег; КД — внешнюю комиссию и комиссию менеджера; остальное — ГД или администратор. Ваши роли: {me.roles.map((r) => r.title).join(", ")}.</p>
+      <p className="muted">Значения применяются к новым расчётам; каждое изменение сохраняется в истории с комментарием. ФД меняет пороги, сценарии и стоимость денег; КД — внешнюю комиссию и комиссию менеджера; остальное — ЗГД или администратор. Ваши роли: {me.roles.map((r) => r.title).join(", ")}.</p>
       {msg && <div className="alert info">{msg}</div>}
       {meta.groups.map((g) => {
         const items = Object.values(meta.items).filter((m) => m.group === g && match(m));

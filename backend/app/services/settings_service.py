@@ -74,7 +74,7 @@ DEFAULTS: dict[str, Any] = {
     "approval_ladder": [
         {"name": "Коммерческая", "role": "cd", "condition": "always", "sla_days": 1},
         {"name": "Финансовая", "role": "fd", "condition": "margin_below_threshold|cash_gap_above_limit", "sla_days": 1},
-        {"name": "Генеральная", "role": "gd", "condition": "deal_above_gd_limit|fd_declined|overhead_override", "sla_days": 1},
+        {"name": "ЗГД", "role": "gd", "condition": "deal_above_gd_limit|fd_declined|overhead_override", "sla_days": 1},
     ],
 }
 
@@ -165,12 +165,12 @@ META: dict[str, dict] = {
                              "help": "Если маржа сделки ниже порога, нужна виза финансового директора."},
     "cash_gap_limit_rub": {"group": "Маржа и визы", "title": "Лимит кассового разрыва", "unit": "₽", "type": "number", "nullable": True,
                            "help": "Кассовый разрыв больше лимита требует визы ФД. Пусто — лимита нет."},
-    "gd_deal_limit_rub": {"group": "Маржа и визы", "title": "Сумма сделки для визы ГД", "unit": "₽", "type": "number", "nullable": True,
-                          "help": "Сделки дороже этой суммы визирует генеральный директор. Пусто — не требуется."},
+    "gd_deal_limit_rub": {"group": "Маржа и визы", "title": "Сумма сделки для визы ЗГД", "unit": "₽", "type": "number", "nullable": True,
+                          "help": "Сделки дороже этой суммы визирует заместитель генерального директора (ЗГД). Пусто — не требуется."},
     "approval_ladder": {"group": "Маржа и визы", "title": "Ступени визации", "type": "table",
                         "help": "Порядок виз и условия, при которых ступень включается.",
                         "columns": [{"key": "name", "label": "Ступень", "type": "text"},
-                                    {"key": "role", "label": "Кто визирует", "type": "select", "options": [{"value": "cd", "label": "КД"}, {"value": "fd", "label": "ФД"}, {"value": "gd", "label": "ГД"}]},
+                                    {"key": "role", "label": "Кто визирует", "type": "select", "options": [{"value": "cd", "label": "КД"}, {"value": "fd", "label": "ФД"}, {"value": "gd", "label": "ЗГД"}]},
                                     {"key": "condition", "label": "Условие (служебное)", "type": "text"},
                                     {"key": "sla_days", "label": "Срок, раб. дн.", "type": "number"}]},
     # Сценарии и курс
@@ -206,11 +206,11 @@ META: dict[str, dict] = {
                                 {"key": "fixed_rub", "label": "Фиксированная сумма, ₽"}, {"key": "pct", "label": "Процент от суммы перевода, %"}],
                      "help": "За каждый платёж заводу и каждый валютный платёж."},
     "external_commission_pct": {"group": "Комиссии", "title": "Внешняя комиссия", "unit": "% от цены клиента", "type": "number",
-                                "help": "Статья 16 себестоимости; выплачивается вместе с оплатами клиента. Меняют КД или ГД."},
+                                "help": "Статья 16 себестоимости; выплачивается вместе с оплатами клиента. Меняют КД или ЗГД."},
     "manager_commission_pct": {"group": "Комиссии", "title": "Комиссия менеджера", "unit": "% от себестоимости", "type": "number",
-                               "help": "Статья 17: от суммы статей 1–15. Меняют КД или ГД."},
+                               "help": "Статья 17: от суммы статей 1–15. Меняют КД или ЗГД."},
     "cd_commission_pct": {"group": "Комиссии", "title": "Комиссия КД", "unit": "% от себестоимости", "type": "number",
-                          "help": "Статья 18: от суммы статей 1–15. Меняет ГД."},
+                          "help": "Статья 18: от суммы статей 1–15. Меняет ЗГД."},
     "util_base_rate_rub": {"group": "Таможня и утилизационный сбор", "title": "Утилизационный сбор: базовая ставка", "unit": "₽", "type": "number",
                            "help": "Подставляется логисту; сбор = базовая ставка × коэффициент по виду техники. Проверьте действующую редакцию постановления Правительства РФ."},
     "util_coefficients": {"group": "Таможня и утилизационный сбор", "title": "Коэффициенты утилизационного сбора", "type": "table",
@@ -257,7 +257,7 @@ META: dict[str, dict] = {
     # Сроки
     "sla_days": {"group": "Сроки и календарь", "title": "Сроки выполнения задач (SLA)", "unit": "раб. дн.", "type": "object",
                  "fields": [{"key": "logistics", "label": "Логист"}, {"key": "service", "label": "Сервис"}, {"key": "cd", "label": "КД"},
-                            {"key": "fd", "label": "ФД"}, {"key": "gd", "label": "ГД"}, {"key": "manager_rework", "label": "Доработка менеджером"}]},
+                            {"key": "fd", "label": "ФД"}, {"key": "gd", "label": "ЗГД"}, {"key": "manager_rework", "label": "Доработка менеджером"}]},
     "kp_validity_days": {"group": "Сроки и календарь", "title": "Срок действия КП", "unit": "дн.", "type": "number"},
     "lc_opening_days": {"group": "Сроки и календарь", "title": "Открытие аккредитива после контракта (план)", "unit": "дн.", "type": "number"},
     "factory_contract_lag_days": {"group": "Сроки и календарь", "title": "Контракт с заводом после контракта с клиентом", "unit": "дн.", "type": "number"},

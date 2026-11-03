@@ -13,7 +13,7 @@ const EMPTY = { factory_id: "", factory_name: "", factory_address: "", machine_t
   unit_price: "", currency: "CNY", basis: "FCA", term_value: "", term_unit: "calendar_days", comment: "" };
 
 /** Задача: оборудование прямо в каталог — вручную или из файла (опросник RFQ одной машины или список моделей).
- *  Вносят менеджер, КД и ГД; запись менеджера — на подтверждение КД или ГД. */
+ *  Вносят менеджер, КД и ЗГД; запись менеджера — на подтверждение КД или ЗГД. */
 export default function CatalogAdd({ editor, onAdded }: { editor: boolean; onAdded: (msg: string) => void }) {
   const [form, setForm] = useState({ ...EMPTY });
   const [rows, setRows] = useState<Row[]>([]);
@@ -117,12 +117,12 @@ export default function CatalogAdd({ editor, onAdded }: { editor: boolean; onAdd
                     {r.map((c, j) => <td key={j}>{String(c ?? "")}</td>)}</tr>))}</tbody></table>
             </div>
             <div className="row" style={{ marginTop: 6 }}><button className="btn" disabled={busy || !mapping.columns.model || (!mapping.columns.factory && !listFactory)} onClick={applyList}>Добавить модели из списка</button>
-              <span className="muted">{editor ? "попадут в каталог сразу" : "уйдут на подтверждение КД/ГД"}</span></div>
+              <span className="muted">{editor ? "попадут в каталог сразу" : "уйдут на подтверждение КД/ЗГД"}</span></div>
           </div>)}
       </div>
 
       <div className="card">
-        <b>Вручную</b> <span className="muted">— {editor ? "запись появится в каталоге сразу" : "запись уйдёт на подтверждение КД или ГД"}; одинаковое исполнение (тот же набор параметров) не дублируется</span>
+        <b>Вручную</b> <span className="muted">— {editor ? "запись появится в каталоге сразу" : "запись уйдёт на подтверждение КД или ЗГД"}; одинаковое исполнение (тот же набор параметров) не дублируется</span>
         <div className="grid cols-3" style={{ marginTop: 6 }}>
           <label className="f">Завод<select value={form.factory_id} onChange={(e) => set({ factory_id: e.target.value, trademark: factories.find((f) => f.id === e.target.value)?.trademarks?.[0] || "" })}><option value="">— новый завод —</option>{factories.map((f) => <option key={f.id} value={f.id}>{f.name}{f.trademarks?.length ? ` (${f.trademarks.join(", ")})` : ""}</option>)}</select></label>
           {!form.factory_id && <label className="f">Новый завод: полное наименование<input value={form.factory_name} onChange={(e) => set({ factory_name: e.target.value })} /></label>}

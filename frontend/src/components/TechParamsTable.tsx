@@ -162,7 +162,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
                 ))}
                 <td style={{ textAlign: "center" }}><input type="checkbox" checked={!!r.required} disabled={!canEdit} onChange={(e) => upd(i, { required: e.target.checked })} /></td>
                 <td style={{ textAlign: "center" }}><input type="checkbox" checked={!!r.local_ru} disabled={!canEdit} onChange={(e) => upd(i, { local_ru: e.target.checked })} /></td>
-                {canEdit && <td>{canDelete && <button className="btn ghost" style={{ padding: "2px 6px" }} title="удалить строку (КД, ГД, администратор)" onClick={() => delRow(i)}>×</button>}</td>}
+                {canEdit && <td>{canDelete && <button className="btn ghost" style={{ padding: "2px 6px" }} title="удалить строку (КД, ЗГД, администратор)" onClick={() => delRow(i)}>×</button>}</td>}
               </tr></Fragment>);
           })}</tbody>
         </table>

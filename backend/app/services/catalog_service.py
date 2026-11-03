@@ -1,5 +1,5 @@
 """Каталог оборудования (задача 7): производитель → тип машины → модель → исполнение; пополнение из КП с двойным
-подтверждением (менеджер → КД/ГД); история цен завода и цен клиентам (задачи 7, 8)."""
+подтверждением (менеджер → КД/ЗГД); история цен завода и цен клиентам (задачи 7, 8)."""
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
@@ -127,7 +127,7 @@ def catalog_candidates(db: Session, deal: Deal) -> list[dict]:
 
 
 def propose(db: Session, deal: Deal, position_ids: list[str], names: dict[str, str], user_id: str) -> list[EquipmentExecution]:
-    """Менеджер отметил позиции → исполнения «на проверке» и задача КД (видна и ГД) «Подтвердить занесение в каталог»."""
+    """Менеджер отметил позиции → исполнения «на проверке» и задача КД (видна и ЗГД) «Подтвердить занесение в каталог»."""
     created: list[EquipmentExecution] = []
     for p in deal.positions:
         if p.id not in position_ids:
@@ -263,8 +263,8 @@ def _num(v) -> Optional[float]:
 
 
 def add_equipment(db: Session, data: dict, user, editor: bool) -> tuple[EquipmentExecution, bool]:
-    """Новая запись каталога вручную или из файла. Менеджер — «на проверке» (подтверждает КД или ГД);
-    КД/ГД — сразу в каталоге. Совпадающее исполнение (тот же набор параметров) не дублируется.
+    """Новая запись каталога вручную или из файла. Менеджер — «на проверке» (подтверждает КД или ЗГД);
+    КД/ЗГД — сразу в каталоге. Совпадающее исполнение (тот же набор параметров) не дублируется.
     data: factory_id | factory_name, machine_type, trademark, model, execution_name, brand_name, tech_params (строки таблицы),
           logistics_params, unit_price, currency, basis, production_term {value, unit}, comment.
     Возвращает (исполнение, создано ли новое)."""

@@ -94,7 +94,7 @@ def create_client(body: ClientIn, db: Session = Depends(get_db), user: CurrentUs
 
 @router.get("/clients/{client_id}")
 def client_card(client_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Карточка клиента: воронка, суммы и средняя маржа по закрытым (видно КД/ФД/ГД), последние КП."""
+    """Карточка клиента: воронка, суммы и средняя маржа по закрытым (видно КД/ФД/ЗГД), последние КП."""
     c = db.get(Client, client_id)
     if c is None:
         raise HTTPException(404)
@@ -213,7 +213,7 @@ class FactoryIn(BaseModel):
 
 def _factory_editor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     if not user.has(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN, Role.LOGISTICIAN):
-        raise HTTPException(403, "Карточки заводов ведут менеджеры, логисты, КД и ГД")
+        raise HTTPException(403, "Карточки заводов ведут менеджеры, логисты, КД и ЗГД")
     return user
 
 
@@ -292,7 +292,7 @@ def update_factory(factory_id: str, body: FactoryIn, db: Session = Depends(get_d
 
 @router.get("/factories/{factory_id}/prices")
 def factory_prices(factory_id: str, model: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """История цен и сроков завода (задача 7): видят менеджер, КД, ГД (настраивается в уровнях доступа)."""
+    """История цен и сроков завода (задача 7): видят менеджер, КД, ЗГД (настраивается в уровнях доступа)."""
     if not user.can("factory_price_history"):
         raise HTTPException(403, "История цен завода закрыта для роли")
     stmt = select(FactoryPriceHistory).where(FactoryPriceHistory.factory_id == factory_id).order_by(FactoryPriceHistory.on.desc())

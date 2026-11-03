@@ -49,7 +49,7 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     price_hist = db.scalars(select(FactoryPriceHistory).where(FactoryPriceHistory.deal_id != deal.id,
                                                               FactoryPriceHistory.model.in_([p.model for p in deal.positions]))
                             .order_by(FactoryPriceHistory.on.desc()).limit(20)).all()
-    # история цен клиентам (задачи 7, 8): по отправленным версиям КП; видят только КД/ГД (серверная фильтрация ключа)
+    # история цен клиентам (задачи 7, 8): по отправленным версиям КП; видят только КД/ЗГД (серверная фильтрация ключа)
     client_kp_history = []
     for h in db.scalars(select(ClientPriceHistory).where(ClientPriceHistory.client_id == deal.client_id, ClientPriceHistory.deal_id != deal.id)
                         .order_by(ClientPriceHistory.on.desc()).limit(30)).all():
@@ -106,7 +106,7 @@ def _cd_deal_dict(deal: Deal) -> dict:
 
 
 class PaymentTermsIn(BaseModel):
-    """Задача 1: условия оплаты задаёт КД (ГД — те же права). Пустые списки = вернуться к типовой схеме."""
+    """Задача 1: условия оплаты задаёт КД (ЗГД — те же права). Пустые списки = вернуться к типовой схеме."""
     client_payments: Optional[list[dict]] = None                 # уровень сделки (без альтернатив)
     variant_payments: Optional[dict[str, list[dict]]] = None     # по предложениям (с альтернативами)
     factory_payments: Optional[dict[str, list[dict]]] = None     # position_id → график заводу
@@ -172,7 +172,7 @@ def set_price(deal_id: str, body: PriceIn, db: Session = Depends(get_db), user: 
     if v is None or v.deal_id != deal.id:
         raise HTTPException(404)
     if body.overhead_pct_override is not None and not body.overhead_override_comment:
-        raise HTTPException(422, "Переопределение накладных требует комментария (и визы ГД)")
+        raise HTTPException(422, "Переопределение накладных требует комментария (и визы ЗГД)")
     before = serialize(v)
     if body.service_in_kp is not None:
         v.service_in_kp = body.service_in_kp
@@ -241,7 +241,7 @@ def scenario_override(deal_id: str, body: ScenarioOverrideIn, db: Session = Depe
 
 @router.post("/submit")
 def submit(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(CD)):
-    """КД задал цену по каждому варианту → коммерческая виза; далее ФД/ГД по условиям или утверждение."""
+    """КД задал цену по каждому варианту → коммерческая виза; далее ФД/ЗГД по условиям или утверждение."""
     deal = get_deal_or_404(db, deal_id, user)
     if any(v.price_rub is None for v in deal.variants if v.in_kp):
         raise HTTPException(422, "Задайте цену по каждому предложению")
@@ -395,7 +395,7 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion) -> str:
             rows = [(f.get("name", ""), f.get("value", ""), f.get("unit", "")) for code, f in sorted((p.tech_params or {}).items())
                     if not code.startswith("_") and 1 <= int(code.split(".")[0]) <= 11 and f.get("value") not in (None, "")]
         tech[title] = rows
-        # задача 10: изображения, отмеченные КД/ГД «В КП»; способ вложения — документ / письмо / оба
+        # задача 10: изображения, отмеченные КД/ЗГД «В КП»; способ вложения — документ / письмо / оба
         for img in sorted((i for i in (p.image_rows or []) if i.in_kp), key=lambda i: i.kp_order):
             att = db.get(Attachment, img.attachment_id)
             if not att:
