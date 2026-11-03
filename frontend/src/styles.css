@@ -51,7 +51,9 @@ tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
 .section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .section-head h2 { margin: 0; }
 /* кнопки добавления — того же вида, что основные (как «Отправить на расчёт»), со знаком «+» */
-.btn.add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; }
+.btn.add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;
+  background: transparent; color: var(--accent); border: 1px solid var(--accent); }   /* как «Дублировать заявку» */
+.btn.add:hover:not(:disabled) { background: var(--accent-soft); }
 .btn.add::before { content: "+"; font-size: 16px; line-height: 1; font-weight: 700; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; line-height: 1.2; text-decoration: none; box-sizing: border-box; vertical-align: middle; }
 .row > .btn, .row > a.btn { flex: 0 0 auto; }
@@ -92,3 +94,7 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; colo
 @media (max-width: 700px) { main { padding: 10px; } th, td { padding: 5px; font-size: 12px; } .margin-ind { font-size: 22px; } }
 .alert.ok { background: #e6f5ec; color: var(--ok); }
 .btn[style*="padding"] { min-height: 0; }
+/* кнопки добавления — у правого края своего блока (в строке кнопок — первая из них сдвигает группу вправо) */
+.btn.add { display: flex; width: max-content; margin-left: auto; }
+.row > .btn.add, .push > .btn.add, .section-head > .btn.add { display: inline-flex; }
+.btn.add ~ .btn.add, .push > .btn.add { margin-left: 0; }

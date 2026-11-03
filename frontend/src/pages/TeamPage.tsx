@@ -90,9 +90,9 @@ export default function TeamPage({ me }: { me: Me }) {
     <>
       <div className="page-head">
         <h1>Сотрудники</h1>
-        {canManage && <button className="btn add" onClick={() => { setShowNew(!showNew); setErr(""); }}>Добавить сотрудника</button>}
         <div className="push">
           <input placeholder="поиск: имя, должность, телефон" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 260, maxWidth: "100%" }} />
+          {canManage && <button className="btn add" onClick={() => { setShowNew(!showNew); setErr(""); }}>Добавить сотрудника</button>}
         </div>
       </div>
       {showNew && canManage && (

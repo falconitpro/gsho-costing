@@ -73,7 +73,7 @@ export default function FactoriesPage({ me }: { me: Me }) {
     <>
       <div className="page-head">
         <h1>Заводы</h1>
-        {editor && <button className="btn add" onClick={() => { setCur({ ...EMPTY, contacts: [{ ...EMPTY_CONTACT, roles: ["rfq"], primary: true }] }); setPrices([]); setMsg(""); }}>Добавить завод</button>}
+        <div className="push">{editor && <button className="btn add" onClick={() => { setCur({ ...EMPTY, contacts: [{ ...EMPTY_CONTACT, roles: ["rfq"], primary: true }] }); setPrices([]); setMsg(""); }}>Добавить завод</button>}</div>
       </div>
       {msg && <div className="alert info">{msg}</div>}
       <div className="grid" style={{ gridTemplateColumns: "360px 1fr" }}>
