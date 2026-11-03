@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { api, ApiError, designation, fmtDate, fmtRub } from "../api";
+import { api, ApiError, designation, fmtDate, fmtRub, ru } from "../api";
 import { DELIVERY_START, PRODUCTION_START, TERM_UNITS, type Position } from "../types";
 import { collectFields, cmpCode, type RfqFieldData } from "../components/Questionnaire";
 import { UndoButton, useUndoHistory } from "../undo";
@@ -194,7 +194,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
           <tbody>
             {[...bySection.entries()].sort((a, b) => a[0] - b[0]).map(([no, fs]) => {
               const filledHere = fs.filter((f) => vals[f.code]).length;
-              const title = (schema.sections.find((s) => s.no === no)?.title || fs[0].section || "").split(" / ")[0];
+              const title = ru((schema.sections.find((s) => s.no === no)?.title || fs[0].section || "").split(" / ")[0]);
               return (
                 <Fragment key={no}>
                   <tr style={{ cursor: "pointer", background: "var(--accent-soft)" }} onClick={() => setOpen((o) => ({ ...o, [no]: !o[no] }))}>

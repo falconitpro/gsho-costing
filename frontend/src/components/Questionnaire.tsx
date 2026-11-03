@@ -52,7 +52,7 @@ export default function Questionnaire({ position, onlyL = false, showEmpty = fal
       </div>
       {[...bySection.entries()].sort((a, b) => a[0] - b[0]).map(([no, fs]) => (
         <details key={no} open style={{ marginBottom: 6 }}>
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>{no}. {fs[0].section?.split(" / ")[0] || SECTION_TITLES[no] || ""} <span className="muted">({fs.length})</span></summary>
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>{no}. {ruOnly(fs[0].section?.split(" / ")[0]) || SECTION_TITLES[no] || ""} <span className="muted">({fs.length})</span></summary>
           <table style={{ marginTop: 4 }}>
             <thead><tr><th style={{ width: 60 }}>Код</th><th>Параметр</th><th style={{ width: 90 }}>Ед.</th><th>Требование заказчика</th><th>Значение завода</th><th>Комментарий</th></tr></thead>
             <tbody>{fs.map((f) => (

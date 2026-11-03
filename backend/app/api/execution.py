@@ -120,6 +120,33 @@ def set_actual(deal_id: str, stage_id: str, body: ActualIn, db: Session = Depend
     return {"ok": True, "stages": ex.stage_rows(db, deal)}
 
 
+class RefineIn(BaseModel):
+    refined_on: Optional[date] = None      # пусто — снять уточнение
+    note: str = ""
+
+
+@router.post("/stages/{stage_id}/refine")
+def refine(deal_id: str, stage_id: str, body: RefineIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Уточнённая внутренняя дата этапа (без факта): прогноз следующих этапов пересчитывается, базовый план не меняется."""
+    deal = get_deal_or_404(db, deal_id, user)
+    _stage_deal(deal)
+    st = db.get(ExecutionStage, stage_id)
+    if st is None or st.deal_id != deal.id:
+        raise HTTPException(404)
+    if not (ex.can_set(user, st) or user.has(Role.CD)):
+        raise HTTPException(403, f"Дату этапа «{st.title}» уточняют: {', '.join(st.responsible_roles)}")
+    if st.actual_on:
+        raise HTTPException(409, "Этап уже выполнен — уточнять нечего")
+    before = st.refined_on
+    st.refined_on, st.refined_note = body.refined_on, body.note
+    audit(db, user.id, deal.id, "execution_stage", st.id, "refine", {"refined_on": str(before) if before else None},
+          {"refined_on": str(body.refined_on) if body.refined_on else None, "note": body.note})
+    db.flush()
+    ex.rebuild_stages(db, deal)
+    db.commit()
+    return {"ok": True, "stages": ex.stage_rows(db, deal)}
+
+
 class TermsChangedIn(BaseModel):
     reason: str
 

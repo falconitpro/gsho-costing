@@ -359,6 +359,7 @@ class Deal(TimestampMixin, Base):
     region: Mapped[str] = mapped_column(String(255), default="")
     requested_at: Mapped[date] = mapped_column(Date)
     kp_due: Mapped[Optional[date]] = mapped_column(Date)
+    report_date: Mapped[Optional[date]] = mapped_column(Date)                  # дата отчёта (расчёта): курсы и прогноз на эту дату; задают КД / ЗГД
     priority: Mapped[str] = mapped_column(String(16), default="normal")
     status: Mapped[DealStatus] = mapped_column(SAEnum(DealStatus, name="deal_status"), default=DealStatus.DRAFT, index=True)
     manager_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
@@ -558,7 +559,10 @@ class ExecutionStage(TimestampMixin, Base):
     code: Mapped[str] = mapped_column(String(32))                             # contract_signed, factory_contract, client_advance, lc_opened, …
     title: Mapped[str] = mapped_column(String(255))
     sort: Mapped[int] = mapped_column(Integer, default=0)
-    planned_on: Mapped[Optional[date]] = mapped_column(Date)
+    planned_on: Mapped[Optional[date]] = mapped_column(Date)                   # прогноз: пересчитывается от фактов и уточнённых дат
+    baseline_on: Mapped[Optional[date]] = mapped_column(Date)                  # базовый план на момент начала исполнения (не меняется)
+    refined_on: Mapped[Optional[date]] = mapped_column(Date)                   # уточнённая внутренняя дата (напр., завод подтвердил готовность)
+    refined_note: Mapped[str] = mapped_column(Text, default="")
     actual_on: Mapped[Optional[date]] = mapped_column(Date)
     amount: Mapped[Optional[float]] = mapped_column(Float)
     currency: Mapped[str] = mapped_column(String(3), default="RUB")

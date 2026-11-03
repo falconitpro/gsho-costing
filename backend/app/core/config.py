@@ -41,6 +41,15 @@ class Settings:
     # Почта: console | outlook | yandex_smtp
     mail_provider: str = field(default_factory=lambda: _env("MAIL_PROVIDER", "console"))
     mail_shared_mailbox: str = field(default_factory=lambda: _env("MAIL_SHARED_MAILBOX", "sales@example.com"))
+    # SMTP (MAIL_PROVIDER=smtp или yandex_smtp): Яндекс 360 — smtp.yandex.ru:465, логин — адрес ящика, пароль приложения
+    # Поиск наименования кода ТН ВЭД во внешнем сервисе: шаблон адреса с {code}, ответ JSON с полем name / Name / description
+    # (например, API TKS «АПИ-ВЭД» или TWS.BY по договору); пусто — только справочник системы
+    hs_lookup_url: str = field(default_factory=lambda: _env("HS_LOOKUP_URL", ""))
+    smtp_host: str = field(default_factory=lambda: _env("SMTP_HOST", "smtp.yandex.ru"))
+    smtp_port: int = field(default_factory=lambda: int(_env("SMTP_PORT", "465")))
+    smtp_user: str = field(default_factory=lambda: _env("SMTP_USER", ""))
+    smtp_password: str = field(default_factory=lambda: _env("SMTP_PASSWORD", ""))
+    smtp_from: str = field(default_factory=lambda: _env("SMTP_FROM", ""))
     # Мессенджер: console | wecom
     messenger_provider: str = field(default_factory=lambda: _env("MESSENGER_PROVIDER", "console"))
     wecom_corp_id: str = field(default_factory=lambda: _env("WECOM_CORP_ID", ""))

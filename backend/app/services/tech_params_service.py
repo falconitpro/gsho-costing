@@ -114,15 +114,27 @@ def _general_fields() -> list[dict]:
     return [f for f in fields if 1 <= (f.get("section_no") or 0) <= 11]
 
 
+_CJK = re.compile(r"[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]")
+
+
+def ru_only(text: str) -> str:
+    """Русская часть подписи без китайской: «Общие данные / 总体参数» → «Общие данные»."""
+    t = (text or "").strip()
+    if not _CJK.search(t):
+        return t
+    parts = [p for p in re.split(r"\s*[/|]\s*", t) if p and not _CJK.search(p)]
+    return _CJK.sub("", " / ".join(parts)).strip()
+
+
 def section_label(code: str, title: str = "") -> str:
-    """«1. Общие данные / 总体参数» — номер раздела по коду поля и название раздела (как в файле опросника)."""
+    """«1. Общие данные» — номер раздела по коду поля и название раздела (как в файле опросника, без китайского)."""
     major = (code or "").split(".")[0]
-    title = (title or "").strip()
+    title = ru_only(title or "")
     if title and re.match(r"^\d+\.", title):
         return title
     if not major.isdigit():
         return title or "Дополнительные параметры"
-    return f"{major}. {title}" if title else f"{major}. {_general_sections().get(major, 'Раздел ' + major)}"
+    return f"{major}. {title}" if title else f"{major}. {ru_only(_general_sections().get(major, '')) or 'Раздел ' + major}"
 
 
 @lru_cache(maxsize=1)

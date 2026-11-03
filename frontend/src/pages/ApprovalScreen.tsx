@@ -23,6 +23,12 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   const isFD = me.roles.some((r) => r.code === "fd");
   const isGD = me.roles.some((r) => r.code === "gd");
 
+  const [repDate, setRepDate] = useState(deal.report_date || "");
+  async function saveReportDate(v: string | null) {
+    setBusy(true);
+    try { await api.put(`/api/deals/${deal.id}/report-date`, { report_date: v }); reload(); await load(); setErr(""); }
+    catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  }
   async function load() {
     try { setCalc(await api.get<CalcResponse>(`/api/deals/${deal.id}/calc`)); setErr(""); }
     catch (e) { setErr((e as Error).message); }
@@ -114,6 +120,14 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                 <button className="btn" onClick={setPrice} disabled={busy}>Назначить цену</button>
               </div>
             )}
+          </div>
+          <div className="row muted" style={{ marginTop: 6 }}>
+            Дата отчёта (расчёта): <b>{fmtDate(calc.input.calc_date)}</b>{deal.report_date ? " — задана вручную" : " — сегодня"}
+            {isCD && <>
+              <input type="date" value={repDate} onChange={(e) => setRepDate(e.target.value)} style={{ width: 150 }} />
+              <button className="btn ghost" disabled={busy || !repDate} onClick={() => saveReportDate(repDate)}>изменить дату</button>
+              {deal.report_date && <button className="btn ghost" disabled={busy} onClick={() => saveReportDate(null)}>вернуть «сегодня»</button>}
+            </>}
           </div>
           {base?.sensitivity && (
             <div className="muted" style={{ marginTop: 6 }}>
@@ -215,10 +229,12 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                 <button className="btn" disabled={busy || !["calc_ready", "cd_approval", "rework"].includes(deal.status) || cdChecks.length > 0} title={cdChecks.join("\n")} onClick={() => act(`/api/deals/${deal.id}/submit`)}>Утвердить / отправить на визу</button>
               </div>
             )}
-            {isCD && (
+            {(isCD || isFD) && (
               <div className="row" style={{ marginBottom: 8 }}>
+                <b>Доработать:</b>
                 <select value={rework.block} onChange={(e) => setRework({ ...rework, block: e.target.value })}>
-                  <option value="manager">менеджер</option><option value="logistics">логист</option><option value="service">сервис</option><option value="pricing">цена (КД)</option>
+                  {isCD && <option value="manager">менеджер</option>}<option value="logistics">логист</option>{deal.service_flag && <option value="service">сервис</option>}
+                  <option value="pricing">КД (цена и условия)</option><option value="gd">ЗГД</option>
                 </select>
                 <input placeholder="причина возврата (обязательно)" value={rework.reason} onChange={(e) => setRework({ ...rework, reason: e.target.value })} style={{ width: 320 }} />
                 <button className="btn ghost" disabled={busy || !rework.reason} onClick={() => act(`/api/deals/${deal.id}/rework`, rework)}>Вернуть на доработку</button>

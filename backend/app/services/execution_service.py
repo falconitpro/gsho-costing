@@ -20,7 +20,7 @@ from ..core.roles import Role
 from ..core.workflow import add_business_days
 from ..models import Batch, Deal, ExecutionStage, LocalOption, PlanFactEntry, Position, Task
 from . import settings_service
-from .deal_calc import run_calc
+from .deal_calc import build_calc_input
 from .deal_service import audit, notify
 
 # code → (название, уровень: deal|position|batch|option, событие расчёта, ответственные роли, вид: date|payment_in|payment_out, порядок)
@@ -62,8 +62,33 @@ def _d(v) -> Optional[date]:
 
 
 def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
-    """Пересобирает плановые даты этапов из расчёта, сохраняя уже введённые фактические даты и суммы."""
-    inp, res = run_calc(db, deal)
+    """Пересобирает плановые (прогнозные) даты этапов из расчёта, сохраняя фактические даты и суммы.
+    Уточнённые внутренние даты этапов без факта участвуют в прогнозе как ожидаемые события — сдвигают следующие этапы."""
+    from ..calc import calc_deal
+
+    inp = build_calc_input(db, deal)
+    refined = [st for st in db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.refined_on.is_not(None),
+                                                                     ExecutionStage.actual_on.is_(None))).all()]
+    for st in refined:
+        ev = STAGE_DEFS.get(st.code, {}).get("event")
+        if not ev or ev == "production_start":
+            continue
+        try:
+            from ..calc.types import PaymentEvent
+            pe = PaymentEvent(ev)
+        except ValueError:
+            continue
+        if st.position_id:
+            for pi in inp.positions:
+                if pi.id == st.position_id and pe.value not in pi.actual_events:
+                    pi.actual_events[pe.value] = st.refined_on
+        elif st.batch_id:
+            for bi in inp.batches:
+                if bi.id == st.batch_id and pe.value not in bi.actual_events:
+                    bi.actual_events[pe.value] = st.refined_on
+        elif ev not in inp.deal_actual_events:
+            inp.deal_actual_events[ev] = st.refined_on
+    res = calc_deal(inp)
     v = won_variant(deal)
     if v is None:
         return []
@@ -85,6 +110,8 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
         st.title = title or TITLES[code]
         st.sort = STAGE_DEFS[code]["sort"]
         st.planned_on = planned
+        if st.baseline_on is None and deal.execution_started:   # базовый план фиксируется при начале исполнения
+            st.baseline_on = planned
         st.responsible_roles = list(STAGE_DEFS[code]["roles"])
         st.event = STAGE_DEFS[code]["event"]
         if amount is not None:
@@ -174,7 +201,11 @@ def stage_rows(db: Session, deal: Deal) -> list[dict]:
                     "currency": s.currency, "actual_amount": s.actual_amount, "responsible_roles": s.responsible_roles, "kind": STAGE_DEFS[s.code]["kind"],
                     "position_id": s.position_id, "position": pos[s.position_id].designation if s.position_id in pos else None,
                     "batch_id": s.batch_id, "batch": bat[s.batch_id].name if s.batch_id in bat else None, "local_option_id": s.local_option_id,
-                    "note": s.note, "done": s.actual_on is not None, "overdue": s.actual_on is None and s.planned_on is not None and s.planned_on < date.today()})
+                    "note": s.note, "done": s.actual_on is not None, "overdue": s.actual_on is None and s.planned_on is not None and s.planned_on < date.today(),
+                    # контроль сроков: базовый план, уточнённая дата, прогноз, факт, отклонение от базового плана (дни, + — позже)
+                    "baseline_on": s.baseline_on, "refined_on": s.refined_on, "refined_note": s.refined_note,
+                    "deviation_days": ((s.actual_on or s.refined_on or s.planned_on) - s.baseline_on).days
+                    if s.baseline_on and (s.actual_on or s.refined_on or s.planned_on) else None})
     return out
 
 

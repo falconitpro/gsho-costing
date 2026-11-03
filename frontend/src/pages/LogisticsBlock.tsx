@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
-import type { Deal, Me } from "../types";
+import { STATUS_TITLES, type Deal, type Me } from "../types";
 import TechParamsView from "../components/TechParamsView";
 import SpecTable from "../components/SpecTable";
 import { UndoButton, useUndoHistory } from "../undo";
 
 type Money = { amount: number; currency: string };
-type PosForm = { domestic_logistics: Money; export_formalities: Money; hs_code: string; duty_pct: string; vat_pct: string; hs_manual_comment: string; util_fee_rub: number; certification_rub: number; volume_m3: string; comments: Record<string, string>;
+type PosForm = { domestic_logistics: Money; export_formalities: Money; hs_code: string; duty_pct: string; vat_pct: string; hs_manual_comment: string; hs_description: string; util_fee_rub: number; certification_rub: number; volume_m3: string; comments: Record<string, string>;
   util_applies: boolean | null; util_base_rate_rub: string; util_coefficient: string };
 type UtilRef = { base_rate_rub: number; coefficient: number | null; rule: { hs_prefix?: string; machine_type?: string; comment?: string } | null; hs_found: boolean; applies_by_hs: boolean | null };
 
@@ -26,7 +26,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const [forms, setForms] = useState<Record<string, PosForm>>(() => Object.fromEntries(positions.map((p) => {
     const l = (p.logistics || {}) as Partial<PosForm>;
     return [p.id, { domestic_logistics: (l.domestic_logistics as Money) || { amount: 0, currency: "CNY" }, export_formalities: (l.export_formalities as Money) || { amount: 0, currency: "CNY" },
-      hs_code: l.hs_code || "", duty_pct: l.duty_pct != null ? String(l.duty_pct) : "", vat_pct: l.vat_pct != null ? String(l.vat_pct) : "22", hs_manual_comment: "",
+      hs_code: l.hs_code || "", duty_pct: l.duty_pct != null ? String(l.duty_pct) : "", vat_pct: l.vat_pct != null ? String(l.vat_pct) : "22", hs_manual_comment: "", hs_description: "",
       util_fee_rub: l.util_fee_rub || 0, certification_rub: l.certification_rub || 0, volume_m3: l.volume_m3 != null ? String(l.volume_m3) : "", comments: (l.comments as Record<string, string>) || {},
       util_applies: l.util_applies ?? null, util_base_rate_rub: l.util_base_rate_rub != null ? String(l.util_base_rate_rub) : "", util_coefficient: l.util_coefficient != null ? String(l.util_coefficient) : "" }];
   })));
@@ -68,21 +68,39 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const utilBase = (pid: string) => n(forms[pid].util_base_rate_rub) ?? uref[pid]?.base_rate_rub ?? 0;
   const utilCoef = (pid: string) => n(forms[pid].util_coefficient) ?? uref[pid]?.coefficient ?? null;
   const utilSum = (pid: string) => Math.round(utilBase(pid) * (utilCoef(pid) ?? 0) * 100) / 100;
+  // единая стоимость доставки партии (сохранённой или создаваемой) покрывает путь завод → граница
+  const d2dCovers = (p: { batch_id: string | null }) => {
+    const b = batches.find((x) => x.id === p.batch_id);
+    const d = b ? ((b.items || {}) as { door_to_door?: Money | null }).door_to_door : null;
+    return b ? !!d?.amount : batch.d2d && batch.d2d_amount > 0;
+  };
+  // ручной ввод кода ТН ВЭД: наименование — из справочника, внешнего сервиса или вручную
+  const [hsInfo, setHsInfo] = useState<Record<string, { code: string; source: string | null; description: string; note?: string; error?: string; links?: { title: string; url: string }[]; duty_pct?: number; vat_pct?: number }>>({});
+  const lookupHs = (pid: string, code: string) => api.get<(typeof hsInfo)[string]>(`/api/refs/hs/lookup?code=${encodeURIComponent(code)}`).then((r) => {
+    setHsInfo((h) => ({ ...h, [pid]: r }));
+    if (r.description) setForms((fs) => ({ ...fs, [pid]: { ...fs[pid], hs_code: r.code, hs_description: fs[pid].hs_description || r.description,
+      ...(r.source === "reference" ? { duty_pct: String(r.duty_pct), vat_pct: String(r.vat_pct) } : {}) } }));
+    loadUref(pid, r.code);
+  }).catch(() => undefined);
   const upd = (pid: string, patch: Partial<PosForm>) => setForms({ ...forms, [pid]: { ...forms[pid], ...patch } });
 
   return (
     <>
       {err && <div className="alert error">{err}</div>}
+      <div className="card row" style={{ justifyContent: "space-between" }}>
+        <span>Статус: <span className="badge accent">{STATUS_TITLES[deal.status] || deal.status}</span> · логистика: {deal.logistics_done ? <span className="badge ok">рассчитана, передана далее</span> : <span className="badge warn">в работе</span>}</span>
+        {canEdit && !deal.logistics_done && <button className="btn" onClick={complete}>Отправить далее на расчёт</button>}
+      </div>
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Партии и консолидация</h2>
-        <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление / по РФ, дн</th><th>CMR план / факт</th><th>Доставка до границы РФ</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Распределение</th><th>Позиции</th></tr></thead>
+        <h2 style={{ marginTop: 0 }}>Доставка</h2>
+        <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление / по РФ, дн</th><th>CMR план / факт</th><th>Доставка до границы РФ</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Позиции</th></tr></thead>
           <tbody>{batches.map((b) => { const it = b.items as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; const d2d = it.door_to_door as Money | null | undefined; return (
             <tr key={b.id}><td>{b.name}</td><td>{b.route}</td><td className="num">{b.transport_units}</td><td className="num">{b.transit_days} / {b.customs_days} / {b.rf_delivery_days ?? 5}</td><td>{fmtDate(b.border_planned)} / {b.border_actual ? <b>{fmtDate(b.border_actual)}</b> : "—"}</td>
               {d2d?.amount ? <td colSpan={1} title="единая стоимость завод → клиент">{fmtRub(d2d.amount * borderPct / 100)} {d2d.currency} <span className="muted">({borderPct} % от {fmtRub(d2d.amount)})</span></td>
                 : <td>{fr ? `${fmtRub(fr.amount)} ${fr.currency}` : "—"}</td>}
               <td>{it.insurance_pct != null ? `${it.insurance_pct} %` : "—"}</td><td className="num">{fmtRub(it.broker_rub as number)}</td>
               <td className="num">{d2d?.amount ? <>{fmtRub(d2d.amount * (100 - borderPct) / 100)} {d2d.currency} <span className="muted">({100 - borderPct} %)</span></> : fmtRub(it.rf_delivery_rub as number)}</td>
-              <td>{b.allocation}</td><td>{positions.filter((p) => p.batch_id === b.id).map((p) => designation(p)).join(", ")}</td></tr>); })}</tbody></table>
+              <td>{positions.filter((p) => p.batch_id === b.id).map((p) => designation(p)).join(", ")}</td></tr>); })}</tbody></table>
         {canEdit && (
           <>
             <h3 style={{ marginBottom: 4 }}>Новая партия</h3>
@@ -118,7 +136,6 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
                 { key: "rf", name: "Доставка по РФ до объекта", unit: "RUB", filled: batch.rf_delivery_rub > 0, value: <input type="number" value={batch.rf_delivery_rub} onChange={(e) => setBatch({ ...batch, rf_delivery_rub: Number(e.target.value) })} />,
                   comment: <input value={batch.comment_rf} placeholder="комментарий" onChange={(e) => setBatch({ ...batch, comment_rf: e.target.value })} /> },
                 ]),
-                { key: "alloc", name: "Распределение общих статей между позициями", filled: true, value: <select value={batch.allocation} onChange={(e) => setBatch({ ...batch, allocation: e.target.value })}><option value="cost">по стоимости</option><option value="weight">по весу</option><option value="volume">по объёму</option></select>, comment: bcc("allocation") },
               ] },
             ]} />
             <div className="row" style={{ marginTop: 8 }}><button className="btn secondary" onClick={createBatch}>Создать партию (нераспределённые позиции)</button><UndoButton h={history} /></div>
@@ -143,22 +160,31 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
               <div style={{ marginTop: 6 }}><TechParamsView rows={p.tech_param_rows || []} /></div></details>
             <SpecTable refTitle="По истории / справочник" nameTitle="Статья" sections={[
               { title: "Китай: до границы", rows: [
-                { key: "dl", name: "Внутрикитайская логистика завод → граница", unit: "CNY", ref: hist("domestic_logistics"), filled: f.domestic_logistics.amount > 0, required: true,
+                d2dCovers(p) ? { key: "dl", name: "Внутрикитайская логистика завод → граница", filled: true,
+                  ref: <span className="muted">входит в единую стоимость доставки завод → клиент</span>, value: <span className="muted">не заполняется</span> }
+                : { key: "dl", name: "Внутрикитайская логистика завод → граница", unit: "CNY", ref: hist("domestic_logistics"), filled: f.domestic_logistics.amount > 0, required: true,
                   value: <input type="number" value={f.domestic_logistics.amount} disabled={!canEdit} onChange={(e) => upd(p.id, { domestic_logistics: { ...f.domestic_logistics, amount: Number(e.target.value) } })} />,
                   comment: ci("domestic_logistics", "при отклонении от истории") },
                 { key: "ef", name: "Экспортные формальности КНР", unit: "CNY", ref: hist("export_formalities"), filled: f.export_formalities.amount > 0,
                   value: <input type="number" value={f.export_formalities.amount} disabled={!canEdit} onChange={(e) => upd(p.id, { export_formalities: { ...f.export_formalities, amount: Number(e.target.value) } })} />,
                   comment: ci("export_formalities", "при отклонении от истории") },
-                { key: "vol", name: "Объём (для распределения общих статей)", unit: "м³", filled: f.volume_m3 !== "",
+                { key: "vol", name: "Объём", unit: "м³", filled: f.volume_m3 !== "",
                   value: <input type="number" value={f.volume_m3} disabled={!canEdit} onChange={(e) => upd(p.id, { volume_m3: e.target.value })} />, comment: ci("volume_m3") },
               ] },
               { title: "Таможня РФ", rows: [
-                { key: "hs", name: <>Код ТН ВЭД <span className="muted">(поиск по коду или описанию)</span></>, filled: !!f.hs_code, required: true,
+                { key: "hs", name: <>Код ТН ВЭД <span className="muted">(поиск по коду или описанию; можно ввести вручную)</span></>, filled: !!f.hs_code, required: true,
                   ref: <span className="muted">{hc?.found === false ? "кода нет в справочнике" : hc?.certification?.length ? hc.certification.join(", ") : ""}</span>,
                   value: <>
-                    <input value={f.hs_code} disabled={!canEdit} onChange={(e) => { upd(p.id, { hs_code: e.target.value }); if (e.target.value.length >= 2) api.get<typeof hs>(`/api/refs/hs?q=${encodeURIComponent(e.target.value)}`).then(setHs); }} />
+                    <input value={f.hs_code} disabled={!canEdit} placeholder="10 цифр" onChange={(e) => { const v = e.target.value; upd(p.id, { hs_code: v }); if (v.length >= 2) api.get<typeof hs>(`/api/refs/hs?q=${encodeURIComponent(v)}`).then(setHs); if (/^\d{10}$/.test(v.replace(/\s/g, ""))) lookupHs(p.id, v); }} />
                     {canEdit && hs.length > 0 && <div style={{ fontSize: 12, marginTop: 2 }}>{hs.slice(0, 5).map((h) => <div key={h.code} style={{ cursor: "pointer", padding: "2px 0" }} onClick={() => { upd(p.id, { hs_code: h.code, duty_pct: String(h.duty_pct), vat_pct: String(h.vat_pct), util_applies: null, util_coefficient: "" }); setHs([]); loadUref(p.id, h.code); }}><b>{h.code}</b> — {h.description} (пошлина {h.duty_pct} %, НДС {h.vat_pct} %; {h.certification.join(", ")})</div>)}</div>}</>,
                   comment: ci("hs_code") },
+                ...(/^\d{10}$/.test(f.hs_code.replace(/\s/g, "")) && hsInfo[p.id]?.code === f.hs_code.replace(/\s/g, "") && hsInfo[p.id]?.source !== "reference" ? [
+                  { key: "hsn", name: "Наименование кода ТН ВЭД", filled: !!f.hs_description, required: true,
+                    ref: <span className="muted">{hsInfo[p.id]?.error || hsInfo[p.id]?.note || (hsInfo[p.id]?.source === "internet" ? "найдено в интернете — проверьте" : "")}
+                      {(hsInfo[p.id]?.links || []).map((l) => <> · <a key={l.url} href={l.url} target="_blank" rel="noreferrer">{l.title}</a></>)}</span>,
+                    value: <input value={f.hs_description} placeholder="наименование по ТН ВЭД ЕАЭС" disabled={!canEdit} onChange={(e) => upd(p.id, { hs_description: e.target.value })} />,
+                    comment: <span className="muted" style={{ fontSize: 11 }}>сохранится в справочник ТН ВЭД</span> },
+                ] : []),
                 { key: "duty", name: "Пошлина", unit: "%", filled: f.duty_pct !== "",
                   ref: hc?.found ? <span className={hc.mismatch ? "badge warn" : "muted"}>справочник: {hc.ref_duty_pct} %</span> : null,
                   value: <input type="number" value={f.duty_pct} disabled={!canEdit} onChange={(e) => upd(p.id, { duty_pct: e.target.value })} />,
@@ -192,7 +218,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
           </div>
         );
       })}
-      {canEdit && <button className="btn" onClick={complete}>Завершить блок логистики</button>}
+      {canEdit && <div className="row"><button className="btn" onClick={complete}>Отправить далее на расчёт</button><span className="muted">все позиции без партии войдут в первую партию</span></div>}
     </>
   );
 }

@@ -51,6 +51,14 @@ export const designation = (p: { trademark?: string | null; model?: string | nul
   return !tm || m.toLowerCase().startsWith(tm.toLowerCase()) ? m || tm : `${tm} ${m}`;
 };
 
+/** Только русская часть подписи: «1. Общие данные / 总体参数» → «1. Общие данные»; чисто китайский текст — пусто. */
+const CJK = /[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]/;
+export const ru = (t: unknown) => {
+  const s = String(t ?? "").trim();
+  if (!CJK.test(s)) return s;
+  return s.split(/\s*[/|]\s*/).filter((x) => x && !CJK.test(x)).join(" / ").replace(/[\u3000-\u303f\u3400-\u9fff\uff00-\uffef（）]+/g, "").trim();
+};
+
 export const fmtRub = (v: number | null | undefined, digits = 0) =>
   v == null ? "—" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(v);
 export const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(2).replace(".", ",")} %`);

@@ -320,6 +320,34 @@ def hs_search(q: str = Query(min_length=2), db: Session = Depends(get_db), user:
     return [serialize(h) for h in db.scalars(stmt).all()]
 
 
+@router.get("/hs/lookup")
+def hs_lookup(code: str = Query(min_length=4, max_length=14), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Наименование кода ТН ВЭД: справочник системы → внешний сервис (HS_LOOKUP_URL) → ссылки для поиска вручную."""
+    import re as _re
+    c = _re.sub(r"\D", "", code)
+    row = db.scalar(select(HsCode).where(HsCode.code == c, HsCode.valid_to.is_(None)))
+    links = [{"title": "TKS.ru", "url": f"https://www.tks.ru/db/tnved/search?q={c}"}, {"title": "Alta-Soft", "url": f"https://www.alta.ru/tnved/code/{c}/"}]
+    if row:
+        return {"code": c, "source": "reference", "description": row.description, "duty_pct": row.duty_pct, "vat_pct": row.vat_pct,
+                "util_fee": row.util_fee, "certification": row.certification, "links": links}
+    from ..core.config import get_settings
+    tpl = get_settings().hs_lookup_url
+    if tpl:
+        import httpx
+        try:
+            r = httpx.get(tpl.format(code=c), timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            item = data[0] if isinstance(data, list) and data else data
+            name = next((item.get(k) for k in ("name", "Name", "description", "Description", "title") if isinstance(item, dict) and item.get(k)), None)
+            if name:
+                return {"code": c, "source": "internet", "description": str(name), "links": links}
+        except Exception as e:   # сервис недоступен — логист вводит наименование сам
+            return {"code": c, "source": None, "description": "", "error": f"внешний сервис недоступен: {str(e)[:120]}", "links": links}
+    return {"code": c, "source": None, "description": "", "links": links,
+            "note": "Кода нет в справочнике; автоматический поиск в интернете не подключён — введите наименование, оно сохранится в справочник"}
+
+
 @router.get("/payment-schemes")
 def payment_schemes(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     return [serialize(p) for p in db.scalars(select(PaymentScheme)).all()]

@@ -192,7 +192,10 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
 
         ship = ev[PaymentEvent.SHIPMENT]
         # 2–3. Логистика позиции (оплата при отгрузке)
+        in_d2d = bool(batch and batch.door_to_door and batch.door_to_door.amount)   # единая стоимость партии уже включает путь завод → граница
         for key, m in (("domestic_logistics", p.domestic_logistics), ("export_formalities", p.export_formalities)):
+            if key == "domestic_logistics" and in_d2d:
+                m = Money(amount=0.0, currency=m.currency)
             items_fx[key] = m
             k = fx.rate(m.currency, ship, s, f"{p.id}/{key}", None, fx_mult)
             items[key] = m.amount * k
@@ -202,7 +205,8 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
         # 4–5, 8, 10. Статьи партии → доля позиции
         share = 1.0
         if batch:
-            k0 = {c: fx.rate(c, ship, s, "_alloc", None, fx_mult) for c in ("CNY", "USD", "EUR", "RUB")}
+            # курсы только тех валют, что есть в загруженных курсах (на прошлую дату отчёта может не быть USD / EUR)
+            k0 = {c: fx.rate(c, ship, s, "_alloc", None, fx_mult) for c in ("CNY", "USD", "EUR", "RUB") if c == "RUB" or c in inp.fx.rates}
             share = _alloc_weights(batch_members[batch.id], batch.allocation, k0)[p.id]
             fr = batch.intl_freight
             d2d = batch.door_to_door if batch.door_to_door and batch.door_to_door.amount else None
