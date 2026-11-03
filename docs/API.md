@@ -11,7 +11,7 @@
 | GET | `/catalog/tree`, `/catalog/executions/{id}`, `/catalog/pending` | любая; pending — КД/ГД | Каталог производитель → тип → модель → исполнение, история цен по правам |
 | POST | `/catalog/executions/{id}/decision`; PATCH `/catalog/executions/{id}`, `/catalog/models/{id}` | КД, ГД | Подтверждение занесения, наименование под брендом компании |
 | GET/POST | `/refs/machine-types`, `POST …/{id}/approve` | любая / КД, ГД | Типы машин (заводятся по ходу работы) |
-| GET/PUT | `/refs/tech-param-templates?machine_type_id=` | любая / КД, ГД | Шаблоны теххарактеристик и обязательность |
+| GET/PUT | `/refs/tech-param-templates?machine_type_id=` | любая / КД, ГД | Шаблоны технических характеристик и обязательность |
 | GET/POST/DELETE | `/refs/glossary`, `POST …/{id}/confirm` | по праву `glossary` | Глоссарий RU↔ZH |
 | POST | `/deals/{id}/payment-terms` | КД, ГД | Условия оплаты клиента и завода, БГ на аванс, точка отсчёта срока поставки (задачи 1, 3) |
 | GET/PUT/POST/DELETE | `/admin/access`, `…/{role}/{group}`, `…/overrides`, `…/preview` | администратор, ГД | Уровни доступа (задача 11) |
@@ -38,7 +38,7 @@
 | PATCH | `/deals/{id}` | менеджер сделки; КД/ГД — `client_payments`, `bank_guarantee` | Шапка, условия эксплуатации, флаг сервиса, пожелания клиента по оплате (`client_payment_wishes`), отметка «Альтернативные предложения» (`has_alternatives`) |
 | POST | `/deals/{id}/duplicate` | менеджер, КД, ГД | Дублировать заявку (задача 9): `offer_id`, `copy_calcs` |
 | GET | `/deals/{id}/related` | по видимости | Связанные заявки по одному запросу клиента |
-| GET/PUT | `/deals/{id}/positions/{pid}/tech-params` | менеджер (КД, ГД) | Таблица теххарактеристик (задача 4); `…/verify/{row}` — подтвердить машинный перевод |
+| GET/PUT | `/deals/{id}/positions/{pid}/tech-params` | менеджер (КД, ГД) | Таблица технических характеристик (задача 4); `…/verify/{row}` — подтвердить машинный перевод |
 | POST | `…/tech-params/import/preview`, `…/import/apply` (multipart: `mapping`, `target`, `selected_rows`, `offer_id`) | менеджер | Импорт файла клиента / ответа завода с предпросмотром и сопоставлением |
 | POST | `…/tech-params/request` | менеджер | Двуязычный запрос одному или нескольким заводам (WeCom + e-mail, вложения клиента); `GET …/request/file` — скачать файл |
 | GET/POST | `/deals/{id}/offers`, `GET …/compare`, `POST …/submit-compare`, `POST …/select` | менеджер; отбор — КД/ГД | Ответы заводов, сравнение «параметр × завод», отбор для КП (задача 9) |
@@ -137,7 +137,7 @@
 
 | Метод | Путь | Назначение |
 | --- | --- | --- |
-| POST | `/api/catalog/equipment` | добавить оборудование вручную (завод → тип → модель → исполнение, теххарактеристики, цена); менеджер — на подтверждение КД/ГД, КД/ГД — сразу |
+| POST | `/api/catalog/equipment` | добавить оборудование вручную (завод → тип → модель → исполнение, технические характеристики, цена); менеджер — на подтверждение КД/ГД, КД/ГД — сразу |
 | POST | `/api/catalog/equipment/import/preview` | файл: опросник RFQ одной машины (`kind=rfq`, данные для формы) или список моделей (`kind=list`, сопоставление столбцов) |
 | POST | `/api/catalog/equipment/import/apply` | добавить модели из списка (`mapping`, `default_factory_id`) |
 | GET | `/api/refs/clients/lookup?inn=` | реквизиты по ИНН (ЕГРЮЛ/ЕГРИП через `COMPANY_REGISTRY_PROVIDER=dadata`, ключ `DADATA_API_KEY`); 422 — неверный ИНН, 503 — источник не подключён |

@@ -159,7 +159,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
         );
       })}
       <div className="grid cols-3" style={{ marginTop: 10 }}>
-        <label className="f">Исполнение из каталога (заполняет теххарактеристики; затем их можно изменить)
+        <label className="f">Исполнение из каталога (заполняет технические характеристики; затем их можно изменить)
           <select value={execId} onChange={(e) => { setExecId(e.target.value); const found = tree.flatMap((f) => f.types.flatMap((t) => t.models.flatMap((m) => m.executions.map((x) => ({ f, t, m, x }))))).find((z) => z.x.id === e.target.value);
             if (found) { setFactoryId(found.f.factory_id); set("0.7", found.f.factory); set("1.1", found.t.machine_type); set("1.2", found.m.model); } }}>
             <option value="">— не использовать —</option>

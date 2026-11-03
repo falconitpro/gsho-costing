@@ -252,7 +252,7 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
     db.flush()
     _record_price(db, pos, deal)
     from ..services.tech_params_service import init_position_rows
-    init_position_rows(db, pos, user.id)   # задача 4/7: перечень теххарактеристик из исполнения каталога или шаблона по типу
+    init_position_rows(db, pos, user.id)   # задача 4/7: перечень технических характеристик из исполнения каталога или шаблона по типу
     ensure_default_variant(db, deal)
     audit(db, user.id, deal.id, "position", pos.id, "create", after=data)
     db.commit()
@@ -399,6 +399,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     imp = RfqImport(deal_id=deal.id, file_path=path, file_hash=sha256_file(path), template_version=parsed.template_version,
                     attempt=attempt, parsed=parsed.to_dict(), errors=[e.__dict__ for e in parsed.errors], imported_by=user.id)
     db.add(imp)
+    db.flush()   # id попытки нужен позиции (rfq_import_id) — источник «RFQ» в списке позиций
     if not parsed.ok:
         db.commit()
         raise HTTPException(422, {"message": "Ошибки импорта — исправьте файл и загрузите повторно", "errors": imp.errors,
@@ -435,7 +436,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     db.flush()
     _record_price(db, pos, deal)
     from ..services.tech_params_service import rows_from_rfq
-    rows_from_rfq(db, pos, parsed, user.id)   # задача 4: таблица теххарактеристик из ответа завода в шаблоне RFQ
+    rows_from_rfq(db, pos, parsed, user.id)   # задача 4: таблица технических характеристик из ответа завода в шаблоне RFQ
     ensure_default_variant(db, deal)
     # шапка сделки из раздела 0 опросника (заполняем только пустое, менеджер мог ввести раньше)
     deal.operating_conditions = {**(deal.operating_conditions or {}), **{k: parsed.header.get(k) for k in ("temp_min", "temp_max", "operating_conditions") if parsed.header.get(k) is not None}}
@@ -592,7 +593,7 @@ class DuplicateIn(BaseModel):
 
 @router.post("/{deal_id}/duplicate", status_code=201)
 def duplicate(deal_id: str, body: DuplicateIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Задача 9: «Дублировать заявку» — новая сделка того же клиента с копией требований, теххарактеристик, изображений,
+    """Задача 9: «Дублировать заявку» — новая сделка того же клиента с копией требований, технических характеристик, изображений,
     выбранного ответа завода и (по умолчанию) расчётов логиста и сервиса. Номер — производный (D-2026-0042-2)."""
     deal = get_deal_or_404(db, deal_id, user)
     if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):

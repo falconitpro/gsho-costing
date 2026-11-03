@@ -141,11 +141,11 @@ def manager_checks(deal: dict[str, Any]) -> list[str]:
                            ("unit_price", "цена"), ("currency", "валюта")):
             if not p.get(key):
                 errors.append(f"Позиция {i}: не заполнено поле «{title}».")
-        # задача 4: обязательные теххарактеристики должны быть заполнены (значение завода)
+        # задача 4: обязательные технические характеристики должны быть заполнены (значение завода)
         missing = [r.get("name_ru") or r.get("code") or "?" for r in (p.get("tech_param_rows") or [])
                    if r.get("required") and not r.get("local_ru") and not (r.get("value_ru") or r.get("value_zh"))]
         if missing:
-            errors.append(f"Позиция {i}: не заполнены обязательные теххарактеристики: {', '.join(missing[:5])}"
+            errors.append(f"Позиция {i}: не заполнены обязательные технические характеристики: {', '.join(missing[:5])}"
                           + (" …" if len(missing) > 5 else "") + ".")
     # задача 1: условия оплаты задаёт КД — менеджер их не вводит; задача 5: варианты только при альтернативных предложениях
     if deal.get("has_alternatives") and len([v for v in (deal.get("variants") or []) if not _is_default_variant(v)]) < 2:

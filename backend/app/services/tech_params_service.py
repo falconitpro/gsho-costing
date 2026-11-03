@@ -1,4 +1,4 @@
-"""Таблица теххарактеристик позиции (задача 4), глоссарий и переводчик, запрос заводу и загрузка ответа (задачи 4, 9, 10).
+"""Таблица технических характеристик позиции (задача 4), глоссарий и переводчик, запрос заводу и загрузка ответа (задачи 4, 9, 10).
 
 Таблица: № / Параметр (RU) / Ед. изм. / Требования заказчика / Значение (RU) / Комментарий.
 Порядок работы: менеджер заполняет требования (вручную или импортом файла клиента) → формирует двуязычный запрос
@@ -168,7 +168,7 @@ def template_for(db: Session, machine_type: str) -> list[TechParamTemplate]:
 
 
 def init_position_rows(db: Session, pos: Position, user_id: Optional[str], replace: bool = False) -> list[PositionTechParam]:
-    """Перечень теххарактеристик позиции: из исполнения каталога (задача 7) или из шаблона по типу машины."""
+    """Перечень технических характеристик позиции: из исполнения каталога (задача 7) или из шаблона по типу машины."""
     if pos.tech_param_rows and not replace:
         return pos.tech_param_rows
     for r in list(pos.tech_param_rows or []):
@@ -202,7 +202,7 @@ def _fmt_value(v: Any) -> str:
 
 
 def rfq_rows(db: Session, parsed, machine_type: str = "") -> list[dict]:
-    """Строки таблицы теххарактеристик из разобранного RFQ: все поля разделов 1–11 из файла (с разделами, как в файле)
+    """Строки таблицы технических характеристик из разобранного RFQ: все поля разделов 1–11 из файла (с разделами, как в файле)
     плюс поля опросника компании, которых в файле нет (пустые, чтобы их можно было дозаполнить)."""
     from .rfq_import import REQUIRED_CODES
     tpl = template_for(db, machine_type)
@@ -210,7 +210,7 @@ def rfq_rows(db: Session, parsed, machine_type: str = "") -> list[dict]:
     out: dict[str, dict] = {}
     for code, f in parsed.fields.items():
         if not (1 <= f.section_no <= 11):
-            continue                         # поля «L» (габариты, массы) — и логисту, и в таблицу: это тоже теххарактеристики для КП
+            continue                         # поля «L» (габариты, массы) — и логисту, и в таблицу: это тоже технические характеристики для КП
         v_ru, v_zh = f.value_ru, f.value_zh
         value_ru = "" if v_ru is None else str(v_ru).strip()
         value_zh = "" if v_zh is None else str(v_zh).strip()

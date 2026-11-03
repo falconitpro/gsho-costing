@@ -1,4 +1,4 @@
-"""Каталог оборудования (задача 7), типы машин, шаблоны теххарактеристик и глоссарий (задача 4), история цен клиентам (задача 8)."""
+"""Каталог оборудования (задача 7), типы машин, шаблоны технических характеристик и глоссарий (задача 4), история цен клиентам (задача 8)."""
 from __future__ import annotations
 
 from typing import Optional
@@ -217,7 +217,7 @@ def _added(ex: EquipmentExecution, created: bool, editor: bool) -> dict:
 
 @router.post("/catalog/equipment", status_code=201)
 def catalog_add(body: EquipmentIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_contributor)):
-    """Добавить оборудование вручную: завод → тип → модель → исполнение с теххарактеристиками и ценой.
+    """Добавить оборудование вручную: завод → тип → модель → исполнение с техническими характеристиками и ценой.
     Менеджер — на подтверждение КД/ГД; КД и ГД — сразу в каталог."""
     editor = user.can("catalog", 2)
     try:
@@ -355,7 +355,7 @@ def approve_machine_type(type_id: str, db: Session = Depends(get_db), user: Curr
     return serialize(t)
 
 
-# ------------------------------------------------------------------ шаблоны теххарактеристик (обязательность задают КД/ГД)
+# ------------------------------------------------------------------ шаблоны технических характеристик (обязательность задают КД/ГД)
 
 class TemplateRowIn(BaseModel):
     id: Optional[str] = None

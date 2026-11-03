@@ -25,9 +25,9 @@ def test_manager_checks():
     # задача 5: при альтернативах нужно минимум два предложения
     errs = manager_checks({"client_id": 1, "positions": [pos], "has_alternatives": True, "variants": [{"name": "A"}]})
     assert any("минимум два" in e for e in errs)
-    # задача 4: обязательные теххарактеристики без значения
+    # задача 4: обязательные технические характеристики без значения
     errs = manager_checks({"client_id": 1, "positions": [{**pos, "tech_param_rows": [{"name_ru": "Мощность", "required": True, "value_ru": ""}]}]})
-    assert any("обязательные теххарактеристики" in e for e in errs)
+    assert any("обязательные технические характеристики" in e for e in errs)
     assert not manager_checks({"client_id": 1, "positions": [{**pos, "tech_param_rows": [{"name_ru": "Мощность", "required": True, "value_ru": "", "local_ru": True}]}]})
     # задача 1/6: проверки КД перед утверждением
     errs = cd_checks({"payment_terms_set": False, "positions": [{"model": "M", "factory_payments": [], "local_options": [{"name": "Кондиционер", "cost": 0, "supplier_lead_days": 0}]}]})

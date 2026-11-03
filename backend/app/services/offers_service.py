@@ -27,7 +27,7 @@ def _copy_columns(src, dst, skip: set[str]) -> None:
 
 
 def duplicate_deal(db: Session, deal: Deal, user_id: str, offer_id: Optional[str] = None, copy_calcs: bool = True, comment: str = "") -> Deal:
-    """Новая заявка того же клиента: требования, теххарактеристики, изображения, опции РФ, выбранный ответ завода;
+    """Новая заявка того же клиента: требования, технические характеристики, изображения, опции РФ, выбранный ответ завода;
     расчёты логиста и сервиса копируются с пометкой «проверить» и задачами на проверку. Цена КД, условия оплаты и визы — заново."""
     if not deal.request_group_id:
         deal.request_group_id = str(uuid.uuid4())

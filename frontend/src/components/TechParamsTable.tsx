@@ -11,7 +11,7 @@ const COLS: { key: keyof TechParamRow; title: string; w?: number }[] = [
   { key: "customer_requirement_ru", title: "Требования заказчика" }, { key: "value_ru", title: "Значение" }, { key: "comment_ru", title: "Комментарий" },
 ];
 
-/** Таблица теххарактеристик позиции (задача 4): ручной ввод, импорт файла с предпросмотром, запрос заводу (задача 9), отметки «обязательно»/«в России». */
+/** Таблица технических характеристик позиции (задача 4): ручной ввод, импорт файла с предпросмотром, запрос заводу (задача 9), отметки «обязательно»/«в России». */
 export default function TechParamsTable({ dealId, position, canEdit, onChanged }: { dealId: string; position: Position; canEdit: boolean; onChanged: () => void }) {
   const base = `/api/deals/${dealId}/positions/${position.id}/tech-params`;
   const [rows, setRows] = useState<TechParamRow[]>([]);
@@ -94,7 +94,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
   return (
     <div>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-        <span className="muted">Теххарактеристики: заполнено значений {filled} из {rows.length}
+        <span className="muted">Технические характеристики: заполнено значений {filled} из {rows.length}
           {missing.length > 0 && <> · <span className="badge bad">не заполнены обязательные: {missing.slice(0, 4).join(", ")}{missing.length > 4 ? " …" : ""}</span></>}
           {rows.some((r) => r.translation_status === "machine") && <> · <span className="badge warn">машинный перевод — проверьте</span></>}
           {rows.some((r) => r.req_status === "mismatch") && <> · <span className="badge" style={{ background: "#ffd9b3" }}>не соответствует требованию: {rows.filter((r) => r.req_status === "mismatch").length}</span></>}</span>

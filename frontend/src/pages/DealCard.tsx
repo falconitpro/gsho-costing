@@ -87,7 +87,7 @@ export default function DealCard({ me }: { me: Me }) {
     catch (e) { setErr((e as Error).message); }
   }
   async function duplicate() {
-    const comment = prompt("Дублировать заявку (новая заявка того же клиента: требования, теххарактеристики, изображения, расчёты логиста и сервиса с пометкой «проверить»). Комментарий:") ?? null;
+    const comment = prompt("Дублировать заявку (новая заявка того же клиента: требования, технические характеристики, изображения, расчёты логиста и сервиса с пометкой «проверить»). Комментарий:") ?? null;
     if (comment === null) return;
     try { const d = await api.post<Deal>(`/api/deals/${deal!.id}/duplicate`, { copy_calcs: true, comment }); nav(`/deals/${d.id}`); } catch (e) { setErr((e as Error).message); }
   }
@@ -122,7 +122,7 @@ export default function DealCard({ me }: { me: Me }) {
 
       <div className="tabs">
         <button className={tab === "main" ? "active" : ""} onClick={() => setTab("main")}>Шапка и условия</button>
-        <button className={tab === "positions" ? "active" : ""} onClick={() => setTab("positions")}>Позиции, теххарактеристики, файлы</button>
+        <button className={tab === "positions" ? "active" : ""} onClick={() => setTab("positions")}>Позиции, технические характеристики, файлы</button>
         <button className={tab === "offers" ? "active" : ""} onClick={() => setTab("offers")}>Заводы и ответы</button>
         {has("logistician", "cd", "fd", "gd") && <button className={tab === "logistics" ? "active" : ""} onClick={() => setTab("logistics")}>Логистика и таможня</button>}
         {deal.service_flag && has("service_head", "cd", "fd", "gd") && <button className={tab === "service" ? "active" : ""} onClick={() => setTab("service")}>Сервис</button>}
@@ -205,7 +205,7 @@ export default function DealCard({ me }: { me: Me }) {
           {editable && (
             <div className="card">
               <h2 style={{ marginTop: 0 }}>Импорт RFQ (двуязычный шаблон RU-ZH)</h2>
-              <p className="muted">Позицию можно завести тремя способами: выбрать исполнение из каталога, загрузить заполненный заводом файл RFQ или ввести поля вручную. Теххарактеристики затем правятся в таблице ниже, а запрос заводу формируется из неё.</p>
+              <p className="muted">Позицию можно завести тремя способами: выбрать исполнение из каталога, загрузить заполненный заводом файл RFQ или ввести поля вручную. Технические характеристики затем правятся в таблице ниже, а запрос заводу формируется из неё.</p>
               <div className="row">
                 <input type="file" accept=".xlsx" onChange={(e) => setRfqFile(e.target.files?.[0] || null)} />
                 <button className="btn secondary" onClick={preview} disabled={!rfqFile}>Предпросмотр</button>
@@ -252,7 +252,7 @@ export default function DealCard({ me }: { me: Me }) {
       {tab === "catalog" && (
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Занесение оборудования в каталог</h2>
-          <p className="muted">Отметьте, что занести: новую модель и/или новое исполнение (набор теххарактеристик). После подтверждения менеджера запись уходит КД/ГД на проверку; до подтверждения в подборе не участвует. История цен пишется автоматически.</p>
+          <p className="muted">Отметьте, что занести: новую модель и/или новое исполнение (набор технических характеристик). После подтверждения менеджера запись уходит КД/ГД на проверку; до подтверждения в подборе не участвует. История цен пишется автоматически.</p>
           <table><thead><tr><th /><th>Модель</th><th>Модель в каталоге</th><th>Исполнение</th><th>Параметров заполнено</th><th>Название исполнения</th></tr></thead>
             <tbody>{cand.map((c) => (
               <tr key={c.position_id}><td><input type="checkbox" checked={!!candSel[c.position_id]} disabled={c.execution_exists || !!c.pending_execution_id} onChange={(e) => setCandSel({ ...candSel, [c.position_id]: e.target.checked })} /></td>

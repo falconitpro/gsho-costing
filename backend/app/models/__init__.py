@@ -132,7 +132,7 @@ class Factory(TimestampMixin, Base):
 
 
 class MachineType(TimestampMixin, Base):
-    """Справочник типов машин (задача 7): каталог, шаблоны теххарактеристик, нормативы по типу."""
+    """Справочник типов машин (задача 7): каталог, шаблоны технических характеристик, нормативы по типу."""
     __tablename__ = "machine_types"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(255), unique=True)
@@ -163,7 +163,7 @@ class EquipmentModel(TimestampMixin, Base):
 
 
 class EquipmentExecution(TimestampMixin, Base):
-    """Исполнение модели: полный набор теххарактеристик (формат таблицы задачи 4), опции РФ и изображения."""
+    """Исполнение модели: полный набор технических характеристик (формат таблицы задачи 4), опции РФ и изображения."""
     __tablename__ = "equipment_executions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     model_id: Mapped[str] = mapped_column(ForeignKey("equipment_models.id"), index=True)
@@ -295,7 +295,7 @@ class Glossary(TimestampMixin, Base):
 
 
 class TechParamTemplate(Base):
-    """Шаблон перечня теххарактеристик по типу машины (задача 4). Обязательность задают КД/ГД."""
+    """Шаблон перечня технических характеристик по типу машины (задача 4). Обязательность задают КД/ГД."""
     __tablename__ = "tech_param_templates"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     machine_type_id: Mapped[Optional[str]] = mapped_column(ForeignKey("machine_types.id"), index=True)   # NULL = общий шаблон
@@ -435,7 +435,7 @@ class Position(TimestampMixin, Base):
 
 
 class PositionTechParam(TimestampMixin, Base):
-    """Строка таблицы теххарактеристик позиции (задача 4): № / параметр / ед. / требования заказчика / значение / комментарий."""
+    """Строка таблицы технических характеристик позиции (задача 4): № / параметр / ед. / требования заказчика / значение / комментарий."""
     __tablename__ = "position_tech_params"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     position_id: Mapped[str] = mapped_column(ForeignKey("positions.id"), index=True)
@@ -515,7 +515,7 @@ class FactoryOffer(TimestampMixin, Base):
     basis: Mapped[str] = mapped_column(String(32), default="FCA")
     production_term: Mapped[dict] = mapped_column(JSONType, default=dict)
     factory_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)
-    params: Mapped[list[dict]] = mapped_column(JSONType, default=list)       # строки теххарактеристик с value_ru/value_zh/comment
+    params: Mapped[list[dict]] = mapped_column(JSONType, default=list)       # строки технических характеристик с value_ru/value_zh/comment
     images: Mapped[list[str]] = mapped_column(JSONType, default=list)        # attachment ids
     request_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     answer_received_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

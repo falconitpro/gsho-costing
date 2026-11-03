@@ -56,6 +56,7 @@ def test_full_flow(client, tmp_path):
     with open(rfq, "rb") as f:
         imp = _ok(client.post(f"/api/deals/{did}/rfq/import", headers=H(MGR), files={"file": ("rfq.xlsx", f)}), 201)
     pos = imp["position"]
+    assert pos["rfq_import_id"]                                                         # источник позиции — RFQ, а не «вручную»
     assert pos["model"] == "XDR80T" and pos["qty"] == 2 and pos["currency"] == "CNY" and pos["options_price"] == 86000
     # весь опросник сохранён в карточке: заполненные поля по разделам + L-поля логисту
     rfq_all = pos["tech_params"]["_rfq"]
@@ -69,7 +70,7 @@ def test_full_flow(client, tmp_path):
     assert d["checks"] == [], d["checks"]
     assert d["offer"] and d["offer"]["position_ids"] == [pos["id"]] and d["payment_terms_set"] is False
     var = d["offer"]
-    # задача 4: таблица теххарактеристик из RFQ, запрос заводу (файл), обязательные параметры
+    # задача 4: таблица технических характеристик из RFQ, запрос заводу (файл), обязательные параметры
     tp = _ok(client.get(f"/api/deals/{did}/positions/{pos['id']}/tech-params", headers=H(MGR)))
     assert len(tp["rows"]) >= 50 and any(r["value_ru"] for r in tp["rows"]) and tp["missing_required"] == []
     assert any(r["code"] == "1.5" and r["value_ru"] for r in tp["rows"])              # поле «L» (длина) — и в таблице для КП
@@ -424,7 +425,7 @@ def test_access_levels_admin(client):
 
 def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     """Каталог: добавление вручную/из RFQ/списком (менеджер → на подтверждение, КД — сразу); клиент по ИНН; справочник заводов;
-    описание настроек; разделы и подсветка несовпадения в таблице теххарактеристик."""
+    описание настроек; разделы и подсветка несовпадения в таблице технических характеристик."""
     import json
     from openpyxl import Workbook
     factories = _ok(client.get("/api/refs/factories", headers=H(MGR)))
@@ -488,7 +489,7 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     # --- настройки: у каждого ключа есть понятное название и группа
     meta = _ok(client.get("/api/admin/settings/meta", headers=H(FD)))
     assert meta["items"]["margin_threshold_pct"]["title"] == "Порог маржи" and not [k for k, v in meta["items"].items() if v["group"] == "Прочее"]
-    # --- таблица теххарактеристик: разделы и подсветка несовпадения с требованием
+    # --- таблица технических характеристик: разделы и подсветка несовпадения с требованием
     clients = _ok(client.get("/api/refs/clients", headers=H(MGR)))
     deal = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "разделы"}), 201)
     with open(rfq, "rb") as fh:

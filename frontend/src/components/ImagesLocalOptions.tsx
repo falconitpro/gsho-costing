@@ -98,7 +98,7 @@ export function LocalOptionsBlock({ dealId, position, me, onChanged }: { dealId:
       {canEdit && (
         <div className="grid cols-3" style={{ marginTop: 8 }}>
           <label className="f">Наименование<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-          <label className="f">Из таблицы теххарактеристик (строка станет «в РФ»)
+          <label className="f">Из таблицы технических характеристик (строка станет «в РФ»)
             <select value={form.tech_param_id || ""} onChange={(e) => { const r = paramRows.find((x) => x.id === e.target.value); setForm({ ...form, tech_param_id: e.target.value || null, name: form.name || r?.name_ru || "" }); }}>
               <option value="">—</option>{paramRows.map((r) => <option key={r.id} value={r.id}>{r.no}. {r.name_ru}</option>)}</select></label>
           <label className="f">Количество<input type="number" value={form.qty} onChange={(e) => setForm({ ...form, qty: Number(e.target.value) })} /></label>
@@ -133,7 +133,7 @@ export function OffersBlock({ dealId, position, me, onChanged }: { dealId: strin
   const isMgr = me.roles.some((r) => r.code === "manager" || r.code === "gd");
   const load = () => api.get<Cmp>(`/api/deals/${dealId}/offers/compare?position_id=${position.id}`).then(setCmp).catch(() => setCmp(null));
   useEffect(() => { load(); }, [position.id]);
-  if (!cmp || cmp.offers.length === 0) return <div className="muted">Запросов заводам по этой позиции ещё нет — отправьте запрос из таблицы теххарактеристик (можно нескольким заводам).</div>;
+  if (!cmp || cmp.offers.length === 0) return <div className="muted">Запросов заводам по этой позиции ещё нет — отправьте запрос из таблицы технических характеристик (можно нескольким заводам).</div>;
   const color: Record<string, string> = { match: "#e6f5ec", mismatch: "#fde7e7", empty: "#fff6d6", unknown: "" };
   async function select() {
     try {
