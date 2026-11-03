@@ -41,7 +41,13 @@ export default function DealsList({ me }: { me: Me }) {
   const [form, setForm] = useState({ client_id: "", contact: "", kp_due: "", priority: "normal", service_flag: false, target_hours: "" });
   const [err, setErr] = useState("");
   const nav = useNavigate();
-  const isManager = me.roles.some((r) => r.code === "manager" || r.code === "gd");
+  const isManager = me.roles.some((r) => ["manager", "cd", "gd"].includes(r.code));
+  const canAssign = me.roles.some((r) => ["cd", "gd"].includes(r.code));
+  const [managers, setManagers] = useState<{ id: string; display_name: string }[]>([]);
+  const [managerId, setManagerId] = useState("");
+  useEffect(() => {
+    if (canAssign) api.get<{ users: { id: string; display_name: string; roles: string[] }[] }>("/api/team").then((r) => setManagers(r.users.filter((u) => u.roles.includes("manager") && u.id !== me.id))).catch(() => setManagers([]));
+  }, [canAssign, me.id]);
 
   const [archived, setArchived] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(() => {
@@ -63,7 +69,7 @@ export default function DealsList({ me }: { me: Me }) {
   const [docs, setDocs] = useState<{ file: File; category: string }[]>([]);   // файлы от клиента — хранятся в сделке
   async function create() {
     try {
-      const d = await api.post<Deal>("/api/deals", { ...form, kp_due: form.kp_due || null, target_hours: form.target_hours ? Number(form.target_hours) : null });
+      const d = await api.post<Deal>("/api/deals", { ...form, manager_id: managerId || undefined, kp_due: form.kp_due || null, target_hours: form.target_hours ? Number(form.target_hours) : null });
       for (const x of docs) await api.upload(`/api/deals/${d.id}/documents`, x.file, { category: x.category, comment: "загружено при заведении сделки" });
       nav(`/deals/${d.id}`);
     } catch (e) { setErr((e as Error).message); }
@@ -88,6 +94,12 @@ export default function DealsList({ me }: { me: Me }) {
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>
+            {canAssign && (
+              <label className="f">Ответственный менеджер
+                <select value={managerId} onChange={(e) => setManagerId(e.target.value)}>
+                  <option value="">я ({me.display_name})</option>
+                  {managers.map((m) => <option key={m.id} value={m.id}>{m.display_name}</option>)}
+                </select></label>)}
             <label className="f">Контактное лицо<input value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} /></label>
             <label className="f">Срок КП<input type="date" value={form.kp_due} onChange={(e) => setForm({ ...form, kp_due: e.target.value })} /></label>
             <label className="f">Приоритет

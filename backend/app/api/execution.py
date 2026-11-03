@@ -96,7 +96,7 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
     step = next((c for c in ex.CONTRACT_STEPS if c["code"] == body.code), None)
     if step is None:
         raise HTTPException(404, "Неизвестный подэтап")
-    is_owner = user.has(_R.MANAGER) and deal.manager_id == user.id
+    is_owner = user.has(_R.MANAGER, _R.CD) and deal.manager_id == user.id
     allowed = user.has(_R.GD) or any(user.has(_R(r)) for r in step["roles"] if r != "manager") or ("manager" in step["roles"] and is_owner)
     if not allowed:
         raise HTTPException(403, f"Подэтап «{step['title']}» отмечают: {', '.join(role_title(r) for r in step['roles'])}")

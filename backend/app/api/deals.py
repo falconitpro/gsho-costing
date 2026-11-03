@@ -22,7 +22,7 @@ from ..models import Attachment, Client, Deal, DealVersion, EquipmentModel, Fact
 from ..services import settings_service
 from ..services.deal_service import apply_transition, audit, complete_tasks, ensure_folders, next_number, sla
 from ..services.rfq_import import parse_rfq, price_reference
-from .common import deal_payload, get_deal_or_404, payment_terms_set, serialize
+from .common import deal_payload, get_deal_or_404, is_deal_owner, payment_terms_set, serialize
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
 
@@ -40,6 +40,7 @@ class DealCreate(BaseModel):
     target_hours: Optional[float] = None
     client_payment_wishes: str = ""          # задача 1: пожелания клиента по оплате (условия задаёт КД)
     has_alternatives: bool = False           # задача 5: альтернативные предложения в одном КП
+    manager_id: Optional[str] = None         # КД / ЗГД: ответственный менеджер (по умолчанию — тот, кто заводит)
 
 
 class DealUpdate(BaseModel):
@@ -139,10 +140,19 @@ def _visible(user: CurrentUser, d: Deal) -> bool:
 
 
 @router.post("", status_code=201)
-def create_deal(body: DealCreate, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.GD))):
+def create_deal(body: DealCreate, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.CD, Role.GD))):
     if db.get(Client, body.client_id) is None:
         raise HTTPException(400, "Клиент не найден")
-    deal = Deal(number=next_number(db, body.requested_at.year), manager_id=user.id, **body.model_dump())
+    from ..models import User
+    manager_id = user.id
+    if body.manager_id and body.manager_id != user.id:
+        if not user.has(Role.CD, Role.GD):
+            raise HTTPException(403, "Ответственного менеджера назначают КД или ЗГД")
+        m = db.get(User, body.manager_id)
+        if m is None or not m.is_active or not ({"manager", "cd"} & set(m.roles or [])):
+            raise HTTPException(422, "Менеджер не найден")
+        manager_id = m.id
+    deal = Deal(number=next_number(db, body.requested_at.year), manager_id=manager_id, **body.model_dump(exclude={"manager_id"}))
     db.add(deal)
     db.flush()
     audit(db, user.id, deal.id, "deal", deal.id, "create", after=body.model_dump(mode="json"))
@@ -184,7 +194,7 @@ def ensure_default_variant(db: Session, deal: Deal) -> None:
 def _editable_by_manager(deal: Deal, user: CurrentUser) -> None:
     if user.has(Role.GD):
         return
-    if not user.has(Role.MANAGER) or deal.manager_id != user.id:
+    if not is_deal_owner(user, deal):
         raise HTTPException(403, "Редактировать исходные данные может только менеджер сделки")
     if deal.status not in (DealStatus.DRAFT, DealStatus.REWORK, DealStatus.APPROVED, DealStatus.KP_SENT):
         raise HTTPException(409, "Сделка на расчёте — верните её на доработку для изменений")

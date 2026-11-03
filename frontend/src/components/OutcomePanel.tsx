@@ -13,7 +13,7 @@ const TITLES: Record<string, string> = { won: "Выиграна", lost: "Про�
  *  «Выиграна» переводит сделку на стадию «Заключение контракта» с подэтапами; проигранную/отменённую КД или ЗГД могут вернуть в работу. */
 export default function OutcomePanel({ deal, me, onDone }: { deal: Deal; me: Me; onDone: (msg: string) => void }) {
   const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
-  const isMgr = has("manager") && deal.manager_id === me.id;
+  const isMgr = has("manager", "cd") && deal.manager_id === me.id;
   const canSet = isMgr || has("cd", "gd");
   const [open, setOpen] = useState<"" | "won" | "lost" | "cancelled" | "reopen">("");
   const [reason, setReason] = useState("");
