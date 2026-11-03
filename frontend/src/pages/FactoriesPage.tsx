@@ -34,9 +34,20 @@ export default function FactoriesPage({ me }: { me: Me }) {
   const [msg, setMsg] = useState("");
   const history = useUndoHistory({ cur }, (st) => setCur(st.cur), cur?.id || (cur ? "new" : null));
   const editor = me.roles.some((r) => ["manager", "logistician", "cd", "gd", "admin"].includes(r.code));
+  const contactEditor = me.roles.some((r) => ["manager", "cd", "gd"].includes(r.code));   // контакты завода — менеджер, КД, ЗГД
+  const isGD = me.roles.some((r) => r.code === "gd");
+  const [confirmDel, setConfirmDel] = useState(false);
+  async function remove() {
+    if (!cur?.id) return;
+    if (!confirmDel) { setConfirmDel(true); setMsg("Нажмите «Подтвердить удаление» ещё раз. Если завод есть в сделках или каталоге, он будет перенесён в архив."); return; }
+    setConfirmDel(false);
+    try { const r = await api.del<{ message: string }>(`/api/refs/factories/${cur.id}`); setMsg(r.message); setCur(null); load(); }
+    catch (e) { setMsg((e as Error).message); }
+  }
   const load = () => api.get<Factory[]>("/api/refs/factories").then(setList);
   useEffect(() => { load(); api.get<Record<string, string>>("/api/refs/factories/contact-roles").then(setRoles); }, []);
   async function open(id: string) {
+    setConfirmDel(false);
     const f = await api.get<Factory>(`/api/refs/factories/${id}`);
     setCur({ ...EMPTY, ...f, bank_details: f.bank_details || {}, contacts: (f.contacts || []).map((c) => ({ ...EMPTY_CONTACT, ...c, roles: c.roles || [] })) });
     setMsg("");
@@ -104,30 +115,30 @@ export default function FactoriesPage({ me }: { me: Me }) {
               <div className="card">
                 <div className="row" style={{ justifyContent: "space-between" }}>
                   <h2 style={{ margin: 0 }}>Контакты по направлениям</h2>
-                  {editor && <button className="btn ghost" onClick={() => set({ contacts: [...cur.contacts, { ...EMPTY_CONTACT }] })}>+ контакт</button>}
+                  {contactEditor && <button className="btn ghost" onClick={() => set({ contacts: [...cur.contacts, { ...EMPTY_CONTACT }] })}>+ контакт</button>}
                 </div>
                 <p className="muted" style={{ marginTop: 4 }}>Отметьте, по каким вопросам писать человеку. Запрос заводу уходит контактам «Заявки и КП»: в WeCom (ID внешнего контакта) и на почту.</p>
                 {cur.contacts.length === 0 && <div className="muted">Контактов нет</div>}
                 {cur.contacts.map((c, i) => (
                   <div key={i} style={{ border: "1px solid var(--line)", borderRadius: 6, padding: 8, marginBottom: 8, background: c.primary ? "#fafafa" : undefined }}>
                     <div className="grid cols-3">
-                      <label className="f">Имя<input value={c.name} disabled={!editor} onChange={(e) => setC(i, { name: e.target.value })} /></label>
-                      <label className="f">Имя (中文)<input value={c.name_zh} disabled={!editor} onChange={(e) => setC(i, { name_zh: e.target.value })} /></label>
-                      <label className="f">Должность<input value={c.position} disabled={!editor} onChange={(e) => setC(i, { position: e.target.value })} /></label>
-                      <label className="f">E-mail<input value={c.email} disabled={!editor} onChange={(e) => setC(i, { email: e.target.value })} /></label>
-                      <label className="f">WeChat ID<input value={c.wechat} disabled={!editor} onChange={(e) => setC(i, { wechat: e.target.value })} /></label>
-                      <label className="f">WeCom — ID внешнего контакта<input value={c.wecom_id} disabled={!editor} placeholder="wm…" onChange={(e) => setC(i, { wecom_id: e.target.value })} /></label>
-                      <label className="f">Телефон<input value={c.phone} disabled={!editor} onChange={(e) => setC(i, { phone: e.target.value })} /></label>
-                      <label className="f">Мобильный<input value={c.mobile} disabled={!editor} onChange={(e) => setC(i, { mobile: e.target.value })} /></label>
-                      <label className="f">WhatsApp / Telegram<div className="row"><input value={c.whatsapp} placeholder="WhatsApp" disabled={!editor} onChange={(e) => setC(i, { whatsapp: e.target.value })} /><input value={c.telegram} placeholder="Telegram" disabled={!editor} onChange={(e) => setC(i, { telegram: e.target.value })} /></div></label>
-                      <label className="f">Язык общения<select value={c.language} disabled={!editor} onChange={(e) => setC(i, { language: e.target.value })}><option value="zh">китайский</option><option value="ru">русский</option><option value="en">английский</option></select></label>
-                      <label className="f">Комментарий<input value={c.comment} disabled={!editor} onChange={(e) => setC(i, { comment: e.target.value })} /></label>
-                      <label className="f">Основной контакт<div className="row"><input type="checkbox" checked={c.primary} disabled={!editor} onChange={(e) => setC(i, { primary: e.target.checked })} />
-                        {editor && <button className="btn ghost" style={{ padding: "1px 8px" }} onClick={() => set({ contacts: cur.contacts.filter((_, j) => j !== i) })}>удалить контакт</button>}</div></label>
+                      <label className="f">Имя<input value={c.name} disabled={!contactEditor} onChange={(e) => setC(i, { name: e.target.value })} /></label>
+                      <label className="f">Имя (中文)<input value={c.name_zh} disabled={!contactEditor} onChange={(e) => setC(i, { name_zh: e.target.value })} /></label>
+                      <label className="f">Должность<input value={c.position} disabled={!contactEditor} onChange={(e) => setC(i, { position: e.target.value })} /></label>
+                      <label className="f">E-mail<input value={c.email} disabled={!contactEditor} onChange={(e) => setC(i, { email: e.target.value })} /></label>
+                      <label className="f">WeChat ID<input value={c.wechat} disabled={!contactEditor} onChange={(e) => setC(i, { wechat: e.target.value })} /></label>
+                      <label className="f">WeCom — ID внешнего контакта<input value={c.wecom_id} disabled={!contactEditor} placeholder="wm…" onChange={(e) => setC(i, { wecom_id: e.target.value })} /></label>
+                      <label className="f">Телефон<input value={c.phone} disabled={!contactEditor} onChange={(e) => setC(i, { phone: e.target.value })} /></label>
+                      <label className="f">Мобильный<input value={c.mobile} disabled={!contactEditor} onChange={(e) => setC(i, { mobile: e.target.value })} /></label>
+                      <label className="f">WhatsApp / Telegram<div className="row"><input value={c.whatsapp} placeholder="WhatsApp" disabled={!contactEditor} onChange={(e) => setC(i, { whatsapp: e.target.value })} /><input value={c.telegram} placeholder="Telegram" disabled={!contactEditor} onChange={(e) => setC(i, { telegram: e.target.value })} /></div></label>
+                      <label className="f">Язык общения<select value={c.language} disabled={!contactEditor} onChange={(e) => setC(i, { language: e.target.value })}><option value="zh">китайский</option><option value="ru">русский</option><option value="en">английский</option></select></label>
+                      <label className="f">Комментарий<input value={c.comment} disabled={!contactEditor} onChange={(e) => setC(i, { comment: e.target.value })} /></label>
+                      <label className="f">Основной контакт<div className="row"><input type="checkbox" checked={c.primary} disabled={!contactEditor} onChange={(e) => setC(i, { primary: e.target.checked })} />
+                        {contactEditor && <button className="btn ghost" style={{ padding: "1px 8px" }} onClick={() => set({ contacts: cur.contacts.filter((_, j) => j !== i) })}>удалить контакт</button>}</div></label>
                     </div>
                     <div className="row" style={{ marginTop: 4, flexWrap: "wrap" }}><span className="muted">Направления:</span>
                       {Object.entries(roles).map(([k, t]) => (
-                        <label key={k} className="row" style={{ fontSize: 12 }}><input type="checkbox" checked={c.roles.includes(k)} disabled={!editor}
+                        <label key={k} className="row" style={{ fontSize: 12 }}><input type="checkbox" checked={c.roles.includes(k)} disabled={!contactEditor}
                           onChange={(e) => setC(i, { roles: e.target.checked ? [...c.roles, k] : c.roles.filter((x) => x !== k) })} /> {t}</label>))}
                     </div>
                   </div>
@@ -144,7 +155,8 @@ export default function FactoriesPage({ me }: { me: Me }) {
                   </div>
                 </div>)}
 
-              {editor && <div className="row" style={{ marginBottom: 12 }}><button className="btn" onClick={save} disabled={!cur.name}>Сохранить завод</button><UndoButton h={history} /><button className="btn ghost" onClick={() => setCur(null)}>закрыть</button></div>}
+              {(editor || contactEditor) && <div className="row" style={{ marginBottom: 12 }}><button className="btn" onClick={save} disabled={!cur.name}>Сохранить завод</button><UndoButton h={history} /><button className="btn ghost" onClick={() => setCur(null)}>закрыть</button>
+                {isGD && cur.id && <button className="btn ghost" style={{ marginLeft: "auto", color: "var(--bad)" }} title="только ЗГД; если завод уже есть в сделках или каталоге — переносится в архив" onClick={remove}>{confirmDel ? "Подтвердить удаление" : "Удалить завод"}</button>}</div>}
 
               {cur.id && (
                 <div className="card">

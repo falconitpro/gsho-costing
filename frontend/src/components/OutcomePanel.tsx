@@ -17,6 +17,8 @@ export default function OutcomePanel({ deal, me, onDone }: { deal: Deal; me: Me;
   const canSet = isMgr || has("cd", "gd");
   const [open, setOpen] = useState<"" | "won" | "lost" | "cancelled" | "reopen">("");
   const [reason, setReason] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);   // несколько причин (особенно при выигрыше)
+  const fullReason = [...picked, reason.trim()].filter(Boolean).join("; ");
   const [variant, setVariant] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -28,15 +30,15 @@ export default function OutcomePanel({ deal, me, onDone }: { deal: Deal; me: Me;
     setBusy(true);
     try {
       if (open === "reopen") {
-        await api.post(`/api/deals/${deal.id}/reopen`, { reason });
+        await api.post(`/api/deals/${deal.id}/reopen`, { reason: reason.trim() });
         onDone("Сделка возвращена в работу (статус «КП отправлено»)");
       } else {
-        const r = await api.post<{ status: string; closed_related: string[] }>(`/api/deals/${deal.id}/outcome`, { outcome: open, reason, won_variant_id: variant || undefined });
+        const r = await api.post<{ status: string; closed_related: string[] }>(`/api/deals/${deal.id}/outcome`, { outcome: open, reason: fullReason, won_variant_id: variant || undefined });
         onDone(open === "won"
           ? `Сделка выиграна — стадия «Заключение контракта». Следующий шаг: подготовка проекта контракта (вкладка «Контракт и исполнение»).${r.closed_related?.length ? ` Связанные заявки закрыты: ${r.closed_related.join(", ")}.` : ""}`
           : `Результат: ${TITLES[open].toLowerCase()}.`);
       }
-      setOpen(""); setReason(""); setVariant(""); setErr("");
+      setOpen(""); setReason(""); setPicked([]); setVariant(""); setErr("");
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
 
@@ -52,7 +54,7 @@ export default function OutcomePanel({ deal, me, onDone }: { deal: Deal; me: Me;
         </div>
         <div className="row">
           {ready && <>
-            <button className="btn" style={{ background: "var(--ok)", borderColor: "var(--ok)" }} onClick={() => setOpen("won")}>Выиграна → заключение контракта</button>
+            <button className="btn" style={{ background: "var(--ok)", borderColor: "var(--ok)" }} onClick={() => { setOpen("won"); setPicked([]); }}>Выиграна → заключение контракта</button>
             <button className="btn secondary" onClick={() => setOpen("lost")}>Проиграна</button>
             <button className="btn ghost" onClick={() => setOpen("cancelled")}>Отменена</button>
           </>}
@@ -66,11 +68,14 @@ export default function OutcomePanel({ deal, me, onDone }: { deal: Deal; me: Me;
             <label className="f" style={{ marginTop: 6 }}>Какое предложение выбрал клиент
               <select value={variant} onChange={(e) => setVariant(e.target.value)}><option value="">— выберите —</option>
                 {deal.variants.filter((v) => !v.is_default).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>)}
-          {open !== "reopen" && <div className="row" style={{ flexWrap: "wrap", marginTop: 6 }}>{REASONS[open].map((r) => (
-            <button key={r} className={"btn ghost" + (reason === r ? " active" : "")} style={reason === r ? { borderColor: "var(--accent)" } : undefined} onClick={() => setReason(r)}>{r}</button>))}</div>}
+          {open !== "reopen" && <>
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Причины — можно отметить несколько:</div>
+            <div className="row" style={{ flexWrap: "wrap", marginTop: 4 }}>{REASONS[open].map((r) => (
+              <label key={r} className="row" style={{ border: "1px solid " + (picked.includes(r) ? "var(--accent)" : "var(--line)"), borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>
+                <input type="checkbox" checked={picked.includes(r)} onChange={() => setPicked(picked.includes(r) ? picked.filter((x) => x !== r) : [...picked, r])} /> {r}</label>))}</div></>}
           <div className="row" style={{ marginTop: 6 }}>
-            <input placeholder={open === "reopen" ? "почему возвращаем (обязательно)" : "причина (выберите выше или впишите)"} value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: 420 }} />
-            <button className="btn" disabled={busy || !reason.trim() || (open === "won" && deal.has_alternatives && !variant)} onClick={submit}>Подтвердить</button>
+            <input placeholder={open === "reopen" ? "почему возвращаем (обязательно)" : "другая причина / комментарий"} value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: 420 }} />
+            <button className="btn" disabled={busy || !(open === "reopen" ? reason.trim() : fullReason) || (open === "won" && deal.has_alternatives && !variant)} onClick={submit}>Подтвердить</button>
             <button className="btn ghost" onClick={() => setOpen("")}>Отмена</button>
           </div>
           {err && <div className="alert error">{err}</div>}

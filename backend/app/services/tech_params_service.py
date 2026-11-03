@@ -321,6 +321,12 @@ def sync_position(db: Session, pos: Position) -> dict:
         pos.tech_params = tp
     if lp != (pos.logistics_params or {}):
         pos.logistics_params = lp
+    if "machine_type" in changed:   # исправленный тип машины — и в модель каталога, созданную автоматически при импорте RFQ
+        from ..models import EquipmentModel
+        from .catalog_service import sync_model_from_position
+        cat = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == pos.factory_id, EquipmentModel.model == pos.model))
+        if cat is not None:
+            sync_model_from_position(db, cat, pos, None)
     return changed
 
 
@@ -616,6 +622,29 @@ def build_request_xlsx(db: Session, pos: Position, factory: Optional[Factory], d
             machine.append({"no": r.no, "name_ru": r.name_ru, "name_zh": name_zh, "requirement_zh": req_zh})
     for col, w in zip("ABCDEFGH", (6, 40, 30, 12, 30, 30, 24, 30)):
         ws.column_dimensions[col].width = w
+    # читаемость: перенос текста, рамки, высота строк по длине текста, закреплённая шапка, поле для заполнения выделено
+    import math
+    from openpyxl.styles import Border, Side
+    thin = Side(style="thin", color="BBBBBB")
+    widths = (6, 40, 30, 12, 30, 30, 24, 30)
+    ws.row_dimensions[6].height = 32
+    for i in range(7, 7 + len(rows)):
+        lines = 1
+        for j in range(1, 9):
+            c = ws.cell(i, j)
+            c.alignment = Alignment(wrap_text=True, vertical="top")
+            c.border = Border(top=thin, bottom=thin, left=thin, right=thin)
+            if j in (7, 8):
+                c.fill = PatternFill("solid", fgColor="FFF8E1")
+            if c.value:
+                lines = max(lines, math.ceil(len(str(c.value)) / max(widths[j - 1] * 1.1, 4)))
+        ws.row_dimensions[i].height = max(15, 15 * lines)
+    for r_ in (2, 3, 4):
+        ws.cell(r_, 1).alignment = Alignment(wrap_text=False)
+    ws.freeze_panes = "A7"
+    ws.print_title_rows = "6:6"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
     path = os.path.join(tempfile.mkdtemp(), f"{deal_number}_запрос_{(factory.name[:20] if factory else 'завод')}_{pos.model}.xlsx".replace("/", "-"))
     wb.save(path)
     return path, machine

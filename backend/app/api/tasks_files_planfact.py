@@ -149,6 +149,15 @@ def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depen
     if restricted and not user.can("cost_files"):
         raise HTTPException(403, "Папка «04 Расчёт себестоимости» недоступна для роли")
     full = os.path.join(s.storage_local_root, path)
+    if ver is not None and path in (ver.excel_path, ver.excel_manager_path):
+        # Excel версии собирается заново по сохранённому расчёту (цифры те же) — в текущем формате подписей
+        from ..services.deal_service import rebuild_version_excel
+        try:
+            fresh = rebuild_version_excel(db, ver, manager=path == ver.excel_manager_path)
+            if fresh:
+                return FileResponse(fresh, filename=os.path.basename(full) if os.path.basename(full) else os.path.basename(fresh))
+        except Exception:   # pragma: no cover — при ошибке отдаём сохранённый файл
+            pass
     if not os.path.isfile(full):
         raise HTTPException(404)
     return FileResponse(full, filename=os.path.basename(full))

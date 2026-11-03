@@ -190,6 +190,26 @@ def test_full_flow(client, tmp_path):
     assert ex["status"] == "approved"
     tree = _ok(client.get("/api/catalog/tree", headers=H(MGR)))
     assert any(e["name"] == "XDR80T базовое" for f in tree for t in f["types"] for m in t["models"] for e in m["executions"])
+    # корректировка модели КД с историей; менеджер не может
+    mod_id = next(m["id"] for f in tree for t in f["types"] for m in t["models"] if any(e["name"] == "XDR80T базовое" for e in m["executions"]))
+    assert client.patch(f"/api/catalog/models/{mod_id}", headers=H(MGR), json={"trademark": "X"}).status_code == 403
+    _ok(client.patch(f"/api/catalog/models/{mod_id}", headers=H(CD), json={"machine_type": "Шахтный самосвал", "trademark": "XCMG", "comment": "марка завода"}))
+    mh = _ok(client.get(f"/api/catalog/models/{mod_id}/history", headers=H(CD)))
+    assert any(h["action"] == "изменение" and any(c["field"] == "торговая марка" and c["after"] == "XCMG" for c in h["changes"]) and h["comment"] == "марка завода" for h in mh)
+    card_m = _ok(client.get(f"/api/catalog/models/{mod_id}/card", headers=H(CD)))
+    assert card_m["trademark"] == "XCMG" and card_m["manually_checked"]
+    # заявка клиенту по машине из каталога: позиция с характеристиками исполнения и последней ценой завода
+    ex_id = next(e["id"] for f in tree for t in f["types"] for m in t["models"] for e in m["executions"] if e["name"] == "XDR80T базовое")
+    assert client.post(f"/api/catalog/executions/{ex_id}/create-deal", headers=H(LOG), json={"client_id": clients[0]["id"]}).status_code == 403
+    nd = _ok(client.post(f"/api/catalog/executions/{ex_id}/create-deal", headers=H(MGR), json={"client_id": clients[0]["id"], "qty": 3, "site": "Карьер Южный"}), 201)
+    assert nd["price_known"] and nd["status"] == "draft" and len(nd["positions"]) == 1
+    np_ = nd["positions"][0]
+    assert np_["execution_id"] == ex_id and np_["qty"] == 3 and np_["unit_price"] > 0 and np_["trademark"] == "XCMG"
+    assert np_["logistics_params"] and _ok(client.get(f"/api/deals/{nd['id']}/positions/{np_['id']}/tech-params", headers=H(MGR)))["rows"]
+    # позиция из каталога в существующей заявке без цены — цена из истории завода
+    pc = _ok(client.post(f"/api/deals/{nd['id']}/positions", headers=H(MGR), json={"factory_id": np_["factory_id"], "model": np_["model"], "qty": 1, "unit_price": 0,
+                                                                                    "execution_id": ex_id}), 201)
+    assert pc["unit_price"] > 0 and isinstance(pc["from_catalog"], dict)
     assert client.post(f"/api/deals/{did}/outcome", headers=H(LOG), json={"outcome": "won", "reason": "x"}).status_code == 403
     assert client.post(f"/api/deals/{did}/outcome", headers=H(CD), json={"outcome": "won", "reason": " "}).status_code == 422
     out = _ok(client.post(f"/api/deals/{did}/outcome", headers=H(CD), json={"outcome": "won", "reason": "лучшая цена"}))   # КД отмечает результат
@@ -775,3 +795,23 @@ def test_outcome_lost_and_reopen(client):
     assert client.post(f"/api/deals/{did}/reopen", headers=H(CD), json={"reason": ""}).status_code == 422
     assert _ok(client.post(f"/api/deals/{did}/reopen", headers=H(CD), json={"reason": "клиент вернулся к переговорам"}))["status"] == "kp_sent"
     assert client.post(f"/api/deals/{did}/reopen", headers=H(CD), json={"reason": "ещё раз"}).status_code == 409
+
+
+def test_factory_delete_and_contacts(client):
+    """Удаление завода — только ЗГД (используемый — в архив); контакты правят менеджер, КД и ЗГД."""
+    f = _ok(client.post("/api/refs/factories", headers=H(MGR), json={"name": "Тестовый завод для удаления", "contacts": []}), 201)
+    c = [{"name": "Ли Вэй", "email": "li@example.cn", "roles": ["rfq"], "primary": True}]
+    assert client.put(f"/api/refs/factories/{f['id']}/contacts", headers=H(LOG), json={"contacts": c}).status_code == 403
+    assert _ok(client.put(f"/api/refs/factories/{f['id']}/contacts", headers=H(MGR), json={"contacts": c}))["contacts"][0]["email"] == "li@example.cn"
+    card = _ok(client.get(f"/api/refs/factories/{f['id']}", headers=H(LOG)))
+    _ok(client.put(f"/api/refs/factories/{f['id']}", headers=H(LOG), json={**{k: v for k, v in card.items() if v is not None}, "notes": "логист", "contacts": []}))
+    assert _ok(client.get(f"/api/refs/factories/{f['id']}", headers=H(LOG)))["contacts"][0]["email"] == "li@example.cn"   # логист контакты не меняет
+    assert client.delete(f"/api/refs/factories/{f['id']}", headers=H(CD)).status_code == 403
+    r = _ok(client.delete(f"/api/refs/factories/{f['id']}", headers=H(GD)))
+    assert r["deleted"] and not any(x["id"] == f["id"] for x in _ok(client.get("/api/refs/factories", headers=H(MGR))))
+    used = _ok(client.get("/api/refs/factories", headers=H(MGR)))[0]
+    r2 = _ok(client.delete(f"/api/refs/factories/{used['id']}", headers=H(GD)))
+    assert r2["archived"] and not r2["deleted"]
+    assert any(x["id"] == used["id"] for x in _ok(client.get("/api/refs/factories?include_archived=true", headers=H(MGR))))
+    card_u = _ok(client.get(f"/api/refs/factories/{used['id']}", headers=H(GD)))
+    _ok(client.put(f"/api/refs/factories/{used['id']}", headers=H(GD), json={**{k: v for k, v in card_u.items() if v is not None}, "is_active": True}))

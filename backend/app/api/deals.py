@@ -250,8 +250,19 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
     data["production_days"] = _production_days(data.get("production_term") or {}, data.get("production_days") or 90)
     from ..services.catalog_service import resolve_trademark
     data["trademark"] = resolve_trademark(db, body.factory_id, body.model, body.trademark)
+    if body.execution_id and not body.unit_price:   # из каталога без цены — последняя цена и срок завода по модели
+        h = db.scalars(select(FactoryPriceHistory).where(FactoryPriceHistory.factory_id == body.factory_id, FactoryPriceHistory.model == body.model)
+                       .order_by(FactoryPriceHistory.on.desc())).first()
+        if h is not None:
+            data["unit_price"], data["currency"] = h.unit_price, h.currency
+            if h.production_term and h.production_term.get("value") and not data.get("production_term"):
+                data["production_term"] = h.production_term
+                data["production_days"] = _production_days(h.production_term, data.get("production_days") or 90)
+            if h.factory_payments and not data["factory_payments_offer"]:
+                data["factory_payments_offer"] = h.factory_payments
+            comment = comment or f"цена из каталога (последнее предложение завода от {h.on:%d.%m.%Y})"
     pos = Position(deal_id=deal.id, **data)
-    pos.tech_params = {**pos.tech_params, "_source_file": "ручной ввод"}
+    pos.tech_params = {**pos.tech_params, "_source_file": "каталог" if body.execution_id else "ручной ввод"}
     pos.price_reference = _price_ref(db, pos, comment)
     if pos.price_reference.get("needs_comment") and not comment:
         raise HTTPException(422, {"message": "Отклонение цены от истории выше порога — нужен комментарий", "price_reference": pos.price_reference})
@@ -260,14 +271,18 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
     _record_price(db, pos, deal)
     from ..services.tech_params_service import init_position_rows
     init_position_rows(db, pos, user.id)   # задача 4/7: перечень технических характеристик из исполнения каталога или шаблона по типу
+    from_catalog = {}
+    if pos.execution_id:   # из каталога — фото и чертежи, опции РФ, данные логиста, ТН ВЭД, цена и срок завода
+        from ..services.catalog_service import apply_execution_to_position
+        from_catalog = apply_execution_to_position(db, deal, pos, user.id)
     if form_rows:
         from ..services.tech_params_service import apply_form_rows, sync_position
         apply_form_rows(pos, form_rows, user.id, skip_empty=True)   # пустые поля формы не затирают данные исполнения из каталога
         sync_position(db, pos)
     ensure_default_variant(db, deal)
-    audit(db, user.id, deal.id, "position", pos.id, "create", after=data)
+    audit(db, user.id, deal.id, "position", pos.id, "create", after={**data, "from_catalog": from_catalog} if from_catalog else data)
     db.commit()
-    return serialize(pos)
+    return {**serialize(pos), "from_catalog": from_catalog}
 
 
 def _price_ref(db: Session, pos: Position, comment: str) -> dict:
@@ -315,11 +330,18 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
     if body.get("execution_id") and body["execution_id"] != before.get("execution_id"):   # выбрано другое исполнение — его перечень
         from ..services.tech_params_service import init_position_rows
         init_position_rows(db, pos, user.id, replace=True)
+        from ..services.catalog_service import apply_execution_to_position
+        apply_execution_to_position(db, deal, pos, user.id)
     if isinstance(body.get("form_rows"), list) and body["form_rows"]:   # ручной ввод таблицей — значения, требования, комментарии
         from ..services.tech_params_service import apply_form_rows, init_position_rows, sync_position
         init_position_rows(db, pos, user.id)
         apply_form_rows(pos, body["form_rows"], user.id, skip_empty=body.get("execution_id") != before.get("execution_id"))
         sync_position(db, pos)
+    if {"machine_type", "trademark"} & set(body) or "form_rows" in body:   # исправленные тип / марка — в модель каталога, созданную импортом
+        from ..services.catalog_service import sync_model_from_position
+        cat = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == pos.factory_id, EquipmentModel.model == pos.model))
+        if cat is not None:
+            sync_model_from_position(db, cat, pos, user.id)
     if "unit_price" in body:
         pos.price_reference = _price_ref(db, pos, body.get("price_comment", ""))
         _record_price(db, pos, deal)

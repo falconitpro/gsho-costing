@@ -114,7 +114,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
           <div className="row">
             <button className="btn ghost" onClick={() => { setWizard("requirements"); setPreview(null); setOfferId(""); }}>Импорт требований клиента</button>
             <button className="btn ghost" onClick={() => { setWizard("factory_answer"); setPreview(null); setOfferId(""); }}>Импорт ответа завода</button>
-            <a className="btn ghost" href={`${base}/request/file`}>Файл запроса RU+CN</a>
+            <a className="btn ghost" href={`${base}/request/file`} title="двуязычный Excel (RU + CN) для отправки заводу вручную: требования заказчика, пустые столбцы «Значение» и «Комментарий»">Скачать запрос заводу (Excel RU + CN)</a>
             <a className="btn ghost" href={`/api/deals/${dealId}/positions/${position.id}/rfq/file`} title="шаблон RFQ с требованиями заказчика из таблицы; строки «в РФ» помечены">RFQ с требованиями</a>
             <UndoButton h={history} />
             <button className="btn ghost" onClick={addRow}>+ строка</button>
@@ -182,6 +182,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
               </select>
               <div className="row" style={{ marginTop: 4, flexWrap: "wrap", gap: 4 }}>
                 {reqFactories.map((id) => <span key={id} className="badge accent">{fname(factories.find((f) => f.id === id))}{id === position.factory_id ? " — завод позиции" : ""}
+                  <a href={`${base}/request/file?factory_id=${id}`} style={{ marginLeft: 6 }} title="скачать запрос этому заводу (Excel RU + CN) для отправки вручную">⬇ Excel</a>
                   <button className="btn ghost" style={{ padding: "0 4px", marginLeft: 2 }} title="убрать" onClick={() => setReqFactories(reqFactories.filter((x) => x !== id))}>×</button></span>)}
               </div>
             </div>
@@ -191,6 +192,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
               </select>
             )}
             <button className="btn" onClick={sendRequest} disabled={sending || reqFactories.length === 0 || (clientSelected.length > 0 && !clientChecked)}>Отправить запрос {reqFactories.length > 1 ? `${reqFactories.length} заводам` : "заводу"}</button>
+            {reqFactories.length > 0 && <a className="btn secondary" href={`${base}/request/file?factory_id=${reqFactories[0]}`} title="двуязычный Excel для отправки вручную (почта, WeChat); по каждому заводу — ссылка «⬇ Excel» у названия">Скачать запрос (Excel RU + CN) для отправки вручную</a>}
           </div>
           {clientSelected.length > 0 && (
             <div className="alert warn" style={{ marginTop: 6 }}>

@@ -157,8 +157,8 @@ def client_refresh_registry(client_id: str, db: Session = Depends(get_db), user:
 
 
 @router.get("/factories")
-def factories(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    out = [serialize(f) for f in db.scalars(select(Factory).order_by(Factory.name)).all()]
+def factories(include_archived: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    out = [serialize(f) for f in db.scalars(select(Factory).order_by(Factory.name)).all() if include_archived or f.is_active is not False]
     if not user.can("factory_price_history"):          # банковские реквизиты — тем, кто видит цены завода
         for f in out:
             f.pop("bank_details", None)
@@ -217,10 +217,15 @@ def _factory_editor(user: CurrentUser = Depends(get_current_user)) -> CurrentUse
     return user
 
 
+CONTACT_EDITORS = (Role.MANAGER, Role.CD, Role.GD)
+
+
 def _apply_factory(f: Factory, body: FactoryIn, user: Optional[CurrentUser] = None) -> None:
     data = body.model_dump()
     if user is not None and not user.can("factory_price_history"):
         data.pop("bank_details", None)                   # реквизиты не видны роли — и не перезаписываются ею
+    if user is not None and not user.has(*CONTACT_EDITORS) and f.id:
+        data["contacts"] = f.contacts or []              # контакты завода меняют менеджер, КД и ЗГД
     marks: list[str] = []
     for t in data.get("trademarks") or []:
         t = (t or "").strip()
@@ -288,6 +293,53 @@ def update_factory(factory_id: str, body: FactoryIn, db: Session = Depends(get_d
     if not user.can("factory_price_history"):
         out.pop("bank_details", None)
     return out
+
+
+class ContactsIn(BaseModel):
+    contacts: list[FactoryContact]
+
+
+@router.put("/factories/{factory_id}/contacts")
+def update_factory_contacts(factory_id: str, body: ContactsIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Контакты завода корректируют менеджер, КД и ЗГД."""
+    if not user.has(*CONTACT_EDITORS):
+        raise HTTPException(403, "Контакты завода меняют менеджер, КД или ЗГД")
+    f = db.get(Factory, factory_id)
+    if f is None:
+        raise HTTPException(404)
+    before = {"contacts": f.contacts or []}
+    f.contacts = [c.model_dump() for c in body.contacts]
+    ordered = sorted(f.contacts, key=lambda c: (("rfq" not in c["roles"]), not c["primary"]))
+    f.wecom_external_ids = [c["wecom_id"] for c in ordered if c.get("wecom_id")]
+    audit(db, user.id, None, "factory", f.id, "contacts", before, {"contacts": f.contacts})
+    db.commit()
+    out = serialize(f)
+    if not user.can("factory_price_history"):
+        out.pop("bank_details", None)
+    return out
+
+
+@router.delete("/factories/{factory_id}")
+def delete_factory(factory_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Удаление завода — только ЗГД. Если завод уже есть в сделках, каталоге или истории цен — он переносится в архив
+    (скрывается из выбора, история и сделки сохраняются)."""
+    from ..models import Position
+    if not user.has(Role.GD):
+        raise HTTPException(403, "Удалить завод может только ЗГД")
+    f = db.get(Factory, factory_id)
+    if f is None:
+        raise HTTPException(404)
+    used = (db.scalar(select(Position.id).where(Position.factory_id == f.id).limit(1)) or db.scalar(select(EquipmentModel.id).where(EquipmentModel.factory_id == f.id).limit(1))
+            or db.scalar(select(FactoryPriceHistory.id).where(FactoryPriceHistory.factory_id == f.id).limit(1)))
+    if used:
+        f.is_active = False
+        audit(db, user.id, None, "factory", f.id, "archive", {"name": f.name}, {"is_active": False}, "завод используется — перенесён в архив")
+        db.commit()
+        return {"deleted": False, "archived": True, "message": f"Завод «{f.name}» используется в сделках или каталоге — перенесён в архив"}
+    audit(db, user.id, None, "factory", f.id, "delete", {"name": f.name})
+    db.delete(f)
+    db.commit()
+    return {"deleted": True, "archived": False, "message": f"Завод «{f.name}» удалён"}
 
 
 @router.get("/factories/{factory_id}/prices")
