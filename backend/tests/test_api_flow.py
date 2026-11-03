@@ -832,7 +832,7 @@ def test_documents_lawyer_and_offer_from_tech_table(client):
             pytest.skip("нет сделки менеджера")
         did = d.id
     tender = ("Тендерная документация.pdf", b"%PDF-1.4 test", "application/pdf")
-    up = _ok(client.post(f"/api/deals/{did}/documents", headers=H(MGR), files={"file": tender}, data={"category": "tender", "comment": "от клиента"}))
+    up = _ok(client.post(f"/api/deals/{did}/documents", headers=H(MGR), files={"file": tender}, data={"category": "tender", "comment": "от клиента"}), 201)
     assert any(x["category"] == "tender" for x in up["documents"])
     docs = _ok(client.get(f"/api/deals/{did}/documents", headers=H(LAW)))
     assert any(x["file_name"] == "Тендерная документация.pdf" for x in docs["documents"]) and docs["review"]["status"] == "in_review"
@@ -840,7 +840,7 @@ def test_documents_lawyer_and_offer_from_tech_table(client):
     # протокол разногласий — юрист; менеджер юридические документы не загружает
     dis = ("Протокол разногласий.docx", b"PK test", "application/octet-stream")
     assert client.post(f"/api/deals/{did}/documents", headers=H(MGR), files={"file": dis}, data={"category": "disagreements"}).status_code == 403
-    _ok(client.post(f"/api/deals/{did}/documents", headers=H(LAW), files={"file": dis}, data={"category": "disagreements"}))
+    _ok(client.post(f"/api/deals/{did}/documents", headers=H(LAW), files={"file": dis}, data={"category": "disagreements"}), 201)
     assert client.post(f"/api/deals/{did}/legal-review", headers=H(MGR), json={"status": "ok"}).status_code == 403
     assert client.post(f"/api/deals/{did}/legal-review", headers=H(LAW), json={"status": "remarks", "comment": ""}).status_code == 422
     _ok(client.post(f"/api/deals/{did}/legal-review", headers=H(LAW), json={"status": "remarks", "comment": "п. 5.2 — неустойка"}))
