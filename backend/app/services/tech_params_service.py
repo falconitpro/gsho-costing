@@ -160,9 +160,11 @@ def init_position_rows(db: Session, pos: Position, user_id: Optional[str], repla
                                           value_zh=r.get("value_zh") or "", required=bool(r.get("required")), local_ru=bool(r.get("local_ru")),
                                           source="catalog", filled_by=user_id))
     else:
+        # поля, которые уже есть в карточке позиции (тип и модель), — сразу в таблицу
+        known = {"1.1": pos.machine_type or "", "1.2": pos.model or ""}
         for t in template_for(db, pos.machine_type):
             rows.append(PositionTechParam(position_id=pos.id, no=t.no, code=t.code, name_ru=t.name_ru, name_zh=t.name_zh, unit=t.unit,
-                                          required=t.required, source="manual", filled_by=user_id))
+                                          value_ru=known.get(t.code, ""), required=t.required, source="manual", filled_by=user_id))
     db.add_all(rows)
     db.flush()
     db.refresh(pos)

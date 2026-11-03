@@ -262,12 +262,13 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     _ok(client.delete(f"/api/deals/{did}/positions/{extra['id']}", headers=H(MGR)), 204)
     # таблица из общего шаблона (фиксированные параметры RFQ 1–11)
     tp = _ok(client.get(f"/api/deals/{did}/positions/{pid}/tech-params", headers=H(MGR)))
-    assert len(tp["rows"]) > 20 and all(not r["value_ru"] for r in tp["rows"])
+    assert len(tp["rows"]) > 20 and all(not r["value_ru"] for r in tp["rows"] if r["code"] not in ("1.1", "1.2"))
+    assert {r["code"]: r["value_ru"] for r in tp["rows"] if r["code"] in ("1.1", "1.2")} == {"1.1": "Погрузчик", "1.2": "ZL50"}   # тип и модель — из позиции
     # файл клиента: №, параметр, требование → предпросмотр и применение
     wb = Workbook(); ws = wb.active
     ws.append(["Требования к погрузчику"]); ws.append([])
     ws.append(["№", "Параметр", "Ед.", "Требование"])
-    first = tp["rows"][0]
+    first = next(r for r in tp["rows"] if not r["value_ru"])
     ws.append([first["no"], first["name_ru"], first["unit"], "не менее 5 т"])
     ws.append(["", "Кондиционер кабины", "", "обязательно"])
     f = tmp_path / "client.xlsx"; wb.save(f)
