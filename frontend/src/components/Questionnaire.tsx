@@ -14,6 +14,9 @@ export function collectFields(p: Position): RfqFieldData[] {
   const merged: Record<string, RfqFieldData> = { ...snap };
   for (const [code, f] of Object.entries(tp)) if (!code.startsWith("_") && f && typeof f === "object") merged[code] = { ...(merged[code] || {}), ...(f as RfqFieldData), code };
   for (const [code, f] of Object.entries(lp)) if (f && typeof f === "object") merged[code] = { ...(merged[code] || {}), ...f, code, is_l: true };
+  // тип машины и модель — всегда текущие значения позиции (могли поменять в таблице или карточке после импорта)
+  if (merged["1.1"] && p.machine_type) merged["1.1"] = { ...merged["1.1"], value: p.machine_type };
+  if (merged["1.2"] && p.model) merged["1.2"] = { ...merged["1.2"], value: p.model };
   return Object.values(merged).sort((a, b) => cmpCode(a.code, b.code));
 }
 
