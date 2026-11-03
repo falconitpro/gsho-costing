@@ -5,6 +5,7 @@ import type { Position, TechParamRow } from "../types";
 type Preview = { sheets: { name: string; rows: unknown[][]; total_rows: number; mapping: { header_row: number; first_row: number; columns: Record<string, number>; source?: string } }[];
   columns: { key: string; title: string }[] };
 type Factory = { id: string; name: string; trademarks?: string[] };
+const isCountry = (r: { code?: string; name_ru?: string }) => r.code === "1.3" || /^(страна|country)/i.test((r.name_ru || "").trim());
 const fname = (f?: Factory) => (f ? f.name + (f.trademarks?.length ? ` (${f.trademarks.join(", ")})` : "") : "—");
 
 const COLS: { key: keyof TechParamRow; title: string; w?: number }[] = [
@@ -29,6 +30,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
   const [offerId, setOfferId] = useState("");
   const [offers, setOffers] = useState<{ id: string; factory: string; factory_id: string; status: string }[]>([]);
   const [factories, setFactories] = useState<Factory[]>([]);
+  const [countries, setCountries] = useState<string[]>([]);
   const [reqFactories, setReqFactories] = useState<string[]>([position.factory_id]);
   const [reqImages, setReqImages] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
@@ -38,13 +40,19 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
   const [closed, setClosed] = useState<Record<string, boolean>>({});   // свёрнутые разделы
 
   const load = () => api.get<{ rows: TechParamRow[]; missing_required: string[] }>(base).then((r) => { setRows(r.rows); setMissing(r.missing_required); setDirty(false); }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); api.get<Factory[]>("/api/refs/factories").then(setFactories); api.get<typeof offers>(`/api/deals/${dealId}/offers`).then(setOffers).catch(() => setOffers([])); }, [position.id]);
+  useEffect(() => { load(); api.get<Factory[]>("/api/refs/factories").then(setFactories); api.get<string[]>("/api/refs/countries").then(setCountries).catch(() => setCountries([])); api.get<typeof offers>(`/api/deals/${dealId}/offers`).then(setOffers).catch(() => setOffers([])); }, [position.id]);
 
   const upd = (i: number, patch: Partial<TechParamRow>) => { setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r))); setDirty(true); };
   const addRow = () => { setRows((rs) => [...rs, { no: (rs[rs.length - 1]?.no || 0) + 1, code: "", name_ru: "", name_zh: "", unit: "", customer_requirement_ru: "", value_ru: "", value_zh: "", comment_ru: "", required: false, local_ru: false, section: rs[rs.length - 1]?.section || "Дополнительные параметры" }]); setDirty(true); };
   const delRow = (i: number) => { setRows((rs) => rs.filter((_, j) => j !== i)); setDirty(true); };
   async function save() {
-    try { await api.put(base, rows); setMsg("Таблица сохранена"); setErr(""); await load(); onChanged(); } catch (e) { setErr((e as Error).message); }
+    try {
+      const r = await api.put<{ synced?: { machine_type?: string; model?: string; country?: string } }>(base, rows);
+      const s = r.synced || {};
+      setMsg("Таблица сохранена" + (s.machine_type ? ` · тип машины в позиции: «${s.machine_type}»` : "") + (s.model ? ` · модель в позиции: «${s.model}»` : "")
+        + (s.country ? ` · страна: «${s.country}»` : ""));
+      setErr(""); await load(); onChanged();
+    } catch (e) { setErr((e as Error).message); }
   }
   async function doPreview() {
     if (!file) return;
@@ -135,7 +143,14 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
               <tr style={{ background: bg }}>
                 {COLS.map((c) => (
                   <td key={c.key} style={{ padding: 3 }}>
-                    {canEdit ? <input style={{ width: "100%", padding: 4, ...vStyle(c.key) }} value={String(r[c.key] ?? "")} type={c.key === "no" ? "number" : "text"}
+                    {canEdit && isCountry(r) && (c.key === "value_ru" || c.key === "customer_requirement_ru") ? (
+                      // страна-производитель — из списка, только названием страны
+                      <select style={{ width: "100%", padding: 4, ...vStyle(c.key) }} value={String(r[c.key] ?? "")} onChange={(e) => upd(i, { [c.key]: e.target.value } as Partial<TechParamRow>)}>
+                        <option value="">—</option>
+                        {r[c.key] && !countries.includes(String(r[c.key])) && <option value={String(r[c.key])}>{String(r[c.key])} (не из списка)</option>}
+                        {countries.map((x) => <option key={x}>{x}</option>)}
+                      </select>)
+                    : canEdit ? <input style={{ width: "100%", padding: 4, ...vStyle(c.key) }} value={String(r[c.key] ?? "")} type={c.key === "no" ? "number" : "text"}
                       onChange={(e) => upd(i, { [c.key]: c.key === "no" ? Number(e.target.value) : e.target.value } as Partial<TechParamRow>)}
                       title={c.key === "name_ru" && r.name_zh ? r.name_zh : c.key === "value_ru" ? [vTitle, r.value_zh ? `ZH: ${r.value_zh}` : ""].filter(Boolean).join(" · ") || undefined : undefined} />
                       : <span style={{ padding: "1px 4px", borderRadius: 3, ...vStyle(c.key) }} title={c.key === "value_ru" ? vTitle : undefined}>{String(r[c.key] ?? "")}</span>}

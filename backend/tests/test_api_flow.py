@@ -509,3 +509,20 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     tp = _ok(client.get(f"/api/deals/{deal['id']}/positions/{imp['position']['id']}/tech-params", headers=H(MGR)))
     assert all(r["section"] and r["section"][0].isdigit() for r in tp["rows"])
     assert {r["req_status"] for r in tp["rows"]} <= {"match", "mismatch", "none"} and "mismatched" in tp
+    # --- тип машины, изменённый в таблице, — в позицию (перечень позиций у всех ролей); страна — только названием
+    pid = imp["position"]["id"]
+    rows = tp["rows"]
+    for r in rows:
+        if r["code"] == "1.1":
+            r["value_ru"] = "Погрузчик шахтный"
+        if r["code"] == "1.3":
+            r["value_ru"] = "China, Shandong province, Jinan"
+    sv = _ok(client.put(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR), json=rows))
+    assert sv["position"]["machine_type"] == "Погрузчик шахтный"
+    assert next(r for r in sv["rows"] if r["code"] == "1.3")["value_ru"] == "Китай"
+    got = _ok(client.get(f"/api/deals/{deal['id']}", headers=H(CD)))
+    assert got["positions"][0]["machine_type"] == "Погрузчик шахтный"
+    _ok(client.patch(f"/api/deals/{deal['id']}/positions/{pid}", headers=H(MGR), json={"machine_type": "ПДМ"}))
+    tp2 = _ok(client.get(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR)))
+    assert next(r for r in tp2["rows"] if r["code"] == "1.1")["value_ru"] == "ПДМ"     # и обратно: карточка позиции → таблица
+    assert "Китай" in _ok(client.get("/api/refs/countries", headers=H(MGR)))
