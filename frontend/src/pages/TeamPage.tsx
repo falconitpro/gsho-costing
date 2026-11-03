@@ -4,7 +4,11 @@ import type { Me } from "../types";
 
 type Contacts = { position: string; department: string; mobile: string; work_phone: string; wechat: string; telegram: string; whatsapp: string; max: string; extra_email: string; note: string };
 type Card = { id: string; display_name: string; email: string; roles: string[]; role_titles: string[]; contacts: Contacts; wecom_user_id: string;
-  notify_channels: string[]; can_edit: boolean; can_channels: boolean };
+  notify_channels: string[]; can_edit: boolean; can_channels: boolean; is_active: boolean };
+type RoleT = { code: string; title: string };
+type Perm = { group: string; title: string; level: number; level_title: string };
+type Override = { id: string; user_id: string; group: string; level: number; valid_to: string | null; comment: string };
+const LEVELS: Record<number, string> = { 0: "не видит", 1: "видит", 2: "редактирует" };
 type Log = { at: string | null; channel: string; channel_title: string; text: string; status: string; error: string };
 
 const FIELDS: [keyof Contacts, string, string][] = [
@@ -21,9 +25,52 @@ export default function TeamPage({ me }: { me: Me }) {
   const [log, setLog] = useState<Log[]>([]);
   const [q, setQ] = useState("");
   const [msg, setMsg] = useState("");
-  const load = () => api.get<{ users: Card[]; channels: Record<string, string> }>("/api/team").then((r) => { setUsers(r.users); setChannels(r.channels); });
+  const [canManage, setCanManage] = useState(false);
+  const [roles, setRoles] = useState<RoleT[]>([]);
+  const [showNew, setShowNew] = useState(false);
+  const [nu, setNu] = useState({ display_name: "", email: "", position: "", roles: [] as string[] });
+  const [perms, setPerms] = useState<Perm[]>([]);
+  const [overrides, setOverrides] = useState<Override[]>([]);
+  const [ovr, setOvr] = useState({ group: "", level: 1, valid_to: "", comment: "" });
+  const [err, setErr] = useState("");
+  const load = () => api.get<{ users: Card[]; channels: Record<string, string>; can_manage?: boolean; roles?: RoleT[] }>("/api/team?include_inactive=true").then((r) => {
+    setUsers(r.users); setChannels(r.channels); setCanManage(!!r.can_manage); setRoles(r.roles || []);
+  });
   useEffect(() => { load(); }, []);
-  const open = (u: Card) => { setCur(JSON.parse(JSON.stringify(u))); setMsg(""); api.get<{ log: Log[] }>(`/api/team/${u.id}/notifications`).then((r) => setLog(r.log)).catch(() => setLog([])); };
+  const loadAccess = (uid: string) => {
+    if (!canManage) return;
+    api.get<{ perms: Perm[] }>(`/api/admin/access/preview?user_id=${uid}`).then((r) => setPerms(r.perms)).catch(() => setPerms([]));
+    api.get<{ overrides: Override[] }>("/api/admin/access").then((r) => setOverrides(r.overrides.filter((o) => o.user_id === uid))).catch(() => setOverrides([]));
+  };
+  const open = (u: Card) => { setCur(JSON.parse(JSON.stringify(u))); setMsg(""); setErr(""); loadAccess(u.id); api.get<{ log: Log[] }>(`/api/team/${u.id}/notifications`).then((r) => setLog(r.log)).catch(() => setLog([])); };
+  async function createUser() {
+    try {
+      const u = await api.post<{ id: string }>("/api/admin/users", { display_name: nu.display_name.trim(), email: nu.email.trim(), roles: nu.roles,
+        contacts: nu.position ? { position: nu.position } : {}, notify_channels: ["app", "outlook"] });
+      setMsg(`Сотрудник «${nu.display_name}» добавлен. Вход — по корпоративной учётной записи с e-mail ${nu.email}.`); setErr("");
+      setShowNew(false); setNu({ display_name: "", email: "", position: "", roles: [] });
+      await load();
+      const r = await api.get<{ users: Card[] }>("/api/team?include_inactive=true"); const c = r.users.find((x) => x.id === u.id); if (c) open(c);
+    } catch (e) { setErr((e as Error).message); }
+  }
+  async function saveRoles() {
+    if (!cur) return;
+    try {
+      await api.patch(`/api/admin/users/${cur.id}`, { roles: cur.roles, is_active: cur.is_active, display_name: cur.display_name });
+      setMsg("Роли и статус сохранены"); setErr(""); await load(); loadAccess(cur.id);
+    } catch (e) { setErr((e as Error).message); }
+  }
+  async function addOverride() {
+    if (!cur || !ovr.group) return;
+    try {
+      await api.post("/api/admin/access/overrides", { user_id: cur.id, group: ovr.group, level: Number(ovr.level), valid_to: ovr.valid_to || null, comment: ovr.comment });
+      setMsg("Индивидуальный доступ установлен"); setErr(""); setOvr({ group: "", level: 1, valid_to: "", comment: "" }); loadAccess(cur.id);
+    } catch (e) { setErr((e as Error).message); }
+  }
+  async function delOverride(id: string) {
+    if (!cur) return;
+    try { await api.del(`/api/admin/access/overrides/${id}`); loadAccess(cur.id); } catch (e) { setErr((e as Error).message); }
+  }
   async function save() {
     if (!cur) return;
     try {
@@ -43,8 +90,29 @@ export default function TeamPage({ me }: { me: Me }) {
     <>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h1>Сотрудники</h1>
-        <input placeholder="поиск: имя, должность, телефон" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 260 }} />
+        <div className="row">
+          <input placeholder="поиск: имя, должность, телефон" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 260 }} />
+          {canManage && <button className="btn add" onClick={() => { setShowNew(!showNew); setErr(""); }}>Добавить сотрудника</button>}
+        </div>
       </div>
+      {showNew && canManage && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Новый сотрудник</h2>
+          <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+            <label className="f">ФИО<input value={nu.display_name} placeholder="Фамилия Имя" onChange={(e) => setNu({ ...nu, display_name: e.target.value })} /></label>
+            <label className="f">E-mail (логин)<input value={nu.email} placeholder="name@company.ru" onChange={(e) => setNu({ ...nu, email: e.target.value })} /></label>
+            <label className="f">Должность<input value={nu.position} onChange={(e) => setNu({ ...nu, position: e.target.value })} /></label>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>Роли (можно несколько) — определяют доступ по умолчанию; индивидуальные доступы настраиваются в карточке сотрудника:</div>
+          <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 4 }}>{roles.map((r) => (
+            <label key={r.code} className="row" style={{ border: "1px solid " + (nu.roles.includes(r.code) ? "var(--accent)" : "var(--line)"), borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>
+              <input type="checkbox" checked={nu.roles.includes(r.code)} onChange={() => setNu({ ...nu, roles: nu.roles.includes(r.code) ? nu.roles.filter((x) => x !== r.code) : [...nu.roles, r.code] })} /> {r.title}</label>))}</div>
+          {err && <div className="alert error">{err}</div>}
+          <div className="row" style={{ marginTop: 10 }}>
+            <button className="btn" disabled={!nu.display_name.trim() || !nu.email.includes("@") || nu.roles.length === 0} onClick={createUser}>Добавить</button>
+            <button className="btn ghost" onClick={() => setShowNew(false)}>Отмена</button>
+          </div>
+        </div>)}
       <p className="muted">При постановке задачи исполнитель сразу получает уведомление во все выбранные каналы. Каналы выбирают КД, ЗГД или администратор; контакты заполняет сам сотрудник. Каналы без подключённой интеграции отмечаются в журнале «ожидает подключения канала».</p>
       {msg && <div className="alert info">{msg}</div>}
       <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)" }}>
@@ -52,7 +120,7 @@ export default function TeamPage({ me }: { me: Me }) {
           <table><thead><tr><th>Сотрудник</th><th>Контакты</th><th>Уведомления</th></tr></thead>
             <tbody>{shown.map((u) => (
               <tr key={u.id} style={{ cursor: "pointer", background: cur?.id === u.id ? "var(--accent-soft)" : undefined }} onClick={() => open(u)}>
-                <td><b>{u.display_name}</b><div className="muted" style={{ fontSize: 12 }}>{u.contacts.position || u.role_titles.join(", ")}</div></td>
+                <td style={{ opacity: u.is_active ? 1 : 0.5 }}><b>{u.display_name}</b>{!u.is_active && <span className="badge"> отключён</span>}<div className="muted" style={{ fontSize: 12 }}>{u.contacts.position || u.role_titles.join(", ")}</div></td>
                 <td style={{ fontSize: 12 }}>{u.contacts.mobile && <div>📱 {u.contacts.mobile}</div>}<div>✉ {u.email}</div>{u.contacts.wechat && <div>WeChat: {u.contacts.wechat}</div>}{u.contacts.telegram && <div>Telegram: {u.contacts.telegram}</div>}</td>
                 <td style={{ fontSize: 12 }}>{u.notify_channels.map((c) => channels[c] || c).join(", ")}</td>
               </tr>))}</tbody></table>
@@ -78,6 +146,39 @@ export default function TeamPage({ me }: { me: Me }) {
                 {cur.can_edit && <button className="btn" onClick={save}>Сохранить карточку</button>}
                 {cur.can_edit && <button className="btn ghost" onClick={test}>Проверить уведомления</button>}
               </div>
+              {canManage && (
+                <>
+                  <h3>Роли и доступы</h3>
+                  <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>{roles.map((r) => (
+                    <label key={r.code} className="row" style={{ border: "1px solid " + (cur.roles.includes(r.code) ? "var(--accent)" : "var(--line)"), borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>
+                      <input type="checkbox" checked={cur.roles.includes(r.code)} onChange={() => setCur({ ...cur, roles: cur.roles.includes(r.code) ? cur.roles.filter((x) => x !== r.code) : [...cur.roles, r.code] })} /> {r.title}</label>))}</div>
+                  <div className="row" style={{ marginTop: 8 }}>
+                    <label className="row"><input type="checkbox" checked={cur.is_active} onChange={(e) => setCur({ ...cur, is_active: e.target.checked })} /> учётная запись активна</label>
+                    <button className="btn secondary" disabled={cur.roles.length === 0} onClick={saveRoles}>Сохранить роли и статус</button>
+                  </div>
+                  {err && <div className="alert error">{err}</div>}
+                  {perms.length > 0 && (
+                    <table style={{ marginTop: 8 }}><thead><tr><th>Раздел</th><th>Итоговый доступ</th><th>Индивидуально</th></tr></thead>
+                      <tbody>{perms.map((p) => {
+                        const o = overrides.find((x) => x.group === p.group);
+                        return (
+                          <tr key={p.group}><td>{p.title}</td>
+                            <td><span className={"badge " + (p.level === 2 ? "ok" : p.level === 1 ? "accent" : "")}>{p.level_title}</span></td>
+                            <td style={{ fontSize: 12 }}>{o ? <>{LEVELS[o.level]}{o.valid_to ? ` до ${fmtDate(o.valid_to)}` : ""}{o.comment ? ` · ${o.comment}` : ""}
+                              <button className="btn ghost" style={{ padding: "0 6px", marginLeft: 6 }} title="убрать индивидуальный доступ — вернуть доступ по роли" onClick={() => delOverride(o.id)}>×</button></>
+                              : <span className="muted">по роли</span>}</td></tr>);
+                      })}</tbody></table>)}
+                  <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
+                    <select value={ovr.group} onChange={(e) => setOvr({ ...ovr, group: e.target.value })}>
+                      <option value="">— раздел —</option>{perms.map((p) => <option key={p.group} value={p.group}>{p.title}</option>)}</select>
+                    <select value={ovr.level} onChange={(e) => setOvr({ ...ovr, level: Number(e.target.value) })}>
+                      {Object.entries(LEVELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+                    <label className="row" style={{ fontSize: 12 }}>до <input type="date" value={ovr.valid_to} onChange={(e) => setOvr({ ...ovr, valid_to: e.target.value })} /></label>
+                    <input placeholder="основание" value={ovr.comment} onChange={(e) => setOvr({ ...ovr, comment: e.target.value })} style={{ width: 180 }} />
+                    <button className="btn secondary" disabled={!ovr.group} onClick={addOverride}>Установить доступ</button>
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Индивидуальный доступ действует поверх роли: можно открыть раздел или, наоборот, закрыть его. Без даты — бессрочно.</div>
+                </>)}
               {log.length > 0 && (
                 <>
                   <h3>Последние уведомления</h3>

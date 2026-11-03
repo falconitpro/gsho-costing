@@ -865,3 +865,23 @@ def test_documents_lawyer_and_offer_from_tech_table(client):
         assert db.query(FactoryOffer).filter(FactoryOffer.deal_id == deal.id, FactoryOffer.source_position_id == pos.id,
                                              FactoryOffer.factory_id == pos.factory_id).count() == 1
         db.rollback()
+
+
+def test_gd_adds_employee_and_access(client):
+    """ЗГД на вкладке «Сотрудники» добавляет сотрудника, назначает роли и индивидуальный доступ; менеджер — нет."""
+    assert client.post("/api/admin/users", headers=H(MGR), json={"email": "x@example.com", "display_name": "X", "roles": ["manager"]}).status_code == 403
+    assert client.post("/api/admin/users", headers=H(GD), json={"email": "new@example.com", "display_name": "Новый", "roles": []}).status_code == 422
+    u = _ok(client.post("/api/admin/users", headers=H(GD), json={"email": "New.Manager@example.com", "display_name": "Новиков Пётр", "roles": ["manager"],
+                                                                 "contacts": {"position": "менеджер по продажам"}}), 201)
+    assert u["email"] == "new.manager@example.com"
+    team = _ok(client.get("/api/team?include_inactive=true", headers=H(GD)))
+    assert team["can_manage"] and any(r["code"] == "lawyer" for r in team["roles"])
+    card = next(x for x in team["users"] if x["id"] == u["id"])
+    assert card["contacts"]["position"] == "менеджер по продажам"
+    assert not _ok(client.get("/api/team", headers=H(MGR)))["can_manage"]
+    _ok(client.post("/api/admin/access/overrides", headers=H(GD), json={"user_id": u["id"], "group": "legal_docs", "level": 1, "comment": "тест"}), 201)
+    perms = {p["group"]: p["level"] for p in _ok(client.get(f"/api/admin/access/preview?user_id={u['id']}", headers=H(GD)))["perms"]}
+    assert perms["legal_docs"] == 1
+    _ok(client.patch(f"/api/admin/users/{u['id']}", headers=H(GD), json={"is_active": False}))
+    assert not any(x["id"] == u["id"] for x in _ok(client.get("/api/team", headers=H(GD)))["users"])
+    assert any(x["id"] == u["id"] and not x["is_active"] for x in _ok(client.get("/api/team?include_inactive=true", headers=H(GD)))["users"])

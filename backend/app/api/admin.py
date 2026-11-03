@@ -92,6 +92,7 @@ class UserIn(BaseModel):
     visa_limit_rub: Optional[float] = None
     wecom_user_id: Optional[str] = None
     notify_channels: list[str] = ["outlook", "wecom", "app"]
+    contacts: dict = {}
     is_active: bool = True
 
 
@@ -109,7 +110,14 @@ def create_user(body: UserIn, db: Session = Depends(get_db), user: CurrentUser =
         raise HTTPException(422, "Неизвестная роль")
     if db.scalar(select(User).where(User.email == body.email)):
         raise HTTPException(409, "Сотрудник с таким e-mail уже есть")
-    u = User(**body.model_dump(exclude={"external_id"}), external_id=body.external_id or body.email)
+    if not body.email.strip() or "@" not in body.email or not body.display_name.strip():
+        raise HTTPException(422, "Укажите ФИО и e-mail сотрудника")
+    if not body.roles:
+        raise HTTPException(422, "Назначьте сотруднику хотя бы одну роль")
+    body.email = body.email.strip().lower()
+    if db.scalar(select(User).where(User.email == body.email)):
+        raise HTTPException(409, "Сотрудник с таким e-mail уже есть")
+    u = User(**body.model_dump(exclude={"external_id", "contacts"}), external_id=body.external_id or body.email, contacts=body.contacts or {})
     db.add(u)
     db.flush()
     audit(db, user.id, None, "user", u.id, "create", after=body.model_dump())
