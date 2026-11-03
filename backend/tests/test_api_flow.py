@@ -849,7 +849,7 @@ def test_documents_lawyer_and_offer_from_tech_table(client):
     # файлы юридической папки закрыты для ролей без доступа
     url = next(x["url"] for x in _ok(client.get(f"/api/deals/{did}/documents", headers=H(MGR)))["documents"] if x["category"] == "tender")
     assert client.get(url, headers=H(LOG)).status_code in (403, 404)
-    assert client.get(f"/api/deals/{did}/documents", headers=H(LOG)).status_code == 403
+    assert client.get(f"/api/deals/{did}/documents", headers=H(LOG)).status_code in (403, 404)   # логисту сделка не видна или документы закрыты
     # ответ завода из таблицы теххарактеристик
     with SessionLocal() as db:
         pos = db.query(Position).filter(Position.factory_id.isnot(None)).first()
