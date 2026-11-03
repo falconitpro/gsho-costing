@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import { api, ApiError, designation } from "../api";
+import { UndoButton, useUndoHistory } from "../undo";
 import type { Position, TechParamRow } from "../types";
 
 type Preview = { sheets: { name: string; rows: unknown[][]; total_rows: number; mapping: { header_row: number; first_row: number; columns: Record<string, number>; source?: string } }[];
@@ -14,7 +15,7 @@ const COLS: { key: keyof TechParamRow; title: string; w?: number }[] = [
 ];
 
 /** Таблица технических характеристик позиции (задача 4): ручной ввод, импорт файла с предпросмотром, запрос заводу (задача 9), отметки «обязательно»/«в России». */
-export default function TechParamsTable({ dealId, position, canEdit, onChanged }: { dealId: string; position: Position; canEdit: boolean; onChanged: () => void }) {
+export default function TechParamsTable({ dealId, position, canEdit, canDelete = false, onChanged }: { dealId: string; position: Position; canEdit: boolean; canDelete?: boolean; onChanged: () => void }) {
   const base = `/api/deals/${dealId}/positions/${position.id}/tech-params`;
   const [rows, setRows] = useState<TechParamRow[]>([]);
   const [missing, setMissing] = useState<string[]>([]);
@@ -39,7 +40,8 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
   const [offerFiles, setOfferFiles] = useState<FileList | null>(null);
   const [closed, setClosed] = useState<Record<string, boolean>>({});   // свёрнутые разделы
 
-  const load = () => api.get<{ rows: TechParamRow[]; missing_required: string[] }>(base).then((r) => { setRows(r.rows); setMissing(r.missing_required); setDirty(false); }).catch((e) => setErr(e.message));
+  const history = useUndoHistory({ rows }, (s) => { setRows(s.rows); setDirty(true); }, position.id);
+  const load = () => api.get<{ rows: TechParamRow[]; missing_required: string[] }>(base).then((r) => { history.accept(); setRows(r.rows); setMissing(r.missing_required); setDirty(false); }).catch((e) => setErr(e.message));
   useEffect(() => { load(); api.get<Factory[]>("/api/refs/factories").then(setFactories); api.get<string[]>("/api/refs/countries").then(setCountries).catch(() => setCountries([])); api.get<typeof offers>(`/api/deals/${dealId}/offers`).then(setOffers).catch(() => setOffers([])); }, [position.id]);
 
   const upd = (i: number, patch: Partial<TechParamRow>) => { setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r))); setDirty(true); };
@@ -113,6 +115,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
             <button className="btn ghost" onClick={() => { setWizard("factory_answer"); setPreview(null); setOfferId(""); }}>Импорт ответа завода</button>
             <a className="btn ghost" href={`${base}/request/file`}>Файл запроса RU+CN</a>
             <a className="btn ghost" href={`/api/deals/${dealId}/positions/${position.id}/rfq/file`} title="шаблон RFQ с требованиями заказчика из таблицы; строки «в РФ» помечены">RFQ с требованиями</a>
+            <UndoButton h={history} />
             <button className="btn ghost" onClick={addRow}>+ строка</button>
             <button className="btn" onClick={save} disabled={!dirty}>Сохранить таблицу</button>
           </div>
@@ -159,7 +162,7 @@ export default function TechParamsTable({ dealId, position, canEdit, onChanged }
                 ))}
                 <td style={{ textAlign: "center" }}><input type="checkbox" checked={!!r.required} disabled={!canEdit} onChange={(e) => upd(i, { required: e.target.checked })} /></td>
                 <td style={{ textAlign: "center" }}><input type="checkbox" checked={!!r.local_ru} disabled={!canEdit} onChange={(e) => upd(i, { local_ru: e.target.checked })} /></td>
-                {canEdit && <td><button className="btn ghost" style={{ padding: "2px 6px" }} onClick={() => delRow(i)}>×</button></td>}
+                {canEdit && <td>{canDelete && <button className="btn ghost" style={{ padding: "2px 6px" }} title="удалить строку (КД, ГД, администратор)" onClick={() => delRow(i)}>×</button>}</td>}
               </tr></Fragment>);
           })}</tbody>
         </table>

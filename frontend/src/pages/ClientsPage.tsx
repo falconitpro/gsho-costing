@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
+import { UndoButton, useUndoHistory } from "../undo";
 import { api, ApiError, fmtDate, fmtPct, fmtRub } from "../api";
 import type { Me } from "../types";
 import { payText } from "../components/PaymentTermsEditor";
@@ -34,6 +35,7 @@ export default function ClientsPage({ me }: { me: Me }) {
   const [card, setCard] = useState<Card | null>(null);
   const EMPTY_FORM = { name: "", inn: "", address: "", full_name: "", kpp: "", ogrn: "", director: "", legal_status: "", okved: "", registry: {} as Record<string, unknown> };
   const [form, setForm] = useState(EMPTY_FORM);
+  const history = useUndoHistory({ form }, (st) => setForm(st.form));
   const [found, setFound] = useState<Found[] | null>(null);       // филиалы — показываются по ссылке
   const [showBranches, setShowBranches] = useState(false);
   const [picked, setPicked] = useState<"head" | "branch" | null>(null);
@@ -108,7 +110,7 @@ export default function ClientsPage({ me }: { me: Me }) {
               <label className="f">Юридический адрес<input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></label>
             </div>
             <div className="row" style={{ marginTop: 8 }}>
-              <button className="btn" onClick={create} disabled={!form.name || (form.inn.length !== 10 && form.inn.length !== 12)}>Добавить</button>
+              <button className="btn" onClick={create} disabled={!form.name || (form.inn.length !== 10 && form.inn.length !== 12)}>Добавить</button><UndoButton h={history} />
               {(form.name || form.inn) && <button className="btn ghost" onClick={() => { setForm(EMPTY_FORM); setFound(null); setPicked(null); setLookupMsg(""); }}>очистить</button>}
               {err && <span className="badge bad">{err}</span>}
             </div>

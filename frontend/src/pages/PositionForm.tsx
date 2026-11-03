@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { api, ApiError, designation, fmtDate, fmtRub } from "../api";
 import { DELIVERY_START, PRODUCTION_START, TERM_UNITS, type Position } from "../types";
 import { collectFields, cmpCode, type RfqFieldData } from "../components/Questionnaire";
+import { UndoButton, useUndoHistory } from "../undo";
 
 type Factory = { id: string; name: string; trademarks?: string[] };
 type Tree = { factory_id: string; factory: string; trademarks?: string[]; types: { machine_type: string; models: { id: string; model: string; trademark?: string; executions: { id: string; name: string; params: number }[] }[] }[] }[];
@@ -49,8 +50,13 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
     api.get<Tree>("/api/catalog/tree").then(setTree).catch(() => setTree([]));
     api.get<string[]>("/api/refs/countries").then(setCountries).catch(() => setCountries([]));
   }, []);
+  // «Отменить последнее действие»: все поля формы
+  const history = useUndoHistory({ vals, reqs, comms, optNames, factoryId, trademark, execId, prod, dterm, advance, priceComment },
+    (st) => { setVals(st.vals); setReqs(st.reqs); setComms(st.comms); setOptNames(st.optNames); setFactoryId(st.factoryId); setTrademark(st.trademark);
+      setExecId(st.execId); setProd(st.prod); setDterm(st.dterm); setAdvance(st.advance); setPriceComment(st.priceComment); }, position?.id || "new");
   useEffect(() => {
     if (!position) return;
+    history.accept();
     const v: Record<string, string> = {}, names: Record<string, string> = {};
     const rq: Record<string, string> = {}, cm: Record<string, string> = {};
     for (const f of collectFields(position)) {
@@ -63,6 +69,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
     // строки таблицы технических характеристик (в т.ч. правки в ней) — приоритетнее снимка импорта
     api.get<{ rows: { code: string; value_ru: string; customer_requirement_ru: string; comment_ru: string }[] }>(`/api/deals/${dealId}/positions/${position.id}/tech-params`)
       .then((r) => {
+        history.accept();
         const byCode = r.rows.filter((x) => x.code);
         setVals((s) => { const n = { ...s }; for (const x of byCode) if (x.value_ru) n[x.code] = x.value_ru; return n; });
         setReqs((s) => { const n = { ...s }; for (const x of byCode) if (x.customer_requirement_ru) n[x.code] = x.customer_requirement_ru; return n; });
@@ -178,6 +185,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
         <button className="btn ghost" onClick={() => setOpen(Object.fromEntries([...bySection.keys()].map((k) => [k, true])))}>развернуть все разделы</button>
         <button className="btn ghost" onClick={() => setOpen({})}>свернуть</button>
         <a className="btn ghost" href="/api/deals/rfq/template/file">скачать пустой шаблон RFQ для завода</a>
+        <UndoButton h={history} />
       </div>
       {/* тот же вид, что у таблицы после загрузки файла: разделы, № / параметр / ед. / требования заказчика / значение / комментарий */}
       <div style={{ overflowX: "auto" }}>
@@ -258,6 +266,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
       {err && <div className="alert error">{err}</div>}
       <div className="row" style={{ marginTop: 10 }}>
         <button className="btn" onClick={save} disabled={!valid || busy}>{position ? "Сохранить изменения" : "Добавить позицию"}</button>
+        <UndoButton h={history} />
         {onCancel && <button className="btn secondary" onClick={onCancel}>Отмена</button>}
       </div>
     </div>

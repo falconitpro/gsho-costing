@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { UndoButton, useUndoHistory } from "../undo";
 import { api } from "../api";
 import { DELIVERY_START, EVENT_TITLES, TERM_UNITS, type CalcResponse, type Deal, type PaymentLine } from "../types";
 
@@ -44,6 +45,8 @@ export default function PaymentTermsEditor({ deal, calc, onSaved }: { deal: Deal
   const [bg, setBg] = useState<{ enabled: boolean; mode: string; value: number }>({ ...pt.advance_guarantee_default, ...(pt.bank_guarantee as { enabled?: boolean; mode?: string; value?: number }) });
   const [terms, setTerms] = useState<Record<string, { unit: string; start_event: string }>>(Object.fromEntries(pt.positions.map((p) => [p.id, { unit: p.delivery_term?.unit || "calendar_days", start_event: p.delivery_term?.start_event || "client_contract" }])));
   const [msg, setMsg] = useState("");
+  const history = useUndoHistory({ client, variantPay, factory, bg, terms },
+    (st) => { setClient(st.client); setVariantPay(st.variantPay); setFactory(st.factory); setBg(st.bg); setTerms(st.terms); });
   useEffect(() => { api.get<Scheme[]>("/api/refs/payment-schemes").then(setSchemes); }, []);
   const toLines = (ls: PaymentLine[]) => ls.map((l, i) => ({ ...l, no: i + 1 }));
   async function save() {
@@ -99,7 +102,7 @@ export default function PaymentTermsEditor({ deal, calc, onSaved }: { deal: Deal
             </div>))}
         </div>
       </div>
-      <div className="row" style={{ marginTop: 8 }}><button className="btn" onClick={save}>Сохранить условия оплаты и сроки</button><span className="muted">изменение после визы сбрасывает визы</span></div>
+      <div className="row" style={{ marginTop: 8 }}><button className="btn" onClick={save}>Сохранить условия оплаты и сроки</button><UndoButton h={history} /><span className="muted">изменение после визы сбрасывает визы</span></div>
     </div>
   );
 }

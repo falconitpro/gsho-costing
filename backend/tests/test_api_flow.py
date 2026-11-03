@@ -559,3 +559,7 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     _ok(client.put("/api/admin/settings/logistics_l_codes", headers=H(GD), json={"value": None}))
     s_ = _ok(client.get("/api/admin/settings", headers=H(FD)))
     assert s_["commissioning_days"] == 5 and s_["unplanned_reserve_pct"] == 3.0 and s_["sla_days"]["logistics"] == 1
+    # --- удалять строки таблицы технических характеристик могут только КД, ГД и администратор
+    rows4 = _ok(client.get(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR)))["rows"]
+    assert client.put(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR), json=rows4[1:]).status_code == 403
+    assert len(_ok(client.put(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(CD), json=rows4[1:]))["rows"]) == len(rows4) - 1

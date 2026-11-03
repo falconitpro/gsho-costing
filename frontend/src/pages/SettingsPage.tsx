@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { api, fmtRub } from "../api";
 import type { Me } from "../types";
+import { UndoButton, useUndoHistory } from "../undo";
 
 type Opt = { value: string; label: string };
 type Col = { key: string; label: string; type?: string; options?: Opt[]; nullable?: boolean };
@@ -166,6 +167,7 @@ export default function SettingsPage({ me }: { me: Me }) {
   const [history, setHistory] = useState<Hist[]>([]);
   const [q, setQ] = useState("");
   const [msg, setMsg] = useState("");
+  const undoH = useUndoHistory({ draft, comment }, (st) => { setDraft(st.draft); setComment(st.comment); }, open);
   const load = () => api.get<Record<string, unknown>>("/api/admin/settings").then(setValues);
   useEffect(() => { load(); api.get<typeof meta>("/api/admin/settings/meta").then(setMeta); }, []);
   if (!meta) return <div className="muted">Загрузка…</div>;
@@ -207,7 +209,7 @@ export default function SettingsPage({ me }: { me: Me }) {
                     <Editor m={m} value={draft} onChange={setDraft} />
                     <div className="row" style={{ marginTop: 8 }}>
                       <input style={{ flex: 1 }} placeholder="Комментарий к изменению (почему меняем)" value={comment} onChange={(e) => setComment(e.target.value)} />
-                      <button className="btn" onClick={() => save(m.key)}>Сохранить</button><button className="btn secondary" onClick={() => setOpen(null)}>Отмена</button>
+                      <button className="btn" onClick={() => save(m.key)}>Сохранить</button><UndoButton h={undoH} /><button className="btn secondary" onClick={() => setOpen(null)}>Закрыть без сохранения</button>
                     </div>
                     {history.length > 0 && (
                       <details style={{ marginTop: 8 }}><summary className="muted" style={{ cursor: "pointer" }}>История изменений ({history.length})</summary>

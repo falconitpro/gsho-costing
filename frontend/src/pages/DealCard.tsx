@@ -231,7 +231,7 @@ export default function DealCard({ me }: { me: Me }) {
                     {(deal.positions || []).map((x, i) => <option key={x.id} value={x.id}>{i + 1}. {x.machine_type} {designation(x)}</option>)}</select>
                 </div>}
               </div>
-              {can(me, "tech_params") && <TechParamsTable dealId={deal.id} position={p} canEdit={canTech} onChanged={load} />}
+              {can(me, "tech_params") && <TechParamsTable dealId={deal.id} position={p} canEdit={canTech} canDelete={has("admin", "cd", "gd")} onChanged={load} />}
               <div style={{ marginTop: 14 }}>{can(me, "images") && <ImagesBlock dealId={deal.id} position={p} me={me} onChanged={load} />}</div>
               <div style={{ marginTop: 14 }}>{can(me, "local_options") && <LocalOptionsBlock dealId={deal.id} position={p} me={me} onChanged={load} />}</div>
               <details style={{ marginTop: 10 }}><summary className="muted" style={{ cursor: "pointer" }}>Опросник RFQ по кодам (как импортировано)</summary><Questionnaire position={p} /></details>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { UndoButton, useUndoHistory } from "../undo";
 import { api, fmtRub, designation } from "../api";
 import type { Deal, Me } from "../types";
 
@@ -23,11 +24,13 @@ export default function ServiceBlock({ deal, me, reload }: { deal: Deal; me: Me;
   const [warrantyPct, setWarrantyPct] = useState("");   // пусто — по настройке типа машины
   const [res, setRes] = useState<Result | null>(null);
   const [err, setErr] = useState("");
+  const history = useUndoHistory({ regs, hpm, crew, commissioning, training, warrantyPct },
+    (st) => { setRegs(st.regs); setHpm(st.hpm); setCrew(st.crew); setCommissioning(st.commissioning); setTraining(st.training); setWarrantyPct(st.warrantyPct); }, pid);
 
   useEffect(() => {
     if (!pid) return;
     api.get<Defaults>(`/api/deals/${deal.id}/service/positions/${pid}/defaults`).then((x) => {
-      setD(x); setHpm(String(x.hours_per_month)); setWarrantyPct(x.warranty?.overridden ? String(x.warranty.pct) : "");
+      history.accept(); setD(x); setHpm(String(x.hours_per_month)); setWarrantyPct(x.warranty?.overridden ? String(x.warranty.pct) : "");
       setRegs(x.regulations.length ? x.regulations : [{ name: "ТО-1", interval_hours: 250, operations: [{ name: "Осмотр, смазка", hours: 2, qualification: "mechanic", spare_part_rows: [] }] },
         { name: "ТО-2", interval_hours: 500, operations: [{ name: "Замена масла и фильтров двигателя", hours: 4, qualification: "engineer_2", spare_part_rows: [] }] }]);
       const existing = (positions.find((p) => p.id === pid)?.service_calc as { result?: Result } | undefined)?.result;
@@ -82,7 +85,7 @@ export default function ServiceBlock({ deal, me, reload }: { deal: Deal; me: Me;
         {canEdit && <div className="row" style={{ marginTop: 8 }}>
           <button className="btn ghost" onClick={() => setRegs([...regs, { name: "ТО-3", interval_hours: 1000, operations: [{ name: "", hours: 1, qualification: "engineer_2", spare_part_rows: [] }] }])}>+ регламент</button>
           <button className="btn ghost" onClick={() => setRegs(regs.map((r, i) => (i === regs.length - 1 ? { ...r, operations: [...r.operations, { name: "", hours: 1, qualification: "mechanic", spare_part_rows: [] }] } : r)))}>+ операция в последний</button>
-          <button className="btn" onClick={calc}>Рассчитать сервис</button>
+          <button className="btn" onClick={calc}>Рассчитать сервис</button><UndoButton h={history} />
         </div>}
         {d && d.spare_parts.length > 0 && <details style={{ marginTop: 8 }}><summary className="muted">Лист «ЗИП на ТО» из RFQ ({d.spare_parts.length} строк)</summary>
           <table><tbody>{d.spare_parts.map((s) => <tr key={s.row}><td>{s.row}</td><td>{s.name}</td><td className="num">{s.interval_hours ?? "—"}</td><td className="num">{fmtRub(s.unit_price)}</td></tr>)}</tbody></table></details>}
