@@ -277,6 +277,8 @@ class BatchInput(BaseModel):
     insurance_amount: Money = Field(default_factory=lambda: Money(amount=0, currency="CNY"))
     broker_rub: float = 0.0
     rf_delivery_rub: float = 0.0
+    door_to_door: Optional[Money] = None      # единая стоимость доставки завод → клиент (вместо перевозки до границы и доставки по РФ)
+    door_to_door_border_pct: float = 10.0     # доля до границы РФ (остальное — от границы до клиента)
     allocation: AllocationMethod = AllocationMethod.COST
     transit_days: int = 14
     customs_days: int = 5

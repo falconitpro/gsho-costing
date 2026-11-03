@@ -186,3 +186,18 @@ def test_commissions_and_transfer_fee_modes():
     assert fixed.transfer_fees_rub == pytest.approx(3000)
     assert pct.transfer_fees_rub == pytest.approx(1000)
     assert both.transfer_fees_rub == pytest.approx(4000)
+
+
+def test_door_to_door_delivery_split():
+    """Единая стоимость доставки завод → клиент: 10 % — до границы РФ (в таможенной стоимости), 90 % — от границы до клиента."""
+    from app.calc.types import Money
+    inp = sample_deal()
+    inp.batches[0].door_to_door = Money(amount=1_000_000, currency="CNY")
+    inp.batches[0].door_to_door_border_pct = 10.0
+    b = calc_deal(inp).variants["V1"]["base"]
+    members = [pc for pc in b.positions if any(p.id == pc.position_id and p.batch_id == inp.batches[0].id for p in inp.positions)]
+    assert sum(pc.items_fx["intl_freight"].amount for pc in members) == pytest.approx(100_000, abs=1)
+    assert all(pc.items_fx["intl_freight"].currency == "CNY" for pc in members)
+    rf = sum(pc.items_rub["rf_delivery"] for pc in members)
+    intl = sum(pc.items_rub["intl_freight"] for pc in members)
+    assert rf == pytest.approx(intl * 9, rel=0.15)   # 90 / 10 с поправкой на курс на дату поставки

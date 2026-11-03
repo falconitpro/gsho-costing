@@ -205,6 +205,9 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
             k0 = {c: fx.rate(c, ship, s, "_alloc", None, fx_mult) for c in ("CNY", "USD", "EUR", "RUB")}
             share = _alloc_weights(batch_members[batch.id], batch.allocation, k0)[p.id]
             fr = batch.intl_freight
+            d2d = batch.door_to_door if batch.door_to_door and batch.door_to_door.amount else None
+            if d2d:   # единая стоимость завод → клиент: доля до границы — как перевозка до границы (в таможенной стоимости)
+                fr = Money(amount=d2d.amount * batch.door_to_door_border_pct / 100.0, currency=d2d.currency)
             items_fx["intl_freight"] = Money(amount=fr.amount * share, currency=fr.currency)
             k = fx.rate(fr.currency, ship, s, f"{batch.id}/freight", None, fx_mult)
             items["intl_freight"] = fr.amount * share * k
@@ -218,6 +221,9 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
                 items["insurance"] = ia.amount * share * fx.rate(ia.currency, ship, s, f"{batch.id}/ins", None, fx_mult)
             items["broker_util"] = batch.broker_rub * share
             items["rf_delivery"] = batch.rf_delivery_rub * share
+            if d2d:   # остальное — от границы РФ до клиента, в рублях по курсу на дату поставки
+                rf_part = d2d.amount * (100.0 - batch.door_to_door_border_pct) / 100.0 * share
+                items["rf_delivery"] = rf_part * fx.rate(d2d.currency, ev[PaymentEvent.DELIVERY], s, f"{batch.id}/door_to_door", None, fx_mult)
             for key in ("intl_freight", "insurance"):
                 m = items_fx[key]
                 if m.amount:

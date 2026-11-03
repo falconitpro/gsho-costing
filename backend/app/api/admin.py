@@ -25,7 +25,7 @@ ADMIN = require_roles(Role.ADMIN, Role.GD)
 FD_ADMIN = require_roles(Role.ADMIN, Role.FD, Role.GD)
 SETTINGS_READ = require_roles(Role.ADMIN, Role.FD, Role.GD, Role.CD)
 # ключи, которые меняет КД (и ЗГД): комиссии внешняя и менеджера
-CD_KEYS = {"external_commission_pct", "manager_commission_pct"}
+CD_KEYS = {"external_commission_pct", "manager_commission_pct", "door_to_door_border_pct"}
 
 # ключи, которые может менять ФД (ставки стоимости денег, порог маржи, ΔK/Δt, лимиты)
 FD_KEYS = {"margin_threshold_pct", "scenario_dk", "scenario_dt", "use_historical_volatility", "vol_multipliers", "fx_weights",

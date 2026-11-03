@@ -153,6 +153,8 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             intl_freight=Money(**it.get("intl_freight", {"amount": 0, "currency": "CNY"})),
             insurance_pct=it.get("insurance_pct"), insurance_amount=Money(**it.get("insurance_amount", {"amount": 0, "currency": "CNY"})),
             broker_rub=_num(it.get("broker_rub")), rf_delivery_rub=_num(it.get("rf_delivery_rub")),
+            door_to_door=Money(**it["door_to_door"]) if (it.get("door_to_door") or {}).get("amount") else None,
+            door_to_door_border_pct=float(s.get("door_to_door_border_pct") or 10.0),
             allocation=AllocationMethod(b.allocation), transit_days=b.transit_days, customs_days=b.customs_days,
             rf_delivery_days=b.rf_delivery_days if b.rf_delivery_days is not None else int(s.get("rf_delivery_days_default") or 5),
             border_planned=b.border_actual or b.border_planned,
