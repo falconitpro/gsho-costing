@@ -210,7 +210,7 @@ def model_history(model_id: str, db: Session = Depends(get_db), user: CurrentUse
     for r in rows:
         fields = sorted(set((r.before or {}).keys()) | set((r.after or {}).keys()))
         changes = [{"field": MODEL_FIELD_TITLES.get(f, f), "before": (r.before or {}).get(f), "after": (r.after or {}).get(f)}
-                   for f in fields if f not in ("approve", "tech_params") and (r.before or {}).get(f) != (r.after or {}).get(f)]
+                   for f in fields if f not in ("approve", "tech_params", "machine_type_id", "names") and (r.before or {}).get(f) != (r.after or {}).get(f)]
         out.append({"at": r.at.isoformat() if r.at else None, "user": names.get(r.user_id, "система") if r.user_id else "система",
                     "object": "модель" if r.entity == "equipment_model" else f"исполнение «{ex_names.get(r.entity_id, '')}»",
                     "action": actions.get(r.action, r.action), "changes": changes, "comment": r.comment or "",
