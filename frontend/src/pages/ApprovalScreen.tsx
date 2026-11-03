@@ -75,7 +75,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   const terms = calc.terms?.[vid] || [];
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: "260px 1fr" }}>
+    <div className="grid" style={{ gridTemplateColumns: "260px minmax(0, 1fr)" }}>
       <div>
         <div className="card">
           <h2 style={{ marginTop: 0 }}>{deal.has_alternatives ? "Предложения (альтернативы в КП)" : "Предложение"}</h2>
@@ -192,20 +192,44 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
             <div className="muted">Финансовые расходы (базовый): {Object.entries(base?.finance_breakdown || {}).map(([k, v]) => `${k} ${fmtRub(v)}`).join(" · ")}</div>
           </div>
         )}
-        {tab === "fx" && (
-          <div className="card" style={{ overflowX: "auto" }}>
-            <table>
-              <thead><tr><th>Платёж</th><th>Дата</th><th className="num">T</th><th className="num">K ЦБ</th><th className="num">A форвард</th><th className="num">Б тренд</th><th className="num">В сезон (min–max)</th><th className="num">Г эксперт</th><th>w A/Б/Г</th><th className="num">Прогноз</th><th className="num">ΔK ±</th><th className="num">пессим.</th><th className="num">оптим.</th></tr></thead>
-              <tbody>{calc.result.fx_components.map((c, i) => (
-                <tr key={i}><td>{c.payment_ref}{c.fixed && <span className="badge ok">зафиксирован</span>}</td><td>{fmtDate(c.on)}</td><td className="num">{c.t_days}</td>
-                  <td className="num">{c.k_cbr.toFixed(4)}</td><td className="num">{c.comp_a_forward.toFixed(4)}</td><td className="num">{c.comp_b_trend.toFixed(4)}</td>
-                  <td className="num">{c.comp_c_season.toFixed(4)} ({c.season_spread[0].toFixed(3)}–{c.season_spread[1].toFixed(3)})</td>
-                  <td className="num">{c.comp_g_expert?.toFixed(4) ?? "—"}</td><td>{c.weights.map((w) => w.toFixed(2)).join("/")}</td>
-                  <td className="num"><b>{c.forecast.toFixed(4)}</b></td><td className="num">{c.dk_pct.pessimistic?.toFixed(2)} / {c.dk_pct.optimistic?.toFixed(2)}</td>
-                  <td className="num">{c.rate_by_scenario.pessimistic?.toFixed(4)}</td><td className="num">{c.rate_by_scenario.optimistic?.toFixed(4)}</td></tr>))}</tbody>
-            </table>
-          </div>
-        )}
+        {tab === "fx" && (() => {
+          const ITEM: Record<string, string> = { domestic_logistics: "внутрикитайская логистика", export_formalities: "экспортные формальности КНР", freight: "доставка до границы РФ",
+            door_to_door: "доставка от границы до клиента", ins: "страхование", service: "сервис", "таможенная стоимость": "таможенная стоимость (пошлина, НДС)", _base: "пересчёт в базовую валюту" };
+          const label = (ref: string) => {
+            const i = ref.indexOf("/");
+            if (i < 0) return ITEM[ref] || ref;
+            const id = ref.slice(0, i), rest = ref.slice(i + 1);
+            const pos = deal.positions.find((p) => p.id === id), bat = (deal.batches || []).find((b) => b.id === id);
+            const what = rest.startsWith("завод №") ? `оплата заводу, платёж ${rest.slice(7)}` : rest.startsWith("опция РФ") ? rest : ITEM[rest] || rest;
+            return `${pos ? designation(pos) : bat ? bat.name : "сделка"}: ${what}`;
+          };
+          const rows = calc.result.fx_components.filter((c) => c.payment_ref !== "_alloc" && !c.payment_ref.endsWith("/_alloc"))
+            .filter((c, i, arr) => arr.findIndex((x) => x.payment_ref === c.payment_ref && x.on === c.on && x.currency === c.currency) === i)
+            .sort((x, y) => x.on.localeCompare(y.on));
+          const noHist = (c: (typeof rows)[number]) => c.comp_c_season === 1 && c.season_spread[0] === 1 && c.season_spread[1] === 1 && Math.abs(c.comp_b_trend - c.comp_a_forward) < 1e-9;
+          const f4 = (v: number | null | undefined) => (v == null ? "—" : v.toFixed(4).replace(".", ","));
+          const anyNoHist = rows.some(noHist);
+          return (
+            <div className="card" style={{ overflowX: "auto" }}>
+              <div className="muted" style={{ marginBottom: 6 }}>Курс ЦБ на {fmtDate(calc.input.fx.as_of)}: {Object.entries(calc.input.fx.rates).filter(([k]) => k !== "RUB").map(([k, v]) => `${k} ${f4(v)}`).join(" · ")}
+                {calc.input.fx.note && <> · {calc.input.fx.note}</>}</div>
+              {anyNoHist && <div className="alert warn">Истории курсов ЦБ пока нет — тренд и сезонность не учитываются, прогноз строится по форварду{rows.some((c) => c.comp_g_expert != null) ? " и экспертным точкам" : ""}. История за 5 лет загрузится автоматически в течение часа.</div>}
+              <table>
+                <thead><tr><th>Дата платежа</th><th>Платёж</th><th>Валюта</th><th className="num">Дней до платежа</th><th className="num">Курс ЦБ сегодня</th><th className="num">Форвард</th>
+                  <th className="num">Тренд</th><th className="num">Сезонность</th><th className="num">Экспертная оценка</th><th>Веса (форвард / тренд / эксперт)</th>
+                  <th className="num">Прогноз (базовый)</th><th className="num">Пессимистичный</th><th className="num">Оптимистичный</th></tr></thead>
+                <tbody>{rows.map((c, i) => (
+                  <tr key={i}><td>{fmtDate(c.on)}</td><td>{label(c.payment_ref)}{c.fixed && <span className="badge ok" style={{ marginLeft: 4 }}>курс зафиксирован</span>}</td><td>{c.currency}</td>
+                    <td className="num">{c.t_days}</td><td className="num">{f4(c.k_cbr)}</td><td className="num">{f4(c.comp_a_forward)}</td>
+                    <td className="num">{noHist(c) ? <span className="muted">нет истории</span> : f4(c.comp_b_trend)}</td>
+                    <td className="num">{noHist(c) ? <span className="muted">—</span> : <>{c.comp_c_season.toFixed(3).replace(".", ",")} <span className="muted">({c.season_spread[0].toFixed(3)}–{c.season_spread[1].toFixed(3)})</span></>}</td>
+                    <td className="num">{f4(c.comp_g_expert)}</td><td className="muted">{c.weights.map((w) => `${Math.round(w * 100)} %`).join(" / ")}</td>
+                    <td className="num"><b>{f4(c.forecast)}</b></td>
+                    <td className="num">{f4(c.rate_by_scenario.pessimistic)} <span className="muted">({c.dk_pct.pessimistic != null ? `${c.dk_pct.pessimistic > 0 ? "+" : ""}${c.dk_pct.pessimistic} %` : ""})</span></td>
+                    <td className="num">{f4(c.rate_by_scenario.optimistic)} <span className="muted">({c.dk_pct.optimistic != null ? `${c.dk_pct.optimistic > 0 ? "+" : ""}${c.dk_pct.optimistic} %` : ""})</span></td></tr>))}</tbody>
+              </table>
+            </div>);
+        })()}
         {tab === "history" && (
           <div className="grid cols-2">
             <div className="card"><h2 style={{ marginTop: 0 }}>Комментарии логиста и менеджера</h2>

@@ -16,8 +16,8 @@ function LinesEditor({ lines, events, onChange }: { lines: PaymentLine[]; events
   const sum = lines.reduce((s, l) => s + (l.share_pct || 0), 0);
   return (
     <div>
-      <table className="pay" style={{ width: "100%", tableLayout: "fixed" }}>
-        <colgroup><col style={{ width: 36 }} /><col style={{ width: 90 }} /><col /><col style={{ width: 90 }} /><col style={{ width: 130 }} /><col style={{ width: 90 }} /><col style={{ width: "28%" }} /><col style={{ width: 36 }} /></colgroup>
+      <table className="pay" style={{ width: "100%", minWidth: 640, tableLayout: "fixed" }}>
+        <colgroup><col style={{ width: 32 }} /><col style={{ width: 72 }} /><col style={{ width: "30%" }} /><col style={{ width: 72 }} /><col style={{ width: 120 }} /><col style={{ width: 80 }} /><col /><col style={{ width: 32 }} /></colgroup>
         <thead><tr><th>№</th><th>Доля, %</th><th>Событие-основание</th><th>Через, дн.</th><th>Дни</th><th>Аккредитив</th><th>Условие словами</th><th /></tr></thead>
         <tbody>{lines.map((l, i) => (
           <tr key={i}>
@@ -72,8 +72,11 @@ export default function PaymentTermsEditor({ deal, calc, onSaved }: { deal: Deal
       <h2 style={{ marginTop: 0 }}>Условия оплаты (задаёт КД)</h2>
       {pt.client_payment_wishes && <div className="alert info">Пожелания клиента по оплате (от менеджера): <b>{pt.client_payment_wishes}</b> <button className="btn ghost" style={{ marginLeft: 8 }} onClick={() => api.post(`/api/deals/${deal.id}/payment-terms`, { accept_wishes: true }).then(() => setMsg("Отмечено: пожелания клиента приняты"))}>принять как есть</button></div>}
       {msg && <div className="alert info">{msg}</div>}
-      <style>{`.pay td { padding: 3px; vertical-align: middle; } .pay td input:not([type=checkbox]), .pay td select { width: 100%; padding: 4px; box-sizing: border-box; }
-        .pay thead th { background: #f1f1f1; } .paysec { border: 1px solid #e5e5e5; border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }`}</style>
+      <style>{`.pay { border-collapse: collapse; } .pay td { padding: 4px; vertical-align: middle; border-bottom: 1px solid #e6e9ee; }
+        .pay td input:not([type=checkbox]), .pay td select { width: 100%; padding: 5px; box-sizing: border-box; font-size: 13px; }
+        .pay thead th { background: #e9edf3; color: #1f2937; font-weight: 600; font-size: 12px; padding: 6px 4px; }
+        .pay tbody tr:nth-child(odd) td { background: #fafbfc; } .pay tbody tr:hover td { background: #f1f6ff; }
+        .paysec { border: 1px solid #e5e5e5; border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; overflow-x: auto; }`}</style>
       <div className="paysec">
           <h3 style={{ marginTop: 0 }}>1. Расчёты с клиентом <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>{deal.has_alternatives ? "по каждому предложению" : "по сделке"}</span></h3>
           {!deal.has_alternatives && <><SchemeBar onPick={setClient} /><LinesEditor lines={client} events={CLIENT_EVENTS} onChange={setClient} />

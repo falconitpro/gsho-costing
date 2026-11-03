@@ -480,6 +480,7 @@ def _kp_local(db: Session, deal: Deal, ver: DealVersion, rebuild: bool = False) 
     ensure_folders(db, deal)
     stored = adapters.storage().upload(path, deal.storage_folder, "05_kp", os.path.basename(path))
     ver.kp_path = stored.path
+    ver.kp_meta = {k: v for k, v in (ver.kp_meta or {}).items() if k not in ("pdf_path", "pdf_for")}   # PDF пересоберётся
     db.add(Attachment(deal_id=deal.id, folder="05_kp", entity="version", entity_id=ver.id, file_name=os.path.basename(path),
                       storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=None))
     return path
@@ -498,6 +499,25 @@ def _to_pdf(docx_path: str) -> str:
     pdf = os.path.join(out, os.path.splitext(os.path.basename(docx_path))[0] + ".pdf")
     if not os.path.isfile(pdf):
         raise HTTPException(500, "Не удалось преобразовать КП в PDF")
+    return pdf
+
+
+def _kp_pdf(db: Session, deal: Deal, ver: DealVersion, docx_path: str) -> str:
+    """PDF версии КП: собирается один раз (LibreOffice ~30 с) и хранится в «05 КП»; после «Сформировать КП» — заново."""
+    meta = dict(ver.kp_meta or {})
+    if meta.get("pdf_path") and meta.get("pdf_for") == ver.kp_path:
+        local = os.path.join(tempfile.mkdtemp(), os.path.basename(meta["pdf_path"]))
+        try:
+            return adapters.storage().download(meta["pdf_path"], local)
+        except Exception:
+            pass
+    pdf = _to_pdf(docx_path)
+    try:
+        stored = adapters.storage().upload(pdf, deal.storage_folder, "05_kp", os.path.basename(pdf))
+        ver.kp_meta = {**meta, "pdf_path": stored.path, "pdf_for": ver.kp_path}
+        db.commit()
+    except Exception:
+        pass
     return pdf
 
 
@@ -523,7 +543,7 @@ def kp_file(deal_id: str, format: str = "docx", db: Session = Depends(get_db), u
     db.commit()
     name = f"{deal.number}_КП_v{ver.version_no}"
     if format == "pdf":
-        return FileResponse(_to_pdf(path), filename=name + ".pdf", media_type="application/pdf")
+        return FileResponse(_kp_pdf(db, deal, ver, path), filename=name + ".pdf", media_type="application/pdf")
     return FileResponse(path, filename=name + ".docx",
                         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
@@ -567,7 +587,7 @@ def kp_send(deal_id: str, body: KpSendIn, db: Session = Depends(get_db), user: C
     if not body.to or bad:
         raise HTTPException(422, "Укажите получателей с корректными e-mail" + (f": {', '.join(bad)}" if bad else ""))
     docx = _kp_local(db, deal, ver)
-    files = [docx] if body.format == "docx" else [_to_pdf(docx)] if body.format == "pdf" else [docx, _to_pdf(docx)]
+    files = [docx] if body.format == "docx" else [_kp_pdf(db, deal, ver, docx)] if body.format == "pdf" else [docx, _kp_pdf(db, deal, ver, docx)]
     subject = body.subject or f"Коммерческое предложение {deal.number}"
     html_body = "".join(f"<p>{html.escape(par).replace(chr(10), '<br>')}</p>" for par in (body.body or "").split("\n\n"))
     try:

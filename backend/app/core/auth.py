@@ -157,6 +157,9 @@ async def get_current_user(request: Request, response: Response, db: Session = D
         email = request.headers.get("X-Dev-User", "")
         if email:
             user = db.scalar(select(User).where(User.email == email))
+            if user is not None and user.is_active:
+                # dev-стенд: сессия и для обычных ссылок (скачивание КП, Excel, фото) — от выбранного пользователя
+                set_session_cookie(response, issue_session(user, s), s)
     if user is None:
         token = request.cookies.get(SESSION_COOKIE)
         if not token:

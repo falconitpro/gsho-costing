@@ -41,6 +41,24 @@ async def _daily_jobs() -> None:
                     except Exception as e:
                         db.add(IntegrationLog(system="cbr", operation="daily", ok=False, details={"error": str(e)[:300]}))
                     db.commit()
+                # история курсов ЦБ для тренда и сезонности прогноза: если её почти нет — догружаем за 5 лет (один раз)
+                import sys
+                from datetime import timedelta
+                for cur in (() if "pytest" in sys.modules else ("CNY", "USD", "EUR")):   # в тестах — без сети
+                    n = len(db.scalars(select(FxRate.id).where(FxRate.currency == cur, FxRate.source == "cbr",
+                                                              FxRate.on >= today - timedelta(days=365 * 5))).all())
+                    if n >= 200:
+                        continue
+                    try:
+                        pts = await asyncio.to_thread(adapters.fx_source().history, cur, today - timedelta(days=365 * 5), today)
+                        have = {r for r in db.scalars(select(FxRate.on).where(FxRate.currency == cur, FxRate.source == "cbr")).all()}
+                        for d, r in pts:
+                            if d not in have:
+                                db.add(FxRate(on=d, currency=cur, rate=r, source="cbr"))
+                        db.add(IntegrationLog(system="cbr", operation="history", ok=True, details={"currency": cur, "points": len(pts)}))
+                    except Exception as e:
+                        db.add(IntegrationLog(system="cbr", operation="history", ok=False, details={"currency": cur, "error": str(e)[:300]}))
+                    db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("daily job failed: %s", e)
         await asyncio.sleep(3600)

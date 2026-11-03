@@ -100,7 +100,7 @@ export interface FxComponent {
   rate_by_scenario: Record<string, number>; fixed: boolean;
 }
 export interface CalcResponse {
-  input: { base_currency: string; calc_date?: string; fx: { as_of: string; rates: Record<string, number>; source: string }; thresholds: { margin_threshold_pct: number } };
+  input: { base_currency: string; calc_date?: string; fx: { as_of: string; rates: Record<string, number>; source: string; note?: string }; thresholds: { margin_threshold_pct: number } };
   result: { variants: Record<string, Record<string, ScenarioResult>>; fx_components: FxComponent[]; approval: { financial: boolean; general: boolean; reasons: string[] }; warnings: string[] };
   approval_flags: Record<string, boolean>; threshold_pct: number; warnings: string[]; comments: { from: string; item: string; ref: string; comment: string }[];
   factory_price_history?: { model: string; unit_price: number; currency: string; on: string }[];
