@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { Position } from "../types";
 
 export type RfqFieldData = {
@@ -42,6 +42,7 @@ export default function Questionnaire({ position, onlyL = false, showEmpty = fal
   const bySection = new Map<number, RfqFieldData[]>();
   for (const f of fields) { const n = f.section_no ?? Number(f.code.split(".")[0]); if (!bySection.has(n)) bySection.set(n, []); bySection.get(n)!.push(f); }
   if (!fields.length) return <div className="muted">{onlyL ? "Технические данные для логиста не заполнены" : "Данные опросника отсутствуют"}</div>;
+  if (onlyL) return <LogisticsView fields={fields} all={all} setAll={setAll} />;
   return (
     <div>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
@@ -66,6 +67,55 @@ export default function Questionnaire({ position, onlyL = false, showEmpty = fal
           </table>
         </details>
       ))}
+    </div>
+  );
+}
+
+const CJK = /[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]/;
+/** Убирает китайскую часть: «Тип машины / 机器类型» → «Тип машины», «мм / 毫米» → «мм». */
+const ruOnly = (t: unknown) => {
+  const s = String(t ?? "").trim();
+  if (!CJK.test(s)) return s;
+  const parts = s.split(/\s*[/|]\s*/).filter((x) => x && !CJK.test(x));
+  return parts.join(" / ") || "";
+};
+
+/** Данные для логиста (метка L): одна таблица по разделам, только по-русски — параметр, значение, единица. */
+function LogisticsView({ fields, all, setAll }: { fields: RfqFieldData[]; all: boolean; setAll: (v: boolean) => void }) {
+  const bySection = new Map<number, RfqFieldData[]>();
+  for (const f of fields) { const n = f.section_no ?? Number(f.code.split(".")[0]); if (!bySection.has(n)) bySection.set(n, []); bySection.get(n)!.push(f); }
+  const filled = fields.filter((f) => f.value != null && f.value !== "").length;
+  const val = (f: RfqFieldData) => {
+    const v = f.value_ru != null && f.value_ru !== "" && typeof f.value !== "number" ? f.value_ru : f.value != null && f.value !== "" ? f.value : f.value_ru;
+    if (v == null || v === "") return "";
+    return typeof v === "number" ? fmtVal(v) : ruOnly(v) || "нет перевода — уточните у менеджера";
+  };
+  return (
+    <div>
+      <style>{`.lview { border-collapse: collapse; width: 100%; } .lview td { padding: 5px 8px; border-bottom: 1px solid #eee; }
+        .lview tr.sec td { background: var(--accent-soft); font-weight: 600; padding-top: 7px; } .lview tbody tr:not(.sec):nth-child(even) td { background: #fbfbfb; }
+        .lview td.v { font-weight: 600; text-align: right; white-space: nowrap; } .lview td.u { color: #777; width: 70px; }`}</style>
+      <div className="row" style={{ justifyContent: "space-between", marginBottom: 4 }}>
+        <span className="muted">Заполнено {filled} из {fields.length}</span>
+        <label className="row muted" style={{ fontSize: 12 }}><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> показать незаполненные</label>
+      </div>
+      <table className="lview">
+        <tbody>
+          {[...bySection.entries()].sort((a, b) => a[0] - b[0]).map(([no, fs]) => (
+            <Fragment key={no}>
+              <tr className="sec"><td colSpan={3}>{no}. {ruOnly(fs[0].section?.split(" / ")[0]) || SECTION_TITLES[no] || ""}</td></tr>
+              {fs.map((f) => {
+                const v = val(f);
+                return (
+                  <tr key={f.code}>
+                    <td>{ruOnly(f.name) || f.code}</td>
+                    <td className="v">{v || <span className="muted" style={{ fontWeight: 400 }}>не указано</span>}</td>
+                    <td className="u">{ruOnly((f.unit || "").split(" / ")[0]).replace(/^—$/, "")}</td>
+                  </tr>);
+              })}
+            </Fragment>))}
+        </tbody>
+      </table>
     </div>
   );
 }
