@@ -120,3 +120,16 @@ def test_country_normalized():
     assert normalize_country("CN") == "Китай" and normalize_country("Made in Korea") == "Республика Корея"
     assert normalize_country("Sweden (Örebro)") == "Швеция" and normalize_country("Дания, Копенгаген") == "Дания"
     assert is_country_row("1.3", "") and is_country_row("", "Страна-производитель")
+
+
+def test_util_fee_reference():
+    """Утилизационный сбор: базовая ставка × коэффициент; коэффициент — по самому длинному совпадению кода ТН ВЭД и типу машины."""
+    from app.services.settings_service import util_reference
+    s = {"util_base_rate_rub": 172500, "util_coefficients": [
+        {"hs_prefix": "8429", "machine_type": "", "coefficient": 1.5},
+        {"hs_prefix": "842951", "machine_type": "погрузчик", "coefficient": 2.0, "comment": "фронтальные погрузчики"},
+    ]}
+    r = util_reference(s, "8429511000", "Погрузчик шахтный")
+    assert r["base_rate_rub"] == 172500 and r["coefficient"] == 2.0
+    assert util_reference(s, "8429520000", "Экскаватор")["coefficient"] == 1.5
+    assert util_reference(s, "8704100000", "Самосвал")["coefficient"] is None

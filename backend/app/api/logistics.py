@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..core.auth import CurrentUser, require_roles
+from ..core.auth import CurrentUser, get_current_user, require_roles
 from ..core.roles import Role
 from ..core.workflow import DealState, DealStatus, block_completed
 from ..db import get_db
@@ -52,6 +52,9 @@ class PositionLogisticsIn(BaseModel):
     vat_pct: Optional[float] = None
     hs_manual_comment: str = ""
     util_fee_rub: float = 0.0
+    util_applies: Optional[bool] = None       # начисляется ли утилизационный сбор; None — по справочнику ТН ВЭД
+    util_base_rate_rub: Optional[float] = None    # базовая ставка, ₽
+    util_coefficient: Optional[float] = None      # коэффициент по виду техники и коду ТН ВЭД
     certification_rub: float = 0.0
     certifications: list[str] = Field(default_factory=list)
     volume_m3: Optional[float] = None
@@ -160,6 +163,21 @@ def update_position_logistics(deal_id: str, pos_id: str, body: PositionLogistics
         data["duty_pct"] = body.duty_pct or 0.0
         data["vat_pct"] = body.vat_pct if body.vat_pct is not None else 20.0
     data["hs_check"] = chk
+    # утилизационный сбор: начисляется → базовая ставка × коэффициент; не начисляется → 0
+    applies = body.util_applies if body.util_applies is not None else bool(body.util_fee_rub or (ref and ref.get("util_fee")))
+    data["util_applies"] = applies
+    if applies and body.util_applies is None and body.util_fee_rub and body.util_coefficient is None:
+        pass   # сумма введена напрямую (прежний способ) — оставляем как есть
+    elif applies:
+        uref = settings_service.util_reference(settings_service.get_all(db), body.hs_code, pos.machine_type)
+        base = body.util_base_rate_rub if body.util_base_rate_rub is not None else uref["base_rate_rub"]
+        coef = body.util_coefficient if body.util_coefficient is not None else uref["coefficient"]
+        if coef is None:
+            raise HTTPException(422, {"message": "Утилизационный сбор начисляется — укажите коэффициент для вида техники и кода ТН ВЭД"})
+        data["util_base_rate_rub"], data["util_coefficient"] = base, coef
+        data["util_fee_rub"] = round(base * coef, 2)
+    else:
+        data["util_base_rate_rub"], data["util_coefficient"], data["util_fee_rub"] = body.util_base_rate_rub, body.util_coefficient, 0.0
     # проверка по истории
     checks = {}
     for key in ("domestic_logistics", "export_formalities"):
@@ -220,3 +238,16 @@ def complete(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     apply_transition(db, deal, tr, user.id)
     db.commit()
     return {"status": deal.status.value}
+
+
+@router.get("/positions/{pos_id}/util-reference")
+def util_reference(deal_id: str, pos_id: str, hs_code: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Подсказка логисту по утилизационному сбору: начисляется ли по справочнику ТН ВЭД, базовая ставка, коэффициент."""
+    deal = get_deal_or_404(db, deal_id, user)
+    pos = db.get(Position, pos_id)
+    if pos is None or pos.deal_id != deal.id:
+        raise HTTPException(404)
+    code = hs_code or (pos.logistics or {}).get("hs_code") or ""
+    row = db.scalar(select(HsCode).where(HsCode.code == code, HsCode.valid_to.is_(None))) if code else None
+    ref = settings_service.util_reference(settings_service.get_all(db), code, pos.machine_type)
+    return {**ref, "hs_code": code, "hs_found": row is not None, "applies_by_hs": bool(row.util_fee) if row else None, "machine_type": pos.machine_type}

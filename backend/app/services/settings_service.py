@@ -28,6 +28,8 @@ DEFAULTS: dict[str, Any] = {
     "external_commission_pct": 2.0,    # внешняя комиссия, % от цены клиента
     "manager_commission_pct": 0.0,     # комиссия менеджера, % от себестоимости
     "cd_commission_pct": 0.0,          # комиссия КД, % от себестоимости
+    "util_base_rate_rub": 172_500.0,   # утилизационный сбор: базовая ставка (самоходная техника), ₽
+    "util_coefficients": [],           # коэффициенты по виду техники и коду ТН ВЭД: [{hs_prefix, machine_type, coefficient, comment}]
     "logistics_l_codes": None,         # коды полей опросника для логиста (метка L); None — как в шаблоне RFQ
     "guarantee_rate_pct": 3.0,
     "vat_offset_days": 90,
@@ -93,6 +95,25 @@ def expert_points(value: Any) -> dict[str, list[dict]]:
         if rows:
             out[str(cur).upper()[:3]] = sorted(rows, key=lambda x: x["on"])
     return out
+
+
+def util_reference(s: dict[str, Any], hs_code: str = "", machine_type: str = "") -> dict[str, Any]:
+    """Подсказка по утилизационному сбору: базовая ставка и коэффициент по коду ТН ВЭД (длиннейшее совпадение начала) и типу машины."""
+    hs = (hs_code or "").replace(" ", "")
+    mt = (machine_type or "").strip().lower()
+    best, best_score = None, (-1, -1)
+    for row in s.get("util_coefficients") or []:
+        pref = str(row.get("hs_prefix") or "").replace(" ", "")
+        rmt = str(row.get("machine_type") or "").strip().lower()
+        if pref and not hs.startswith(pref):
+            continue
+        if rmt and rmt not in mt:
+            continue
+        score = (len(pref), len(rmt))
+        if score > best_score:
+            best, best_score = row, score
+    return {"base_rate_rub": float(s.get("util_base_rate_rub") or 0), "coefficient": float(best["coefficient"]) if best and best.get("coefficient") not in (None, "") else None,
+            "rule": best}
 
 
 def get_all(db: Session) -> dict[str, Any]:
@@ -191,6 +212,12 @@ META: dict[str, dict] = {
                                "help": "Статья 17: от суммы статей 1–15. Меняют КД или ГД."},
     "cd_commission_pct": {"group": "Комиссии", "title": "Комиссия КД", "unit": "% от себестоимости", "type": "number",
                           "help": "Статья 18: от суммы статей 1–15. Меняет ГД."},
+    "util_base_rate_rub": {"group": "Таможня и утилизационный сбор", "title": "Утилизационный сбор: базовая ставка", "unit": "₽", "type": "number",
+                           "help": "Подставляется логисту; сбор = базовая ставка × коэффициент по виду техники. Проверьте действующую редакцию постановления Правительства РФ."},
+    "util_coefficients": {"group": "Таможня и утилизационный сбор", "title": "Коэффициенты утилизационного сбора", "type": "table",
+                          "columns": [{"key": "hs_prefix", "label": "Код ТН ВЭД (начало)", "type": "text"}, {"key": "machine_type", "label": "Вид техники (тип машины)", "type": "text"},
+                                      {"key": "coefficient", "label": "Коэффициент"}, {"key": "comment", "label": "Основание / комментарий", "type": "text"}],
+                          "help": "Подсказка логисту: коэффициент выбирается по коду ТН ВЭД (самое длинное совпадение начала кода) и типу машины. Логист может изменить."},
     "logistics_l_codes": {"group": "Технические характеристики", "title": "Поля для логиста (метка L)", "type": "l_codes",
                           "help": "Какие поля опросника попадают логисту для расчёта (габариты, массы, тип машины…). Не задано — как в шаблоне RFQ."},
     "guarantee_rate_pct": {"group": "Стоимость денег и банк", "title": "Ставка банковской гарантии (прочие)", "unit": "% годовых", "type": "number"},
@@ -254,7 +281,7 @@ META: dict[str, dict] = {
                          "options": [{"value": "factory", "label": "под маркой завода"}, {"value": "company", "label": "под брендом компании"}]},
 }
 GROUP_ORDER = ["Маржа и визы", "Комиссии", "Условия оплаты по умолчанию", "Стоимость денег и банк", "Сценарии и прогноз курса", "НДС",
-               "Накладные и резервы", "Сервис", "Технические характеристики", "Контроль отклонений", "Сроки и календарь", "Интеграции и КП"]
+               "Накладные и резервы", "Сервис", "Таможня и утилизационный сбор", "Технические характеристики", "Контроль отклонений", "Сроки и календарь", "Интеграции и КП"]
 
 
 def meta() -> dict:
