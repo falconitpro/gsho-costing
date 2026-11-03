@@ -532,3 +532,16 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     r15 = next(r for r in _ok(client.get(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR)))["rows"] if r["code"] == "1.5")
     assert (r15["value_ru"], r15["customer_requirement_ru"], r15["comment_ru"]) == ("8 300", "не более 8 500", "по чертежу")
     assert r15["req_status"] == "match"
+    # --- логист видит тот же тип машины, что в таблице (поле 1.1 с меткой L — в данных логиста)
+    rows3 = _ok(client.get(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR)))["rows"]
+    for r in rows3:
+        if r["code"] == "1.1":
+            r["value_ru"] = "Самосвал шахтный"
+    _ok(client.put(f"/api/deals/{deal['id']}/positions/{pid}/tech-params", headers=H(MGR), json=rows3))
+    pl = next(p_ for p_ in _ok(client.get(f"/api/deals/{deal['id']}", headers=H(MGR)))["positions"] if p_["id"] == pid)
+    assert pl["machine_type"] == "Самосвал шахтный"
+    if "1.1" in (pl.get("logistics_params") or {}):
+        assert pl["logistics_params"]["1.1"]["value"] == "Самосвал шахтный"
+    snap = ((pl.get("tech_params") or {}).get("_rfq") or {}).get("fields") or {}
+    if "1.1" in snap:
+        assert snap["1.1"]["value"] == "Самосвал шахтный"

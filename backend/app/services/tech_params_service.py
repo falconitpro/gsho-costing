@@ -247,12 +247,35 @@ def rows_from_rfq(db: Session, pos: Position, parsed, user_id: Optional[str]) ->
     sync_position(db, pos)   # страна — только названием страны
 
 
+def _field_value(code: str, text: str):
+    """Значение строки таблицы → значение поля опросника (числовые коды — числом, как при импорте)."""
+    from .rfq_import import NUMERIC_CODES, _parse_number
+    if code in NUMERIC_CODES:
+        n = _parse_number(text)
+        if n is not None:
+            return n
+    return text
+
+
+def _put_field(store: dict, code: str, value) -> bool:
+    entry = store.get(code)
+    if isinstance(entry, dict) and entry.get("value") != value:
+        store[code] = {**entry, "value": value}
+        return True
+    return False
+
+
 def sync_position(db: Session, pos: Position) -> dict:
-    """Таблица → позиция: страна-производитель приводится к названию страны; тип машины (1.1) и модель (1.2), изменённые
-    в таблице, переносятся в позицию — оттуда они видны в перечне позиций, карточке сделки и у всех ролей."""
+    """Таблица → позиция: страна-производитель приводится к названию страны; тип машины (1.1) и модель (1.2) — в позицию
+    (перечень позиций, карточка сделки, все роли); значения всех строк — в поля опросника, в том числе в данные логиста
+    (метка L: тип машины, страна, габариты, массы), чтобы логист видел то же, что в таблице."""
     from .countries import is_country_row, normalize_country
     changed: dict = {}
     tp = dict(pos.tech_params or {})
+    lp = dict(pos.logistics_params or {})
+    snap = dict(((tp.get("_rfq") or {}).get("fields")) or {}) if isinstance(tp.get("_rfq"), dict) else {}
+    l_meta = {f["code"]: f for f in _general_fields() if f.get("is_l")}
+    snap_changed = False
     for r in pos.tech_param_rows or []:
         if is_country_row(r.code, r.name_ru):
             raw = r.value_ru or r.value_zh
@@ -261,28 +284,46 @@ def sync_position(db: Session, pos: Position) -> dict:
                 r.value_ru = norm
                 changed["country"] = norm
         code, val = (r.code or "").strip(), (r.value_ru or "").strip()
-        if code == "1.1" and val and val != (pos.machine_type or ""):
+        if not code or not val:
+            continue
+        if code == "1.1" and val != (pos.machine_type or ""):
             pos.machine_type = changed["machine_type"] = val
-        if code == "1.2" and val and val != (pos.model or ""):
+        if code == "1.2" and val != (pos.model or ""):
             pos.model = changed["model"] = val
-        if code in ("1.1", "1.2", "1.3") and val and isinstance(tp.get(code), dict) and tp[code].get("value") != val:
-            tp[code] = {**tp[code], "value": val}
+        value = _field_value(code, val)
+        _put_field(tp, code, value)
+        if not _put_field(lp, code, value) and code in l_meta and code not in lp:
+            f = l_meta[code]   # поле логиста заполнено только в таблице — добавляем в данные логиста
+            lp[code] = {"code": code, "section": f.get("section"), "section_no": f.get("section_no"), "name": f.get("name") or r.name_ru,
+                        "name_zh": f.get("name_zh") or r.name_zh, "unit": f.get("unit") or r.unit, "value": value, "is_l": True}
+        snap_changed = _put_field(snap, code, value) or snap_changed
+    if snap_changed:
+        tp["_rfq"] = {**tp["_rfq"], "fields": snap}
     if tp != (pos.tech_params or {}):
         pos.tech_params = tp
+    if lp != (pos.logistics_params or {}):
+        pos.logistics_params = lp
     return changed
 
 
 def rows_follow_position(pos: Position) -> None:
     """Позиция → таблица: тип машины, модель и страна, изменённые в карточке позиции, — в строки 1.1 / 1.2 / 1.3."""
+    def field(code: str):
+        for store in (pos.logistics_params or {}, pos.tech_params or {}):
+            e = store.get(code)
+            if isinstance(e, dict) and e.get("value") not in (None, ""):
+                return str(e["value"])
+        return None
     for r in pos.tech_param_rows or []:
         if r.code == "1.1" and pos.machine_type and r.value_ru != pos.machine_type:
             r.value_ru = pos.machine_type
         if r.code == "1.2" and pos.model and r.value_ru != pos.model:
             r.value_ru = pos.model
-        country = ((pos.tech_params or {}).get("1.3") or {}).get("value") if isinstance((pos.tech_params or {}).get("1.3"), dict) else None
-        if r.code == "1.3" and country and r.value_ru != country:
+        country = field("1.3") if r.code == "1.3" else None
+        if country:
             from .countries import normalize_country
-            r.value_ru = normalize_country(country)
+            if r.value_ru != normalize_country(country):
+                r.value_ru = normalize_country(country)
 
 
 def apply_form_rows(pos: Position, form_rows: list[dict], user_id: Optional[str], skip_empty: bool = False) -> int:
