@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { MeContext } from "../App";
 import { lbl, IMAGE_KIND, PRICE_SOURCE } from "../labels";
 import { api, designation, fmtDate, fmtRub } from "../api";
 import type { TechParamRow } from "../types";
 import TechParamsView from "./TechParamsView";
 
+type Hist = { at: string | null; user: string; object: string; action: string; changes: { field: string; before: unknown; after: unknown }[]; comment: string; deal: string | null };
+const fmtVal = (v: unknown) => (v == null || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
 type Img = { attachment_id?: string; caption?: string; kind?: string; source?: string; file_name?: string; url?: string };
 type Exec = { id: string; name: string; brand_name: string; status: string; tech_params: TechParamRow[]; local_options: { name?: string; cost?: number; currency?: string; install_days?: number }[];
   images: Img[]; source_deal_id: string | null };
@@ -18,7 +22,7 @@ type Analytics = {
   client: { kp: number; deals: number; won: number; lost: number; open: number; win_rate_pct: number | null; price_rub: Stats; won_price_rub: Stats; lost_price_rub: Stats; qty_won: number; last: string | null };
   price_ratio?: { factory_rub: number; rate: number; currency: string; client_avg_rub: number; ratio: number | null };
 };
-type Card = { id: string; model: string; trademark: string; brand_name: string; machine_type: string; status: string; factory: string;
+type Card = { id: string; model: string; trademark: string; trademark_saved?: string; manually_checked?: boolean; brand_name: string; machine_type: string; status: string; factory: string;
   logistics_params: Record<string, { name?: string; value?: unknown; unit?: string }>; maintenance_regulations: { name: string; interval_hours: number; operations?: { name: string; hours: number }[] }[];
   default_hours_per_month?: number | null; hs?: { code: string; description?: string; duty_pct?: number | null; vat_pct?: number | null; on?: string; deal?: string } | null; executions: Exec[]; with_prices: boolean; factory_prices?: FPrice[]; client_prices?: CPrice[]; analytics?: Analytics };
 
@@ -47,7 +51,32 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
   const [tab, setTab] = useState("tech");
   const [ex, setEx] = useState(execId || "");
   const [err, setErr] = useState("");
-  useEffect(() => { setCard(null); setErr(""); api.get<Card>(`/api/catalog/models/${modelId}/card`).then((c) => { setCard(c); setEx(execId || c.executions[0]?.id || ""); }).catch((e) => setErr(e.message)); }, [modelId]);
+  const [msg, setMsg] = useState("");
+  const [edit, setEdit] = useState<null | { model: string; machine_type: string; trademark: string; brand_name: string; comment: string }>(null);
+  const [hist, setHist] = useState<Hist[] | null>(null);
+  const [newDeal, setNewDeal] = useState<null | { client_id: string; qty: string; site: string; kp_due: string; comment: string }>(null);
+  const [clients, setClients] = useState<{ id: string; name: string; sites?: { name: string }[] }[]>([]);
+  const nav = useNavigate();
+  const me = MeContext.current;
+  const has = (...r: string[]) => !!me && me.roles.some((x) => r.includes(x.code));
+  const canEdit = !!me && (me.perms?.catalog ?? 0) >= 2;
+  const reload = () => api.get<Card>(`/api/catalog/models/${modelId}/card`).then((c) => { setCard(c); setEx((cur) => cur || execId || c.executions[0]?.id || ""); }).catch((e) => setErr(e.message));
+  useEffect(() => { setCard(null); setErr(""); setEdit(null); setHist(null); setNewDeal(null); setMsg(""); setEx(execId || ""); reload(); }, [modelId]);
+  useEffect(() => { if (tab === "history") api.get<Hist[]>(`/api/catalog/models/${modelId}/history`).then(setHist).catch(() => setHist([])); }, [tab, modelId]);
+  async function saveModel() {
+    if (!edit || !card) return;
+    try {
+      await api.patch(`/api/catalog/models/${card.id}`, { model: edit.model, machine_type: edit.machine_type, trademark: edit.trademark, brand_name: edit.brand_name, comment: edit.comment });
+      setEdit(null); setMsg("Модель сохранена; изменение записано в историю"); reload(); if (tab === "history") api.get<Hist[]>(`/api/catalog/models/${modelId}/history`).then(setHist);
+    } catch (e) { setMsg((e as Error).message); }
+  }
+  async function createDeal() {
+    if (!newDeal || !e) return;
+    try {
+      const d = await api.post<{ id: string; number: string }>(`/api/catalog/executions/${e.id}/create-deal`, { ...newDeal, qty: Number(newDeal.qty) || 1, kp_due: newDeal.kp_due || null });
+      nav(`/deals/${d.id}`);
+    } catch (x) { setMsg((x as Error).message); }
+  }
   useEffect(() => { if (execId) setEx(execId); }, [execId]);
   if (err) return <div className="alert error">{err}</div>;
   if (!card) return <div className="card muted">Загрузка…</div>;
@@ -55,13 +84,45 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
   const images = card.executions.flatMap((x) => x.images.map((im) => ({ ...im, exec: x.name })));
   const an = card.analytics;
   const tabs: [string, string][] = [["tech", "Технические характеристики"], ["photo", `Фото и чертежи (${images.length})`], ["more", "Опции, регламенты, логистика"],
-    ...(card.with_prices ? [["prices", "Цены и сроки — список"], ["analytics", "Аналитическая справка"]] as [string, string][] : [])];
+    ...(card.with_prices ? [["prices", "Цены и сроки — список"], ["analytics", "Аналитическая справка"]] as [string, string][] : []), ["history", "История изменений"]];
   const pickExec = (id: string) => { setEx(id); onExec?.(id); };
 
   return (
     <div className="card">
       <h2 style={{ marginTop: 0 }}>{card.machine_type} <b>{designation(card)}</b> {card.brand_name && <span className="badge accent">{card.brand_name}</span>}</h2>
-      <div className="muted" style={{ marginBottom: 8 }}>{card.factory} · исполнений: {card.executions.length}</div>
+      <div className="muted" style={{ marginBottom: 8 }}>{card.factory} · торговая марка: {card.trademark || "—"} · исполнений: {card.executions.length}{card.manually_checked ? "" : " · данные модели пока не проверены КД / ЗГД"}</div>
+      {msg && <div className="alert info">{msg}</div>}
+      <div className="row" style={{ marginBottom: 8, flexWrap: "wrap" }}>
+        {has("manager", "cd", "gd") && e && e.status === "approved" && <button className="btn" onClick={() => { setNewDeal({ client_id: "", qty: "1", site: "", kp_due: "", comment: "" }); if (!clients.length) api.get<typeof clients>("/api/refs/clients").then(setClients); }}>Создать заявку для клиента по этой машине</button>}
+        {canEdit && <button className="btn secondary" onClick={() => setEdit({ model: card.model, machine_type: card.machine_type || "", trademark: card.trademark_saved || card.trademark || "", brand_name: card.brand_name || "", comment: "" })}>Изменить модель</button>}
+      </div>
+      {newDeal && e && (
+        <div className="card" style={{ background: "#fafbfc" }}>
+          <b>Новая заявка: {designation(card)} — {e.name}</b>
+          <div className="muted" style={{ fontSize: 12, margin: "4px 0" }}>В заявку попадут технические характеристики исполнения, фото и чертежи, опции РФ, данные для логиста, код ТН ВЭД, последние цена и срок производства завода. Дальше — обычный порядок: проверить, при необходимости запросить завод, отправить на расчёт.</div>
+          <div className="row" style={{ flexWrap: "wrap" }}>
+            <select value={newDeal.client_id} onChange={(x) => setNewDeal({ ...newDeal, client_id: x.target.value })}><option value="">— клиент —</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+            <label className="row">кол-во <input type="number" min={1} value={newDeal.qty} onChange={(x) => setNewDeal({ ...newDeal, qty: x.target.value })} style={{ width: 70 }} /></label>
+            <input placeholder="объект / месторождение" value={newDeal.site} list="cat-sites" onChange={(x) => setNewDeal({ ...newDeal, site: x.target.value })} />
+            <datalist id="cat-sites">{(clients.find((c) => c.id === newDeal.client_id)?.sites || []).map((s0) => <option key={s0.name} value={s0.name} />)}</datalist>
+            <label className="row">срок КП <input type="date" value={newDeal.kp_due} onChange={(x) => setNewDeal({ ...newDeal, kp_due: x.target.value })} /></label>
+            <input placeholder="комментарий" value={newDeal.comment} onChange={(x) => setNewDeal({ ...newDeal, comment: x.target.value })} style={{ width: 220 }} />
+            <button className="btn" disabled={!newDeal.client_id} onClick={createDeal}>Создать заявку</button>
+            <button className="btn ghost" onClick={() => setNewDeal(null)}>Отмена</button>
+          </div>
+        </div>)}
+      {edit && (
+        <div className="card" style={{ background: "#fafbfc" }}>
+          <b>Изменить модель</b> <span className="muted" style={{ fontSize: 12 }}>— после проверки КД / ЗГД данные модели больше не меняются автоматически из сделок</span>
+          <div className="grid cols-2" style={{ marginTop: 6 }}>
+            <label className="f">Тип машины<input value={edit.machine_type} onChange={(x) => setEdit({ ...edit, machine_type: x.target.value })} placeholder="напр. Шахтная пассажиро-грузовая машина" /></label>
+            <label className="f">Модель<input value={edit.model} onChange={(x) => setEdit({ ...edit, model: x.target.value })} /></label>
+            <label className="f">Торговая марка завода<input value={edit.trademark} onChange={(x) => setEdit({ ...edit, trademark: x.target.value })} placeholder="напр. SHILI" /></label>
+            <label className="f">Наименование под брендом компании<input value={edit.brand_name} onChange={(x) => setEdit({ ...edit, brand_name: x.target.value })} /></label>
+          </div>
+          <label className="f">Что исправлено и почему (в историю изменений)<input value={edit.comment} onChange={(x) => setEdit({ ...edit, comment: x.target.value })} style={{ width: "100%" }} /></label>
+          <div className="row" style={{ marginTop: 6 }}><button className="btn" disabled={!edit.model.trim()} onClick={saveModel}>Сохранить</button><button className="btn ghost" onClick={() => setEdit(null)}>Отмена</button></div>
+        </div>)}
       <div className="tabs" style={{ marginBottom: 10 }}>{tabs.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{t}</button>)}</div>
 
       {tab === "tech" && (
@@ -152,6 +213,11 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
             {!Object.keys(an.factory).length && an.client.price_rub.n === 0 && <li className="muted">Истории цен по модели пока нет.</li>}
           </ul>
         </>)}
+      {tab === "history" && (hist == null ? <div className="muted">Загрузка…</div> : hist.length === 0 ? <div className="muted">Изменений пока нет.</div> : (
+        <table><thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Действие</th><th>Было → стало</th><th>Комментарий</th></tr></thead>
+          <tbody>{hist.map((h, i) => (
+            <tr key={i}><td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{h.at ? new Date(h.at).toLocaleString("ru-RU") : ""}</td><td>{h.user}</td><td style={{ fontSize: 12 }}>{h.object}{h.deal && <div className="muted">сделка {h.deal}</div>}</td><td>{h.action}</td>
+              <td style={{ fontSize: 12 }}>{h.changes.map((c, j) => <div key={j}><b>{c.field}:</b> <span className="muted">{fmtVal(c.before)}</span> → {fmtVal(c.after)}</div>)}</td><td style={{ fontSize: 12 }}>{h.comment}</td></tr>))}</tbody></table>))}
     </div>
   );
 }

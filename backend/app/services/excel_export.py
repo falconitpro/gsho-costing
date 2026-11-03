@@ -54,6 +54,10 @@ MANAGER_HIDDEN_SHEETS = {"Сводка", "Себестоимость", "Плат
 
 
 def _hdr(ws, row: int, values: list[str], col: int = 1) -> None:
+    rows = getattr(ws, "_hdr_rows", None)
+    if rows is None:
+        rows = ws._hdr_rows = []
+    rows.append(row)
     for i, v in enumerate(values):
         c = ws.cell(row, col + i, v)
         c.font, c.fill, c.border = HDR_FONT, HDR_FILL, BORDER
@@ -109,8 +113,24 @@ class ExcelExporter:
                 for c in row:
                     if isinstance(c.value, str) and not c.value.startswith("=") and _CJK.search(c.value):
                         c.value = ru_only(c.value)
+        self._fit_headers()
         self.wb.save(path)
         return path
+
+    def _fit_headers(self) -> None:
+        """Высота строк заголовков по длине текста и ширине столбцов — заголовки читаются целиком (Excel сам не подбирает высоту)."""
+        import math
+        for ws in self.wb.worksheets:
+            for r in set(getattr(ws, "_hdr_rows", [])):
+                lines = 1
+                for c in ws[r]:
+                    if c.value is None:
+                        continue
+                    w = ws.column_dimensions[c.column_letter].width or 10
+                    chars = max(int(w * 1.15) - 1, 4)
+                    need = sum(max(1, math.ceil(len(part) / chars)) for part in str(c.value).split("\n"))
+                    lines = max(lines, need)
+                ws.row_dimensions[r].height = max(15.0, 14.5 * lines + 3)
 
     # ------------------------------------------------------------------ «Себестоимость»
     def _sheet_cost(self) -> None:
@@ -221,7 +241,7 @@ class ExcelExporter:
             for pc in base.positions:
                 if pc.delivery_term:
                     dt = pc.delivery_term
-                    ws.cell(row, 1, f"Срок клиенту, {pc.position_id}: расчёт {dt.calc_days} → +{dt.reserve_pct:g} % = {dt.with_reserve} → {dt.text}")
+                    ws.cell(row, 1, f"Срок клиенту, {self._n(pc.position_id)}: расчёт {dt.calc_days} → +{dt.reserve_pct:g} % = {dt.with_reserve} → {dt.text}")
                     row += 1
             ws.cell(row, 1, "Банковская гарантия на аванс, RUB")
             for j, s in enumerate(SCEN_ORDER):

@@ -135,6 +135,30 @@ def catalog_candidates(db: Session, deal: Deal) -> list[dict]:
     return out
 
 
+def sync_model_from_position(db: Session, model: EquipmentModel, pos: Position, user_id: Optional[str]) -> dict:
+    """Тип машины и торговая марка модели каталога — как в позиции (после исправлений менеджера), пока модель не проверена
+    вручную КД / ЗГД (создана автоматически при импорте RFQ или ждёт подтверждения). У проверенной модели заполняются
+    только пустые поля. Изменения пишутся в журнал (история модели)."""
+    auto = model.status == "pending" or model.approved_by is None
+    before = {"machine_type": model.machine_type, "trademark": model.trademark}
+    changed = {}
+    if pos.machine_type and (auto or not model.machine_type) and pos.machine_type != model.machine_type:
+        mt = db.scalar(select(MachineType).where(MachineType.name == pos.machine_type))
+        if mt is None:
+            mt = MachineType(name=pos.machine_type, status="pending", proposed_by=user_id)
+            db.add(mt)
+            db.flush()
+        model.machine_type, model.machine_type_id = pos.machine_type, mt.id
+        changed["machine_type"] = pos.machine_type
+    if pos.trademark and (auto or not model.trademark) and pos.trademark != model.trademark:
+        model.trademark = pos.trademark
+        changed["trademark"] = pos.trademark
+    if changed:
+        audit(db, user_id, pos.deal_id, "equipment_model", model.id, "sync", {k: before[k] for k in changed}, changed,
+              "по данным позиции сделки (исправления менеджера)")
+    return changed
+
+
 def propose(db: Session, deal: Deal, position_ids: list[str], names: dict[str, str], user_id: str) -> list[EquipmentExecution]:
     """Менеджер отметил позиции → исполнения «на проверке» и задача КД (видна и ЗГД) «Подтвердить занесение в каталог»."""
     created: list[EquipmentExecution] = []
@@ -153,6 +177,8 @@ def propose(db: Session, deal: Deal, position_ids: list[str], names: dict[str, s
                                    status="pending", proposed_by=user_id)
             db.add(model)
             db.flush()
+        else:
+            sync_model_from_position(db, model, p, user_id)
         rows = [{k: r.get(k) for k in ("no", "code", "name_ru", "name_zh", "unit", "value_ru", "value_zh", "required", "local_ru")} for r in row_dicts(p)]
         fp = fingerprint(rows)
         dup = db.scalar(select(EquipmentExecution).where(EquipmentExecution.model_id == model.id, EquipmentExecution.fingerprint == fp,
@@ -189,6 +215,10 @@ def approve_execution(db: Session, ex: EquipmentExecution, user_id: str, approve
     if brand_name is not None:
         ex.brand_name = brand_name
     model = db.get(EquipmentModel, ex.model_id)
+    if model and approve and ex.source_position_id:
+        src_pos = db.get(Position, ex.source_position_id)
+        if src_pos is not None:
+            sync_model_from_position(db, model, src_pos, user_id)
     if model and approve and model.status == "pending":
         model.status, model.approved_by = "approved", user_id
         mt = db.get(MachineType, model.machine_type_id) if model.machine_type_id else None
@@ -370,6 +400,7 @@ def model_card(db: Session, model: EquipmentModel, with_prices: bool) -> dict:
     out = {
         "id": model.id, "model": model.model, "trademark": model.trademark or default_trademark(factory), "brand_name": model.brand_name,
         "machine_type": model.machine_type, "status": model.status, "factory_id": model.factory_id, "factory": factory.name if factory else "",
+        "trademark_saved": model.trademark or "", "manually_checked": model.approved_by is not None,
         "logistics_params": model.logistics_params or {}, "maintenance_regulations": model.maintenance_regulations or [],
         "default_hours_per_month": model.default_hours_per_month,
         "hs": {**(model.hs_info or {}), "code": model.default_hs_code} if model.default_hs_code else None,   # код ТН ВЭД (вводит логист)
@@ -434,3 +465,106 @@ def model_card(db: Session, model: EquipmentModel, with_prices: bool) -> dict:
                                  "ratio": round(an["client"]["price_rub"]["avg"] / factory_rub, 2) if factory_rub else None}
     out["analytics"] = an
     return out
+
+
+# ------------------------------------------------------------------ заявка из каталога: перенос данных исполнения в позицию
+
+def apply_execution_to_position(db: Session, deal, pos, user_id: Optional[str]) -> dict:
+    """Позиция, выбранная из каталога, получает всё, что известно по исполнению и модели (не затирая введённое вручную):
+    фото и чертежи (копии файлов в папку сделки), опции РФ, данные для логиста (метка L), код ТН ВЭД, торговую марку,
+    наименование под брендом компании, последние цену и срок производства завода (если цена не задана). Возвращает, что перенесено."""
+    import os
+    import shutil
+    import tempfile
+    from .. import adapters
+    from ..core.config import get_settings
+    from ..models import Attachment, FactoryPriceHistory, LocalOption, PositionImage
+    from .deal_service import ensure_folders
+    done: dict[str, int | str] = {}
+    ex = db.get(EquipmentExecution, pos.execution_id) if pos.execution_id else None
+    if ex is None:
+        return done
+    model = db.get(EquipmentModel, ex.model_id)
+    # 1. фото и чертежи — копии файлов (доступ по правам новой сделки), без отметки «В КП»
+    have = {(i.caption, i.kind) for i in (pos.image_rows or [])}
+    n = 0
+    s = get_settings()
+    for im in ex.images or []:
+        att = db.get(Attachment, im.get("attachment_id")) if im.get("attachment_id") else None
+        if att is None or (im.get("caption"), im.get("kind")) in have:
+            continue
+        try:
+            ensure_folders(db, deal)
+            src = os.path.join(s.storage_local_root, att.storage_path)
+            if s.storage_provider == "local" and os.path.isfile(src):
+                d = tempfile.mkdtemp()
+                tmp = os.path.join(d, att.file_name)
+                shutil.copyfile(src, tmp)
+                stored = adapters.storage().upload(tmp, deal.storage_folder, "01_rfq", f"img_{pos.model}_{att.file_name}".replace("/", "-"))
+                shutil.rmtree(d, ignore_errors=True)
+                new = Attachment(deal_id=deal.id, folder="01_rfq", entity="position", entity_id=pos.id, file_name=att.file_name,
+                                 storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=user_id)
+                db.add(new)
+                db.flush()
+                aid = new.id
+            else:   # внешнее хранилище: ссылка на тот же файл
+                aid = att.id
+        except Exception:   # pragma: no cover — без файла позиция всё равно создаётся
+            continue
+        db.add(PositionImage(deal_id=deal.id, position_id=pos.id, attachment_id=aid, kind=im.get("kind") or "photo", source=im.get("source") or "catalog",
+                             caption=im.get("caption") or "", has_factory_logo=(im.get("source") == "factory"), uploaded_by=user_id))
+        n += 1
+    if n:
+        done["images"] = n
+    # 2. опции, реализуемые в России
+    names = {o.name for o in (pos.local_option_rows or [])}
+    k = 0
+    for o in ex.local_options or []:
+        if not o.get("name") or o["name"] in names:
+            continue
+        db.add(LocalOption(deal_id=deal.id, position_id=pos.id, name=o["name"], qty=int(o.get("qty") or 1), cost=float(o.get("cost") or 0), currency=o.get("currency") or "RUB",
+                           install_stage=o.get("install_stage") or "during_commissioning", comment="из каталога"))
+        k += 1
+    if k:
+        done["local_options"] = k
+    if model is not None:
+        # 3. данные для логиста (габариты, массы) и технические параметры модели — только пустые
+        lp = dict(pos.logistics_params or {})
+        added = 0
+        for code, v in (model.logistics_params or {}).items():
+            if code not in lp:
+                lp[code] = v
+                added += 1
+        if added:
+            pos.logistics_params = lp
+            done["logistics_params"] = added
+        # 4. код ТН ВЭД, который логист ранее ввёл по этой модели
+        hs = model.hs_info or ({"code": model.default_hs_code} if model.default_hs_code else {})
+        if hs.get("code"):
+            lg = dict(pos.logistics or {})
+            if not lg.get("hs_code"):
+                lg["hs_code"] = hs["code"]
+                for src_k, dst_k in (("duty_pct", "duty_pct"), ("vat_pct", "vat_pct"), ("description", "hs_description"), ("util_applies", "util_applies")):
+                    if hs.get(src_k) is not None and lg.get(dst_k) is None:
+                        lg[dst_k] = hs[src_k]
+                pos.logistics = lg
+                done["hs_code"] = hs["code"]
+        if not pos.trademark and model.trademark:
+            pos.trademark = model.trademark
+        if not pos.machine_type and model.machine_type:
+            pos.machine_type = model.machine_type
+    # 5. последняя цена и срок производства завода по исполнению / модели, если цена не задана
+    if not pos.unit_price:
+        h = db.scalars(select(FactoryPriceHistory).where(FactoryPriceHistory.factory_id == pos.factory_id, FactoryPriceHistory.model == pos.model)
+                       .order_by(FactoryPriceHistory.on.desc())).first()
+        if h is not None:
+            pos.unit_price, pos.currency = h.unit_price, h.currency
+            if h.basis:
+                pos.basis = h.basis
+            if h.production_term and h.production_term.get("value"):
+                pos.production_term = h.production_term
+                pos.production_days = int(h.production_term.get("value") or pos.production_days or 90) * (7 if h.production_term.get("unit") == "weeks" else 1)
+            if h.factory_payments and not pos.factory_payments_offer:
+                pos.factory_payments_offer = h.factory_payments
+            done["price"] = f"{h.unit_price:g} {h.currency} от {h.on:%d.%m.%Y}"
+    return done

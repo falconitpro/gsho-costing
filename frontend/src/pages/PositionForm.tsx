@@ -94,7 +94,8 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
 
   const set = (code: string, v: string) => setVals((s) => ({ ...s, [code]: v }));
   const num = (code: string) => { const n = Number((vals[code] || "").replace(/\s/g, "").replace(",", ".")); return isNaN(n) ? null : n; };
-  const valid = (factoryId || vals["0.7"]) && vals["1.2"] && (num("13.5") || 0) > 0 && (num("13.4") || 0) > 0;
+  // из каталога цену можно не вводить — подставится последнее предложение завода по модели
+  const valid = (factoryId || vals["0.7"]) && vals["1.2"] && ((num("13.5") || 0) > 0 || !!execId) && (num("13.4") || 0) > 0;
   const filledCount = Object.values(vals).filter((v) => v !== "").length;
   const reqCount = Object.values(reqs).filter((v) => v !== "").length;
 
@@ -125,7 +126,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
       const optPerUnit = options.reduce((s, o) => s + (o.value || 0), 0) || num("12.6") || 0;
       const cur = (vals["13.1"] || "CNY").toUpperCase().slice(0, 3);
       const body = {
-        factory_id: fid, trademark: trademark.trim(), model: vals["1.2"], machine_type: vals["1.1"] || "", qty, unit_price: num("13.5"), currency: CURRENCIES.includes(cur) ? cur : "CNY",
+        factory_id: fid, trademark: trademark.trim(), model: vals["1.2"], machine_type: vals["1.1"] || "", qty, unit_price: num("13.5") || 0, currency: CURRENCIES.includes(cur) ? cur : "CNY",
         options, options_price: optPerUnit * qty, basis: vals["13.2"] || "FCA", delivery_point: vals["13.3"] || "",
         production_days: num("14.1") || 90, delivery_days: num("14.2") || 10, warranty_months: num("14.4"), warranty_hours: num("14.5"), zip_price: num("13.8"),
         production_term: prod.unit === "date" ? { unit: "date", fixed_date: prod.fixed_date || null, start_event: prod.start_event } : { value: Number(prod.value) || num("14.1") || 90, unit: prod.unit, start_event: prod.start_event },
@@ -222,7 +223,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
         </table>
       </div>
       <div className="grid cols-3" style={{ marginTop: 10 }}>
-        <label className="f">Исполнение из каталога (заполняет технические характеристики; затем их можно изменить)
+        <label className="f">Исполнение из каталога — подтягиваются технические характеристики, фото и чертежи, опции РФ, данные для логиста, код ТН ВЭД, последние цена и срок завода (всё можно изменить)
           <select value={execId} onChange={(e) => { setExecId(e.target.value); const found = tree.flatMap((f) => f.types.flatMap((t) => t.models.flatMap((m) => m.executions.map((x) => ({ f, t, m, x }))))).find((z) => z.x.id === e.target.value);
             if (found) { setFactoryId(found.f.factory_id); set("0.7", found.f.factory); setTrademark(found.m.trademark || found.f.trademarks?.[0] || ""); set("1.1", found.t.machine_type); set("1.2", found.m.model); } }}>
             <option value="">— не использовать —</option>

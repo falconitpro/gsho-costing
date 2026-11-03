@@ -112,40 +112,110 @@ def execution_patch(exec_id: str, body: ExecutionPatch, db: Session = Depends(ge
     ex = db.get(EquipmentExecution, exec_id)
     if ex is None:
         raise HTTPException(404)
-    for k, v in body.model_dump(exclude_none=True).items():
+    data = body.model_dump(exclude_none=True)
+    before = {k: getattr(ex, k) for k in data if k != "tech_params"}
+    for k, v in data.items():
         setattr(ex, k, v)
     if body.tech_params is not None:
         ex.fingerprint = tps.fingerprint(body.tech_params)
-    audit(db, user.id, None, "equipment_execution", ex.id, "update", after=body.model_dump(exclude_none=True))
+        before["tech_params"], data["tech_params"] = "прежний перечень", f"{len(body.tech_params)} строк"
+    audit(db, user.id, None, "equipment_execution", ex.id, "update", before, data)
     db.commit()
     return serialize(ex)
 
 
 class ModelPatch(BaseModel):
-    brand_name: Optional[str] = None
-    trademark: Optional[str] = None
+    model: Optional[str] = None              # наименование модели
+    machine_type: Optional[str] = None       # тип машины (новый тип заводится в справочник)
     machine_type_id: Optional[str] = None
+    trademark: Optional[str] = None          # торговая марка завода
+    brand_name: Optional[str] = None         # собственное наименование под брендом компании
     status: Optional[str] = None
     names: Optional[dict] = None
+    default_hs_code: Optional[str] = None
+    comment: str = ""                        # что и почему исправлено (в историю изменений)
+
+
+MODEL_FIELD_TITLES = {"model": "модель", "machine_type": "тип машины", "trademark": "торговая марка", "brand_name": "наименование под брендом компании",
+                      "status": "статус", "names": "наименования", "default_hs_code": "код ТН ВЭД", "name": "наименование исполнения",
+                      "tech_params": "технические характеристики"}
 
 
 @router.patch("/catalog/models/{model_id}")
 def model_patch(model_id: str, body: ModelPatch, db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_editor)):
-    """Собственное наименование под брендом компании (задача 9), тип машины, статус модели."""
+    """Корректировка модели каталога (КД, ЗГД): наименование, тип машины, торговая марка, наименование под брендом компании,
+    код ТН ВЭД, статус. Каждое изменение — в историю модели (было / стало, кто, когда, комментарий)."""
     m = db.get(EquipmentModel, model_id)
     if m is None:
         raise HTTPException(404)
-    for k, v in body.model_dump(exclude_none=True).items():
-        setattr(m, k, v)
-    if body.machine_type_id:
-        mt = db.get(MachineType, body.machine_type_id)
+    data = body.model_dump(exclude_none=True)
+    comment = data.pop("comment", "")
+    if "model" in data:
+        data["model"] = data["model"].strip()
+        if not data["model"]:
+            raise HTTPException(422, "Укажите наименование модели")
+        if data["model"] != m.model and db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == m.factory_id, EquipmentModel.model == data["model"],
+                                                                               EquipmentModel.id != m.id)):
+            raise HTTPException(409, "У этого завода уже есть модель с таким наименованием — объедините дубли")
+    if "machine_type_id" in data:
+        mt = db.get(MachineType, data["machine_type_id"])
         if mt:
-            m.machine_type = mt.name
-    if body.trademark:
-        cs.remember_trademark(db.get(Factory, m.factory_id), body.trademark)
-    audit(db, user.id, None, "equipment_model", m.id, "update", after=body.model_dump(exclude_none=True))
+            data["machine_type"] = mt.name
+    elif "machine_type" in data and data["machine_type"].strip():
+        name = data["machine_type"].strip()
+        mt = db.scalar(select(MachineType).where(MachineType.name == name))
+        if mt is None:
+            mt = MachineType(name=name, status="approved", proposed_by=user.id)
+            db.add(mt)
+            db.flush()
+        data["machine_type"], data["machine_type_id"] = name, mt.id
+    if "status" in data and data["status"] not in ("approved", "pending", "archived"):
+        raise HTTPException(422, "Статус: подтверждена, на проверке или в архиве")
+    before = {k: getattr(m, k) for k in data if hasattr(m, k)}
+    old_name = m.model
+    for k, v in data.items():
+        setattr(m, k, v)
+    m.approved_by = m.approved_by or user.id          # проверена вручную — автоматическая синхронизация из сделок больше не меняет тип и марку
+    if m.status == "pending" and "status" not in data:
+        m.status = "approved"
+    if data.get("trademark"):
+        cs.remember_trademark(db.get(Factory, m.factory_id), data["trademark"])
+    if "model" in data and data["model"] != old_name:   # история цен завода — к новому наименованию
+        for h in db.scalars(select(FactoryPriceHistory).where(FactoryPriceHistory.factory_id == m.factory_id, FactoryPriceHistory.model == old_name)).all():
+            h.model = data["model"]
+    changed = {k: v for k, v in data.items() if before.get(k) != v}
+    if changed:
+        audit(db, user.id, None, "equipment_model", m.id, "update", {k: before.get(k) for k in changed}, changed, comment)
     db.commit()
     return serialize(m)
+
+
+@router.get("/catalog/models/{model_id}/history")
+def model_history(model_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """История изменений модели и её исполнений: когда, кто, что было и что стало, комментарий."""
+    from ..models import AuditLog, Deal, User
+    m = db.get(EquipmentModel, model_id)
+    if m is None:
+        raise HTTPException(404)
+    ex_ids = [e.id for e in db.scalars(select(EquipmentExecution).where(EquipmentExecution.model_id == m.id)).all()]
+    ex_names = {e.id: e.name for e in db.scalars(select(EquipmentExecution).where(EquipmentExecution.model_id == m.id)).all()}
+    rows = db.scalars(select(AuditLog).where(((AuditLog.entity == "equipment_model") & (AuditLog.entity_id == m.id))
+                                             | ((AuditLog.entity == "equipment_execution") & (AuditLog.entity_id.in_(ex_ids or ["-"]))))
+                      .order_by(AuditLog.at.desc()).limit(300)).all()
+    names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    deals = {d.id: d.number for d in db.scalars(select(Deal)).all()}
+    actions = {"update": "изменение", "sync": "из сделки", "approve": "подтверждено", "reject": "отклонено", "merge": "объединение", "history": "использовано в сделке",
+               "create": "создание", "archive": "в архив"}
+    out = []
+    for r in rows:
+        fields = sorted(set((r.before or {}).keys()) | set((r.after or {}).keys()))
+        changes = [{"field": MODEL_FIELD_TITLES.get(f, f), "before": (r.before or {}).get(f), "after": (r.after or {}).get(f)}
+                   for f in fields if f not in ("approve", "tech_params") and (r.before or {}).get(f) != (r.after or {}).get(f)]
+        out.append({"at": r.at.isoformat() if r.at else None, "user": names.get(r.user_id, "система") if r.user_id else "система",
+                    "object": "модель" if r.entity == "equipment_model" else f"исполнение «{ex_names.get(r.entity_id, '')}»",
+                    "action": actions.get(r.action, r.action), "changes": changes, "comment": r.comment or "",
+                    "deal": deals.get(r.deal_id) if r.deal_id else None})
+    return out
 
 
 class MergeIn(BaseModel):
@@ -534,3 +604,71 @@ def pending(db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_
         m = db.get(EquipmentModel, e.model_id)
         out.append({**serialize(e), "model": m.model if m else "", "factory_id": m.factory_id if m else None})
     return out
+
+
+# ------------------------------------------------------------------ заявка клиенту из каталога
+
+class DealFromCatalogIn(BaseModel):
+    client_id: str
+    qty: int = 1
+    site: str = ""
+    region: str = ""
+    contact: str = ""
+    kp_due: Optional[str] = None
+    priority: str = "normal"
+    comment: str = ""
+    manager_id: Optional[str] = None          # КД / ЗГД могут назначить менеджера сделки
+
+
+@router.post("/catalog/executions/{exec_id}/create-deal", status_code=201)
+def create_deal_from_catalog(exec_id: str, body: DealFromCatalogIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Новая заявка клиенту по выбранной машине каталога: позиция с техническими характеристиками исполнения, фото и чертежами,
+    опциями РФ, данными для логиста, кодом ТН ВЭД, последними ценой и сроком завода."""
+    from datetime import date as _date
+    from ..models import Client, Deal, FeedEntry, Position, User
+    from ..services.deal_service import next_number
+    from .common import deal_payload
+    from .deals import _production_days, ensure_default_variant
+    if not user.has(Role.MANAGER, Role.CD, Role.GD):
+        raise HTTPException(403, "Заявку создают менеджер, КД или ЗГД")
+    ex = db.get(EquipmentExecution, exec_id)
+    if ex is None or ex.status == "archived":
+        raise HTTPException(404, "Исполнение не найдено")
+    if ex.status != "approved":
+        raise HTTPException(409, "Исполнение ещё не подтверждено КД / ЗГД")
+    model = db.get(EquipmentModel, ex.model_id)
+    if db.get(Client, body.client_id) is None:
+        raise HTTPException(400, "Клиент не найден")
+    manager_id = user.id
+    if body.manager_id and user.has(Role.CD, Role.GD):
+        m = db.get(User, body.manager_id)
+        if m is None or "manager" not in (m.roles or []):
+            raise HTTPException(422, "Менеджер не найден")
+        manager_id = m.id
+    kp_due = _date.fromisoformat(body.kp_due) if body.kp_due else None
+    deal = Deal(number=next_number(db, _date.today().year), manager_id=manager_id, client_id=body.client_id, site=body.site, region=body.region,
+                contact=body.contact, kp_due=kp_due, priority=body.priority, requested_at=_date.today())
+    db.add(deal)
+    db.flush()
+    h = db.scalars(select(FactoryPriceHistory).where(FactoryPriceHistory.factory_id == model.factory_id, FactoryPriceHistory.model == model.model)
+                   .order_by(FactoryPriceHistory.on.desc())).first()
+    term = (h.production_term if h and h.production_term else {}) or {}
+    pos = Position(deal_id=deal.id, factory_id=model.factory_id, model=model.model, machine_type=model.machine_type or "", trademark=model.trademark or "",
+                   qty=max(body.qty, 1), unit_price=h.unit_price if h else 0.0, currency=h.currency if h else "CNY", basis=(h.basis if h and h.basis else "FCA"),
+                   production_term=term, production_days=_production_days(term, 90) if term else 90, execution_id=ex.id,
+                   factory_payments_offer=(h.factory_payments if h else []) or [], tech_params={"_source_file": "каталог"},
+                   logistics_params=dict(model.logistics_params or {}))
+    pos.price_reference = {"last_price": h.unit_price if h else None, "on": h.on.isoformat() if h else None, "currency": h.currency if h else None,
+                           "deviation_pct": 0 if h else None, "needs_comment": False, "comment": "цена из каталога" if h else "", "history": []}
+    db.add(pos)
+    db.flush()
+    tps.init_position_rows(db, pos, user.id)
+    done = cs.apply_execution_to_position(db, deal, pos, user.id)
+    db.refresh(deal)
+    ensure_default_variant(db, deal)
+    note = f"Заявка создана из каталога: {model.trademark + ' ' if model.trademark and not model.model.startswith(model.trademark) else ''}{model.model} — {ex.name}"
+    db.add(FeedEntry(deal_id=deal.id, kind="system", subject=note, body=body.comment, user_id=user.id))
+    audit(db, user.id, deal.id, "deal", deal.id, "create", after={"from_catalog": ex.id, "qty": body.qty, **{k: v for k, v in done.items()}})
+    db.commit()
+    db.refresh(deal)
+    return {**deal_payload(deal, user), "from_catalog": done, "price_known": h is not None}

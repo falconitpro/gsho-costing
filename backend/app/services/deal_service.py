@@ -177,12 +177,42 @@ def ensure_folders(db: Session, deal: Deal) -> None:
     deal.storage_folder = folder
 
 
+STEP_TITLES = {"commercial": "Коммерческая", "financial": "Финансовая", "general": "ЗГД"}
+
+
+def version_approvals(db: Session, deal: Deal, before=None) -> list[dict]:
+    """Визы для листа «Визы»: ступень, роль и сотрудник по-русски, дата ДД.ММ.ГГГГ."""
+    names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    q = select(Approval).where(Approval.deal_id == deal.id)
+    q = q.where(Approval.at <= before) if before is not None else q.where(Approval.reset_at.is_(None))
+    out = []
+    for a in db.scalars(q.order_by(Approval.at)).all():
+        if before is not None and a.reset_at is not None and a.reset_at <= before:
+            continue
+        out.append({"step": STEP_TITLES.get(a.step, a.step), "role": a.role, "user": names.get(a.user_id, a.user_id or ""),
+                    "at": a.at.strftime("%d.%m.%Y %H:%M") if a.at else "", "decision": "согласовано" if a.approved else "отказ", "comment": a.comment})
+    return out
+
+
+def rebuild_version_excel(db: Session, ver: DealVersion, manager: bool) -> str | None:
+    """Excel версии заново по сохранённому входу и результату расчёта (те же цифры) текущим форматом выгрузки —
+    файлы прежних версий скачиваются уже с исправленными подписями. Возвращает путь к файлу или None."""
+    from ..calc.types import DealCalcInput, DealCalcResult
+    deal = db.get(Deal, ver.deal_id)
+    if deal is None or not ver.calc_input or not ver.calc_result:
+        return None
+    inp, res = DealCalcInput.model_validate(ver.calc_input), DealCalcResult.model_validate(ver.calc_result)
+    meta = excel_meta(deal, ver.version_no, version_approvals(db, deal, before=ver.created_at))
+    tmp = tempfile.mkdtemp()
+    name = f"{deal.number}_расчёт_v{ver.version_no}{'_менеджер' if manager else ''}.xlsx"
+    return export_excel(inp, res, os.path.join(tmp, name), meta, manager_version=manager)
+
+
 def create_version(db: Session, deal: Deal, reason: str, user_id: str | None, calc_date: date | None = None) -> DealVersion:
     """Фиксирует версию расчёта (вход + результат + курс) и формирует Excel в двух вариантах."""
     inp, res = run_calc(db, deal, calc_date)
     deal.current_version_no += 1
-    approvals = [{"step": a.step, "role": a.role, "user": a.user_id, "at": a.at.isoformat() if a.at else "", "decision": "да" if a.approved else "нет",
-                  "comment": a.comment} for a in db.scalars(select(Approval).where(Approval.deal_id == deal.id, Approval.reset_at.is_(None))).all()]
+    approvals = version_approvals(db, deal)
     ver = DealVersion(deal_id=deal.id, version_no=deal.current_version_no, reason=reason,
                       calc_input=inp.model_dump(mode="json"), calc_result=res.model_dump(mode="json"), created_by=user_id)
     db.add(ver)
