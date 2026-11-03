@@ -61,6 +61,7 @@ class DealUpdate(BaseModel):
 
 class PositionIn(BaseModel):
     factory_id: str
+    trademark: str = ""                                    # торговая марка; пусто — по сопоставлению «завод → марки»
     model: str
     machine_type: str = ""
     qty: int = 1
@@ -243,6 +244,8 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
     if user.can("payment_terms", 2):
         data["factory_payments"] = data["factory_payments_offer"]
     data["production_days"] = _production_days(data.get("production_term") or {}, data.get("production_days") or 90)
+    from ..services.catalog_service import resolve_trademark
+    data["trademark"] = resolve_trademark(db, body.factory_id, body.model, body.trademark)
     pos = Position(deal_id=deal.id, **data)
     pos.tech_params = {**pos.tech_params, "_source_file": "ручной ввод"}
     pos.price_reference = _price_ref(db, pos, comment)
@@ -252,7 +255,7 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
     db.flush()
     _record_price(db, pos, deal)
     from ..services.tech_params_service import init_position_rows
-    init_position_rows(db, pos, user.id)   # задача 4/7: перечень теххарактеристик из исполнения каталога или шаблона по типу
+    init_position_rows(db, pos, user.id)   # задача 4/7: перечень технических характеристик из исполнения каталога или шаблона по типу
     ensure_default_variant(db, deal)
     audit(db, user.id, deal.id, "position", pos.id, "create", after=data)
     db.commit()
@@ -286,6 +289,9 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
     for k, v in body.items():
         if k in allowed:
             setattr(pos, k, v)
+    if "trademark" in body or "factory_id" in body:   # смена завода — марка по сопоставлению, если не указана явно
+        from ..services.catalog_service import resolve_trademark
+        pos.trademark = resolve_trademark(db, pos.factory_id, pos.model, body.get("trademark") or "")
     if "factory_payments" in body:
         pos.factory_payments_offer = body["factory_payments"] or []
         if user.can("payment_terms", 2):
@@ -399,6 +405,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     imp = RfqImport(deal_id=deal.id, file_path=path, file_hash=sha256_file(path), template_version=parsed.template_version,
                     attempt=attempt, parsed=parsed.to_dict(), errors=[e.__dict__ for e in parsed.errors], imported_by=user.id)
     db.add(imp)
+    db.flush()   # id попытки нужен позиции (rfq_import_id) — источник «RFQ» в списке позиций
     if not parsed.ok:
         db.commit()
         raise HTTPException(422, {"message": "Ошибки импорта — исправьте файл и загрузите повторно", "errors": imp.errors,
@@ -411,6 +418,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
         db.add(factory)
         db.flush()
     imp.factory_id = factory.id
+    from ..services.catalog_service import resolve_trademark
     pos_data = parsed.position
     pos = Position(
         deal_id=deal.id, factory_id=factory.id, machine_type=pos_data.get("machine_type") or "", model=pos_data["model"],
@@ -423,6 +431,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
                      "sections": parsed.sections, "filled": parsed.filled_count, "total": len(parsed.fields),
                      "fields": {c: f.as_dict() for c, f in parsed.fields.items()}}},
         logistics_params=parsed.logistics_params, rfq_import_id=imp.id,
+        trademark=resolve_trademark(db, factory.id, pos_data["model"], str(pos_data.get("trademark") or "")),
         service_calc={"spare_parts": parsed.spare_parts, "zip_target_hours": parsed.zip_target_hours, "zip_currency": parsed.zip_currency},
     )
     pos.price_reference = _price_ref(db, pos, price_comment)
@@ -435,7 +444,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     db.flush()
     _record_price(db, pos, deal)
     from ..services.tech_params_service import rows_from_rfq
-    rows_from_rfq(db, pos, parsed, user.id)   # задача 4: таблица теххарактеристик из ответа завода в шаблоне RFQ
+    rows_from_rfq(db, pos, parsed, user.id)   # задача 4: таблица технических характеристик из ответа завода в шаблоне RFQ
     ensure_default_variant(db, deal)
     # шапка сделки из раздела 0 опросника (заполняем только пустое, менеджер мог ввести раньше)
     deal.operating_conditions = {**(deal.operating_conditions or {}), **{k: parsed.header.get(k) for k in ("temp_min", "temp_max", "operating_conditions") if parsed.header.get(k) is not None}}
@@ -452,7 +461,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     cat = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == factory.id, EquipmentModel.model == pos.model))
     catalog_diff = {}
     if cat is None:
-        db.add(EquipmentModel(factory_id=factory.id, machine_type=pos.machine_type, model=pos.model, tech_params=parsed.tech_params,
+        db.add(EquipmentModel(factory_id=factory.id, machine_type=pos.machine_type, model=pos.model, trademark=pos.trademark, tech_params=parsed.tech_params,
                               logistics_params=parsed.logistics_params))
     else:
         for code, f in {**parsed.tech_params, **parsed.logistics_params}.items():
@@ -592,7 +601,7 @@ class DuplicateIn(BaseModel):
 
 @router.post("/{deal_id}/duplicate", status_code=201)
 def duplicate(deal_id: str, body: DuplicateIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Задача 9: «Дублировать заявку» — новая сделка того же клиента с копией требований, теххарактеристик, изображений,
+    """Задача 9: «Дублировать заявку» — новая сделка того же клиента с копией требований, технических характеристик, изображений,
     выбранного ответа завода и (по умолчанию) расчётов логиста и сервиса. Номер — производный (D-2026-0042-2)."""
     deal = get_deal_or_404(db, deal_id, user)
     if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):
@@ -613,7 +622,7 @@ def related(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Dep
     out = []
     for d in db.scalars(select(Deal).where(Deal.request_group_id == deal.request_group_id).order_by(Deal.number)).all():
         row = {"id": d.id, "number": d.number, "status": d.status.value, "outcome": d.outcome, "parent_deal_id": d.parent_deal_id,
-               "factories": sorted({p.factory_id for p in d.positions}), "models": [p.model for p in d.positions], "current": d.id == deal.id}
+               "factories": sorted({p.factory_id for p in d.positions}), "models": [p.designation for p in d.positions], "current": d.id == deal.id}
         if user.can("price"):
             row["price_rub"] = next((v.price_rub for v in d.variants if v.price_rub is not None), None)
         out.append(row)

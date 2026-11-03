@@ -125,7 +125,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
         fp = _lines(p.factory_payments)
         dterm = {k: v for k, v in (p.delivery_term or {}).items() if k in DeliveryTerm.model_fields}
         positions.append(PositionInput(
-            id=p.id, factory=p.factory_id, model=p.model, machine_type=p.machine_type or "", qty=p.qty, unit_price=p.unit_price,
+            id=p.id, factory=p.factory_id, model=p.designation, machine_type=p.machine_type or "", qty=p.qty, unit_price=p.unit_price,
             options_price=_num(p.options_price), currency=p.currency, production_days=p.production_days or 90, delivery_days=p.delivery_days,
             production_term=_production_term(p.production_term), delivery_term=DeliveryTerm(**dterm),
             factory_payments=fp or default_factory or PositionInput.model_fields["factory_payments"].default_factory(),
@@ -205,7 +205,7 @@ def excel_meta(deal: Deal, version_no: int, approvals: list[dict]) -> dict[str, 
     meta["rfq_fields"] = {p.id: {**(p.tech_params or {}), **(p.logistics_params or {})} for p in deal.positions}
     meta["rfq_fields"] = {pid: {k: v for k, v in f.items() if not k.startswith("_")} for pid, f in meta["rfq_fields"].items()}
     meta["spare_parts"] = {p.id: (p.service_calc or {}).get("spare_parts", []) for p in deal.positions}
-    meta["price_references"] = [{"position_id": p.id, "factory": p.factory_id, "model": p.model, "unit_price": p.unit_price,
+    meta["price_references"] = [{"position_id": p.id, "factory": p.factory_id, "model": p.designation, "unit_price": p.unit_price,
                                  **(p.price_reference or {})} for p in deal.positions]
     comments = []
     for p in deal.positions:

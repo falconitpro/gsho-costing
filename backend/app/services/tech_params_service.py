@@ -1,4 +1,4 @@
-"""Таблица теххарактеристик позиции (задача 4), глоссарий и переводчик, запрос заводу и загрузка ответа (задачи 4, 9, 10).
+"""Таблица технических характеристик позиции (задача 4), глоссарий и переводчик, запрос заводу и загрузка ответа (задачи 4, 9, 10).
 
 Таблица: № / Параметр (RU) / Ед. изм. / Требования заказчика / Значение (RU) / Комментарий.
 Порядок работы: менеджер заполняет требования (вручную или импортом файла клиента) → формирует двуязычный запрос
@@ -168,7 +168,7 @@ def template_for(db: Session, machine_type: str) -> list[TechParamTemplate]:
 
 
 def init_position_rows(db: Session, pos: Position, user_id: Optional[str], replace: bool = False) -> list[PositionTechParam]:
-    """Перечень теххарактеристик позиции: из исполнения каталога (задача 7) или из шаблона по типу машины."""
+    """Перечень технических характеристик позиции: из исполнения каталога (задача 7) или из шаблона по типу машины."""
     if pos.tech_param_rows and not replace:
         return pos.tech_param_rows
     for r in list(pos.tech_param_rows or []):
@@ -202,7 +202,7 @@ def _fmt_value(v: Any) -> str:
 
 
 def rfq_rows(db: Session, parsed, machine_type: str = "") -> list[dict]:
-    """Строки таблицы теххарактеристик из разобранного RFQ: все поля разделов 1–11 из файла (с разделами, как в файле)
+    """Строки таблицы технических характеристик из разобранного RFQ: все поля разделов 1–11 из файла (с разделами, как в файле)
     плюс поля опросника компании, которых в файле нет (пустые, чтобы их можно было дозаполнить)."""
     from .rfq_import import REQUIRED_CODES
     tpl = template_for(db, machine_type)
@@ -210,7 +210,7 @@ def rfq_rows(db: Session, parsed, machine_type: str = "") -> list[dict]:
     out: dict[str, dict] = {}
     for code, f in parsed.fields.items():
         if not (1 <= f.section_no <= 11):
-            continue                         # поля «L» (габариты, массы) — и логисту, и в таблицу: это тоже теххарактеристики для КП
+            continue                         # поля «L» (габариты, массы) — и логисту, и в таблицу: это тоже технические характеристики для КП
         v_ru, v_zh = f.value_ru, f.value_zh
         value_ru = "" if v_ru is None else str(v_ru).strip()
         value_zh = "" if v_zh is None else str(v_zh).strip()
@@ -475,7 +475,7 @@ def build_request_xlsx(db: Session, pos: Position, factory: Optional[Factory], d
     ws.title = "Техданные 技术参数"
     ws["A1"] = f"Запрос технических характеристик / 技术参数询价 — {deal_number}"
     ws["A1"].font = Font(bold=True, size=13)
-    ws["A2"] = f"Завод / 工厂: {(factory.name_zh or factory.name) if factory else ''}   Модель / 型号: {pos.model}   Кол-во / 数量: {pos.qty}"
+    ws["A2"] = f"Завод / 工厂: {(factory.name_zh or factory.name) if factory else ''}   Модель / 型号: {pos.designation}   Кол-во / 数量: {pos.qty}"
     ws["A3"] = "Просим заполнить столбцы «Значение / 数值» и «Комментарий / 备注» по каждому параметру с учётом требований заказчика. 请根据客户要求填写每项参数的数值和备注。"
     if request_images:
         ws["A4"] = "Просим приложить фото, рендеры и габаритные чертежи предлагаемой машины. 请附上所报机型的照片、效果图和外形尺寸图。"
@@ -508,7 +508,7 @@ def send_request(db: Session, deal, pos: Position, factory: Factory, file_path: 
     from ..models import Attachment, FeedEntry
     from .deal_service import ensure_folders
     result: dict[str, Any] = {"wecom": None, "mail": None}
-    text = f"Запрос технических характеристик по сделке {deal.number}: {pos.model} × {pos.qty}. 技术参数询价，请填写附件并回复。"
+    text = f"Запрос технических характеристик по сделке {deal.number}: {pos.designation} × {pos.qty}. 技术参数询价，请填写附件并回复。"
     if via_wecom and factory.wecom_external_ids:
         try:
             result["wecom"] = adapters.messenger().send_to_external(factory.wecom_external_ids[0], text, deal.number)
@@ -538,7 +538,7 @@ def send_request(db: Session, deal, pos: Position, factory: Factory, file_path: 
     except Exception as e:
         result["file"] = f"ошибка хранилища: {e}"
     db.add(FeedEntry(deal_id=deal.id, kind="wecom" if via_wecom else "mail_out", direction="out", counterparty=factory.name,
-                     subject=f"Запрос заводу: {pos.model}", body=text + (f" Вложения: {len(image_paths)} изобр." if image_paths else ""), user_id=user_id))
+                     subject=f"Запрос заводу: {pos.designation}", body=text + (f" Вложения: {len(image_paths)} изобр." if image_paths else ""), user_id=user_id))
     return result
 
 

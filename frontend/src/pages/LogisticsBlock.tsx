@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, ApiError, fmtDate, fmtRub } from "../api";
+import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
 import type { Deal, Me } from "../types";
 import Questionnaire from "../components/Questionnaire";
 
@@ -55,7 +55,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
           <tbody>{batches.map((b) => { const it = b.items as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; return (
             <tr key={b.id}><td>{b.name}</td><td>{b.route}</td><td className="num">{b.transport_units}</td><td className="num">{b.transit_days} / {b.customs_days} / {b.rf_delivery_days ?? 5}</td><td>{fmtDate(b.border_planned)} / {b.border_actual ? <b>{fmtDate(b.border_actual)}</b> : "—"}</td>
               <td>{fr ? `${fmtRub(fr.amount)} ${fr.currency}` : "—"}</td><td>{it.insurance_pct != null ? `${it.insurance_pct} %` : "—"}</td><td className="num">{fmtRub(it.broker_rub as number)}</td><td className="num">{fmtRub(it.rf_delivery_rub as number)}</td>
-              <td>{b.allocation}</td><td>{positions.filter((p) => p.batch_id === b.id).map((p) => p.model).join(", ")}</td></tr>); })}</tbody></table>
+              <td>{b.allocation}</td><td>{positions.filter((p) => p.batch_id === b.id).map((p) => designation(p)).join(", ")}</td></tr>); })}</tbody></table>
         {canEdit && (
           <div className="grid cols-3" style={{ marginTop: 10 }}>
             <label className="f">Название<input value={batch.name} onChange={(e) => setBatch({ ...batch, name: e.target.value })} /></label>
@@ -83,7 +83,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
         const lp = p.logistics_params || {};
         return (
           <div className="card" key={p.id}>
-            <h2 style={{ marginTop: 0 }}>{p.machine_type} {p.model} × {p.qty} <span className="muted">· данных для логиста (L): {Object.keys(lp).length}</span></h2>
+            <h2 style={{ marginTop: 0 }}>{p.machine_type} {designation(p)} × {p.qty} <span className="muted">· данных для логиста (L): {Object.keys(lp).length}</span></h2>
             <details style={{ marginBottom: 10 }} open={Object.keys(lp).length > 0}><summary className="muted" style={{ cursor: "pointer" }}>Технические данные из опросника (метка L)</summary>
               <div style={{ marginTop: 6 }}><Questionnaire position={p} onlyL /></div></details>
             <div className="grid cols-3">

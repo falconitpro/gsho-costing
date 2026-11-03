@@ -122,26 +122,26 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
         if pay:
             first, rest = pay[0], pay[1:]
             upsert("factory_advance", _d(first["on"]), position_id=p.id, amount=first["amount"], currency=first["currency"],
-                   title=f"Оплата заводу (аванс) — {p.model}")
+                   title=f"Оплата заводу (аванс) — {p.designation}")
             if rest:
                 upsert("factory_final", max(_d(l["on"]) for l in rest), position_id=p.id, amount=round(sum(l["amount"] for l in rest), 2),
-                       currency=rest[0]["currency"], title=f"Окончательный расчёт с заводом — {p.model}")
+                       currency=rest[0]["currency"], title=f"Окончательный расчёт с заводом — {p.designation}")
         start_ev = "factory_prepayment" if (p.production_term or {}).get("start_event") == "factory_prepayment" else "factory_contract"
-        upsert("production", pc.events.get(start_ev), position_id=p.id, title=f"Производство — {p.model}")
-        upsert("readiness", pc.events.get("readiness"), position_id=p.id, title=f"Готовность на заводе — {p.model}")
-        upsert("commissioning", pc.events.get("commissioning"), position_id=p.id, title=f"ПНР — {p.model}")
+        upsert("production", pc.events.get(start_ev), position_id=p.id, title=f"Производство — {p.designation}")
+        upsert("readiness", pc.events.get("readiness"), position_id=p.id, title=f"Готовность на заводе — {p.designation}")
+        upsert("commissioning", pc.events.get("commissioning"), position_id=p.id, title=f"ПНР — {p.designation}")
         if p.batch_id is None:
             for code in ("shipment", "border", "declaration", "delivery"):
-                upsert(code, pc.events.get(code), position_id=p.id, title=f"{TITLES[code]} — {p.model}")
+                upsert(code, pc.events.get(code), position_id=p.id, title=f"{TITLES[code]} — {p.designation}")
         # опции РФ (задача 6): заказать к дате − срок поставщика − запас; установить до передачи или в ПНР
         for o in p.local_option_rows or []:
             needed = pc.events.get("declaration") if o.install_stage == "before_handover" else pc.events.get("commissioning")
             if needed:
                 order_on = max(needed - timedelta(days=(o.supplier_lead_days or 0) + lead), pc.events.get("contract") or needed)
                 upsert("local_option_order", order_on, position_id=p.id, option_id=o.id, amount=round((o.cost or 0) * (o.qty or 1), 2),
-                       currency=o.currency or "RUB", title=f"Заказать опцию РФ «{o.name}» ({p.model})")
+                       currency=o.currency or "RUB", title=f"Заказать опцию РФ «{o.name}» ({p.designation})")
                 if o.needs_install:
-                    upsert("local_option_install", needed, position_id=p.id, option_id=o.id, title=f"Установить опцию РФ «{o.name}» ({p.model})")
+                    upsert("local_option_install", needed, position_id=p.id, option_id=o.id, title=f"Установить опцию РФ «{o.name}» ({p.designation})")
     # уровень партии: даты по самой поздней позиции партии
     for b in batches.values():
         members = [pc for pc in base.positions if positions.get(pc.position_id) and positions[pc.position_id].batch_id == b.id]
@@ -172,7 +172,7 @@ def stage_rows(db: Session, deal: Deal) -> list[dict]:
     for s in sorted(rows, key=lambda s: ((s.actual_on or s.planned_on or date.max), s.sort)):
         out.append({"id": s.id, "code": s.code, "title": s.title, "planned_on": s.planned_on, "actual_on": s.actual_on, "amount": s.amount,
                     "currency": s.currency, "actual_amount": s.actual_amount, "responsible_roles": s.responsible_roles, "kind": STAGE_DEFS[s.code]["kind"],
-                    "position_id": s.position_id, "position": pos[s.position_id].model if s.position_id in pos else None,
+                    "position_id": s.position_id, "position": pos[s.position_id].designation if s.position_id in pos else None,
                     "batch_id": s.batch_id, "batch": bat[s.batch_id].name if s.batch_id in bat else None, "local_option_id": s.local_option_id,
                     "note": s.note, "done": s.actual_on is not None, "overdue": s.actual_on is None and s.planned_on is not None and s.planned_on < date.today()})
     return out

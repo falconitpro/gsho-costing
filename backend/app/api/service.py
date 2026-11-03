@@ -93,7 +93,7 @@ def calc(deal_id: str, pos_id: str, body: ServiceCalcIn, db: Session = Depends(g
 @router.post("/complete")
 def complete(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(SERVICE)):
     deal = get_deal_or_404(db, deal_id, user)
-    missing = [p.model for p in deal.positions if not (p.service_calc or {}).get("result")]
+    missing = [p.designation for p in deal.positions if not (p.service_calc or {}).get("result")]
     if missing:
         raise HTTPException(422, {"message": "Сервис не рассчитан для позиций", "positions": missing})
     st = DealState(status=deal.status, service_flag=deal.service_flag, logistics_done=deal.logistics_done, service_done=deal.service_done)

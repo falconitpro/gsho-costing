@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, designation } from "../api";
 import { TERM_UNITS } from "../types";
 
 type Row = { no?: number; code: string; name_ru: string; unit: string; value_ru: string; section: string; required?: boolean };
-type Factory = { id: string; name: string };
+type Factory = { id: string; name: string; trademarks?: string[] };
 type RfqPreview = { kind: "rfq"; item: Record<string, unknown> & { tech_params: Row[] }; messages: { severity: string; message: string }[]; filled: number; total: number };
 type ListPreview = { kind: "list"; sheets: { name: string; rows: unknown[][]; total_rows: number; mapping: { header_row: number; first_row: number; columns: Record<string, number> } }[];
   columns: { key: string; title: string }[] };
 
-const EMPTY = { factory_id: "", factory_name: "", factory_address: "", machine_type: "", model: "", execution_name: "", brand_name: "",
+const EMPTY = { factory_id: "", factory_name: "", factory_address: "", machine_type: "", trademark: "", model: "", execution_name: "", brand_name: "",
   unit_price: "", currency: "CNY", basis: "FCA", term_value: "", term_unit: "calendar_days", comment: "" };
 
 /** Задача: оборудование прямо в каталог — вручную или из файла (опросник RFQ одной машины или список моделей).
@@ -47,7 +47,7 @@ export default function CatalogAdd({ editor, onAdded }: { editor: boolean; onAdd
         const term = (it.production_term || {}) as { value?: number; unit?: string };
         const fid = factories.find((f) => f.name === it.factory_name)?.id || "";
         setForm({ ...EMPTY, factory_id: fid, factory_name: fid ? "" : String(it.factory_name || ""), factory_address: String(it.factory_address || ""),
-          machine_type: String(it.machine_type || ""), model: String(it.model || ""), unit_price: it.unit_price != null ? String(it.unit_price) : "",
+          machine_type: String(it.machine_type || ""), trademark: factories.find((f) => f.id === fid)?.trademarks?.[0] || "", model: String(it.model || ""), unit_price: it.unit_price != null ? String(it.unit_price) : "",
           currency: String(it.currency || "CNY"), basis: String(it.basis || "FCA"), term_value: term.value != null ? String(term.value) : "", term_unit: term.unit || "calendar_days" });
         setRows(p.item.tech_params);
         setNotes(p.messages.filter((m) => m.severity !== "info"));
@@ -74,13 +74,13 @@ export default function CatalogAdd({ editor, onAdded }: { editor: boolean; onAdd
     setBusy(true); setErr("");
     try {
       const r = await api.post<{ message: string }>("/api/catalog/equipment", {
-        factory_id: form.factory_id || null, factory_name: form.factory_name, factory_address: form.factory_address, machine_type: form.machine_type, model: form.model,
+        factory_id: form.factory_id || null, factory_name: form.factory_name, factory_address: form.factory_address, machine_type: form.machine_type, trademark: form.trademark, model: form.model,
         execution_name: form.execution_name, brand_name: form.brand_name, unit_price: form.unit_price ? Number(form.unit_price.replace(/\s/g, "").replace(",", ".")) : null,
         currency: form.currency, basis: form.basis, comment: form.comment,
         production_term: form.term_value ? { value: Number(form.term_value), unit: form.term_unit } : {},
         tech_params: rows.filter((r) => r.name_ru.trim()).map((r, i) => ({ ...r, no: i + 1 })),
       });
-      onAdded(`${form.model}: ${r.message}`); setForm({ ...EMPTY }); loadTemplate(); setNotes([]); setFile(null);
+      onAdded(`${designation(form)}: ${r.message}`); setForm({ ...EMPTY }); loadTemplate(); setNotes([]); setFile(null);
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
   const updRow = (i: number, p: Partial<Row>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...p } : r)));
@@ -122,11 +122,14 @@ export default function CatalogAdd({ editor, onAdded }: { editor: boolean; onAdd
       <div className="card">
         <b>Вручную</b> <span className="muted">— {editor ? "запись появится в каталоге сразу" : "запись уйдёт на подтверждение КД или ГД"}; одинаковое исполнение (тот же набор параметров) не дублируется</span>
         <div className="grid cols-3" style={{ marginTop: 6 }}>
-          <label className="f">Завод<select value={form.factory_id} onChange={(e) => set({ factory_id: e.target.value })}><option value="">— новый завод —</option>{factories.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>
+          <label className="f">Завод<select value={form.factory_id} onChange={(e) => set({ factory_id: e.target.value, trademark: factories.find((f) => f.id === e.target.value)?.trademarks?.[0] || "" })}><option value="">— новый завод —</option>{factories.map((f) => <option key={f.id} value={f.id}>{f.name}{f.trademarks?.length ? ` (${f.trademarks.join(", ")})` : ""}</option>)}</select></label>
           {!form.factory_id && <label className="f">Новый завод: полное наименование<input value={form.factory_name} onChange={(e) => set({ factory_name: e.target.value })} /></label>}
           <label className="f">Тип машины<input list="mt-list" value={form.machine_type} onChange={(e) => { set({ machine_type: e.target.value }); const t = types.find((x) => x.name === e.target.value); if (t && rows.every((r) => !r.value_ru)) loadTemplate(t.id); }} placeholder="выберите или введите новый" />
             <datalist id="mt-list">{types.map((t) => <option key={t.id} value={t.name} />)}</datalist></label>
-          <label className="f">Модель *<input value={form.model} onChange={(e) => set({ model: e.target.value })} /></label>
+          <label className="f">Торговая марка<input list="ca-marks" value={form.trademark} placeholder="по заводу, напр. SHILI" onChange={(e) => set({ trademark: e.target.value })} />
+            <datalist id="ca-marks">{(factories.find((f) => f.id === form.factory_id)?.trademarks || []).map((m) => <option key={m} value={m} />)}</datalist></label>
+          <label className="f">Модель *<input value={form.model} onChange={(e) => set({ model: e.target.value })} />
+            {form.model && <span className="muted" style={{ fontSize: 11 }}>обозначение: {designation(form)}</span>}</label>
           <label className="f">Исполнение<input value={form.execution_name} placeholder={form.model ? `${form.model} базовое` : ""} onChange={(e) => set({ execution_name: e.target.value })} /></label>
           {editor && <label className="f">Наименование под брендом компании<input value={form.brand_name} onChange={(e) => set({ brand_name: e.target.value })} /></label>}
           <label className="f">Цена завода<div className="row"><input value={form.unit_price} inputMode="decimal" onChange={(e) => set({ unit_price: e.target.value })} />

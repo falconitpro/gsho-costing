@@ -45,6 +45,12 @@ export const api = {
   },
 };
 
+/** Обозначение оборудования: торговая марка + модель (SHILI FL-0.5(C)); марка не дублируется, если уже входит в модель. */
+export const designation = (p: { trademark?: string | null; model?: string | null }) => {
+  const tm = (p.trademark || "").trim(), m = (p.model || "").trim();
+  return !tm || m.toLowerCase().startsWith(tm.toLowerCase()) ? m || tm : `${tm} ${m}`;
+};
+
 export const fmtRub = (v: number | null | undefined, digits = 0) =>
   v == null ? "—" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(v);
 export const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(2).replace(".", ",")} %`);

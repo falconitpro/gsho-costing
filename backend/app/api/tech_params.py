@@ -1,4 +1,4 @@
-"""Теххарактеристики позиции (задача 4), запрос заводам и ответы-кандидаты (задача 9), импорт таблиц с предпросмотром."""
+"""Технические характеристики позиции (задача 4), запрос заводам и ответы-кандидаты (задача 9), импорт таблиц с предпросмотром."""
 from __future__ import annotations
 
 import json
@@ -37,7 +37,7 @@ def _can_edit(user: CurrentUser, deal) -> None:
     if user.has(Role.GD, Role.CD):
         return
     if not (user.can("tech_params", 2) and user.has(Role.MANAGER) and deal.manager_id == user.id):
-        raise HTTPException(403, "Таблицу теххарактеристик ведёт менеджер сделки")
+        raise HTTPException(403, "Таблицу технических характеристик ведёт менеджер сделки")
 
 
 def _tmp(file: UploadFile) -> str:

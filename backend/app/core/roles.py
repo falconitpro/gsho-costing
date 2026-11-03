@@ -73,7 +73,7 @@ FIELD_GROUPS: dict[str, tuple[str, set[str]]] = {
     "client_price_history": ("История КП и цен клиентам", CLIENT_PRICE_HISTORY_FIELDS),
     "payment_terms": ("Условия оплаты клиента и завода, БГ", PAYMENT_TERMS_FIELDS),
     "local_options": ("Опции, реализуемые в России", LOCAL_OPTIONS_FIELDS),
-    "tech_params": ("Таблица теххарактеристик и запрос заводу", set()),
+    "tech_params": ("Таблица технических характеристик и запрос заводу", set()),
     "images": ("Изображения и чертежи", set()),
     "kp_images_select": ("Выбор файлов и бренда для КП", set()),
     "catalog": ("Каталог оборудования (правка)", set()),

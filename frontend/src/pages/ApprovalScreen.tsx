@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, fmtDate, fmtPct, fmtRub } from "../api";
+import { api, fmtDate, fmtPct, fmtRub, designation } from "../api";
 import { COST_ITEMS, EVENT_TITLES, can, type CalcResponse, type Deal, type Me, type ScenarioResult } from "../types";
 import CashflowChart from "../components/CashflowChart";
 import PaymentTermsEditor from "../components/PaymentTermsEditor";
@@ -248,7 +248,7 @@ function gapText(r?: ScenarioResult) {
 function KpSettings({ deal, calc, reload }: { deal: Deal; calc: CalcResponse; reload: () => void }) {
   const [msg, setMsg] = useState("");
   const set = (body: Record<string, string>) => api.patch(`/api/deals/${deal.id}/kp-settings`, body).then(() => { setMsg(""); reload(); }).catch((e) => setMsg(e.message));
-  const selected = deal.positions.flatMap((p) => (p.images || []).filter((i) => i.in_kp).map((i) => ({ ...i, model: p.model })));
+  const selected = deal.positions.flatMap((p) => (p.images || []).filter((i) => i.in_kp).map((i) => ({ ...i, model: designation(p) })));
   return (
     <div className="card">
       <h2 style={{ marginTop: 0 }}>Подача КП</h2>

@@ -10,9 +10,35 @@ from sqlalchemy.orm import Session
 
 from ..core.roles import Role
 from ..core.workflow import add_business_days
-from ..models import ClientPriceHistory, Deal, DealVersion, EquipmentExecution, EquipmentModel, Factory, MachineType, Position, Task, User
+from ..models import (ClientPriceHistory, Deal, DealVersion, EquipmentExecution, EquipmentModel, Factory, MachineType, Position, Task, User,
+                      default_trademark)
 from .deal_service import audit, notify
 from .tech_params_service import fingerprint, row_dicts
+
+
+# ------------------------------------------------------------------ торговые марки: сопоставление «завод → марки»
+
+def remember_trademark(factory: Optional[Factory], trademark: str) -> None:
+    """Новая марка завода попадает в его список марок (сопоставление пополняется само)."""
+    tm = (trademark or "").strip()
+    if factory is None or not tm:
+        return
+    marks = list(factory.trademarks or [])
+    if tm.lower() not in {m.lower() for m in marks}:
+        factory.trademarks = marks + [tm]
+
+
+def resolve_trademark(db: Session, factory_id: Optional[str], model: str = "", given: str = "") -> str:
+    """Торговая марка позиции: указанная явно → марка модели в каталоге → первая марка завода."""
+    factory = db.get(Factory, factory_id) if factory_id else None
+    if (given or "").strip():
+        remember_trademark(factory, given)
+        return given.strip()
+    if factory_id and model:
+        m = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == factory_id, EquipmentModel.model == model))
+        if m is not None and m.trademark:
+            return m.trademark
+    return default_trademark(factory)
 
 
 # ------------------------------------------------------------------ история цен клиентам (задачи 7, 8)
@@ -93,7 +119,7 @@ def catalog_candidates(db: Session, deal: Deal) -> list[dict]:
             existing = db.scalar(select(EquipmentExecution).where(EquipmentExecution.model_id == model.id, EquipmentExecution.fingerprint == fp,
                                                                    EquipmentExecution.status != "archived"))
         pending = db.scalar(select(EquipmentExecution).where(EquipmentExecution.source_position_id == p.id, EquipmentExecution.status.in_(["pending_manager", "pending"])))
-        out.append({"position_id": p.id, "model": p.model, "machine_type": p.machine_type, "factory_id": p.factory_id, "model_exists": model is not None,
+        out.append({"position_id": p.id, "model": p.designation, "machine_type": p.machine_type, "factory_id": p.factory_id, "model_exists": model is not None,
                     "model_status": model.status if model else None, "execution_exists": existing is not None,
                     "existing_execution": {"id": existing.id, "name": existing.name, "status": existing.status} if existing else None,
                     "pending_execution_id": pending.id if pending else None, "params_filled": sum(1 for r in rows if r.get("value_ru")), "params_total": len(rows)})
@@ -114,7 +140,8 @@ def propose(db: Session, deal: Deal, position_ids: list[str], names: dict[str, s
                 db.add(mt)
                 db.flush()
             model = EquipmentModel(factory_id=p.factory_id, machine_type=p.machine_type or "", machine_type_id=mt.id if mt else None, model=p.model,
-                                   tech_params=p.tech_params or {}, logistics_params=p.logistics_params or {}, status="pending", proposed_by=user_id)
+                                   trademark=p.trademark or "", tech_params=p.tech_params or {}, logistics_params=p.logistics_params or {},
+                                   status="pending", proposed_by=user_id)
             db.add(model)
             db.flush()
         rows = [{k: r.get(k) for k in ("no", "code", "name_ru", "name_zh", "unit", "value_ru", "value_zh", "required", "local_ru")} for r in row_dicts(p)]
@@ -186,11 +213,11 @@ def tree(db: Session, include_pending: bool = False) -> list[dict]:
                 continue
             tname = (types[m.machine_type_id].name if m.machine_type_id in types else m.machine_type) or "—"
             by_type.setdefault(tname, {"machine_type": tname, "machine_type_id": m.machine_type_id, "models": []})["models"].append({
-                "id": m.id, "model": m.model, "brand_name": m.brand_name, "status": m.status,
+                "id": m.id, "model": m.model, "trademark": m.trademark or default_trademark(f), "brand_name": m.brand_name, "status": m.status,
                 "executions": [{"id": e.id, "name": e.name, "brand_name": e.brand_name, "status": e.status, "params": len(e.tech_params or []),
                                 "images": len(e.images or []), "source_deal_id": e.source_deal_id} for e in execs.get(m.id, [])]})
         if by_type:
-            out.append({"factory_id": f.id, "factory": f.name, "types": list(by_type.values())})
+            out.append({"factory_id": f.id, "factory": f.name, "trademarks": f.trademarks or [], "types": list(by_type.values())})
     return out
 
 
@@ -200,8 +227,9 @@ LIST_ALIASES = {
     "factory": ("завод", "производитель", "изготовитель", "manufacturer", "factory", "工厂", "制造商"),
     "machine_type": ("тип машины", "тип", "type", "设备类型", "类型"),
     "model": ("модель", "model", "型号"),
+    "trademark": ("торговая марка", "марка", "бренд", "brand", "trademark", "品牌", "商标"),
     "execution": ("исполнение", "комплектация", "вариант", "configuration", "配置"),
-    "brand_name": ("наименование под брендом", "бренд", "brand"),
+    "brand_name": ("наименование под брендом", "под брендом компании"),
     "unit_price": ("цена", "стоимость", "price", "价格", "单价"),
     "currency": ("валюта", "currency", "币种"),
     "basis": ("базис", "incoterms", "условия поставки"),
@@ -237,7 +265,7 @@ def _num(v) -> Optional[float]:
 def add_equipment(db: Session, data: dict, user, editor: bool) -> tuple[EquipmentExecution, bool]:
     """Новая запись каталога вручную или из файла. Менеджер — «на проверке» (подтверждает КД или ГД);
     КД/ГД — сразу в каталоге. Совпадающее исполнение (тот же набор параметров) не дублируется.
-    data: factory_id | factory_name, machine_type, model, execution_name, brand_name, tech_params (строки таблицы),
+    data: factory_id | factory_name, machine_type, trademark, model, execution_name, brand_name, tech_params (строки таблицы),
           logistics_params, unit_price, currency, basis, production_term {value, unit}, comment.
     Возвращает (исполнение, создано ли новое)."""
     from ..models import FactoryPriceHistory
@@ -269,6 +297,12 @@ def add_equipment(db: Session, data: dict, user, editor: bool) -> tuple[Equipmen
         db.flush()
     elif model.status == "archived":
         model.status = status
+    tm = (data.get("trademark") or "").strip()
+    if tm:
+        model.trademark = model.trademark or tm
+        remember_trademark(factory, tm)
+    elif not model.trademark:
+        model.trademark = default_trademark(factory)
     if editor and data.get("brand_name"):
         model.brand_name = model.brand_name or data["brand_name"]
     rows = [r for r in (data.get("tech_params") or []) if (r.get("name_ru") or "").strip()]
@@ -295,5 +329,5 @@ def add_equipment(db: Session, data: dict, user, editor: bool) -> tuple[Equipmen
                                    currency=(data.get("currency") or "CNY")[:3].upper(), basis=data.get("basis") or "",
                                    production_term=term, on=date.today(), source="price_list"))
     audit(db, user.id, None, "equipment_execution", ex.id, "catalog_add" if created else "catalog_add_existing",
-          after={"factory": factory.name, "model": model_name, "status": ex.status, "params": len(rows), "comment": data.get("comment") or ""})
+          after={"factory": factory.name, "trademark": model.trademark, "model": model_name, "status": ex.status, "params": len(rows), "comment": data.get("comment") or ""})
     return ex, created

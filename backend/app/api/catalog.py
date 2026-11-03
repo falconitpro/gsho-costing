@@ -1,4 +1,4 @@
-"""Каталог оборудования (задача 7), типы машин, шаблоны теххарактеристик и глоссарий (задача 4), история цен клиентам (задача 8)."""
+"""Каталог оборудования (задача 7), типы машин, шаблоны технических характеристик и глоссарий (задача 4), история цен клиентам (задача 8)."""
 from __future__ import annotations
 
 from typing import Optional
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
 from ..db import get_db
-from ..models import EquipmentExecution, EquipmentModel, FactoryPriceHistory, Glossary, MachineType, TechParamTemplate
+from ..models import EquipmentExecution, EquipmentModel, Factory, FactoryPriceHistory, Glossary, MachineType, TechParamTemplate
 from ..services import catalog_service as cs, tech_params_service as tps
 from ..services.deal_service import audit
 from .common import get_deal_or_404, serialize
@@ -90,6 +90,7 @@ def execution_patch(exec_id: str, body: ExecutionPatch, db: Session = Depends(ge
 
 class ModelPatch(BaseModel):
     brand_name: Optional[str] = None
+    trademark: Optional[str] = None
     machine_type_id: Optional[str] = None
     status: Optional[str] = None
     names: Optional[dict] = None
@@ -107,6 +108,8 @@ def model_patch(model_id: str, body: ModelPatch, db: Session = Depends(get_db), 
         mt = db.get(MachineType, body.machine_type_id)
         if mt:
             m.machine_type = mt.name
+    if body.trademark:
+        cs.remember_trademark(db.get(Factory, m.factory_id), body.trademark)
     audit(db, user.id, None, "equipment_model", m.id, "update", after=body.model_dump(exclude_none=True))
     db.commit()
     return serialize(m)
@@ -198,6 +201,7 @@ class EquipmentIn(BaseModel):
     factory_name: str = ""
     factory_address: str = ""
     machine_type: str = ""
+    trademark: str = ""
     model: str
     execution_name: str = ""
     brand_name: str = ""
@@ -217,7 +221,7 @@ def _added(ex: EquipmentExecution, created: bool, editor: bool) -> dict:
 
 @router.post("/catalog/equipment", status_code=201)
 def catalog_add(body: EquipmentIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_contributor)):
-    """Добавить оборудование вручную: завод → тип → модель → исполнение с теххарактеристиками и ценой.
+    """Добавить оборудование вручную: завод → тип → модель → исполнение с техническими характеристиками и ценой.
     Менеджер — на подтверждение КД/ГД; КД и ГД — сразу в каталог."""
     editor = user.can("catalog", 2)
     try:
@@ -305,7 +309,7 @@ async def catalog_import_apply(file: UploadFile = File(...), mapping: str = Form
                 continue
             try:
                 ex, created = cs.add_equipment(db, {"factory_id": None if cell("factory") else default_factory_id, "factory_name": cell("factory"),
-                                                    "machine_type": cell("machine_type"), "model": cell("model"), "execution_name": cell("execution"),
+                                                    "machine_type": cell("machine_type"), "model": cell("model"), "trademark": cell("trademark"), "execution_name": cell("execution"),
                                                     "brand_name": cell("brand_name"), "unit_price": cell("unit_price") or None,
                                                     "currency": cell("currency") or "CNY", "basis": cell("basis"),
                                                     "production_days": cell("production_days") or None}, user, editor)
@@ -355,7 +359,7 @@ def approve_machine_type(type_id: str, db: Session = Depends(get_db), user: Curr
     return serialize(t)
 
 
-# ------------------------------------------------------------------ шаблоны теххарактеристик (обязательность задают КД/ГД)
+# ------------------------------------------------------------------ шаблоны технических характеристик (обязательность задают КД/ГД)
 
 class TemplateRowIn(BaseModel):
     id: Optional[str] = None

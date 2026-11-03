@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, fmtRub } from "../api";
+import { api, fmtRub, designation } from "../api";
 import type { Deal, Me } from "../types";
 
 type Op = { name: string; hours: number; qualification: string; spare_part_rows: number[] };
@@ -47,7 +47,7 @@ export default function ServiceBlock({ deal, me, reload }: { deal: Deal; me: Me;
       {err && <div className="alert error">{err}</div>}
       <div className="card">
         <div className="row">
-          <label className="f">Позиция<select value={pid} onChange={(e) => setPid(e.target.value)}>{positions.map((p) => <option key={p.id} value={p.id}>{p.model} × {p.qty}</option>)}</select></label>
+          <label className="f">Позиция<select value={pid} onChange={(e) => setPid(e.target.value)}>{positions.map((p) => <option key={p.id} value={p.id}>{designation(p)} × {p.qty}</option>)}</select></label>
           <label className="f">Целевая наработка, м·ч<input value={d?.target_hours ?? ""} disabled /></label>
           <label className="f">Интенсивность, м·ч/мес<input type="number" value={hpm} disabled={!canEdit} onChange={(e) => setHpm(e.target.value)} /></label>
           <label className="f">Бригада, чел<input type="number" value={crew} disabled={!canEdit} onChange={(e) => setCrew(Number(e.target.value))} /></label>

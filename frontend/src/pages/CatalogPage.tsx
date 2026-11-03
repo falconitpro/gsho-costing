@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { api, fmtDate, fmtRub } from "../api";
+import { api, fmtDate, fmtRub, designation } from "../api";
 import { can, type Me } from "../types";
 import CatalogAdd from "../components/CatalogAdd";
 
-type Tree = { factory_id: string; factory: string; types: { machine_type: string; models: { id: string; model: string; brand_name: string; status: string; executions: { id: string; name: string; brand_name: string; status: string; params: number; images: number; source_deal_id: string | null }[] }[] }[] }[];
+type Tree = { factory_id: string; factory: string; types: { machine_type: string; models: { id: string; model: string; trademark?: string; brand_name: string; status: string; executions: { id: string; name: string; brand_name: string; status: string; params: number; images: number; source_deal_id: string | null }[] }[] }[] }[];
 type Exec = { id: string; name: string; brand_name: string; status: string; tech_params: { no: number; name_ru: string; unit: string; value_ru: string; required: boolean; local_ru: boolean }[]; images: unknown[];
-  model: { id: string; model: string; brand_name: string; machine_type: string; factory_id: string } | null; source_deal_id: string | null;
+  model: { id: string; model: string; trademark?: string; brand_name: string; machine_type: string; factory_id: string } | null; source_deal_id: string | null;
   factory_prices?: { on: string; unit_price: number; currency: string; production_term: { value?: number; unit?: string }; source: string; deal_id: string }[];
   client_prices?: { on: string; deal_number: string; unit_price_rub: number; total_rub: number; qty: number; outcome: string | null; delivery_term: string }[] };
 type Gl = { id: string; term_ru: string; term_zh: string; kind: string; status: string };
@@ -16,7 +16,7 @@ export default function CatalogPage({ me }: { me: Me }) {
   const [tab, setTab] = useState<"tree" | "add" | "pending" | "glossary" | "templates" | "archive">("tree");
   const [mergeExec, setMergeExec] = useState("");
   const [mergeModel, setMergeModel] = useState<Record<string, string>>({});
-  const [archive, setArchive] = useState<{ models: { id: string; model: string; brand_name: string }[]; executions: { id: string; name: string; model_id: string }[] }>({ models: [], executions: [] });
+  const [archive, setArchive] = useState<{ models: { id: string; model: string; trademark?: string; brand_name: string }[]; executions: { id: string; name: string; model_id: string }[] }>({ models: [], executions: [] });
   const [tree, setTree] = useState<Tree>([]);
   const [exec, setExec] = useState<Exec | null>(null);
   const [pending, setPending] = useState<{ id: string; name: string; model: string; source_deal_id: string | null; created_at: string }[]>([]);
@@ -55,7 +55,7 @@ export default function CatalogPage({ me }: { me: Me }) {
         {contributor && <button className={tab === "add" ? "active" : ""} onClick={() => setTab("add")}>+ Добавить оборудование</button>}
         {editor && <button className={tab === "pending" ? "active" : ""} onClick={() => setTab("pending")}>На подтверждение ({pending.length})</button>}
         {can(me, "glossary") && <button className={tab === "glossary" ? "active" : ""} onClick={() => setTab("glossary")}>Глоссарий RU ↔ ZH</button>}
-        <button className={tab === "templates" ? "active" : ""} onClick={() => setTab("templates")}>Шаблоны теххарактеристик</button>
+        <button className={tab === "templates" ? "active" : ""} onClick={() => setTab("templates")}>Шаблоны технических характеристик</button>
         {editor && <button className={tab === "archive" ? "active" : ""} onClick={() => setTab("archive")}>Архив</button>}
       </div>
       {tab === "tree" && (
@@ -68,13 +68,13 @@ export default function CatalogPage({ me }: { me: Me }) {
                   <div key={t.machine_type} style={{ marginLeft: 12 }}><div className="muted">{t.machine_type}</div>
                     {t.models.map((m) => (
                       <div key={m.id} style={{ marginLeft: 12 }}>
-                        <b>{m.model}</b>{m.brand_name && <span className="badge accent" style={{ marginLeft: 4 }}>{m.brand_name}</span>}{m.status === "pending" && <span className="badge warn"> на проверке</span>}
+                        <b>{designation(m)}</b>{m.brand_name && <span className="badge accent" style={{ marginLeft: 4 }}>{m.brand_name}</span>}{m.status === "pending" && <span className="badge warn"> на проверке</span>}
                         {editor && <button className="btn ghost" style={{ padding: "0 6px", marginLeft: 4 }} onClick={() => { const b = prompt("Наименование под брендом компании:", m.brand_name || ""); if (b !== null) api.patch(`/api/catalog/models/${m.id}`, { brand_name: b }).then(loadTree); }}>бренд</button>}
                         {editor && (
                           <div className="row" style={{ fontSize: 12, margin: "2px 0" }}>
                             <select value={mergeModel[m.id] || ""} onChange={(e) => setMergeModel({ ...mergeModel, [m.id]: e.target.value })} style={{ padding: 2, maxWidth: 170 }} title="объединить дубль модели с другой моделью">
                               <option value="">объединить с…</option>
-                              {allModels.filter((x) => x.id !== m.id).map((x) => <option key={x.id} value={x.id}>{x.model} ({x.factory.slice(0, 18)})</option>)}</select>
+                              {allModels.filter((x) => x.id !== m.id).map((x) => <option key={x.id} value={x.id}>{designation(x)} ({x.factory.slice(0, 18)})</option>)}</select>
                             {mergeModel[m.id] && <button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => act(() => api.post(`/api/catalog/models/${m.id}/merge`, { into_id: mergeModel[m.id] }), `Модель ${m.model} объединена; дубль в архиве`)}>объединить</button>}
                             <button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => act(() => api.patch(`/api/catalog/models/${m.id}`, { status: "archived" }), `Модель ${m.model} в архиве`)}>в архив</button>
                           </div>)}
@@ -90,7 +90,7 @@ export default function CatalogPage({ me }: { me: Me }) {
             {exec ? (
               <div className="card">
                 <div className="row" style={{ justifyContent: "space-between" }}>
-                  <h2 style={{ marginTop: 0 }}>{exec.model?.model} — {exec.name} {exec.brand_name && <span className="badge accent">{exec.brand_name}</span>} <span className={"badge " + (exec.status === "approved" ? "ok" : "warn")}>{exec.status}</span></h2>
+                  <h2 style={{ marginTop: 0 }}>{exec.model ? designation(exec.model) : ""} — {exec.name} {exec.brand_name && <span className="badge accent">{exec.brand_name}</span>} <span className={"badge " + (exec.status === "approved" ? "ok" : "warn")}>{exec.status}</span></h2>
                   {editor && exec.status === "pending" && <div className="row"><button className="btn" onClick={() => decide(exec.id, true)}>Подтвердить</button><button className="btn ghost" onClick={() => decide(exec.id, false)}>Отклонить</button></div>}
                 </div>
                 {editor && exec.status === "approved" && (
@@ -118,7 +118,7 @@ export default function CatalogPage({ me }: { me: Me }) {
         <div className="card">
           <p className="muted">Объединённые дубли и архивированные позиции каталога. В подборе при вводе заявок не участвуют; можно восстановить.</p>
           <h2>Модели</h2>
-          <table><tbody>{archive.models.map((m) => <tr key={m.id}><td>{m.model}</td><td>{m.brand_name}</td>
+          <table><tbody>{archive.models.map((m) => <tr key={m.id}><td>{designation(m)}</td><td>{m.brand_name}</td>
             <td><button className="btn ghost" onClick={() => act(() => api.patch(`/api/catalog/models/${m.id}`, { status: "approved" }), "Модель восстановлена")}>восстановить</button></td></tr>)}
             {archive.models.length === 0 && <tr><td className="muted">нет</td></tr>}</tbody></table>
           <h2>Исполнения</h2>
@@ -152,7 +152,7 @@ export default function CatalogPage({ me }: { me: Me }) {
       )}
       {tab === "templates" && (
         <div className="card">
-          <p className="muted">Перечень теххарактеристик по типу машины и обязательность параметров (задают КД и ГД). Общий шаблон — фиксированные параметры RFQ (разделы 1–11). Менеджер может изменить обязательность в конкретной сделке.</p>
+          <p className="muted">Перечень технических характеристик по типу машины и обязательность параметров (задают КД и ГД). Общий шаблон — фиксированные параметры RFQ (разделы 1–11). Менеджер может изменить обязательность в конкретной сделке.</p>
           <div className="row"><select value={tplType} onChange={(e) => setTplType(e.target.value)}><option value="">Общий шаблон</option>{types.map((t) => <option key={t.id} value={t.id}>{t.name}{t.status === "pending" ? " (на подтверждение)" : ""}</option>)}</select>
             {editor && <button className="btn ghost" onClick={() => { const n = prompt("Новый тип машины:"); if (n) api.post("/api/refs/machine-types", { name: n }).then(() => api.get<typeof types>("/api/refs/machine-types").then(setTypes)); }}>+ тип машины</button>}
             {editor && <button className="btn" onClick={() => api.put(`/api/refs/tech-param-templates?machine_type_id=${tplType}`, tpl).then(() => setMsg("Шаблон сохранён")).catch((e) => setMsg(e.message))}>Сохранить шаблон</button>}

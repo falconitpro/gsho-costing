@@ -102,6 +102,20 @@ class Client(TimestampMixin, Base):
     default_payment_scheme_id: Mapped[Optional[str]] = mapped_column(ForeignKey("payment_schemes.id"))
 
 
+def designation(trademark: Optional[str], model: Optional[str]) -> str:
+    """«Торговая марка + модель»; марка не дублируется, если уже входит в название модели."""
+    tm, m = (trademark or "").strip(), (model or "").strip()
+    if not tm or m.lower().startswith(tm.lower()):
+        return m or tm
+    return f"{tm} {m}".strip()
+
+
+def default_trademark(factory: Optional["Factory"]) -> str:
+    """Торговая марка по сопоставлению «завод → марки» (первая в списке)."""
+    marks = [t for t in ((factory.trademarks if factory else None) or []) if t]
+    return marks[0] if marks else ""
+
+
 class Factory(TimestampMixin, Base):
     __tablename__ = "factories"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -124,6 +138,7 @@ class Factory(TimestampMixin, Base):
     default_currency: Mapped[str] = mapped_column(String(3), default="CNY")
     default_basis: Mapped[str] = mapped_column(String(16), default="")
     machine_types: Mapped[list[str]] = mapped_column(JSONType, default=list)  # что выпускает
+    trademarks: Mapped[list[str]] = mapped_column(JSONType, default=list)     # торговые марки завода (первая — по умолчанию), напр. SHILI
     notes: Mapped[str] = mapped_column(Text, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     payment_terms: Mapped[list[dict]] = mapped_column(JSONType, default=list)
@@ -132,7 +147,7 @@ class Factory(TimestampMixin, Base):
 
 
 class MachineType(TimestampMixin, Base):
-    """Справочник типов машин (задача 7): каталог, шаблоны теххарактеристик, нормативы по типу."""
+    """Справочник типов машин (задача 7): каталог, шаблоны технических характеристик, нормативы по типу."""
     __tablename__ = "machine_types"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(255), unique=True)
@@ -150,6 +165,7 @@ class EquipmentModel(TimestampMixin, Base):
     machine_type: Mapped[str] = mapped_column(String(255))                   # 1.1 (текст, совместимость)
     machine_type_id: Mapped[Optional[str]] = mapped_column(ForeignKey("machine_types.id"))
     model: Mapped[str] = mapped_column(String(255))                          # 1.2
+    trademark: Mapped[str] = mapped_column(String(128), default="")          # торговая марка оборудования (марка завода)
     brand_name: Mapped[str] = mapped_column(String(255), default="")         # собственное наименование для подачи под брендом компании
     names: Mapped[dict] = mapped_column(JSONType, default=dict)              # {"ru":..., "en":..., "zh":...}
     tech_params: Mapped[dict] = mapped_column(JSONType, default=dict)        # разделы RFQ 1–11 по кодам
@@ -163,7 +179,7 @@ class EquipmentModel(TimestampMixin, Base):
 
 
 class EquipmentExecution(TimestampMixin, Base):
-    """Исполнение модели: полный набор теххарактеристик (формат таблицы задачи 4), опции РФ и изображения."""
+    """Исполнение модели: полный набор технических характеристик (формат таблицы задачи 4), опции РФ и изображения."""
     __tablename__ = "equipment_executions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     model_id: Mapped[str] = mapped_column(ForeignKey("equipment_models.id"), index=True)
@@ -295,7 +311,7 @@ class Glossary(TimestampMixin, Base):
 
 
 class TechParamTemplate(Base):
-    """Шаблон перечня теххарактеристик по типу машины (задача 4). Обязательность задают КД/ГД."""
+    """Шаблон перечня технических характеристик по типу машины (задача 4). Обязательность задают КД/ГД."""
     __tablename__ = "tech_param_templates"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     machine_type_id: Mapped[Optional[str]] = mapped_column(ForeignKey("machine_types.id"), index=True)   # NULL = общий шаблон
@@ -395,6 +411,7 @@ class Position(TimestampMixin, Base):
     factory_id: Mapped[str] = mapped_column(ForeignKey("factories.id"))
     equipment_model_id: Mapped[Optional[str]] = mapped_column(ForeignKey("equipment_models.id"))
     machine_type: Mapped[str] = mapped_column(String(255), default="")
+    trademark: Mapped[str] = mapped_column(String(128), default="")            # торговая марка оборудования (по заводу)
     model: Mapped[str] = mapped_column(String(255))
     qty: Mapped[int] = mapped_column(Integer, default=1)                       # 13.4
     unit_price: Mapped[float] = mapped_column(Float)                           # 13.5
@@ -433,9 +450,14 @@ class Position(TimestampMixin, Base):
     local_option_rows = relationship("LocalOption", cascade="all, delete-orphan")
     image_rows = relationship("PositionImage", cascade="all, delete-orphan")
 
+    @property
+    def designation(self) -> str:
+        """Обозначение оборудования: торговая марка + модель (SHILI FL-0.5(C))."""
+        return designation(self.trademark, self.model)
+
 
 class PositionTechParam(TimestampMixin, Base):
-    """Строка таблицы теххарактеристик позиции (задача 4): № / параметр / ед. / требования заказчика / значение / комментарий."""
+    """Строка таблицы технических характеристик позиции (задача 4): № / параметр / ед. / требования заказчика / значение / комментарий."""
     __tablename__ = "position_tech_params"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     position_id: Mapped[str] = mapped_column(ForeignKey("positions.id"), index=True)
@@ -515,7 +537,7 @@ class FactoryOffer(TimestampMixin, Base):
     basis: Mapped[str] = mapped_column(String(32), default="FCA")
     production_term: Mapped[dict] = mapped_column(JSONType, default=dict)
     factory_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)
-    params: Mapped[list[dict]] = mapped_column(JSONType, default=list)       # строки теххарактеристик с value_ru/value_zh/comment
+    params: Mapped[list[dict]] = mapped_column(JSONType, default=list)       # строки технических характеристик с value_ru/value_zh/comment
     images: Mapped[list[str]] = mapped_column(JSONType, default=list)        # attachment ids
     request_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     answer_received_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
