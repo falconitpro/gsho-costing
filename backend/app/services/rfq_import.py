@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -61,7 +62,7 @@ HEADER_ALIASES = {
 class ImportError_:
     code: str
     message: str
-    severity: str = "error"   # error | warning
+    severity: str = "error"   # error | warning | info
 
 
 @dataclass
@@ -129,12 +130,18 @@ def _norm(v: Any) -> str:
 
 
 def _parse_number(raw: Any) -> Optional[float]:
-    """Число из ячейки: 9 850 → 9850; «12 мес.» → 12; «2 × 280 кВт», «200–1000» → None (это текст, не число)."""
+    """Число из ячейки: 9 850 → 9850; «12 мес.» → 12; «5 050 ± 50» → 5050; «≥ 200» → 200; «95,6 (при 2 400 об/мин)» → 95.6;
+    «2 × 280 кВт», «200–1000» → None (это текст, не число)."""
     if isinstance(raw, bool):
         return None
     if isinstance(raw, (int, float)):
         return float(raw)
-    s = str(raw).strip().replace("\u00a0", "").replace(" ", "").replace(",", ".")
+    s = str(raw)
+    # заводские записи вида «5 050 ± 50», «≥ 200», «≈ 1,48 м³», «95,6 (при 2 400 об/мин)»: допуск, знак сравнения и пояснение в скобках
+    s = re.sub(r"\([^)]*\)", "", s)
+    s = re.sub(r"±.*$", "", s)
+    s = s.strip().lstrip("≥≤≈~<>=").strip()
+    s = s.replace("\u00a0", "").replace(" ", "").replace(",", ".")
     m = re.match(r"^[-+]?\d+(\.\d+)?", s)
     if not m:
         return None
@@ -180,7 +187,46 @@ def _value(raw_ru: Any, raw_zh: Any, code: str, name: str, out: RfqParsed) -> An
     return raw if not isinstance(raw, str) else raw.strip()
 
 
-def parse_rfq(path: str) -> RfqParsed:
+# если завод/менеджер не заполнил значение, а это условие самого заказчика — берём из «Требований заказчика»
+# раздел 0 (дата запроса, срок КП, температуры, условия эксплуатации) заполняет заказчик — тоже из требований
+L_MARKS = {"l", "л", "+", "x", "да", "yes", "1", "true"}
+FROM_REQUIREMENT = {"0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "13.2", "13.3", "13.4"}
+
+
+@lru_cache(maxsize=1)
+def _canonical() -> tuple[dict[str, str], frozenset[str]]:
+    """Встроенный шаблон: название поля → код (только уникальные названия) и коды с меткой L (данные логисту)."""
+    from .rfq_template import DEFAULT_TEMPLATE
+    wb = load_workbook(DEFAULT_TEMPLATE, data_only=True)
+    ws = next((w for w in wb.worksheets if "тех" in w.title.lower()), wb.worksheets[0])
+    hdr, cols, l_col = _find_main_header(ws)
+    seen: dict[str, list[str]] = {}
+    l_codes: set[str] = set()
+    for r in range(hdr + 1, ws.max_row + 1):
+        code = str(ws.cell(r, cols["code"]).value or "").strip()
+        name = _norm(ws.cell(r, cols.get("name_ru", cols["code"] + 1)).value)
+        if CODE_RE.match(code) and name:
+            seen.setdefault(name, []).append(code)
+        if CODE_RE.match(code) and l_col is not None and _norm(ws.cell(r, l_col).value) in L_MARKS:
+            l_codes.add(code)
+    return {n: codes[0] for n, codes in seen.items() if len(codes) == 1}, frozenset(l_codes)
+
+
+def _canonical_names() -> dict[str, str]:
+    return _canonical()[0]
+
+
+def _canonical_code(code: str, name: str, enabled: bool) -> str:
+    """Код по названию, если в файле строки сдвинуты (вставлена/удалена строка): только внутри того же раздела."""
+    if not enabled:
+        return code
+    canon = _canonical_names().get(_norm(name))
+    if canon and canon != code and canon.split(".")[0] == code.split(".")[0]:
+        return canon
+    return code
+
+
+def parse_rfq(path: str, by_name: bool = True) -> RfqParsed:
     wb = load_workbook(path, data_only=True)
     out = RfqParsed()
     main = next((ws for ws in wb.worksheets if "тех" in ws.title.lower() or "технич" in ws.title.lower() or "кп" in ws.title.lower()), wb.worksheets[0])
@@ -212,6 +258,16 @@ def parse_rfq(path: str) -> RfqParsed:
             code = f"{code_raw:.2f}".rstrip("0")  # 8.50 → 8.5 (Excel мог хранить код числом)
         if not CODE_RE.match(code):
             continue
+        file_code = code
+        code = _canonical_code(code, str(name or ""), by_name)
+        if code in out.fields:
+            # такой код уже занят строкой с «родным» названием — оставляем номер из файла
+            code = file_code
+            if code in out.fields:
+                out.errors.append(ImportError_(file_code, f"Строка {file_code} «{name}» повторяет уже распознанное поле — пропущена.", "warning"))
+                continue
+        elif code != file_code:
+            out.errors.append(ImportError_(code, f"Строка {file_code} «{name}» распознана по названию как поле {code} (нумерация в файле отличается от шаблона).", "info"))
         get = lambda key: main.cell(r, cols[key]).value if key in cols else None
         raw_ru, raw_zh = get("value_ru"), get("value_zh")
         if raw_ru is None and raw_zh is None:
@@ -220,17 +276,28 @@ def parse_rfq(path: str) -> RfqParsed:
                 if rng.min_row <= r <= rng.max_row and "value_ru" in cols and rng.min_col <= cols["value_ru"] <= rng.max_col:
                     raw_ru = main.cell(rng.min_row, rng.min_col).value
                     break
-        is_l = l_col is not None and _norm(main.cell(r, l_col).value) in {"l", "л", "+", "x", "да", "yes", "1", "true"}
+        is_l = l_col is not None and _norm(main.cell(r, l_col).value) in L_MARKS
         name_ru = str(name).strip() if name else ""
         f = RfqField(code=code, section=section, section_no=section_no, name_ru=name_ru, name_zh=str(get("name_zh") or "").strip(),
                      unit=str(get("unit") or "").strip(), requirement=get("req_ru"), requirement_zh=get("req_zh"),
                      value=None, value_ru=raw_ru, value_zh=raw_zh, comment=get("comment"), is_l=is_l, row=r)
         f.value = _value(raw_ru, raw_zh, code, name_ru or code, out)
+        if f.value is None and code in FROM_REQUIREMENT and _norm(f.requirement) not in NA_VALUES:
+            f.value = _value(f.requirement, None, code, name_ru or code, out)
+            if f.value is not None:
+                out.errors.append(ImportError_(code, f"Поле {code} «{name_ru}» не заполнено заводом — взято из требований заказчика: «{f.requirement}».", "info"))
         if f.value is None and code in REQUIRED_CODES:
             out.errors.append(ImportError_(code, f"Обязательное поле {code} «{name_ru}» не заполнено заводом."))
             out.missing_required.append(code)
         out.fields[code] = f
 
+    if by_name and not any(f.is_l for f in out.fields.values()):
+        # в файле нет отметок «L» (данные логисту) — берём их из встроенного шаблона по кодам
+        l_codes = _canonical()[1]
+        for code, f in out.fields.items():
+            f.is_l = code in l_codes
+        if l_codes:
+            out.errors.append(ImportError_("", "В файле нет отметок «L» (данные для логиста) — применены отметки из шаблона компании.", "info"))
     for code in REQUIRED_CODES - set(out.fields):
         out.errors.append(ImportError_(code, f"В шаблоне нет обязательного поля {code}."))
         out.missing_required.append(code)
