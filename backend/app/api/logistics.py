@@ -106,7 +106,7 @@ def _check_batch_items(db: Session, deal: Deal, b: Batch, items: dict) -> dict:
             chk["value"] = amount
             chk["comment"] = comments.get(key, "")
             if chk["needs_comment"] and not chk["comment"]:
-                raise HTTPException(422, {"message": f"Статья {key}: отклонение от истории выше {thr} % — нужен комментарий", "check": chk})
+                raise HTTPException(422, {"message": f"{ {'intl_freight': 'Международная перевозка', 'broker_rub': 'Брокер и СВХ', 'rf_delivery_rub': 'Доставка по РФ'}.get(key, key)}: отклонение от истории выше {thr} % — нужен комментарий", "check": chk})
             checks[key] = chk
     return {**items, "checks": checks}
 
@@ -168,7 +168,7 @@ def update_position_logistics(deal_id: str, pos_id: str, body: PositionLogistics
             c = history_check(amt, _history(db, key, machine_type=pos.machine_type), thr)
             c["value"], c["comment"] = amt, body.comments.get(key, "")
             if c["needs_comment"] and not c["comment"]:
-                raise HTTPException(422, {"message": f"Статья {key}: отклонение выше {thr} % — нужен комментарий", "check": c})
+                raise HTTPException(422, {"message": f"{ {'domestic_logistics': 'Внутрикитайская логистика', 'export_formalities': 'Экспортные формальности КНР'}[key]}: отклонение от истории выше {thr} % — нужен комментарий", "check": c})
             checks[key] = c
     if body.certification_rub:
         c = history_check(body.certification_rub, _history(db, "certification_rub", machine_type=pos.machine_type), thr)
