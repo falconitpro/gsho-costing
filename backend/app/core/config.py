@@ -47,7 +47,7 @@ class Settings:
     wecom_agent_id: str = field(default_factory=lambda: _env("WECOM_AGENT_ID", ""))
     wecom_secret: str = field(default_factory=lambda: _env("WECOM_SECRET", ""))
 
-    # Переводчик RU↔ZH (задача 4): console | yandex
+    # Переводчик RU↔CN (задача 4): console | yandex
     translator_provider: str = field(default_factory=lambda: _env("TRANSLATOR_PROVIDER", "yandex"))
     company_registry_provider: str = field(default_factory=lambda: _env("COMPANY_REGISTRY_PROVIDER", "dadata"))
     dadata_api_key: str = field(default_factory=lambda: _env("DADATA_API_KEY", ""))

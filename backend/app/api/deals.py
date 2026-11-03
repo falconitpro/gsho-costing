@@ -360,7 +360,7 @@ def delete_variant(deal_id: str, var_id: str, db: Session = Depends(get_db), use
 
 @router.get("/rfq/template")
 def rfq_template_schema(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Все поля опросника из актуального шаблона RFQ (разделы, коды, названия RU/ZH, единицы, метка L) — для ручного ввода."""
+    """Все поля опросника из актуального шаблона RFQ (разделы, коды, названия RU/CN, единицы, метка L) — для ручного ввода."""
     from ..models import Template
     from ..services.rfq_import import template_fields
     from ..services.rfq_template import template_path
@@ -375,7 +375,7 @@ def rfq_template_file(db: Session = Depends(get_db), user: CurrentUser = Depends
     from ..models import Template
     from ..services.rfq_template import template_path
     custom = db.scalar(select(Template).where(Template.kind == "rfq", Template.is_active.is_(True)).order_by(Template.version.desc()))
-    return FileResponse(template_path(custom.file_path if custom else None), filename="RFQ_RU-ZH.xlsx")
+    return FileResponse(template_path(custom.file_path if custom else None), filename="RFQ_RU-CN.xlsx")
 
 
 @router.post("/{deal_id}/rfq/preview")

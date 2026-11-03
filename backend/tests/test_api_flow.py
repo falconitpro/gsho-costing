@@ -307,7 +307,7 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     assert client.patch(f"/api/deals/{did}/positions/{pid}/images/{img['id']}", headers=H(MGR), json={"in_kp": True}).status_code == 403
     _ok(client.patch(f"/api/deals/{did}/positions/{pid}/images/{img['id']}", headers=H(CD), json={"in_kp": True, "kp_order": 1}))
     assert client.post(f"/api/deals/{did}/positions/{pid}/images", headers=H(FD), files={"file": ("x.png", b"123", "image/png")}).status_code == 403
-    # задача 9: запрос двум заводам (файл RU+ZH, строка опции РФ не включена), ответ второго завода, сравнение, отбор КД
+    # задача 9: запрос двум заводам (файл RU+CN, строка опции РФ не включена), ответ второго завода, сравнение, отбор КД
     # файлы клиента без подтверждения проверки — 422 (задача 10)
     r = client.post(f"/api/deals/{did}/positions/{pid}/tech-params/request", headers=H(MGR), json={"factory_ids": [factories[0]["id"]], "image_ids": [img["id"]]})
     assert r.status_code == 422 and "client_files" in r.json()["detail"]

@@ -176,7 +176,7 @@ async def import_preview(deal_id: str, pos_id: str, file: UploadFile = File(...)
 async def import_apply(deal_id: str, pos_id: str, file: UploadFile = File(...), mapping: str = Form(...), target: str = Form("requirements"),
                        selected_rows: str = Form(""), add_unmatched: bool = Form(True), offer_id: str = Form(""),
                        db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Применить выбранное сопоставление. target=requirements — файл клиента; factory_answer — ответ завода (ZH→RU через глоссарий/переводчик).
+    """Применить выбранное сопоставление. target=requirements — файл клиента; factory_answer — ответ завода (CN→RU через глоссарий/переводчик).
     offer_id — ответ конкретного завода при запросе нескольким заводам (задача 9)."""
     deal = get_deal_or_404(db, deal_id, user)
     _can_edit(user, deal)
@@ -257,7 +257,7 @@ class RequestIn(BaseModel):
 
 @router.post("/positions/{pos_id}/tech-params/request")
 def send_request(deal_id: str, pos_id: str, body: RequestIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Двуязычный запрос (RU+ZH) одному или нескольким заводам: файл с требованиями заказчика, просьба приложить фото и чертежи.
+    """Двуязычный запрос (RU+CN) одному или нескольким заводам: файл с требованиями заказчика, просьба приложить фото и чертежи.
     По каждому заводу создаётся ответ-кандидат (задача 9). Машинные переводы возвращаются списком на проверку."""
     deal = get_deal_or_404(db, deal_id, user)
     _can_edit(user, deal)

@@ -299,7 +299,7 @@ class PaymentScheme(Base):
 
 
 class Glossary(TimestampMixin, Base):
-    """Глоссарий переводов RU ↔ ZH (задача 4): параметры, единицы, значения, фразы."""
+    """Глоссарий переводов RU ↔ CN (задача 4): параметры, единицы, значения, фразы."""
     __tablename__ = "glossary"
     __table_args__ = (UniqueConstraint("term_ru", "kind", name="uq_glossary_term"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)

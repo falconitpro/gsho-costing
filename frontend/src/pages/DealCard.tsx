@@ -204,7 +204,7 @@ export default function DealCard({ me }: { me: Me }) {
           )}
           {editable && (
             <div className="card">
-              <h2 style={{ marginTop: 0 }}>Импорт RFQ (двуязычный шаблон RU-ZH)</h2>
+              <h2 style={{ marginTop: 0 }}>Импорт RFQ (двуязычный шаблон RU-CN)</h2>
               <p className="muted">Позицию можно завести тремя способами: выбрать исполнение из каталога, загрузить заполненный заводом файл RFQ или ввести поля вручную. Технические характеристики затем правятся в таблице ниже, а запрос заводу формируется из неё.</p>
               <div className="row">
                 <input type="file" accept=".xlsx" onChange={(e) => setRfqFile(e.target.files?.[0] || null)} />

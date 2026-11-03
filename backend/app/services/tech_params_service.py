@@ -2,8 +2,8 @@
 
 Таблица: № / Параметр (RU) / Ед. изм. / Требования заказчика / Значение (RU) / Комментарий.
 Порядок работы: менеджер заполняет требования (вручную или импортом файла клиента) → формирует двуязычный запрос
-заводу (RU+ZH; строки «реализуется в России» не попадают) → завод заполняет значения → менеджер загружает ответ
-(вручную или импортом), значения переводятся ZH→RU через глоссарий, затем переводчик (машинный перевод — на проверку).
+заводу (RU+CN; строки «реализуется в России» не попадают) → завод заполняет значения → менеджер загружает ответ
+(вручную или импортом), значения переводятся CN→RU через глоссарий, затем переводчик (машинный перевод — на проверку).
 Импорт таблиц — с предпросмотром и выбором столбцов/строк; сопоставление строк по № и названию.
 """
 from __future__ import annotations
@@ -412,7 +412,7 @@ def _match(rows: list[PositionTechParam], no: Any, name: Any, synonyms: dict[str
 
 def apply_import(db: Session, pos: Position, path: str, filename: str, mapping: dict, user_id: Optional[str], target: str = "requirements",
                  selected_rows: Optional[list[int]] = None, add_unmatched: bool = True) -> dict:
-    """Применяет выбранное сопоставление. target: requirements (файл клиента) | factory_answer (ответ завода, ZH→RU)."""
+    """Применяет выбранное сопоставление. target: requirements (файл клиента) | factory_answer (ответ завода, CN→RU)."""
     sheets = read_table(path, filename)
     sheet = next((s for s in sheets if s["name"] == mapping.get("sheet")), sheets[0])
     cols: dict[str, int] = {k: int(v) for k, v in (mapping.get("columns") or {}).items() if v is not None and v != ""}
@@ -484,7 +484,7 @@ def apply_import(db: Session, pos: Position, path: str, filename: str, mapping: 
                 else:
                     r.comment_ru = c
             r.source, r.filled_by = "factory_answer", user_id
-    # перевод ответа завода ZH→RU: глоссарий → переводчик
+    # перевод ответа завода CN→RU: глоссарий → переводчик
     if zh_values:
         tr = translate(db, [t for _, _, t in zh_values], "zh", "ru", kind="value", user_id=user_id)
         for (r, field, _), (text, status) in zip(zh_values, tr):

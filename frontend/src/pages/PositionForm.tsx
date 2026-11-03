@@ -154,7 +154,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
         <h2 style={{ marginTop: 0 }}>{position ? `Позиция ${designation(position)}: правка полей опросника` : "Новая позиция: ввод полей опросника вручную"}</h2>
         <span className="muted">заполнено {filledCount} из {schema.fields.length} · обязательные: завод, модель, кол-во, цена</span>
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>Те же поля, что в шаблоне RFQ ({schema.title || "RU-ZH"}). Метка <span className="badge">L</span> — данные для логиста. Заполняйте то, что известно; остальное можно дополнить позже или импортом файла.</p>
+      <p className="muted" style={{ marginTop: 0 }}>Те же поля, что в шаблоне RFQ ({schema.title || "RU-CN"}). Метка <span className="badge">L</span> — данные для логиста. Заполняйте то, что известно; остальное можно дополнить позже или импортом файла.</p>
       <div className="row" style={{ marginBottom: 8 }}>
         <button className="btn ghost" onClick={() => setOpen(Object.fromEntries([...bySection.keys()].map((k) => [k, true])))}>развернуть все разделы</button>
         <button className="btn ghost" onClick={() => setOpen({})}>свернуть</button>
