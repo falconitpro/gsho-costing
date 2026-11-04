@@ -80,7 +80,7 @@ export default function App() {
             <NavLink to="/team">Сотрудники</NavLink>
             <NavLink to="/catalog">Каталог</NavLink>
             <NavLink to="/factories">Заводы</NavLink>
-            {has("cd", "fd", "gd", "admin", "logistician") && <NavLink to="/parts/setup">Запчасти: компании и маршруты</NavLink>}
+            {has("cd", "fd", "gd", "admin", "logistician") && <NavLink to="/parts/setup">Запасные части</NavLink>}
             {has("admin", "fd", "gd", "cd") && <NavLink to="/settings">Настройки</NavLink>}
             {perm("access_admin", 2) && <NavLink to="/access">Уровни доступа</NavLink>}
             {has("admin", "gd", "fd") && <NavLink to="/admin">Администрирование</NavLink>}

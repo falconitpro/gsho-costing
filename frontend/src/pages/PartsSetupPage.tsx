@@ -43,7 +43,7 @@ export default function PartsSetupPage({ me }: { me: Me }) {
 
   return (
     <>
-      <div className="page-head"><h1>Запчасти: компании и маршруты</h1></div>
+      <div className="page-head"><h1>Запасные части</h1></div>
       <div className="row" style={{ marginBottom: 10 }}>
         <button className={`btn ${tab === "entities" ? "" : "ghost"}`} onClick={() => setTab("entities")}>Компании группы</button>
         <button className={`btn ${tab === "routes" ? "" : "ghost"}`} onClick={() => setTab("routes")}>Маршруты поставки</button>
@@ -318,7 +318,7 @@ function Simulator({ routes, suppliers, rules, title }: { routes: Route[]; suppl
         <label className="f">Поставщик<select value={f.supplier_id} onChange={(e) => setF({ ...f, supplier_id: e.target.value })}><option value="">—</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.short_name || s.name}</option>)}</select></label>
         <label className="f">Цена клиенту, ₽ (для маржи группы)<input type="number" value={f.client_price_rub} onChange={(e) => setF({ ...f, client_price_rub: e.target.value })} /></label>
         <label className="f">Прочие расходы до клиента, ₽<input type="number" value={f.extra_costs_rub} onChange={(e) => setF({ ...f, extra_costs_rub: e.target.value })} placeholder="логистика, пошлина" /></label>
-        {route?.steps.some((s) => s.currency === "KGS") && <label className="f">Курс KGS, ₽ за 1 сом<input value={f.kgs} onChange={(e) => setF({ ...f, kgs: e.target.value })} /></label>}
+        {route?.steps.some((s) => s.currency === "KGS") && <label className="f">Курс KGS, ₽ за 1 сом<input value={f.kgs} placeholder="по умолчанию — курс ЦБ РФ" onChange={(e) => setF({ ...f, kgs: e.target.value })} /></label>}
       </div>
       <button className="btn" style={{ marginTop: 8 }} onClick={run} disabled={!f.route_id || !Number(f.purchase_price)}>Посчитать</button>
       {err && <div className="alert info" style={{ marginTop: 8 }}>{err}</div>}
