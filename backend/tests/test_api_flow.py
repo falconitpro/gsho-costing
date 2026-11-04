@@ -926,3 +926,18 @@ def test_cd_creates_deal(client):
     assert d["manager_id"] == mgr_id and any(x["id"] == d["id"] for x in _ok(client.get("/api/deals", headers=H(MGR))))
     assert client.post("/api/deals", headers=H(MGR), json={"client_id": cl["id"], "manager_id": own["manager_id"]}).status_code == 403
     assert client.post("/api/deals", headers=H(LOG), json={"client_id": cl["id"]}).status_code == 403
+
+
+def test_factory_with_offers_is_archived_not_error(client):
+    """Завод, которому отправляли запрос (есть ответ-кандидат), при удалении уходит в архив, а не падает с ошибкой."""
+    from app.db import SessionLocal
+    from app.models import Deal, FactoryOffer
+    f = _ok(client.post("/api/refs/factories", headers=H(MGR), json={"name": "Завод только с запросом", "contacts": []}), 201)
+    with SessionLocal() as db:
+        d = db.query(Deal).filter(Deal.deleted_at.is_(None)).first()
+        if d is None:
+            pytest.skip("нет сделки")
+        db.add(FactoryOffer(deal_id=d.id, factory_id=f["id"], status="requested"))
+        db.commit()
+    r = _ok(client.delete(f"/api/refs/factories/{f['id']}", headers=H(GD)))
+    assert r["archived"] and not r["deleted"]
