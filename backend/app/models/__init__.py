@@ -146,6 +146,10 @@ class Factory(TimestampMixin, Base):
     payment_terms: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     typical_production_days: Mapped[Optional[int]] = mapped_column(Integer)
     rating: Mapped[Optional[float]] = mapped_column(Float)
+    # запчасти (шаг 1): тип поставщика — supplier_status, плюс group_company — компания группы как поставщик
+    legal_entity_id: Mapped[Optional[str]] = mapped_column(ForeignKey("legal_entities.id"))   # для supplier_status = group_company
+    language: Mapped[str] = mapped_column(String(8), default="")         # язык переписки: ru | zh | en | de
+    default_route_id: Mapped[Optional[str]] = mapped_column(ForeignKey("supply_routes.id"))   # маршрут поставки по умолчанию
 
 
 class MachineType(TimestampMixin, Base):
@@ -812,3 +816,64 @@ class IntegrationLog(Base):
     operation: Mapped[str] = mapped_column(String(64))
     ok: Mapped[bool] = mapped_column(Boolean)
     details: Mapped[dict] = mapped_column(JSONType, default=dict)
+
+
+# ------------------------------------------------------------------ запчасти: компании группы, маршруты, наценки (ТЗ запчастей, раздел 2)
+
+class LegalEntity(TimestampMixin, Base):
+    """Компания группы: РФ (продаёт клиентам), Киргизия, Китай."""
+    __tablename__ = "legal_entities"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    code: Mapped[str] = mapped_column(String(16), unique=True)            # ru | kg | cn — короткий код
+    name: Mapped[str] = mapped_column(String(255))
+    country: Mapped[str] = mapped_column(String(64), default="")
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")       # валюта учёта компании
+    warehouse: Mapped[str] = mapped_column(String(16), default="none")    # physical | virtual | none
+    sells_to_clients: Mapped[bool] = mapped_column(Boolean, default=False)   # продаёт клиентам (компания в РФ)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class SupplyRoute(TimestampMixin, Base):
+    """Маршрут поставки: цепочка продаж от поставщика до компании, продающей клиенту."""
+    __tablename__ = "supply_routes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    supplier_country: Mapped[str] = mapped_column(String(64), default="")    # подсказка при выборе маршрута: CN | DE | KG
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    steps: Mapped[list["RouteStep"]] = relationship(back_populates="route", cascade="all, delete-orphan", order_by="RouteStep.no")
+
+
+class RouteStep(Base):
+    """Ступень маршрута: кто кому продаёт, на каких условиях и в какой валюте."""
+    __tablename__ = "route_steps"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    route_id: Mapped[str] = mapped_column(ForeignKey("supply_routes.id", ondelete="CASCADE"), index=True)
+    no: Mapped[int] = mapped_column(Integer)
+    seller_entity_id: Mapped[Optional[str]] = mapped_column(ForeignKey("legal_entities.id"))   # NULL — поставщик
+    buyer_entity_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id"))
+    incoterms: Mapped[str] = mapped_column(String(8), default="")
+    place: Mapped[str] = mapped_column(String(255), default="")           # место по Incoterms: склад экспедитора в КНР, склад РФ…
+    currency: Mapped[str] = mapped_column(String(3), default="CNY")
+    customs_country: Mapped[str] = mapped_column(String(64), default="")   # где выпуск в свободное обращение на этой ступени: RU | KG
+    pay_days: Mapped[Optional[int]] = mapped_column(Integer)              # отсрочка оплаты, дн
+    transit_days: Mapped[Optional[int]] = mapped_column(Integer)          # типовой срок перевозки, дн
+    comment: Mapped[str] = mapped_column(Text, default="")
+    route: Mapped["SupplyRoute"] = relationship(back_populates="steps")
+
+
+class MarkupPolicy(Base):
+    """Версия политики наценок между компаниями группы. Вступает в силу после двух виз: ЗГД и ФД."""
+    __tablename__ = "markup_policies"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    version_no: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="draft")      # draft | on_approval | approved | rejected | superseded
+    valid_from: Mapped[Optional[date]] = mapped_column(Date)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    rules: Mapped[dict] = mapped_column(JSONType, default=dict)           # см. services/markup_chain.py
+    approvals: Mapped[dict] = mapped_column(JSONType, default=dict)       # {"gd": {user_id, name, at, comment}, "fd": {...}}
+    rejection: Mapped[dict] = mapped_column(JSONType, default=dict)       # {user_id, name, at, comment}
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

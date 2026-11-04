@@ -209,6 +209,13 @@ class FactoryIn(BaseModel):
     rating: Optional[float] = None
     notes: str = ""
     is_active: bool = True
+    # запчасти (шаг 1): supplier_status = group_company — компания группы как поставщик
+    legal_entity_id: Optional[str] = None
+    language: str = ""                                    # ru | zh | en | de
+    default_route_id: Optional[str] = None
+
+
+SUPPLIER_STATUSES = {"manufacturer", "official_dealer", "trader", "group_company", ""}
 
 
 def _factory_editor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
@@ -222,6 +229,12 @@ CONTACT_EDITORS = (Role.MANAGER, Role.CD, Role.GD)
 
 def _apply_factory(f: Factory, body: FactoryIn, user: Optional[CurrentUser] = None) -> None:
     data = body.model_dump()
+    if data.get("supplier_status") not in SUPPLIER_STATUSES:
+        raise HTTPException(422, "Тип поставщика: завод, официальный дилер, торговая компания или компания группы")
+    if data.get("supplier_status") != "group_company":
+        data["legal_entity_id"] = None
+    elif not data.get("legal_entity_id"):
+        raise HTTPException(422, "Для компании группы выберите, какая это компания")
     if user is not None and not user.can("factory_price_history"):
         data.pop("bank_details", None)                   # реквизиты не видны роли — и не перезаписываются ею
     if user is not None and not user.has(*CONTACT_EDITORS) and f.id:
