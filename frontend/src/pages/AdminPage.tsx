@@ -183,8 +183,8 @@ function FxRates({ canManual }: { canManual: boolean }) {
       <table><thead><tr><th>Валюта</th><th>Источник</th><th className="num">Записей</th><th>Первая дата</th><th>Последняя дата</th></tr></thead>
         <tbody>{sum.map((s) => <tr key={s.currency + s.source}><td>{s.currency}</td><td>{SOURCE[s.source] || s.source}</td><td className="num">{fmtRub(s.count)}</td><td>{fmtDate(s.first)}</td><td>{fmtDate(s.last)}</td></tr>)}</tbody></table>
       <div className="row" style={{ margin: "10px 0", flexWrap: "wrap" }}>
-        <select value={cur} onChange={(e) => setCur(e.target.value)}>{["CNY", "USD", "EUR"].map((c) => <option key={c}>{c}</option>)}</select>
-        <button className="btn secondary" disabled={busy} onClick={() => run("/api/admin/fx/load", (r) => `Курсы ЦБ на сегодня: ${Object.entries((r.rates as Record<string, number>) || {}).filter(([k]) => ["CNY", "USD", "EUR"].includes(k)).map(([k, v]) => `${k} ${v}`).join(", ")}`)}>Загрузить курс ЦБ на сегодня</button>
+        <select value={cur} onChange={(e) => setCur(e.target.value)}>{["CNY", "USD", "EUR", "KGS"].map((c) => <option key={c}>{c}</option>)}</select>
+        <button className="btn secondary" disabled={busy} onClick={() => run("/api/admin/fx/load", (r) => `Курсы ЦБ на сегодня: ${Object.entries((r.rates as Record<string, number>) || {}).filter(([k]) => ["CNY", "USD", "EUR", "KGS"].includes(k)).map(([k, v]) => `${k} ${v}`).join(", ")}`)}>Загрузить курс ЦБ на сегодня</button>
         <button className="btn ghost" disabled={busy} onClick={() => run(`/api/admin/fx/history?currency=${cur}&start=${new Date(Date.now() - 5 * 365 * 864e5).toISOString().slice(0, 10)}`, (r) => `${cur}: догружено дат из истории ЦБ — ${r.loaded}`)}>Догрузить историю {cur} за 5 лет</button>
       </div>
       {canManual && (

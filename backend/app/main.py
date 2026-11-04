@@ -32,7 +32,8 @@ async def _daily_jobs() -> None:
             with SessionLocal() as db:
                 today = date.today()
                 have_today = set(db.scalars(select(FxRate.currency).where(FxRate.on == today, FxRate.source == "cbr")).all())
-                if not {"CNY", "USD", "EUR"} <= have_today:
+                from .adapters.fx_source import SUPPORTED as FX_CODES
+                if not set(FX_CODES) <= have_today:
                     try:
                         rates = await asyncio.to_thread(adapters.fx_source().daily, today)
                         for cur, rate in rates.items():
@@ -45,7 +46,7 @@ async def _daily_jobs() -> None:
                 # история курсов ЦБ для тренда и сезонности прогноза: если её почти нет — догружаем за 5 лет (один раз)
                 import sys
                 from datetime import timedelta
-                for cur in (() if "pytest" in sys.modules else ("CNY", "USD", "EUR")):   # в тестах — без сети
+                for cur in (() if "pytest" in sys.modules else FX_CODES):   # в тестах — без сети
                     n = len(db.scalars(select(FxRate.id).where(FxRate.currency == cur, FxRate.source == "cbr",
                                                               FxRate.on >= today - timedelta(days=365 * 5))).all())
                     if n >= 200:
