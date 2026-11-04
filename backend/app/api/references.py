@@ -323,23 +323,35 @@ def update_factory_contacts(factory_id: str, body: ContactsIn, db: Session = Dep
 def delete_factory(factory_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Удаление завода — только ЗГД. Если завод уже есть в сделках, каталоге или истории цен — он переносится в архив
     (скрывается из выбора, история и сделки сохраняются)."""
-    from ..models import Position
+    from sqlalchemy.exc import IntegrityError
+    from ..models import FactoryOffer, Position, RfqImport
     if not user.has(Role.GD):
         raise HTTPException(403, "Удалить завод может только ЗГД")
     f = db.get(Factory, factory_id)
     if f is None:
         raise HTTPException(404)
     used = (db.scalar(select(Position.id).where(Position.factory_id == f.id).limit(1)) or db.scalar(select(EquipmentModel.id).where(EquipmentModel.factory_id == f.id).limit(1))
-            or db.scalar(select(FactoryPriceHistory.id).where(FactoryPriceHistory.factory_id == f.id).limit(1)))
+            or db.scalar(select(FactoryPriceHistory.id).where(FactoryPriceHistory.factory_id == f.id).limit(1))
+            or db.scalar(select(FactoryOffer.id).where(FactoryOffer.factory_id == f.id).limit(1))      # ответы завода / запросы заводу
+            or db.scalar(select(RfqImport.id).where(RfqImport.factory_id == f.id).limit(1)))           # импорт RFQ этого завода
     if used:
         f.is_active = False
         audit(db, user.id, None, "factory", f.id, "archive", {"name": f.name}, {"is_active": False}, "завод используется — перенесён в архив")
         db.commit()
         return {"deleted": False, "archived": True, "message": f"Завод «{f.name}» используется в сделках или каталоге — перенесён в архив"}
-    audit(db, user.id, None, "factory", f.id, "delete", {"name": f.name})
-    db.delete(f)
-    db.commit()
-    return {"deleted": True, "archived": False, "message": f"Завод «{f.name}» удалён"}
+    name = f.name
+    try:
+        audit(db, user.id, None, "factory", f.id, "delete", {"name": name})
+        db.delete(f)
+        db.commit()
+    except IntegrityError:   # на завод ссылаются другие записи — не удаляем, а переносим в архив
+        db.rollback()
+        f = db.get(Factory, factory_id)
+        f.is_active = False
+        audit(db, user.id, None, "factory", f.id, "archive", {"name": name}, {"is_active": False}, "завод используется — перенесён в архив")
+        db.commit()
+        return {"deleted": False, "archived": True, "message": f"Завод «{name}» используется — перенесён в архив"}
+    return {"deleted": True, "archived": False, "message": f"Завод «{name}» удалён"}
 
 
 @router.get("/factories/{factory_id}/prices")
