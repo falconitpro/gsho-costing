@@ -9,7 +9,7 @@ from datetime import date
 from sqlalchemy import select
 
 from app.db import SessionLocal, init_db
-from app.models import Client, Factory, FxRate, HsCode, LegalEntity, PaymentScheme, RouteStep, SupplyRoute, User
+from app.models import Client, Factory, FxRate, HsCode, LegalEntity, MarkupPolicy, PaymentScheme, RouteStep, SupplyRoute, User
 
 USERS = [
     ("manager@example.com", "Бочаров Егор (менеджер)", ["manager"]),
@@ -117,6 +117,11 @@ def seed_parts_setup(db) -> None:
                                      incoterms=inc, place=place, currency=cur, customs_country=customs))
         db.add(r)
     db.flush()
+    # стартовая политика наценок — черновиком: в силу вступает только после виз ЗГД и ФД
+    if not db.scalar(select(MarkupPolicy)):
+        db.add(MarkupPolicy(version_no=1, status="draft", reason="Стартовые ставки: компания в Китае 5 %, компания в Киргизии 6 %",
+                            rules={"default": {by_code["cn"]: 5.0, by_code["kg"]: 6.0}, "by_group": [], "by_supplier": [], "min_margin_pct": None}))
+        db.flush()
 
 
 if __name__ == "__main__":
