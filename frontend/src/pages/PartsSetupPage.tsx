@@ -43,7 +43,7 @@ export default function PartsSetupPage({ me }: { me: Me }) {
 
   return (
     <>
-      <div className="page-head"><h1>Запчасти: компании и маршруты</h1></div>
+      <div className="page-head"><h1>Запасные части</h1></div>
       <div className="row" style={{ marginBottom: 10 }}>
         <button className={`btn ${tab === "entities" ? "" : "ghost"}`} onClick={() => setTab("entities")}>Компании группы</button>
         <button className={`btn ${tab === "routes" ? "" : "ghost"}`} onClick={() => setTab("routes")}>Маршруты поставки</button>
