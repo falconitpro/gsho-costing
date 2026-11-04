@@ -9,7 +9,7 @@ from datetime import date
 from sqlalchemy import select
 
 from app.db import SessionLocal, init_db
-from app.models import Client, Factory, FxRate, HsCode, PaymentScheme, User
+from app.models import Client, Factory, FxRate, HsCode, LegalEntity, PaymentScheme, RouteStep, SupplyRoute, User
 
 USERS = [
     ("manager@example.com", "Бочаров Егор (менеджер)", ["manager"]),
@@ -63,6 +63,7 @@ def run() -> None:
         for name, lines in SCHEMES:
             if not db.scalar(select(PaymentScheme).where(PaymentScheme.name == name)):
                 db.add(PaymentScheme(name=name, lines=lines))
+        seed_parts_setup(db)
         # синтетическая история курса CNY/RUB за 4 года (в проде — загрузка с cbr.ru: POST /api/admin/fx/history)
         if not db.scalar(select(FxRate).where(FxRate.currency == "CNY")):
             import sys
@@ -74,6 +75,48 @@ def run() -> None:
             db.add(FxRate(on=date.today(), currency="EUR", rate=98.0, source="cbr"))
         db.commit()
     print("seed: ok")
+
+
+# запчасти, шаг 1: компании группы и типовые маршруты (вариант В: Китай → FCA склад экспедитора в CNY;
+# Киргизия → DAP склад РФ в валюте закупки). Названия компаний — заготовки, их правят КД и ЗГД.
+ENTITIES = [
+    ("ru", "Компания в РФ", "RU", "RUB", "physical", True),
+    ("kg", "Компания в Киргизии", "KG", "KGS", "virtual", False),
+    ("cn", "Компания в Китае", "CN", "CNY", "none", False),
+]
+ROUTES = [   # (название, страна поставщика, [(продавец, покупатель, Incoterms, место, валюта, выпуск)])
+    ("Поставщик КНР → РФ", "CN", [(None, "ru", "FCA", "склад экспедитора в КНР", "CNY", "RU")]),
+    ("Поставщик КНР → компания в Китае → РФ", "CN", [(None, "cn", "EXW", "склад поставщика", "CNY", ""),
+                                                   ("cn", "ru", "FCA", "склад экспедитора в КНР", "CNY", "RU")]),
+    ("Поставщик КНР → компания в Китае → Киргизия → РФ", "CN", [(None, "cn", "EXW", "склад поставщика", "CNY", ""),
+                                                              ("cn", "kg", "FCA", "склад экспедитора в КНР", "CNY", "KG"),
+                                                              ("kg", "ru", "DAP", "склад РФ", "CNY", "")]),
+    ("Поставщик Германии → Киргизия → РФ", "DE", [(None, "kg", "FCA", "склад поставщика", "EUR", "KG"),
+                                                 ("kg", "ru", "DAP", "склад РФ", "EUR", "")]),
+    ("Поставщик Германии → РФ", "DE", [(None, "ru", "FCA", "склад поставщика", "EUR", "RU")]),
+    ("Поставщик Киргизии → Киргизия → РФ", "KG", [(None, "kg", "EXW", "склад поставщика", "KGS", "KG"),
+                                                 ("kg", "ru", "DAP", "склад РФ", "KGS", "")]),
+]
+
+
+def seed_parts_setup(db) -> None:
+    by_code = {}
+    for code, name, country, cur, wh, sells in ENTITIES:
+        e = db.scalar(select(LegalEntity).where(LegalEntity.code == code))
+        if e is None:
+            e = LegalEntity(code=code, name=name, country=country, currency=cur, warehouse=wh, sells_to_clients=sells)
+            db.add(e)
+            db.flush()
+        by_code[code] = e.id
+    for name, country, steps in ROUTES:
+        if db.scalar(select(SupplyRoute).where(SupplyRoute.name == name)):
+            continue
+        r = SupplyRoute(name=name, supplier_country=country)
+        for i, (seller, buyer, inc, place, cur, customs) in enumerate(steps, start=1):
+            r.steps.append(RouteStep(no=i, seller_entity_id=by_code[seller] if seller else None, buyer_entity_id=by_code[buyer],
+                                     incoterms=inc, place=place, currency=cur, customs_country=customs))
+        db.add(r)
+    db.flush()
 
 
 if __name__ == "__main__":

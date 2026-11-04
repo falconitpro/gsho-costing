@@ -13,7 +13,7 @@ type Factory = {
   website: string; uscc: string; supplier_status: string; contacts: Contact[]; payment_terms: unknown[];
   bank_details: { beneficiary?: string; bank?: string; swift?: string; account?: string; bank_address?: string };
   default_currency: string; default_basis: string; machine_types: string[]; trademarks: string[]; typical_production_days: number | null; rating: number | null;
-  notes: string; is_active: boolean; models?: { id: string; model: string; machine_type: string; status: string }[]; deals?: number;
+  notes: string; is_active: boolean; legal_entity_id?: string | null; language?: string; models?: { id: string; model: string; machine_type: string; status: string }[]; deals?: number;
 };
 type Price = { on: string; model: string; unit_price: number; currency: string; basis: string; production_term: { value?: number; unit?: string }; source: string };
 
@@ -21,7 +21,8 @@ const EMPTY_CONTACT: Contact = { name: "", name_zh: "", position: "", roles: [],
 const EMPTY: Factory = { name: "", name_zh: "", short_name: "", address: "", address_zh: "", country: "CN", province: "", city: "", website: "", uscc: "",
   supplier_status: "manufacturer", contacts: [], payment_terms: [], bank_details: {}, default_currency: "CNY", default_basis: "FCA", machine_types: [], trademarks: [],
   typical_production_days: null, rating: null, notes: "", is_active: true };
-const STATUS: Record<string, string> = { manufacturer: "завод-изготовитель", official_dealer: "официальный дилер", trader: "торговая компания" };
+const STATUS: Record<string, string> = { manufacturer: "завод-изготовитель", official_dealer: "официальный дилер", trader: "торговая компания", group_company: "компания группы" };
+const LANGS: Record<string, string> = { "": "—", zh: "китайский", ru: "русский", en: "английский", de: "немецкий" };
 
 /** Справочник заводов: реквизиты, контакты по направлениям (заявки, логистика, финансы, сервис…), WeChat / WeCom / почта, история цен. */
 export default function FactoriesPage({ me }: { me: Me }) {
@@ -37,6 +38,8 @@ export default function FactoriesPage({ me }: { me: Me }) {
   const contactEditor = me.roles.some((r) => ["manager", "cd", "gd"].includes(r.code));   // контакты завода — менеджер, КД, ЗГД
   const isGD = me.roles.some((r) => r.code === "gd");
   const [confirmDel, setConfirmDel] = useState(false);
+  const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { api.get<{ id: string; name: string }[]>("/api/parts/entities").then(setEntities).catch(() => setEntities([])); }, []);
   async function remove() {
     if (!cur?.id) return;
     if (!confirmDel) { setConfirmDel(true); setMsg("Нажмите «Подтвердить удаление» ещё раз. Если завод есть в сделках или каталоге, он будет перенесён в архив."); return; }
@@ -97,6 +100,8 @@ export default function FactoriesPage({ me }: { me: Me }) {
                 <div className="grid cols-3">
                   {field("Наименование (как в документах, EN)", "name")}{field("Наименование (中文)", "name_zh")}{field("Краткое название", "short_name")}
                   <label className="f">Статус поставщика<select value={cur.supplier_status} disabled={!editor} onChange={(e) => set({ supplier_status: e.target.value })}>{Object.entries(STATUS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+                  {cur.supplier_status === "group_company" && <label className="f">Какая компания группы<select value={cur.legal_entity_id || ""} disabled={!editor} onChange={(e) => set({ legal_entity_id: e.target.value || null })}><option value="">— выберите —</option>{entities.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
+                  <label className="f">Язык переписки<select value={cur.language || ""} disabled={!editor} onChange={(e) => set({ language: e.target.value })}>{Object.entries(LANGS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
                   {field("Единый код юрлица (统一社会信用代码)", "uscc", "18 знаков")}{field("Сайт", "website", "https://")}
                   {field("Провинция", "province")}{field("Город", "city")}{field("Страна", "country")}
                   {field("Адрес (рус./EN)", "address")}{field("Адрес (中文)", "address_zh")}
