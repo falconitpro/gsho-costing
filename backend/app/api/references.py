@@ -159,14 +159,17 @@ def client_refresh_registry(client_id: str, db: Session = Depends(get_db), user:
 
 
 @router.get("/factories")
-def factories(include_archived: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    out = [serialize(f) for f in db.scalars(select(Factory).order_by(Factory.name)).all() if include_archived or f.is_active is not False]
+def factories(include_archived: bool = False, supplies: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Поставщики; supplies=gsho | parts — только поставщики ГШО или запасных частей."""
+    out = [serialize(f) for f in db.scalars(select(Factory).order_by(Factory.name)).all()
+           if (include_archived or f.is_active is not False) and (not supplies or supplies in (f.supplies or []))]
     if not user.can("factory_price_history"):          # банковские реквизиты — тем, кто видит цены завода
         for f in out:
             f.pop("bank_details", None)
     return out
 
 
+SUPPLIES = {"gsho": "ГШО", "parts": "Запасные части"}
 CONTACT_ROLES = {"rfq": "Заявки и КП", "sales": "Продажи / договор", "logistics": "Логистика и отгрузка", "finance": "Финансы и оплаты",
                  "service": "Сервис и запчасти", "quality": "Качество и документы", "management": "Руководство", "other": "Другое"}
 
@@ -215,6 +218,7 @@ class FactoryIn(BaseModel):
     legal_entity_id: Optional[str] = None
     language: str = ""                                    # ru | zh | en | de
     default_route_id: Optional[str] = None
+    supplies: list[str] = Field(default_factory=lambda: ["gsho"])   # gsho | parts — раздел «Поставщики»
 
 
 SUPPLIER_STATUSES = {"manufacturer", "official_dealer", "trader", "group_company", ""}
@@ -233,6 +237,9 @@ def _apply_factory(f: Factory, body: FactoryIn, user: Optional[CurrentUser] = No
     data = body.model_dump()
     if data.get("supplier_status") not in SUPPLIER_STATUSES:
         raise HTTPException(422, "Тип поставщика: завод, официальный дилер, торговая компания или компания группы")
+    data["supplies"] = [x for x in dict.fromkeys(data.get("supplies") or []) if x in SUPPLIES]
+    if not data["supplies"]:
+        raise HTTPException(422, "Отметьте, что поставляет: ГШО, запасные части или и то и другое")
     if data.get("supplier_status") != "group_company":
         data["legal_entity_id"] = None
     elif not data.get("legal_entity_id"):

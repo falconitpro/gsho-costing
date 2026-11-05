@@ -23,6 +23,7 @@ from ..services.markup_chain import ChainError, simulate
 from ..services.parts_po import (ORDERABLE, PO_LINE_STATUS, PO_STATUS, REQUEST_STATUS, build_po_xlsx, can_move, eta, intragroup_steps,
                                  po_status)
 from ..services.parts_requests import _route_steps
+from ..services.suppliers import mark as mark_supplier
 from ..services.parts_supplier import CARD_KEY, supplier_language
 from .common import serialize
 from .parts_rfq import send_supplier_file
@@ -178,6 +179,7 @@ def create(body: PoCreateIn, db: Session = Depends(get_db), user: CurrentUser = 
         raise HTTPException(404, "Поставщик не найден")
     if not body.request_line_ids and not body.stock_lines:
         raise HTTPException(422, "Отметьте строки для заказа")
+    mark_supplier(db, sup.id, "parts")
     done = _ordered_line_ids(db)
     lang = supplier_language(sup.country, sup.language)
     today = date.today()

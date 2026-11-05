@@ -150,6 +150,7 @@ class Factory(TimestampMixin, Base):
     legal_entity_id: Mapped[Optional[str]] = mapped_column(ForeignKey("legal_entities.id"))   # для supplier_status = group_company
     language: Mapped[str] = mapped_column(String(8), default="")         # язык переписки: ru | zh | en | de
     default_route_id: Mapped[Optional[str]] = mapped_column(ForeignKey("supply_routes.id"))   # маршрут поставки по умолчанию
+    supplies: Mapped[list[str]] = mapped_column(JSONType, default=list)   # что поставляет: gsho (горно-шахтное оборудование) | parts (запасные части)
 
 
 class MachineType(TimestampMixin, Base):

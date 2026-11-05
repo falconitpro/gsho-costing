@@ -13,18 +13,20 @@ type Factory = {
   website: string; uscc: string; supplier_status: string; contacts: Contact[]; payment_terms: unknown[];
   bank_details: { beneficiary?: string; bank?: string; swift?: string; account?: string; bank_address?: string };
   default_currency: string; default_basis: string; machine_types: string[]; trademarks: string[]; typical_production_days: number | null; rating: number | null;
-  notes: string; is_active: boolean; legal_entity_id?: string | null; language?: string; models?: { id: string; model: string; machine_type: string; status: string }[]; deals?: number;
+  notes: string; is_active: boolean; legal_entity_id?: string | null; language?: string; supplies?: string[]; default_route_id?: string | null; models?: { id: string; model: string; machine_type: string; status: string }[]; deals?: number;
 };
 type Price = { on: string; model: string; unit_price: number; currency: string; basis: string; production_term: { value?: number; unit?: string }; source: string };
 
 const EMPTY_CONTACT: Contact = { name: "", name_zh: "", position: "", roles: [], phone: "", mobile: "", email: "", wechat: "", wecom_id: "", whatsapp: "", telegram: "", language: "zh", primary: false, comment: "" };
 const EMPTY: Factory = { name: "", name_zh: "", short_name: "", address: "", address_zh: "", country: "CN", province: "", city: "", website: "", uscc: "",
   supplier_status: "manufacturer", contacts: [], payment_terms: [], bank_details: {}, default_currency: "CNY", default_basis: "FCA", machine_types: [], trademarks: [],
-  typical_production_days: null, rating: null, notes: "", is_active: true };
+  typical_production_days: null, rating: null, notes: "", is_active: true, supplies: ["gsho"] };
 const STATUS: Record<string, string> = { manufacturer: "завод-изготовитель", official_dealer: "официальный дилер", trader: "торговая компания", group_company: "компания группы" };
 const LANGS: Record<string, string> = { "": "—", zh: "китайский", ru: "русский", en: "английский", de: "немецкий" };
 
-/** Справочник заводов: реквизиты, контакты по направлениям (заявки, логистика, финансы, сервис…), WeChat / WeCom / почта, история цен. */
+const KINDS: Record<string, string> = { gsho: "ГШО", parts: "Запасные части" };
+
+/** Справочник поставщиков (ГШО и запасных частей): реквизиты, контакты по направлениям (заявки, логистика, финансы, сервис…), WeChat / WeCom / почта, история цен. */
 export default function FactoriesPage({ me }: { me: Me }) {
   const [list, setList] = useState<Factory[]>([]);
   const [roles, setRoles] = useState<Record<string, string>>({});
@@ -39,6 +41,10 @@ export default function FactoriesPage({ me }: { me: Me }) {
   const isGD = me.roles.some((r) => r.code === "gd");
   const [confirmDel, setConfirmDel] = useState(false);
   const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
+  const [kind, setKind] = useState<"gsho" | "parts" | "">(() => { try { return (localStorage.getItem("suppliers_kind") as "gsho" | "parts" | "") ?? "gsho"; } catch { return "gsho"; } });
+  useEffect(() => { try { localStorage.setItem("suppliers_kind", kind); } catch { /* приватный режим */ } }, [kind]);
+  const [routes, setRoutes] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { api.get<{ id: string; name: string }[]>("/api/parts/routes").then(setRoutes).catch(() => setRoutes([])); }, []);
   useEffect(() => { api.get<{ id: string; name: string }[]>("/api/parts/entities").then(setEntities).catch(() => setEntities([])); }, []);
   async function remove() {
     if (!cur?.id) return;
@@ -67,7 +73,7 @@ export default function FactoriesPage({ me }: { me: Me }) {
   }
   const set = (p: Partial<Factory>) => cur && setCur({ ...cur, ...p });
   const setC = (i: number, p: Partial<Contact>) => cur && setCur({ ...cur, contacts: cur.contacts.map((c, j) => (j === i ? { ...c, ...p } : c)) });
-  const shown = list.filter((f) => (!q || `${f.name} ${f.name_zh} ${f.short_name} ${f.city} ${f.province} ${(f.trademarks || []).join(" ")}`.toLowerCase().includes(q.toLowerCase()))
+  const shown = list.filter((f) => (!kind || (f.supplies || ["gsho"]).includes(kind)) && (!q || `${f.name} ${f.name_zh} ${f.short_name} ${f.city} ${f.province} ${(f.trademarks || []).join(" ")}`.toLowerCase().includes(q.toLowerCase()))
     && (!roleFilter || (f.contacts || []).some((c) => (c.roles || []).includes(roleFilter))));
   const field = (label: string, key: keyof Factory, ph = "") => (
     <label className="f">{label}<input value={String(cur?.[key] ?? "")} placeholder={ph} disabled={!editor} onChange={(e) => set({ [key]: e.target.value } as Partial<Factory>)} /></label>);
@@ -75,8 +81,10 @@ export default function FactoriesPage({ me }: { me: Me }) {
   return (
     <>
       <div className="page-head">
-        <h1>Заводы</h1>
-        <div className="push">{editor && <button className="btn add" onClick={() => { setCur({ ...EMPTY, contacts: [{ ...EMPTY_CONTACT, roles: ["rfq"], primary: true }] }); setPrices([]); setMsg(""); }}>Добавить завод</button>}</div>
+        <h1>Поставщики</h1>
+        <div className="row" style={{ marginLeft: 12 }}>{([["gsho", "ГШО"], ["parts", "Запасные части"], ["", "Все"]] as const).map(([k, t]) => (
+          <button key={k} className={`btn ${kind === k ? "" : "ghost"}`} onClick={() => setKind(k)}>{t} <span className="muted">({list.filter((f) => !k || (f.supplies || ["gsho"]).includes(k)).length})</span></button>))}</div>
+        <div className="push">{editor && <button className="btn add" onClick={() => { setCur({ ...EMPTY, supplies: [kind || "gsho"], contacts: [{ ...EMPTY_CONTACT, roles: ["rfq"], primary: true }] }); setPrices([]); setMsg(""); }}>Добавить поставщика</button>}</div>
       </div>
       {msg && <div className="alert info">{msg}</div>}
       <div className="grid" style={{ gridTemplateColumns: "360px 1fr" }}>
@@ -87,30 +95,36 @@ export default function FactoriesPage({ me }: { me: Me }) {
             const rfq = (f.contacts || []).find((c) => (c.roles || []).includes("rfq"));
             return (
               <tr key={f.id} style={{ cursor: "pointer", background: cur?.id === f.id ? "var(--accent-soft)" : undefined, opacity: f.is_active === false ? 0.5 : 1 }} onClick={() => open(f.id!)}>
-                <td><b>{f.short_name || f.name}</b>{(f.trademarks || []).map((t) => <span key={t} className="badge accent" style={{ marginLeft: 4 }}>{t}</span>)}{f.name_zh && <div className="muted" style={{ fontSize: 11 }}>{f.name_zh}</div>}
+                <td><b>{f.short_name || f.name}</b>{(f.trademarks || []).map((t) => <span key={t} className="badge accent" style={{ marginLeft: 4 }}>{t}</span>)}{!kind && (f.supplies || []).map((x) => <span key={x} className="badge" style={{ marginLeft: 4 }}>{KINDS[x]}</span>)}{f.name_zh && <div className="muted" style={{ fontSize: 11 }}>{f.name_zh}</div>}
                   <div className="muted" style={{ fontSize: 11 }}>{[f.city, f.province].filter(Boolean).join(", ")}{rfq ? ` · заявки: ${rfq.name}` : " · нет контакта по заявкам"}</div></td>
                 <td className="muted" style={{ fontSize: 11 }}>{(f.contacts || []).length} конт.</td></tr>);
           })}{shown.length === 0 && <tr><td className="muted">Не найдено</td></tr>}</tbody></table>
         </div>
         <div>
-          {!cur ? <div className="card muted">Выберите завод слева или добавьте новый. Запрос заводу из сделки уходит контактам с направлением «Заявки и КП» (WeCom и почта).</div> : (
+          {!cur ? <div className="card muted">Выберите поставщика слева или добавьте нового. Поставщик может поставлять и ГШО, и запасные части — отметьте оба. Запрос заводу из сделки уходит контактам с направлением «Заявки и КП» (WeCom и почта).</div> : (
             <>
               <div className="card">
-                <h2 style={{ marginTop: 0 }}>{cur.id ? cur.name : "Новый завод"} {!cur.is_active && <span className="badge bad">не работаем</span>}</h2>
+                <h2 style={{ marginTop: 0 }}>{cur.id ? cur.name : "Новый поставщик"} {!cur.is_active && <span className="badge bad">не работаем</span>}</h2>
                 <div className="grid cols-3">
                   {field("Наименование (как в документах, EN)", "name")}{field("Наименование (中文)", "name_zh")}{field("Краткое название", "short_name")}
+                  <label className="f">Что поставляет<div className="row">{Object.entries(KINDS).map(([k, t]) => (
+                    <label key={k} className="row"><input type="checkbox" disabled={!editor} checked={(cur.supplies || []).includes(k)}
+                      onChange={(e) => set({ supplies: e.target.checked ? [...(cur.supplies || []), k] : (cur.supplies || []).filter((x) => x !== k) })} /> {t}</label>))}</div></label>
                   <label className="f">Статус поставщика<select value={cur.supplier_status} disabled={!editor} onChange={(e) => set({ supplier_status: e.target.value })}>{Object.entries(STATUS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
                   {cur.supplier_status === "group_company" && <label className="f">Какая компания группы<select value={cur.legal_entity_id || ""} disabled={!editor} onChange={(e) => set({ legal_entity_id: e.target.value || null })}><option value="">— выберите —</option>{entities.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}
+                  {(cur.supplies || []).includes("parts") && <label className="f">Маршрут поставки запчастей по умолчанию<select value={cur.default_route_id || ""} disabled={!editor} onChange={(e) => set({ default_route_id: e.target.value || null })}>
+                    <option value="">— не задан —</option>{routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>}
                   <label className="f">Язык переписки<select value={cur.language || ""} disabled={!editor} onChange={(e) => set({ language: e.target.value })}>{Object.entries(LANGS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
                   {field("Единый код юрлица (统一社会信用代码)", "uscc", "18 знаков")}{field("Сайт", "website", "https://")}
                   {field("Провинция", "province")}{field("Город", "city")}{field("Страна", "country")}
                   {field("Адрес (рус./EN)", "address")}{field("Адрес (中文)", "address_zh")}
+                  {(cur.supplies || []).includes("gsho") && <>
                   <label className="f">Торговые марки (через запятую; первая — по умолчанию)<input value={(cur.trademarks || []).join(", ")} placeholder="напр. SHILI" disabled={!editor}
                     onChange={(e) => set({ trademarks: e.target.value.split(",").map((x) => x.trimStart()) })} /></label>
                   <label className="f">Что выпускает (типы машин через запятую)<input value={cur.machine_types.join(", ")} disabled={!editor} onChange={(e) => set({ machine_types: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} /></label>
+                  <label className="f">Типовой срок производства, дн<input type="number" value={cur.typical_production_days ?? ""} disabled={!editor} onChange={(e) => set({ typical_production_days: e.target.value ? Number(e.target.value) : null })} /></label></>}
                   <label className="f">Валюта / базис по умолчанию<div className="row"><select value={cur.default_currency} disabled={!editor} onChange={(e) => set({ default_currency: e.target.value })}>{["CNY", "USD", "EUR", "KGS", "RUB"].map((c) => <option key={c}>{c}</option>)}</select>
                     <select value={cur.default_basis} disabled={!editor} onChange={(e) => set({ default_basis: e.target.value })}>{["EXW", "FCA", "CPT", "CIP", "DAP", "DDP"].map((b) => <option key={b}>{b}</option>)}</select></div></label>
-                  <label className="f">Типовой срок производства, дн<input type="number" value={cur.typical_production_days ?? ""} disabled={!editor} onChange={(e) => set({ typical_production_days: e.target.value ? Number(e.target.value) : null })} /></label>
                   <label className="f">Оценка (1–5)<input type="number" min={1} max={5} step={0.5} value={cur.rating ?? ""} disabled={!editor} onChange={(e) => set({ rating: e.target.value ? Number(e.target.value) : null })} /></label>
                   <label className="f">Работаем<div className="row"><input type="checkbox" checked={cur.is_active} disabled={!editor} onChange={(e) => set({ is_active: e.target.checked })} /> {cur.is_active ? "да" : "нет — в архиве"}</div></label>
                 </div>
