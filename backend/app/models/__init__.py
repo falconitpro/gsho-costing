@@ -1039,3 +1039,40 @@ class PartRequestLine(TimestampMixin, Base):
     calc: Mapped[dict] = mapped_column(JSONType, default=dict)          # снимок расчёта: себестоимость, порог, маржа (видят КД, ФД, ЗГД)
     status: Mapped[str] = mapped_column(String(24), default="new")
     comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class PartKp(Base):
+    """Редакция КП по заявке на запчасти: снимок выбранных строк, цены, срок действия. КП можно отправлять частями."""
+    __tablename__ = "part_kps"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    request_id: Mapped[str] = mapped_column(ForeignKey("part_requests.id", ondelete="CASCADE"), index=True)
+    revision_no: Mapped[int] = mapped_column(Integer)
+    number: Mapped[str] = mapped_column(String(48))                      # КП-ЗЧ-2026-0001/1
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")      # валюта КП
+    fx_rate: Mapped[Optional[float]] = mapped_column(Float)             # курс ЦБ на дату КП (для валюты КП)
+    lines: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # снимок строк: line_id, артикул, наименование, кол-во, цена, сумма, срок
+    handling_fee: Mapped[float] = mapped_column(Float, default=0)       # «Обработка заказа» в валюте КП
+    handling_fee_removed_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    total: Mapped[float] = mapped_column(Float, default=0)
+    valid_until: Mapped[date] = mapped_column(Date)
+    changes: Mapped[list[dict]] = mapped_column(JSONType, default=list)  # что изменилось к прошлой редакции
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    sent_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class PartReservation(Base):
+    """Резерв товара под строку заявки: мягкий — при КП, на срок КП; жёсткий — после заказа клиента."""
+    __tablename__ = "part_reservations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    part_id: Mapped[str] = mapped_column(ForeignKey("parts.id"), index=True)
+    warehouse_id: Mapped[str] = mapped_column(ForeignKey("warehouses.id"), index=True)
+    line_id: Mapped[str] = mapped_column(ForeignKey("part_request_lines.id", ondelete="CASCADE"), index=True)
+    kp_id: Mapped[Optional[str]] = mapped_column(ForeignKey("part_kps.id", ondelete="SET NULL"))
+    qty: Mapped[float] = mapped_column(Float)
+    kind: Mapped[str] = mapped_column(String(8), default="soft")         # soft | hard
+    expires_at: Mapped[Optional[date]] = mapped_column(Date)            # мягкий — до конца срока КП
+    released_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

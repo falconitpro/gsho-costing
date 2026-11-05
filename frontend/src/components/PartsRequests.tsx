@@ -15,8 +15,13 @@ type Req = {
   id: string; number: string; client_id: string; client_name: string; manager_name: string; machine: string; urgent: boolean; warranty: boolean;
   contact: string; channel: string; comment: string; closed: string; close_reason: string; created_at: string; status_text: string;
   lines: Line[]; approvals: { level: string; name: string; at: string; comment: string }[];
+  kps: Kp[];
   summary: { lines: number; sum_rub: number; profit_rub?: number | null; margin_pct?: number | null; handling_fee_rub: number; approval_needed: string | null; uncosted_lines: number };
 };
+type Kp = { id: string; number: string; revision_no: number; currency: string; total: number; handling_fee: number; handling_fee_removed_by: string | null;
+  valid_until: string; expired: boolean; created_at: string; sent_at: string | null; comment: string;
+  lines: { line_id: string; article: string; name: string; qty: number; unit: string; price: number; sum: number; lead: string }[];
+  changes: { article: string; change: string; old?: unknown; new?: unknown }[] };
 type Row = { id: string; number: string; client_name: string; machine: string; urgent: boolean; created_at: string; lines: number; status_text: string; price_rub: number };
 type Meta = { channels: Record<string, string>; line_status: Record<string, string>; close_kinds: Record<string, string>; can_create: boolean };
 type Ref = { id: string; name: string };
@@ -101,6 +106,9 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
   const [closeKind, setCloseKind] = useState("");
   const [reason, setReason] = useState("");
   const [comment, setComment] = useState("");
+  const [sel, setSel] = useState<string[]>([]);
+  const [kpCur, setKpCur] = useState("RUB");
+  const [noFee, setNoFee] = useState(false);
   const [pick, setPick] = useState<{ line: string; q: string; items: { id: string; article: string; name_ru: string; manufacturer: string }[] } | null>(null);
   const base = `/api/parts/requests/${r.id}`;
   const patch = (l: Line, body: Record<string, unknown>) => act(() => api.patch<Req>(`${base}/lines/${l.id}`, body));
@@ -122,10 +130,12 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
       </div>
       <div style={{ overflowX: "auto" }}>
         <table>
-          <thead><tr><th>№</th><th>Запрос клиента</th><th>Подобрано</th><th className="num">Кол-во</th><th>Источник</th><th className="num">Срок, дн</th><th className="num">Цена</th><th className="num">Сумма, ₽</th>
+          <thead><tr><th title="в КП">КП</th><th>№</th><th>Запрос клиента</th><th>Подобрано</th><th className="num">Кол-во</th><th>Источник</th><th className="num">Срок, дн</th><th className="num">Цена</th><th className="num">Сумма, ₽</th>
             {seesCost && <><th className="num">Себест., ₽/ед</th><th className="num">Маржа</th></>}<th className="num">Порог</th><th>Статус</th></tr></thead>
           <tbody>{r.lines.map((l) => (
             <tr key={l.id} style={{ opacity: ["cancelled", "unavailable"].includes(l.status) ? 0.5 : 1 }}>
+              <td><input type="checkbox" disabled={closed || l.price == null || ["cancelled", "unavailable"].includes(l.status)} checked={sel.includes(l.id)}
+                onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></td>
               <td>{l.no}{l.parent_line_id && <div className="muted" style={{ fontSize: 11 }}>часть строки</div>}</td>
               <td><b>{l.raw_article}</b><div className="muted" style={{ fontSize: 11 }}>{l.raw_name}</div></td>
               <td>{l.part ? <>{l.part.article} {l.part.name_ru}<div className="muted" style={{ fontSize: 11 }}>{MATCH[l.match_kind] || l.match_kind}{l.part.manufacturer && ` · ${l.part.manufacturer}`}</div></>
@@ -173,6 +183,30 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
             <button className="btn" onClick={() => act(() => api.post<Req>(`${base}/approve`, { comment }), "Виза поставлена").then(() => setComment(""))}>Утвердить цены</button></div>}</div>)}
       {r.approvals?.length > 0 && <div className="muted" style={{ marginTop: 6 }}>Визы: {r.approvals.map((a) => `${a.level === "fd" ? "ФД" : "КД"} ${a.name}, ${fmtDate(a.at)}${a.comment ? ` — ${a.comment}` : ""}`).join("; ")}</div>}
 
+      <h3>Коммерческое предложение</h3>
+      {!closed && (
+        <div className="row" style={{ flexWrap: "wrap" }}>
+          <span className="muted">Отмечено строк: {sel.length}</span>
+          <button className="btn ghost" onClick={() => setSel(r.lines.filter((l) => l.price != null && !["cancelled", "unavailable"].includes(l.status)).map((l) => l.id))}>отметить все с ценой</button>
+          <label className="row">валюта КП<select value={kpCur} onChange={(e) => setKpCur(e.target.value)}>{["RUB", "EUR", "CNY", "USD"].map((c) => <option key={c}>{c}</option>)}</select></label>
+          {approver && r.summary.handling_fee_rub > 0 && <label className="row"><input type="checkbox" checked={noFee} onChange={(e) => setNoFee(e.target.checked)} /> без «Обработки заказа» (ФД увидит)</label>}
+          <button className="btn" disabled={!sel.length} onClick={() => act(() => api.post<Req & { reserve_short?: string[] }>(`${base}/kp`, { line_ids: sel, currency: kpCur, remove_handling_fee: noFee })
+            .then((x) => { if (x.reserve_short?.length) alert(`Свободного остатка не хватило для строк: ${x.reserve_short.join(", ")}`); return x; }), "КП сформировано, строки «со склада» в мягком резерве")}>Сформировать КП</button>
+        </div>)}
+      {r.kps?.length > 0 && (
+        <table style={{ marginTop: 6 }}>
+          <thead><tr><th>КП</th><th>Дата</th><th className="num">Строк</th><th className="num">Итого</th><th>Действует до</th><th>Что изменилось</th><th></th></tr></thead>
+          <tbody>{r.kps.map((k) => (
+            <tr key={k.id}><td><b>{k.number}</b>{k.sent_at && <span className="badge" style={{ marginLeft: 4 }}>отправлено {fmtDate(k.sent_at)}</span>}</td><td>{fmtDate(k.created_at)}</td>
+              <td className="num">{k.lines.length}</td>
+              <td className="num">{fmtRub(k.total, 2)} {k.currency}{k.handling_fee > 0 && <div className="muted" style={{ fontSize: 11 }}>в т. ч. обработка {fmtRub(k.handling_fee, 2)}</div>}
+                {k.handling_fee_removed_by && <div className="muted" style={{ fontSize: 11 }}>обработка заказа убрана</div>}</td>
+              <td style={{ color: k.expired ? "var(--bad)" : undefined }}>{fmtDate(k.valid_until)}{k.expired && " — истекло"}</td>
+              <td style={{ fontSize: 12 }}>{k.changes.length ? k.changes.map((c, i) => <div key={i}>{c.article}: {c.change}{c.old != null ? ` ${String(c.old)} → ${String(c.new)}` : ""}</div>) : <span className="muted">—</span>}</td>
+              <td><a className="btn ghost" href={`/api/parts/requests/kp/${k.id}/docx`}>Word</a>
+                {!k.sent_at && !closed && <button className="btn ghost" onClick={() => act(() => api.post<Req>(`/api/parts/requests/kp/${k.id}/sent`), "Отмечено как отправленное")}>отправлено</button>}</td></tr>))}</tbody>
+        </table>)}
+
       <div className="row" style={{ marginTop: 10 }}>
         {!closed ? <>
           <select value={closeKind} onChange={(e) => setCloseKind(e.target.value)}><option value="">закрыть заявку…</option>{Object.entries(meta.close_kinds).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
@@ -181,7 +215,6 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
         </> : <><span className="muted">Закрыта: {meta.close_kinds[r.closed]}{r.close_reason && ` — ${r.close_reason}`}</span>
           <button className="btn ghost" onClick={() => act(() => api.post<Req>(`${base}/reopen`), "Заявка снова в работе")}>вернуть в работу</button></>}
       </div>
-      <p className="muted" style={{ fontSize: 12 }}>КП с частичной отправкой, сроком действия и мягким резервом на 30 дней — следующий шаг.</p>
     </div>
   );
 }
