@@ -1268,3 +1268,35 @@ class PartShipmentLine(Base):
     request_line_id: Mapped[str] = mapped_column(ForeignKey("part_request_lines.id"), index=True)
     part_id: Mapped[str] = mapped_column(ForeignKey("parts.id"))
     qty: Mapped[float] = mapped_column(Float)
+
+
+class PartInventory(TimestampMixin, Base):
+    """Инвентаризация склада: задание (склад, ячейки, группа товара), подсчёт с телефона, утверждение КД → корректировка остатков."""
+    __tablename__ = "part_inventories"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(32), unique=True)                     # ИН-2026-0001
+    warehouse_id: Mapped[str] = mapped_column(ForeignKey("warehouses.id"))
+    cell_prefix: Mapped[str] = mapped_column(String(32), default="")
+    part_group: Mapped[str] = mapped_column(String(128), default="")
+    status: Mapped[str] = mapped_column(String(16), default="counting")              # counting | submitted | approved | cancelled
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    submitted_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    lines: Mapped[list["PartInventoryLine"]] = relationship(cascade="all, delete-orphan")
+
+
+class PartInventoryLine(Base):
+    __tablename__ = "part_inventory_lines"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    inventory_id: Mapped[str] = mapped_column(ForeignKey("part_inventories.id", ondelete="CASCADE"), index=True)
+    part_id: Mapped[str] = mapped_column(ForeignKey("parts.id"))
+    cell: Mapped[str] = mapped_column(String(32), default="")
+    expected: Mapped[float] = mapped_column(Float, default=0)                        # учётный остаток на начало подсчёта
+    counted: Mapped[Optional[float]] = mapped_column(Float)                          # NULL — ещё не посчитано
+    added: Mapped[bool] = mapped_column(Boolean, default=False)                      # найдено при подсчёте, в учёте не было
+    counted_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    counted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    comment: Mapped[str] = mapped_column(Text, default="")

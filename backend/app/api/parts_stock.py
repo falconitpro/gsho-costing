@@ -63,7 +63,7 @@ def _physical(db: Session, wid: str) -> Warehouse:
 def meta(db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
     whs = db.scalars(select(Warehouse).where(Warehouse.is_active.is_(True), Warehouse.kind == "physical").order_by(Warehouse.name)).all()
     return {"warehouses": [{"id": w.id, "name": w.name} for w in whs], "discrepancy": DISCREPANCY, "decisions": DECISIONS, "dev_status": DEV_STATUS,
-            "can_edit": user.has(*EDIT_ROLES)}
+            "can_edit": user.has(*EDIT_ROLES), "can_approve": user.has(Role.CD, Role.GD)}
 
 
 # ------------------------------------------------------------------ приёмка
