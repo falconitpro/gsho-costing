@@ -107,12 +107,18 @@ def test_po_flow(client):
     _ok(client.post(f"/api/parts/po/{po['id']}/lines/status", headers=H(LOG), json={"line_ids": ids, "status": "transit"}))
     assert client.post(f"/api/parts/po/{po['id']}/lines/status", headers=H(LOG), json={"line_ids": ids[:1], "status": "confirmed"}).status_code == 409
     assert client.post(f"/api/parts/po/{po['id']}/cancel", headers=H(MGR)).status_code == 409
-    d = _ok(client.post(f"/api/parts/po/{po['id']}/lines/status", headers=H(LOG), json={"line_ids": ids[:1], "status": "received"}))
+    assert client.post(f"/api/parts/po/{po['id']}/lines/status", headers=H(LOG), json={"line_ids": ids[:1], "status": "received"}).status_code == 422
+    wh = _ok(client.post("/api/parts/warehouses", headers=H(CD), json={"name": f"Склад PO {t}", "legal_entity_id": ents["ru"]}), 201)
+    _ok(client.post("/api/parts/stock/receipts", headers=H(MGR), json={"po_id": po["id"], "warehouse_id": wh["id"],
+                                                                       "lines": [{"po_line_id": ids[0], "qty": 2, "cell": "A-1"}]}), 201)
+    d = _ok(client.get(f"/api/parts/po/{po['id']}", headers=H(CD)))
     assert d["status"] == "in_progress" and d["intragroup"][0]["lines"][0]["status"] == "received"
     rq = _ok(client.get(f"/api/parts/requests/{r['id']}", headers=H(MGR)))
     st = {l["no"]: l["status"] for l in rq["lines"]}
     assert st == {1: "in_stock", 2: "transit"}
-    d = _ok(client.post(f"/api/parts/po/{po['id']}/lines/status", headers=H(LOG), json={"line_ids": ids[1:], "status": "received"}))
+    _ok(client.post("/api/parts/stock/receipts", headers=H(MGR), json={"po_id": po["id"], "warehouse_id": wh["id"],
+                                                                       "lines": [{"po_line_id": ids[1], "qty": 5}, {"po_line_id": ids[2], "qty": 10}]}), 201)
+    d = _ok(client.get(f"/api/parts/po/{po['id']}", headers=H(CD)))
     assert d["status"] == "closed"
     assert po["id"] not in {p["id"] for p in _ok(client.get("/api/parts/po", headers=H(FD)))}
     assert po["id"] in {p["id"] for p in _ok(client.get(f"/api/parts/po?open_only=false&request_id={r['id']}", headers=H(FD)))}

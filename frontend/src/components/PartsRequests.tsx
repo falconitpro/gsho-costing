@@ -10,7 +10,7 @@ type Line = {
   source: string; lead_days: number | null; price: number | null; currency: string; price_source: string; price_rub: number | null; sum_rub: number | null;
   available: number | null; status: string; comment: string; threshold_pct: number | null; approval: string | null;
   cost?: number | null; margin_pct?: number | null; profit_rub?: number | null; cost_note?: string;
-  eta?: string | null; supplier_id?: string | null; rfq_line_id?: string | null; quote_price?: number | null; quote_currency?: string;
+  eta?: string | null; shipped_qty?: number; supplier_id?: string | null; rfq_line_id?: string | null; quote_price?: number | null; quote_currency?: string;
 };
 type Req = {
   id: string; number: string; client_id: string; client_name: string; manager_name: string; machine: string; urgent: boolean; warranty: boolean;
@@ -173,7 +173,14 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
           <button className="btn add" disabled={!add.trim()} onClick={() => act(() => api.post<Req>(`${base}/lines`, { lines_text: add })).then(() => setAdd(""))}>Строки</button>
         </div>)}
 
+      {!closed && (
+        <div className="row" style={{ marginTop: 6, flexWrap: "wrap" }}>
+          <button className="btn ghost" disabled={!sel.length} onClick={() => act(() => api.post<Req & { reserve_short?: number[] }>(`/api/parts/stock/requests/${r.id}/client-order`, { line_ids: sel })
+            .then((x) => { if (x.reserve_short?.length) alert(`Свободного остатка не хватило для строк: ${x.reserve_short.join(", ")}`); return x; }), "Заказ клиента отмечен, строки «со склада» в жёстком резерве")}>Клиент заказал отмеченные</button>
+          <span className="muted" style={{ fontSize: 11 }}>строки «со склада» — жёсткий резерв; «под заказ» — в «Заказы поставщикам» → «К заказу»</span>
+        </div>)}
       {!closed && <SupplierPanel r={r} sel={sel} act={act} />}
+      {!closed && r.lines.some((l) => ["ordered", "po", "transit", "in_stock"].includes(l.status)) && <ShipPanel r={r} act={act} />}
 
       <h3>Итого по строкам в работе</h3>
       <div className="grid cols-3">
@@ -337,5 +344,38 @@ function RfqAnswers({ rfq, onSave, onClose }: { rfq: Rfq; onSave: (lines: Partia
       <button className="btn" style={{ marginTop: 6 }} onClick={() => onSave(rows.filter((x) => x.availability || x.price != null).map((x) => ({
         id: x.id, availability: x.availability, price: x.price, currency: x.currency, lead_days: x.lead_days, moq: x.moq, analog_number: x.analog_number, comment: x.comment })))}>Сохранить ответ</button>
     </div>
+  );
+}
+
+// ------------------------------------------------------------------ отгрузка клиенту по жёсткому резерву (ТЗ запчастей, раздел 8)
+
+type Shippable = { line_id: string; no: number; article: string; name: string; qty: number; unit: string; shipped_qty: number; status: string;
+  reserved: { warehouse_id: string; warehouse: string; qty: number }[] };
+
+function ShipPanel({ r, act }: { r: Req; act: <T>(fn: () => Promise<T>, ok?: string) => Promise<void> }) {
+  const [rows, setRows] = useState<Shippable[]>([]);
+  const [qty, setQty] = useState<Record<string, string>>({});
+  const [wh, setWh] = useState("");
+  useEffect(() => { api.get<Shippable[]>(`/api/parts/stock/requests/${r.id}/shippable`).then((x) => { setRows(x); setQty({}); }).catch(() => setRows([])); }, [r]);
+  const whs = [...new Map(rows.flatMap((x) => x.reserved).map((x) => [x.warehouse_id, x.warehouse])).entries()];
+  const w = wh || whs[0]?.[0] || "";
+  const ready = rows.filter((x) => x.reserved.some((y) => y.warehouse_id === w && y.qty > 0));
+  if (!whs.length) return null;
+  return (
+    <>
+      <h3>Отгрузка клиенту</h3>
+      <div className="row"><label className="row">со склада<select value={w} onChange={(e) => setWh(e.target.value)}>{whs.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select></label></div>
+      <table style={{ marginTop: 4 }}>
+        <thead><tr><th>№</th><th>Позиция</th><th className="num">В заявке</th><th className="num">Отгружено</th><th className="num">В резерве</th><th className="num">Отгрузить</th></tr></thead>
+        <tbody>{ready.map((x) => { const res = x.reserved.find((y) => y.warehouse_id === w)?.qty || 0; return (
+          <tr key={x.line_id}><td>{x.no}</td><td>{x.article} {x.name}</td><td className="num">{x.qty} {x.unit}</td><td className="num">{x.shipped_qty}</td><td className="num">{res}</td>
+            <td className="num"><input inputMode="decimal" style={{ width: 70 }} placeholder={String(res)} value={qty[x.line_id] ?? ""} onChange={(e) => setQty({ ...qty, [x.line_id]: e.target.value })} /></td></tr>); })}</tbody>
+      </table>
+      <div className="row" style={{ marginTop: 6 }}>
+        <button className="btn ghost" onClick={() => setQty(Object.fromEntries(ready.map((x) => [x.line_id, String(x.reserved.find((y) => y.warehouse_id === w)?.qty || 0)])))}>всё из резерва</button>
+        <button className="btn" disabled={!Object.values(qty).some((v) => Number(v) > 0)} onClick={() => act(() => api.post<Req>(`/api/parts/stock/requests/${r.id}/shipments`, {
+          warehouse_id: w, lines: Object.entries(qty).filter(([, v]) => Number(v) > 0).map(([line_id, v]) => ({ line_id, qty: Number(v.replace(",", ".")) })) }), "Отгрузка проведена, остаток и резерв уменьшены")}>Отгрузить</button>
+      </div>
+    </>
   );
 }

@@ -156,7 +156,7 @@ function PoCard({ po, meta, act }: { po: Po; meta: Meta; act: (fn: () => Promise
       {meta.can_track && live && (
         <div className="row" style={{ marginTop: 6, flexWrap: "wrap" }}>
           <button className="btn ghost" onClick={() => setSel(po.lines.filter((l) => !["received", "cancelled"].includes(l.status)).map((l) => l.id))}>отметить все</button>
-          <select value={st} onChange={(e) => setSt(e.target.value)}><option value="">статус не менять</option>{Object.entries(meta.line_status).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+          <select value={st} onChange={(e) => setSt(e.target.value)}><option value="">статус не менять</option>{Object.entries(meta.line_status).filter(([k]) => k !== "received").map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
           <label className="row">новая дата на складе<input type="date" value={eta} onChange={(e) => setEta(e.target.value)} /></label>
           <input placeholder="комментарий (причина сдвига)" value={note} onChange={(e) => setNote(e.target.value)} />
           <button className="btn" disabled={!sel.length || (!st && !eta)} onClick={() => act(() => api.post(`${base}/lines/status`, { line_ids: sel, status: st || null, eta: eta || null, comment: note,

@@ -481,6 +481,8 @@ def lines_status(pid: str, body: LinesStatusIn, db: Session = Depends(get_db), u
         raise HTTPException(409, "Сначала отправьте заказ поставщику")
     if body.status and body.status not in PO_LINE_STATUS:
         raise HTTPException(422, "Неизвестный статус")
+    if body.status == "received":
+        raise HTTPException(422, "«На складе» ставится приёмкой: «Склад» → «Приёмка»")
     sel = [l for l in po.lines if l.id in set(body.line_ids)]
     if not sel:
         raise HTTPException(422, "Отметьте строки")
