@@ -10,14 +10,14 @@ type Dev = { id: string; number: string; po_number: string; supplier_name: strin
   decision_title: string; status: string; status_title: string; claim_text: string; claim_sent_at: string | null; comment: string; created_at: string;
   line: { no: number; number: string; name: string; qty: number; received_qty: number; unit: string } | null; photos: { i: number; name: string }[] };
 type Move = { id: string; at: string; article: string; name: string; warehouse: string; qty: number; kind: string; doc_number: string; user: string };
-type Meta = { warehouses: { id: string; name: string }[]; discrepancy: Record<string, string>; decisions: Record<string, string>; can_edit: boolean };
+type Meta = { warehouses: { id: string; name: string }[]; discrepancy: Record<string, string>; decisions: Record<string, string>; can_edit: boolean; can_approve?: boolean };
 type Row = { qty: string; qty_bad: string; discrepancy: string; cell: string; comment: string };
 
-const KIND: Record<string, string> = { receipt: "приёмка", shipment: "отгрузка", adjust: "корректировка" };
+const KIND: Record<string, string> = { receipt: "приёмка", shipment: "отгрузка", adjust: "инвентаризация" };
 
 export default function PartsWarehouse() {
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [tab, setTab] = useState<"receipt" | "dev" | "moves">("receipt");
+  const [tab, setTab] = useState<"receipt" | "dev" | "inv" | "repl" | "moves">("receipt");
   const [msg, setMsg] = useState("");
   useEffect(() => { api.get<Meta>("/api/parts/stock/meta").then(setMeta).catch((e) => setMsg((e as Error).message)); }, []);
   if (!meta) return msg ? <div className="alert info">{msg}</div> : null;
@@ -27,10 +27,14 @@ export default function PartsWarehouse() {
       <div className="row" style={{ marginBottom: 8 }}>
         <button className={`btn ${tab === "receipt" ? "" : "ghost"}`} onClick={() => setTab("receipt")}>Приёмка</button>
         <button className={`btn ${tab === "dev" ? "" : "ghost"}`} onClick={() => setTab("dev")}>Отклонения</button>
+        <button className={`btn ${tab === "inv" ? "" : "ghost"}`} onClick={() => setTab("inv")}>Инвентаризация</button>
+        <button className={`btn ${tab === "repl" ? "" : "ghost"}`} onClick={() => setTab("repl")}>Пополнение</button>
         <button className={`btn ${tab === "moves" ? "" : "ghost"}`} onClick={() => setTab("moves")}>Движения</button>
       </div>
       {tab === "receipt" && <Receipt meta={meta} setMsg={setMsg} />}
       {tab === "dev" && <Deviations meta={meta} setMsg={setMsg} />}
+      {tab === "inv" && <Inventory meta={meta} setMsg={setMsg} />}
+      {tab === "repl" && <Replenish meta={meta} setMsg={setMsg} />}
       {tab === "moves" && <Moves />}
     </>
   );
@@ -141,6 +145,132 @@ function Moves() {
             <td className="num" style={{ color: m.qty < 0 ? "var(--bad)" : undefined }}>{m.qty > 0 ? `+${m.qty}` : m.qty}</td><td>{m.user}</td></tr>))}
           {list.length === 0 && <tr><td colSpan={8} className="muted">Движений нет</td></tr>}</tbody>
       </table>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ инвентаризация: задание → подсчёт с телефона → утверждение КД
+
+type InvLine = { id: string; article: string; name: string; unit: string; cell: string; expected: number; counted: number | null; added: boolean; diff: number | null; comment: string };
+type Inv = { id: string; number: string; warehouse_name: string; cell_prefix: string; part_group: string; status: string; status_title: string; created_at: string;
+  comment: string; approved_by_name: string; summary: { lines: number; counted: number; diff_lines: number; surplus: number; shortage: number }; lines?: InvLine[] };
+
+function Inventory({ meta, setMsg }: { meta: Meta; setMsg: (s: string) => void }) {
+  const [list, setList] = useState<Inv[]>([]);
+  const [cur, setCur] = useState<Inv | null>(null);
+  const [f, setF] = useState({ warehouse_id: meta.warehouses[0]?.id || "", cell_prefix: "", part_group: "" });
+  const [q, setQ] = useState("");
+  const [onlyDiff, setOnlyDiff] = useState(false);
+  const [found, setFound] = useState({ article: "", counted: "", cell: "" });
+  const load = () => api.get<Inv[]>("/api/parts/stock/inventories").then(setList).catch((e) => setMsg((e as Error).message));
+  useEffect(() => { load(); }, []);
+  const open = (id: string) => api.get<Inv>(`/api/parts/stock/inventories/${id}`).then(setCur);
+  const run = async (fn: () => Promise<Inv>, ok = "") => { try { setCur(await fn()); if (ok) setMsg(ok); load(); } catch (e) { setMsg((e as Error).message); } };
+  const count = (l: InvLine, v: string) => { if (v === "" || Number(v.replace(",", ".")) === l.counted) return;
+    run(() => api.put<Inv>(`/api/parts/stock/inventories/${cur!.id}/counts`, { lines: [{ line_id: l.id, counted: Number(v.replace(",", ".")) }] })); };
+  if (cur) {
+    const rows = (cur.lines || []).filter((l) => (!q || `${l.article} ${l.name} ${l.cell}`.toLowerCase().includes(q.toLowerCase())) && (!onlyDiff || (l.diff != null && l.diff !== 0)));
+    const counting = cur.status === "counting" && meta.can_edit;
+    return (
+      <div className="card">
+        <div className="row" style={{ justifyContent: "space-between" }}><h2 style={{ margin: 0 }}>{cur.number} · {cur.warehouse_name}</h2><button className="btn ghost" onClick={() => setCur(null)}>назад</button></div>
+        <p className="muted" style={{ marginTop: 4 }}>{cur.status_title} · посчитано {cur.summary.counted} из {cur.summary.lines} · расхождений {cur.summary.diff_lines} (излишек {cur.summary.surplus}, недостача {cur.summary.shortage}){cur.comment && ` · ${cur.comment}`}</p>
+        <div className="row" style={{ flexWrap: "wrap" }}>
+          <input placeholder="артикул, название, ячейка" value={q} onChange={(e) => setQ(e.target.value)} />
+          <label className="row"><input type="checkbox" checked={onlyDiff} onChange={(e) => setOnlyDiff(e.target.checked)} /> только расхождения</label>
+        </div>
+        <table style={{ marginTop: 6 }}>
+          <thead><tr><th>Ячейка</th><th>Артикул</th><th>Наименование</th><th className="num">Учёт</th><th className="num">Посчитано</th><th className="num">Разница</th></tr></thead>
+          <tbody>{rows.map((l) => (
+            <tr key={l.id}><td>{l.cell || "—"}</td><td><b>{l.article}</b>{l.added && <span className="badge" style={{ marginLeft: 4 }}>найдено</span>}</td><td>{l.name}</td><td className="num">{l.expected}</td>
+              <td className="num">{counting ? <input inputMode="decimal" style={{ width: 70 }} defaultValue={l.counted ?? ""} key={`${l.id}-${l.counted}`} onBlur={(e) => count(l, e.target.value)} /> : (l.counted ?? "—")}</td>
+              <td className="num" style={{ color: l.diff ? "var(--bad)" : undefined }}>{l.diff == null ? "" : l.diff > 0 ? `+${l.diff}` : l.diff}</td></tr>))}</tbody>
+        </table>
+        {counting && <>
+          <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
+            <b>Нашли на полке то, чего нет в списке:</b>
+            <input placeholder="артикул" value={found.article} onChange={(e) => setFound({ ...found, article: e.target.value })} />
+            <input inputMode="decimal" placeholder="кол-во" style={{ width: 70 }} value={found.counted} onChange={(e) => setFound({ ...found, counted: e.target.value })} />
+            <input placeholder="ячейка" style={{ width: 80 }} value={found.cell} onChange={(e) => setFound({ ...found, cell: e.target.value })} />
+            <button className="btn ghost" disabled={!found.article || !found.counted} onClick={() => run(() => api.put<Inv>(`/api/parts/stock/inventories/${cur.id}/counts`,
+              { lines: [{ article: found.article.trim(), counted: Number(found.counted.replace(",", ".")), cell: found.cell }] })).then(() => setFound({ article: "", counted: "", cell: "" }))}>добавить</button>
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn" onClick={() => { const left = cur.summary.lines - cur.summary.counted;
+              if (left && !confirm(`Не посчитано строк: ${left}. Они будут считаться нулём (недостача). Отправить КД?`)) return;
+              run(() => api.post<Inv>(`/api/parts/stock/inventories/${cur.id}/submit`), "Отправлено КД на утверждение"); }}>Подсчёт завершён — на утверждение КД</button>
+            <button className="btn ghost" onClick={() => { if (confirm("Отменить инвентаризацию? Остатки не изменятся.")) run(() => api.post<Inv>(`/api/parts/stock/inventories/${cur.id}/cancel`), "Отменена"); }}>отменить</button>
+          </div></>}
+        {cur.status === "submitted" && meta.can_approve && (
+          <div className="row" style={{ marginTop: 8 }}>
+            <button className="btn" onClick={() => run(() => api.post<Inv>(`/api/parts/stock/inventories/${cur.id}/approve`, {}), "Утверждено: остатки исправлены, движения записаны")}>Утвердить и исправить остатки</button>
+            <button className="btn ghost" onClick={() => { const c = prompt("Что пересчитать?") ?? ""; run(() => api.post<Inv>(`/api/parts/stock/inventories/${cur.id}/approve`, { approve: false, comment: c }), "Возвращено на пересчёт"); }}>вернуть на пересчёт</button>
+          </div>)}
+      </div>);
+  }
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Инвентаризация</h2>
+      {meta.can_edit && (
+        <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label className="f">Склад<select value={f.warehouse_id} onChange={(e) => setF({ ...f, warehouse_id: e.target.value })}>{meta.warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
+          <label className="f">Ячейки, начинаются с<input style={{ width: 90 }} value={f.cell_prefix} onChange={(e) => setF({ ...f, cell_prefix: e.target.value })} placeholder="все" /></label>
+          <label className="f">Группа товара<input value={f.part_group} onChange={(e) => setF({ ...f, part_group: e.target.value })} placeholder="все" /></label>
+          <button className="btn add" disabled={!f.warehouse_id} onClick={() => run(() => api.post<Inv>("/api/parts/stock/inventories", f), "Задание создано — считайте по списку")}>Новая инвентаризация</button>
+        </div>)}
+      <table style={{ marginTop: 8 }}>
+        <thead><tr><th>Номер</th><th>Дата</th><th>Склад</th><th>Отбор</th><th className="num">Строк</th><th className="num">Расхождений</th><th>Статус</th></tr></thead>
+        <tbody>{list.map((i) => (
+          <tr key={i.id} style={{ cursor: "pointer" }} onClick={() => open(i.id)}><td><b>{i.number}</b></td><td>{fmtDate(i.created_at)}</td><td>{i.warehouse_name}</td>
+            <td>{[i.cell_prefix && `ячейки ${i.cell_prefix}…`, i.part_group].filter(Boolean).join(", ") || "весь склад"}</td>
+            <td className="num">{i.summary.counted} / {i.summary.lines}</td><td className="num">{i.summary.diff_lines}</td><td>{i.status_title}</td></tr>))}
+          {list.length === 0 && <tr><td colSpan={7} className="muted">Инвентаризаций не было</td></tr>}</tbody>
+      </table>
+      <p className="muted" style={{ fontSize: 12 }}>Учётный остаток фиксируется при создании задания; при утверждении разница проводится движением «инвентаризация», поступления и отгрузки во время подсчёта не теряются. Выгрузка в 1С — после подключения обмена.</p>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ пополнение по минимальному остатку
+
+type ReplLine = { part_id: string; article: string; name: string; unit: string; warehouse: string; qty: number; reserved: number; free: number; incoming: number;
+  min_qty: number; suggest: number; moq: number | null; multiple: number | null; price: number | null; currency: string; priced: boolean };
+type ReplGroup = { supplier_id: string | null; supplier_name: string; lines: ReplLine[] };
+
+function Replenish({ meta, setMsg }: { meta: Meta; setMsg: (s: string) => void }) {
+  const [list, setList] = useState<ReplGroup[]>([]);
+  const [qty, setQty] = useState<Record<string, string>>({});
+  const load = () => api.get<ReplGroup[]>("/api/parts/stock/replenishment").then((g) => {
+    setList(g); setQty(Object.fromEntries(g.flatMap((x) => x.lines).map((l) => [l.part_id, String(l.suggest)])));
+  }).catch((e) => setMsg((e as Error).message));
+  useEffect(() => { load(); }, []);
+  async function order(g: ReplGroup) {
+    try {
+      const lines = g.lines.filter((l) => l.priced && Number(qty[l.part_id]) > 0).map((l) => ({ part_id: l.part_id, qty: Number(qty[l.part_id].replace(",", ".")) }));
+      const r = await api.post<{ number: string }[]>("/api/parts/po", { supplier_id: g.supplier_id, stock_lines: lines });
+      setMsg(`Заказ на склад создан: ${r.map((x) => x.number).join(", ")} — отправьте его во вкладке «Заказы поставщикам»`);
+      load();
+    } catch (e) { setMsg((e as Error).message); }
+  }
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Пополнение склада</h2>
+      <p className="muted" style={{ marginTop: 0 }}>Позиции, у которых свободный остаток с учётом ожидаемого по заказам на склад ниже минимального. Минимальный остаток задаётся в карточке запчасти (блок «Остатки»).</p>
+      {list.length === 0 && <div className="muted">Всё выше минимума</div>}
+      {list.map((g) => (
+        <div key={g.supplier_id || "none"} style={{ marginBottom: 10 }}>
+          <div className="row" style={{ justifyContent: "space-between" }}><b>{g.supplier_name}</b>
+            {meta.can_edit && g.supplier_id && <button className="btn" onClick={() => order(g)}>Заказать на склад</button>}</div>
+          <table>
+            <thead><tr><th>Артикул</th><th>Наименование</th><th>Склад</th><th className="num">Свободно</th><th className="num">Ожидается</th><th className="num">Минимум</th><th className="num">Заказать</th><th className="num">Цена</th></tr></thead>
+            <tbody>{g.lines.map((l) => (
+              <tr key={l.part_id + l.warehouse}><td><b>{l.article}</b></td><td>{l.name}</td><td>{l.warehouse}</td><td className="num">{l.free}</td><td className="num">{l.incoming}</td><td className="num">{l.min_qty}</td>
+                <td className="num"><input inputMode="decimal" style={{ width: 70 }} value={qty[l.part_id] ?? ""} onChange={(e) => setQty({ ...qty, [l.part_id]: e.target.value })} />
+                  {(l.moq || l.multiple) && <div className="muted" style={{ fontSize: 11 }}>{[l.moq && `мин. ${l.moq}`, l.multiple && `кратно ${l.multiple}`].filter(Boolean).join(", ")}</div>}</td>
+                <td className="num">{l.priced ? (l.price != null ? `${l.price} ${l.currency}` : "есть") : <span className="badge bad">нет цены</span>}</td></tr>))}</tbody>
+          </table>
+          {!g.supplier_id && <div className="muted" style={{ fontSize: 12 }}>Укажите поставщика в карточках этих позиций, чтобы заказать.</div>}
+        </div>))}
     </div>
   );
 }

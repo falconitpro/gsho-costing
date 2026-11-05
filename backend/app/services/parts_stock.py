@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -24,6 +25,18 @@ def deviations_for(remaining: float, qty: float, qty_bad: float, discrepancy: st
     elif qty > remaining:
         out.append(("over", round(qty - remaining, 4)))
     return out
+
+
+def suggest_qty(min_qty: float, free: float, incoming: float, moq: Optional[float] = None, multiple: Optional[float] = None) -> float:
+    """Сколько заказать: до минимального остатка, не меньше минимальной партии, кратно упаковке."""
+    need = float(min_qty) - float(free) - float(incoming)
+    if need <= 0:
+        return 0.0
+    if moq:
+        need = max(need, float(moq))
+    if multiple:
+        need = math.ceil(round(need / float(multiple), 6)) * float(multiple)
+    return round(need, 4)
 
 
 # ------------------------------------------------------------------ БД
