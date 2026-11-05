@@ -3,6 +3,7 @@ import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
 import PartsCatalog from "../components/PartsCatalog";
 import PartsRequests from "../components/PartsRequests";
+import PartsPurchase from "../components/PartsPurchase";
 
 // Запчасти, шаг 1: компании группы, маршруты поставки, политика наценок между компаниями (визы ЗГД и ФД).
 
@@ -28,7 +29,7 @@ const EMPTY_RULES: Rules = { default: {}, by_group: [], by_supplier: [], min_mar
 const num = (v: string) => (v === "" ? null : Number(v.replace(",", ".")));
 
 export default function PartsSetupPage({ me }: { me: Me }) {
-  const [tab, setTab] = useState<"requests" | "catalog" | "entities" | "routes" | "markups">("requests");
+  const [tab, setTab] = useState<"requests" | "po" | "catalog" | "entities" | "routes" | "markups">("requests");
   const [meta, setMeta] = useState<Meta | null>(null);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -37,6 +38,7 @@ export default function PartsSetupPage({ me }: { me: Me }) {
   const entityEditor = has("cd", "gd", "admin");
   const routeEditor = has("cd", "gd", "admin", "logistician");
   const markupReader = can(me, "cost") || has("cd", "fd", "gd");
+  const poReader = has("manager", "purchasing", "cd", "gd", "fd", "logistician", "admin");
   const setupReader = has("cd", "fd", "gd", "admin", "logistician");
 
   const loadEntities = () => api.get<Entity[]>("/api/parts/entities").then(setEntities);
@@ -49,6 +51,7 @@ export default function PartsSetupPage({ me }: { me: Me }) {
       <div className="page-head"><h1>Запасные части</h1></div>
       <div className="row" style={{ marginBottom: 10 }}>
         <button className={`btn ${tab === "requests" ? "" : "ghost"}`} onClick={() => setTab("requests")}>Заявки</button>
+        {poReader && <button className={`btn ${tab === "po" ? "" : "ghost"}`} onClick={() => setTab("po")}>Заказы поставщикам</button>}
         <button className={`btn ${tab === "catalog" ? "" : "ghost"}`} onClick={() => setTab("catalog")}>Каталог</button>
         {setupReader && <button className={`btn ${tab === "entities" ? "" : "ghost"}`} onClick={() => setTab("entities")}>Компании группы</button>}
         {setupReader && <button className={`btn ${tab === "routes" ? "" : "ghost"}`} onClick={() => setTab("routes")}>Маршруты поставки</button>}
@@ -56,6 +59,7 @@ export default function PartsSetupPage({ me }: { me: Me }) {
       </div>
       {msg && <div className="alert info">{msg}</div>}
       {tab === "requests" && <PartsRequests me={me} />}
+      {tab === "po" && <PartsPurchase me={me} />}
       {tab === "catalog" && <PartsCatalog me={me} />}
       {meta && tab === "entities" && <Entities meta={meta} list={entities} editor={entityEditor} onSaved={() => { loadEntities(); loadRoutes(); }} setMsg={setMsg} />}
       {meta && tab === "routes" && <RoutesTab meta={meta} list={routes} entities={entities} editor={routeEditor} name={name} onSaved={loadRoutes} setMsg={setMsg} />}

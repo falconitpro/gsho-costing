@@ -184,45 +184,54 @@ class SendIn(BaseModel):
     only_unanswered: bool = False      # напоминание — только по строкам без ответа
 
 
-@router.post("/rfq/{rfq_id}/send")
-def rfq_send(rfq_id: str, body: SendIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
-    """Отправка поставщику контактам с направлением «Заявки и КП» (или основному): почта с файлом и сообщение WeCom."""
+def send_supplier_file(sup: Factory, subject: str, path: str, wecom_text: str, ref: str, via_mail: bool = True, via_wecom: bool = True,
+                       roles: tuple[str, ...] = ("rfq",)) -> list[dict]:
+    """Файл поставщику: почта с вложением и сообщение WeCom контактам нужного направления (иначе — основному контакту)."""
     from ..adapters.mail import OutgoingMail
     from ..core.config import get_settings
-    rfq = _rfq_or_404(db, rfq_id)
-    sup = db.get(Factory, rfq.supplier_id)
-    if body.only_unanswered and all(l.availability for l in rfq.lines):
-        raise HTTPException(409, "Поставщик ответил по всем строкам — напоминать не о чем")
-    contacts = [c for c in (sup.contacts or []) if "rfq" in (c.get("roles") or [])] or [c for c in (sup.contacts or []) if c.get("primary")]
-    path = _file(db, rfq, body.only_unanswered)
-    results = []
-    now = datetime.now(timezone.utc)
+    contacts = [c for c in (sup.contacts or []) if set(roles) & set(c.get("roles") or [])] or [c for c in (sup.contacts or []) if c.get("primary")]
     s = get_settings()
-    subj = f"{'Напоминание: ' if body.only_unanswered else ''}Запрос цены {rfq.number}"
-    if body.via_mail:
+    results: list[dict] = []
+    if via_mail:
         emails = [c["email"] for c in contacts if c.get("email")]
         if not emails:
             results.append({"via": "mail", "ok": False, "error": "не отправлено: нет e-mail в карточке поставщика"})
         else:
             try:
-                adapters.mail().send(OutgoingMail(to=emails, subject=subj, body_html=f"<p>{subj}. Файл во вложении.</p>", attachments=[path]))
+                adapters.mail().send(OutgoingMail(to=emails, subject=subject, body_html=f"<p>{subject}. Файл во вложении.</p>", attachments=[path]))
                 ok = s.mail_provider != "console"
                 results.append({"via": "mail", "to": emails, "ok": ok, "error": "" if ok else "почта не подключена — файл не ушёл"})
             except Exception as e:
                 results.append({"via": "mail", "to": emails, "ok": False, "error": str(e)[:200]})
-    if body.via_wecom:
+    if via_wecom:
         ids = [c["wecom_id"] for c in contacts if c.get("wecom_id")] or list(sup.wecom_external_ids or [])
         if not ids:
             results.append({"via": "wecom", "ok": False, "error": "не отправлено: нет WeCom-контакта в карточке поставщика"})
         else:
             try:
                 for i in ids:
-                    adapters.messenger().send_to_external(i, f"{subj}: строк {len(rfq.lines)}. Файл отправлен на почту.", rfq.number)
+                    adapters.messenger().send_to_external(i, wecom_text, ref)
                 ok = s.messenger_provider != "console"
                 results.append({"via": "wecom", "to": ids, "ok": ok, "error": "" if ok else "WeCom не подключён"})
             except Exception as e:
                 results.append({"via": "wecom", "to": ids, "ok": False, "error": str(e)[:200]})
-    os.unlink(path)
+    return results
+
+
+@router.post("/rfq/{rfq_id}/send")
+def rfq_send(rfq_id: str, body: SendIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    """Отправка поставщику контактам с направлением «Заявки и КП» (или основному): почта с файлом и сообщение WeCom."""
+    rfq = _rfq_or_404(db, rfq_id)
+    sup = db.get(Factory, rfq.supplier_id)
+    if body.only_unanswered and all(l.availability for l in rfq.lines):
+        raise HTTPException(409, "Поставщик ответил по всем строкам — напоминать не о чем")
+    path = _file(db, rfq, body.only_unanswered)
+    now = datetime.now(timezone.utc)
+    subj = f"{'Напоминание: ' if body.only_unanswered else ''}Запрос цены {rfq.number}"
+    try:
+        results = send_supplier_file(sup, subj, path, f"{subj}: строк {len(rfq.lines)}. Файл отправлен на почту.", rfq.number, body.via_mail, body.via_wecom)
+    finally:
+        os.unlink(path)
     rfq.send_log = [*(rfq.send_log or []), *({**r, "at": now.isoformat()} for r in results)]
     if any(r["ok"] for r in results) or not results:
         rfq.sent_at = rfq.sent_at or now

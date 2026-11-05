@@ -154,6 +154,8 @@ def price_lines(db: Session, req: PartRequest, fx: dict, rules: dict) -> None:
             line.source = "stock" if available >= (line.qty or 0) else "order"
         if line.source == "order" and line.lead_days is None:
             line.lead_days = part.lead_days
+        if not line.supplier_id and part.supplier_id:      # поставщик по умолчанию — из карточки; меняется выбором ответа на запрос
+            line.supplier_id = part.supplier_id
         quote = (line.quote_price, line.quote_currency, line.supplier_id) if line.quote_price else None
         cost, cost_note = unit_cost_rub(db, part, line.route_id, rules, fx, quote)
         manual = (line.price, line.currency) if line.price_source == "manual" and line.price else None
