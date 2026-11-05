@@ -181,6 +181,8 @@ def create(body: PoCreateIn, db: Session = Depends(get_db), user: CurrentUser = 
         raise HTTPException(404, "Поставщик не найден")
     if not body.request_line_ids and not body.stock_lines:
         raise HTTPException(422, "Отметьте строки для заказа")
+    from ..services.suppliers import require_approved
+    require_approved(sup, "оформить у него заказ")
     mark_supplier(db, sup.id, "parts")
     done = _ordered_line_ids(db)
     lang = supplier_language(sup.country, sup.language)

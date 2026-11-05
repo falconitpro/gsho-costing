@@ -151,6 +151,10 @@ class Factory(TimestampMixin, Base):
     language: Mapped[str] = mapped_column(String(8), default="")         # язык переписки: ru | zh | en | de
     default_route_id: Mapped[Optional[str]] = mapped_column(ForeignKey("supply_routes.id"))   # маршрут поставки по умолчанию
     supplies: Mapped[list[str]] = mapped_column(JSONType, default=list)   # что поставляет: gsho (горно-шахтное оборудование) | parts (запасные части)
+    approval_status: Mapped[Optional[str]] = mapped_column(String(16))             # pending | approved | rejected (NULL — заведён до утверждений = утверждён)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(36))
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))
 
 
 class MachineType(TimestampMixin, Base):
@@ -1428,3 +1432,19 @@ class PartBatch(TimestampMixin, Base):
     tracking: Mapped[str] = mapped_column(String(128), default="")
     comment: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class FactoryChange(Base):
+    """Предложенное изменение карточки утверждённого поставщика: в карточку попадает после утверждения КД или ЗГД."""
+    __tablename__ = "factory_changes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    factory_id: Mapped[str] = mapped_column(ForeignKey("factories.id", ondelete="CASCADE"), index=True)
+    proposed_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    proposed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    data: Mapped[dict] = mapped_column(JSONType, default=dict)                       # только изменённые поля: {поле: новое значение}
+    before: Mapped[dict] = mapped_column(JSONType, default=dict)                     # их значения на момент предложения
+    comment: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="pending")               # pending | approved | rejected
+    decided_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    decision_comment: Mapped[str] = mapped_column(Text, default="")

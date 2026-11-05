@@ -244,7 +244,7 @@ type Quote = RfqLine & { rfq_number: string; supplier_id: string; supplier_name:
 const AVAIL: Record<string, string> = { available: "в наличии", on_order: "под заказ", none: "нет", analog: "аналог" };
 
 function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: () => Promise<T>, ok?: string) => Promise<void> }) {
-  const [sups, setSups] = useState<{ id: string; name: string; short_name: string; country: string; supplier_status: string }[]>([]);
+  const [sups, setSups] = useState<{ id: string; name: string; short_name: string; country: string; supplier_status: string; approval_status?: string }[]>([]);
   const [pickSup, setPickSup] = useState<string[]>([]);
   const [due, setDue] = useState(3);
   const [rfqs, setRfqs] = useState<Rfq[]>([]);
@@ -268,7 +268,7 @@ function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: ()
       <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
         <span className="muted">Отмечено строк: {sel.length}</span>
         <select multiple size={4} style={{ minWidth: 260 }} value={pickSup} onChange={(e) => setPickSup(Array.from(e.target.selectedOptions as ArrayLike<HTMLOptionElement>).map((o: HTMLOptionElement) => o.value))}>
-          {sups.map((s) => <option key={s.id} value={s.id}>{s.short_name || s.name} · {s.country}</option>)}</select>
+          {sups.map((s) => <option key={s.id} value={s.id} disabled={s.approval_status === "pending"}>{s.short_name || s.name} · {s.country}{s.approval_status === "pending" ? " — на утверждении" : ""}</option>)}</select>
         <label className="row">ответ за<input type="number" style={{ width: 50 }} value={due} onChange={(e) => setDue(Number(e.target.value))} />дн.</label>
         <button className="btn" disabled={!sel.length || !pickSup.length} onClick={() => act(async () => {
           const x = await api.post<{ request: Req }>(`${base}/rfq`, { line_ids: sel, supplier_ids: pickSup, due_days: due }); reload(); return x.request;

@@ -1,6 +1,7 @@
 """Справочники и база клиентов (раздел 11)."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -161,7 +162,12 @@ def client_refresh_registry(client_id: str, db: Session = Depends(get_db), user:
 @router.get("/factories")
 def factories(include_archived: bool = False, supplies: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Поставщики; supplies=gsho | parts — только поставщики ГШО или запасных частей."""
-    out = [serialize(f) for f in db.scalars(select(Factory).order_by(Factory.name)).all()
+    from ..models import FactoryChange
+    pend = {}
+    for fid in db.scalars(select(FactoryChange.factory_id).where(FactoryChange.status == "pending")).all():
+        pend[fid] = pend.get(fid, 0) + 1
+    out = [{**serialize(f), "approval_status": f.approval_status or "approved", "pending_changes": pend.get(f.id, 0)}
+           for f in db.scalars(select(Factory).order_by(Factory.name)).all()
            if (include_archived or f.is_active is not False) and (not supplies or supplies in (f.supplies or []))]
     if not user.can("factory_price_history"):          # банковские реквизиты — тем, кто видит цены завода
         for f in out:
@@ -225,12 +231,21 @@ SUPPLIER_STATUSES = {"manufacturer", "official_dealer", "trader", "group_company
 
 
 def _factory_editor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    if not user.has(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN, Role.LOGISTICIAN):
-        raise HTTPException(403, "Карточки заводов ведут менеджеры, логисты, КД и ЗГД")
+    """Заводить поставщиков и предлагать изменения могут все сотрудники (кроме наблюдателя); утверждают КД или ЗГД."""
+    if not user.roles or user.roles <= {Role.OBSERVER}:
+        raise HTTPException(403, "Наблюдатель не меняет карточки поставщиков")
     return user
 
 
-CONTACT_EDITORS = (Role.MANAGER, Role.CD, Role.GD)
+APPROVERS = (Role.CD, Role.GD)
+FACTORY_FIELD_TITLES = {
+    "name": "Наименование", "name_zh": "Наименование (中文)", "short_name": "Краткое название", "address": "Адрес", "address_zh": "Адрес (中文)",
+    "country": "Страна", "province": "Провинция", "city": "Город", "website": "Сайт", "uscc": "Код юрлица", "supplier_status": "Статус поставщика",
+    "contacts": "Контакты", "payment_terms": "Условия оплаты", "bank_details": "Банковские реквизиты", "default_currency": "Валюта по умолчанию",
+    "default_basis": "Базис по умолчанию", "machine_types": "Что выпускает", "trademarks": "Торговые марки", "typical_production_days": "Срок производства",
+    "rating": "Оценка", "notes": "Заметки", "is_active": "Работаем", "legal_entity_id": "Компания группы", "language": "Язык переписки",
+    "default_route_id": "Маршрут поставки запчастей", "supplies": "Что поставляет",
+}
 
 
 def _apply_factory(f: Factory, body: FactoryIn, user: Optional[CurrentUser] = None) -> None:
@@ -246,19 +261,83 @@ def _apply_factory(f: Factory, body: FactoryIn, user: Optional[CurrentUser] = No
         raise HTTPException(422, "Для компании группы выберите, какая это компания")
     if user is not None and not user.can("factory_price_history"):
         data.pop("bank_details", None)                   # реквизиты не видны роли — и не перезаписываются ею
-    if user is not None and not user.has(*CONTACT_EDITORS) and f.id:
-        data["contacts"] = f.contacts or []              # контакты завода меняют менеджер, КД и ЗГД
     marks: list[str] = []
     for t in data.get("trademarks") or []:
         t = (t or "").strip()
         if t and t.lower() not in {m.lower() for m in marks}:
             marks.append(t)
     data["trademarks"] = marks
+    return data
+
+
+def _set_factory(f: Factory, data: dict) -> None:
     for k, v in data.items():
         setattr(f, k, v)
-    # отправка из системы (запрос заводу): WeCom-контакты по направлению «Заявки» первыми
-    ordered = sorted(data["contacts"], key=lambda c: (("rfq" not in c["roles"]), not c["primary"]))
-    f.wecom_external_ids = [c["wecom_id"] for c in ordered if c.get("wecom_id")]
+    if "contacts" in data:   # отправка из системы (запрос заводу): WeCom-контакты по направлению «Заявки» первыми
+        ordered = sorted(f.contacts or [], key=lambda c: (("rfq" not in (c.get("roles") or [])), not c.get("primary")))
+        f.wecom_external_ids = [c["wecom_id"] for c in ordered if c.get("wecom_id")]
+
+
+def _approved(f: Factory) -> bool:
+    return f.approval_status in (None, "approved")
+
+
+def _notify_approvers(db: Session, user: CurrentUser, text: str) -> None:
+    from ..models import User
+    from ..services.deal_service import notify
+    for u in db.scalars(select(User).where(User.is_active.is_(True))).all():
+        if set(u.roles or []) & {"cd", "gd"} and u.id != user.id:
+            notify(db, None, u.id, "factory_approval", None, text)
+
+
+def _save_factory(db: Session, f: Factory, data: dict, user: CurrentUser, comment: str = "") -> Optional["FactoryChange"]:
+    """КД и ЗГД, а также любые правки ещё не утверждённого поставщика — сразу в карточку.
+    Правка утверждённого поставщика остальными — предложение изменений, в карточку попадает после утверждения КД или ЗГД."""
+    from ..models import FactoryChange
+    if user.has(*APPROVERS) or not _approved(f) or not f.id:
+        _set_factory(f, data)
+        return None
+    cur = serialize(f)
+    changed = {k: v for k, v in data.items() if cur.get(k) != v and not (cur.get(k) in (None, "", [], {}) and v in (None, "", [], {}))}
+    if not changed:
+        return None
+    ch = db.scalars(select(FactoryChange).where(FactoryChange.factory_id == f.id, FactoryChange.proposed_by == user.id,
+                                                FactoryChange.status == "pending")).first()
+    if ch is None:
+        ch = FactoryChange(factory_id=f.id, proposed_by=user.id, data={}, before={})
+        db.add(ch)
+    ch.data = {**(ch.data or {}), **changed}
+    ch.before = {**{k: cur.get(k) for k in changed}, **(ch.before or {})}
+    ch.comment = comment or ch.comment
+    ch.proposed_at = datetime.now(timezone.utc)
+    db.flush()
+    _notify_approvers(db, user, f"Поставщик «{f.short_name or f.name}»: предложены изменения ({', '.join(FACTORY_FIELD_TITLES.get(k, k) for k in ch.data)}) — утвердите")
+    return ch
+
+
+def _change_payload(db: Session, ch, user: CurrentUser) -> dict:
+    from ..models import User
+    u = db.get(User, ch.proposed_by) if ch.proposed_by else None
+    hide = not user.can("factory_price_history")
+    fields = [{"field": k, "title": FACTORY_FIELD_TITLES.get(k, k), "old": (ch.before or {}).get(k), "new": v}
+              for k, v in (ch.data or {}).items() if not (hide and k == "bank_details")]
+    return {"id": ch.id, "factory_id": ch.factory_id, "proposed_by": ch.proposed_by, "proposed_by_name": u.display_name if u else "",
+            "proposed_at": ch.proposed_at, "comment": ch.comment, "status": ch.status, "fields": fields}
+
+
+def _factory_out(db: Session, f: Factory, user: CurrentUser) -> dict:
+    from ..models import FactoryChange, User
+    d = serialize(f)
+    d["approval_status"] = f.approval_status or "approved"
+    if not user.can("factory_price_history"):
+        d.pop("bank_details", None)
+    d["pending_changes"] = [_change_payload(db, c, user) for c in db.scalars(select(FactoryChange).where(
+        FactoryChange.factory_id == f.id, FactoryChange.status == "pending").order_by(FactoryChange.proposed_at)).all()]
+    cb = db.get(User, f.created_by) if f.created_by else None
+    ab = db.get(User, f.approved_by) if f.approved_by else None
+    d["created_by_name"], d["approved_by_name"] = (cb.display_name if cb else ""), (ab.display_name if ab else "")
+    d["can_approve"] = user.has(*APPROVERS)
+    return d
 
 
 @router.get("/countries")
@@ -278,12 +357,11 @@ def factory_card(factory_id: str, db: Session = Depends(get_db), user: CurrentUs
     f = db.get(Factory, factory_id)
     if f is None:
         raise HTTPException(404)
-    d = serialize(f)
+    d = {}
     d["models"] = [{"id": m.id, "model": m.model, "machine_type": m.machine_type, "status": m.status}
                    for m in db.scalars(select(EquipmentModel).where(EquipmentModel.factory_id == f.id).order_by(EquipmentModel.model)).all()]
+    d.update(_factory_out(db, f, user))
     d["deals"] = len({p.deal_id for p in db.scalars(select(Position).where(Position.factory_id == f.id)).all()})
-    if not user.can("factory_price_history"):
-        d.pop("bank_details", None)
     return d
 
 
@@ -292,12 +370,19 @@ def create_factory(body: FactoryIn, db: Session = Depends(get_db), user: Current
     if db.scalar(select(Factory).where(Factory.name == body.name)):
         raise HTTPException(409, "Завод с таким наименованием уже есть")
     f = Factory()
-    _apply_factory(f, body, user)
+    _set_factory(f, _apply_factory(f, body, user))
+    f.created_by = user.id
+    if user.has(*APPROVERS):
+        f.approval_status, f.approved_by, f.approved_at = "approved", user.id, datetime.now(timezone.utc)
+    else:
+        f.approval_status = "pending"
     db.add(f)
     db.flush()
-    audit(db, user.id, None, "factory", f.id, "create", after={"name": f.name})
+    if f.approval_status == "pending":
+        _notify_approvers(db, user, f"Новый поставщик «{f.short_name or f.name}» — утвердите карточку")
+    audit(db, user.id, None, "factory", f.id, "create", after={"name": f.name, "approval": f.approval_status})
     db.commit()
-    return serialize(f)
+    return _factory_out(db, f, user)
 
 
 @router.put("/factories/{factory_id}")
@@ -308,12 +393,12 @@ def update_factory(factory_id: str, body: FactoryIn, db: Session = Depends(get_d
     if body.name != f.name and db.scalar(select(Factory).where(Factory.name == body.name)):
         raise HTTPException(409, "Завод с таким наименованием уже есть")
     before = {"name": f.name, "contacts": len(f.contacts or [])}
-    _apply_factory(f, body, user)
-    audit(db, user.id, None, "factory", f.id, "update", before, {"name": f.name, "contacts": len(f.contacts or [])})
+    ch = _save_factory(db, f, _apply_factory(f, body, user), user)
+    audit(db, user.id, None, "factory", f.id, "propose" if ch else "update", before, {"name": f.name, "contacts": len(f.contacts or []),
+                                                                                   "fields": list((ch.data if ch else {}).keys())})
     db.commit()
-    out = serialize(f)
-    if not user.can("factory_price_history"):
-        out.pop("bank_details", None)
+    out = _factory_out(db, f, user)
+    out["proposed"] = bool(ch)
     return out
 
 
@@ -323,22 +408,113 @@ class ContactsIn(BaseModel):
 
 @router.put("/factories/{factory_id}/contacts")
 def update_factory_contacts(factory_id: str, body: ContactsIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Контакты завода корректируют менеджер, КД и ЗГД."""
-    if not user.has(*CONTACT_EDITORS):
-        raise HTTPException(403, "Контакты завода меняют менеджер, КД или ЗГД")
+    """Контакты поставщика: правка утверждённой карточки — через утверждение КД или ЗГД."""
+    _factory_editor(user)
     f = db.get(Factory, factory_id)
     if f is None:
         raise HTTPException(404)
     before = {"contacts": f.contacts or []}
-    f.contacts = [c.model_dump() for c in body.contacts]
-    ordered = sorted(f.contacts, key=lambda c: (("rfq" not in c["roles"]), not c["primary"]))
-    f.wecom_external_ids = [c["wecom_id"] for c in ordered if c.get("wecom_id")]
-    audit(db, user.id, None, "factory", f.id, "contacts", before, {"contacts": f.contacts})
+    ch = _save_factory(db, f, {"contacts": [c.model_dump() for c in body.contacts]}, user)
+    audit(db, user.id, None, "factory", f.id, "propose" if ch else "contacts", before, {"contacts": [c.model_dump() for c in body.contacts]})
     db.commit()
-    out = serialize(f)
-    if not user.can("factory_price_history"):
-        out.pop("bank_details", None)
+    out = _factory_out(db, f, user)
+    out["proposed"] = bool(ch)
     return out
+
+
+def _approver(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if not user.has(*APPROVERS):
+        raise HTTPException(403, "Утверждает КД или ЗГД")
+    return user
+
+
+class DecisionIn(BaseModel):
+    comment: str = ""
+
+
+@router.post("/factories/{factory_id}/approve")
+def approve_factory(factory_id: str, body: DecisionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_approver)):
+    """Утвердить нового поставщика (КД или ЗГД)."""
+    f = db.get(Factory, factory_id)
+    if f is None:
+        raise HTTPException(404)
+    f.approval_status, f.approved_by, f.approved_at = "approved", user.id, datetime.now(timezone.utc)
+    audit(db, user.id, None, "factory", f.id, "approve", None, {"comment": body.comment})
+    if f.created_by and f.created_by != user.id:
+        from ..services.deal_service import notify
+        notify(db, None, f.created_by, "factory_approval", None, f"Поставщик «{f.short_name or f.name}» утверждён")
+    db.commit()
+    return _factory_out(db, f, user)
+
+
+@router.post("/factories/{factory_id}/reject")
+def reject_factory(factory_id: str, body: DecisionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_approver)):
+    """Не утверждать нового поставщика: карточка уходит в архив с причиной."""
+    f = db.get(Factory, factory_id)
+    if f is None:
+        raise HTTPException(404)
+    if _approved(f):
+        raise HTTPException(409, "Поставщик уже утверждён — его можно перевести в архив («Работаем: нет»)")
+    f.approval_status, f.is_active = "rejected", False
+    f.notes = (f.notes + "\n" if f.notes else "") + f"Не утверждён: {body.comment}".strip()
+    audit(db, user.id, None, "factory", f.id, "reject", None, {"comment": body.comment})
+    if f.created_by and f.created_by != user.id:
+        from ..services.deal_service import notify
+        notify(db, None, f.created_by, "factory_approval", None, f"Поставщик «{f.short_name or f.name}» не утверждён: {body.comment}")
+    db.commit()
+    return _factory_out(db, f, user)
+
+
+@router.get("/factory-changes")
+def factory_changes(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """На утверждении: новые поставщики и предложенные изменения карточек."""
+    from ..models import FactoryChange
+    news = [{"id": f.id, "name": f.short_name or f.name, "created_at": f.created_at} for f in
+            db.scalars(select(Factory).where(Factory.approval_status == "pending").order_by(Factory.created_at)).all()]
+    changes = []
+    for ch in db.scalars(select(FactoryChange).where(FactoryChange.status == "pending").order_by(FactoryChange.proposed_at)).all():
+        f = db.get(Factory, ch.factory_id)
+        changes.append({**_change_payload(db, ch, user), "factory_name": (f.short_name or f.name) if f else ""})
+    return {"new": news, "changes": changes}
+
+
+def _change_or_404(db: Session, cid: str):
+    from ..models import FactoryChange
+    ch = db.get(FactoryChange, cid)
+    if ch is None or ch.status != "pending":
+        raise HTTPException(404, "Изменение не найдено или уже рассмотрено")
+    return ch
+
+
+@router.post("/factory-changes/{change_id}/approve")
+def approve_change(change_id: str, body: DecisionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_approver)):
+    """Утвердить изменения: поля попадают в карточку поставщика."""
+    from ..services.deal_service import notify
+    ch = _change_or_404(db, change_id)
+    f = db.get(Factory, ch.factory_id)
+    data = dict(ch.data or {})
+    if "name" in data and data["name"] != f.name and db.scalar(select(Factory).where(Factory.name == data["name"], Factory.id != f.id)):
+        raise HTTPException(409, "Поставщик с таким наименованием уже есть")
+    _set_factory(f, data)
+    ch.status, ch.decided_by, ch.decided_at, ch.decision_comment = "approved", user.id, datetime.now(timezone.utc), body.comment
+    audit(db, user.id, None, "factory", f.id, "change_approve", ch.before, data)
+    if ch.proposed_by and ch.proposed_by != user.id:
+        notify(db, None, ch.proposed_by, "factory_approval", None, f"Изменения поставщика «{f.short_name or f.name}» утверждены")
+    db.commit()
+    return _factory_out(db, f, user)
+
+
+@router.post("/factory-changes/{change_id}/reject")
+def reject_change(change_id: str, body: DecisionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_approver)):
+    from ..services.deal_service import notify
+    ch = _change_or_404(db, change_id)
+    f = db.get(Factory, ch.factory_id)
+    ch.status, ch.decided_by, ch.decided_at, ch.decision_comment = "rejected", user.id, datetime.now(timezone.utc), body.comment
+    audit(db, user.id, None, "factory", f.id, "change_reject", None, {"comment": body.comment})
+    if ch.proposed_by and ch.proposed_by != user.id:
+        notify(db, None, ch.proposed_by, "factory_approval", None, f"Изменения поставщика «{f.short_name or f.name}» не утверждены: {body.comment}")
+    db.commit()
+    return _factory_out(db, f, user)
 
 
 @router.delete("/factories/{factory_id}")

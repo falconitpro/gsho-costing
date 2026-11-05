@@ -585,7 +585,8 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
         "contacts": [{"name": "Li Wei", "roles": ["finance"], "email": "fin@test.cn", "wecom_id": "wm_fin"},
                      {"name": "Zhang San", "roles": ["rfq", "sales"], "email": "sales@test.cn", "wechat": "zhangsan_wx", "wecom_id": "wm_rfq", "primary": True}]}), 201)
     assert fz["wecom_external_ids"][0] == "wm_rfq"
-    assert client.post("/api/refs/factories", headers=H(FD), json={"name": "X"}).status_code == 403
+    assert fz["approval_status"] == "pending"                                    # завёл менеджер — на утверждении КД / ЗГД
+    assert client.post("/api/refs/factories", headers=H("observer@example.com"), json={"name": "X"}).status_code == 403
     card = _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(MGR)))
     assert card["contacts"][1]["wechat"] == "zhangsan_wx" and "models" in card
     _ok(client.put(f"/api/refs/factories/{fz['id']}", headers=H(MGR), json={**{k: card[k] for k in ("name", "name_zh", "contacts")}, "bank_details": {"swift": "BKCHCNBJ"}}))
@@ -600,6 +601,9 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     assert mk["trademarks"] == ["SHILI", "SL"]
     cl0 = _ok(client.get("/api/refs/clients", headers=H(MGR)))[0]
     dtm = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": cl0["id"], "site": "марки"}), 201)
+    assert client.post(f"/api/deals/{dtm['id']}/positions", headers=H(MGR), json={"factory_id": fz["id"], "model": "FL-0.5(C)",
+                                                                                  "machine_type": "Погрузчик", "unit_price": 100000}).status_code == 409   # завод не утверждён
+    _ok(client.post(f"/api/refs/factories/{fz['id']}/approve", headers=H(CD), json={}))
     ptm = _ok(client.post(f"/api/deals/{dtm['id']}/positions", headers=H(MGR), json={"factory_id": fz["id"], "model": "FL-0.5(C)",
                                                                                      "machine_type": "Погрузчик", "unit_price": 100000}), 201)
     assert ptm["trademark"] == "SHILI"                                        # подставлена по заводу
@@ -801,14 +805,41 @@ def test_outcome_lost_and_reopen(client):
 
 
 def test_factory_delete_and_contacts(client):
-    """Удаление завода — только ЗГД (используемый — в архив); контакты правят менеджер, КД и ЗГД."""
-    f = _ok(client.post("/api/refs/factories", headers=H(MGR), json={"name": "Тестовый завод для удаления", "contacts": []}), 201)
+    """Поставщика заводит любой — утверждает КД или ЗГД; правки утверждённого — через утверждение; удаление — только ЗГД."""
+    f = _ok(client.post("/api/refs/factories", headers=H(LOG), json={"name": "Тестовый завод для удаления", "contacts": []}), 201)
+    assert f["approval_status"] == "pending"
     c = [{"name": "Ли Вэй", "email": "li@example.cn", "roles": ["rfq"], "primary": True}]
-    assert client.put(f"/api/refs/factories/{f['id']}/contacts", headers=H(LOG), json={"contacts": c}).status_code == 403
-    assert _ok(client.put(f"/api/refs/factories/{f['id']}/contacts", headers=H(MGR), json={"contacts": c}))["contacts"][0]["email"] == "li@example.cn"
+    # пока не утверждён — правки сразу в карточке
+    assert _ok(client.put(f"/api/refs/factories/{f['id']}/contacts", headers=H(LOG), json={"contacts": c}))["contacts"][0]["email"] == "li@example.cn"
+    assert client.post(f"/api/refs/factories/{f['id']}/approve", headers=H(MGR), json={}).status_code == 403
+    assert f["id"] in {x["id"] for x in _ok(client.get("/api/refs/factory-changes", headers=H(CD)))["new"]}
+    a = _ok(client.post(f"/api/refs/factories/{f['id']}/approve", headers=H(CD), json={}))
+    assert a["approval_status"] == "approved" and a["approved_by_name"]
+    # утверждён — правка логиста становится предложением, карточка не меняется до утверждения
     card = _ok(client.get(f"/api/refs/factories/{f['id']}", headers=H(LOG)))
-    _ok(client.put(f"/api/refs/factories/{f['id']}", headers=H(LOG), json={**{k: v for k, v in card.items() if v is not None}, "notes": "логист", "contacts": []}))
-    assert _ok(client.get(f"/api/refs/factories/{f['id']}", headers=H(LOG)))["contacts"][0]["email"] == "li@example.cn"   # логист контакты не меняет
+    p = _ok(client.put(f"/api/refs/factories/{f['id']}", headers=H(LOG), json={**{k: v for k, v in card.items() if v is not None}, "notes": "логист", "contacts": []}))
+    assert p["proposed"] and p["notes"] == "" and p["contacts"][0]["email"] == "li@example.cn"
+    ch = p["pending_changes"][0]
+    assert {x["field"] for x in ch["fields"]} == {"notes", "contacts"} and ch["proposed_by_name"]
+    _ok(client.put(f"/api/refs/factories/{f['id']}", headers=H(LOG), json={**{k: v for k, v in card.items() if v is not None}, "notes": "логист 2", "contacts": []}))
+    card = _ok(client.get(f"/api/refs/factories/{f['id']}", headers=H(CD)))
+    assert len(card["pending_changes"]) == 1 and next(x for x in card["pending_changes"][0]["fields"] if x["field"] == "notes")["new"] == "логист 2"
+    assert client.post(f"/api/refs/factory-changes/{ch['id']}/approve", headers=H(LOG), json={}).status_code == 403
+    done = _ok(client.post(f"/api/refs/factory-changes/{ch['id']}/approve", headers=H(GD), json={}))
+    assert done["notes"] == "логист 2" and done["contacts"] == [] and done["pending_changes"] == []
+    # КД правит утверждённую карточку сразу; отклонённое предложение карточку не меняет
+    assert not _ok(client.put(f"/api/refs/factories/{f['id']}/contacts", headers=H(CD), json={"contacts": c}))["proposed"]
+    p2 = _ok(client.put(f"/api/refs/factories/{f['id']}/contacts", headers=H(MGR), json={"contacts": []}))
+    assert p2["proposed"] and p2["contacts"][0]["email"] == "li@example.cn"
+    r_ = _ok(client.post(f"/api/refs/factory-changes/{p2['pending_changes'][0]['id']}/reject", headers=H(CD), json={"comment": "контакт актуален"}))
+    assert r_["contacts"][0]["email"] == "li@example.cn" and r_["pending_changes"] == []
+    # новый поставщик, которого не утвердили, — в архив; заказать у неутверждённого нельзя
+    n = _ok(client.post("/api/refs/factories", headers=H(MGR), json={"name": "Неутверждённый поставщик", "supplies": ["parts"]}), 201)
+    pt = _ok(client.post("/api/parts/catalog", headers=H(CD), json={"article": "UNAPPROVED-1", "name_ru": "Деталь", "supplier_id": n["id"], "purchase_price": 10,
+                                                                    "purchase_currency": "RUB"}), 201)
+    assert client.post("/api/parts/po", headers=H(CD), json={"supplier_id": n["id"], "stock_lines": [{"part_id": pt["id"], "qty": 1}]}).status_code == 409
+    rj = _ok(client.post(f"/api/refs/factories/{n['id']}/reject", headers=H(CD), json={"comment": "дубль"}))
+    assert rj["approval_status"] == "rejected" and rj["is_active"] is False
     assert client.delete(f"/api/refs/factories/{f['id']}", headers=H(CD)).status_code == 403
     r = _ok(client.delete(f"/api/refs/factories/{f['id']}", headers=H(GD)))
     assert r["deleted"] and not any(x["id"] == f["id"] for x in _ok(client.get("/api/refs/factories", headers=H(MGR))))

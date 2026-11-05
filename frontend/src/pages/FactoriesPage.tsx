@@ -13,8 +13,10 @@ type Factory = {
   website: string; uscc: string; supplier_status: string; contacts: Contact[]; payment_terms: unknown[];
   bank_details: { beneficiary?: string; bank?: string; swift?: string; account?: string; bank_address?: string };
   default_currency: string; default_basis: string; machine_types: string[]; trademarks: string[]; typical_production_days: number | null; rating: number | null;
-  notes: string; is_active: boolean; legal_entity_id?: string | null; language?: string; supplies?: string[]; default_route_id?: string | null; models?: { id: string; model: string; machine_type: string; status: string }[]; deals?: number;
+  notes: string; is_active: boolean; approval_status?: string; can_approve?: boolean; created_by_name?: string; approved_by_name?: string; approved_at?: string | null;
+  pending_changes?: Change[] | number; legal_entity_id?: string | null; language?: string; supplies?: string[]; default_route_id?: string | null; models?: { id: string; model: string; machine_type: string; status: string }[]; deals?: number;
 };
+type Change = { id: string; proposed_by_name: string; proposed_at: string; comment: string; fields: { field: string; title: string; old: unknown; new: unknown }[] };
 type Price = { on: string; model: string; unit_price: number; currency: string; basis: string; production_term: { value?: number; unit?: string }; source: string };
 
 const EMPTY_CONTACT: Contact = { name: "", name_zh: "", position: "", roles: [], phone: "", mobile: "", email: "", wechat: "", wecom_id: "", whatsapp: "", telegram: "", language: "zh", primary: false, comment: "" };
@@ -24,6 +26,13 @@ const EMPTY: Factory = { name: "", name_zh: "", short_name: "", address: "", add
 const STATUS: Record<string, string> = { manufacturer: "завод-изготовитель", official_dealer: "официальный дилер", trader: "торговая компания", group_company: "компания группы" };
 const LANGS: Record<string, string> = { "": "—", zh: "китайский", ru: "русский", en: "английский", de: "немецкий" };
 
+const showVal = (v: unknown): string => {
+  if (v == null || v === "") return "—";
+  if (Array.isArray(v)) return v.length && typeof v[0] === "object" ? v.map((x) => (x as { name?: string; email?: string }).name || (x as { email?: string }).email || "…").join(", ") : (v as unknown[]).join(", ") || "—";
+  if (typeof v === "object") return Object.values(v as Record<string, unknown>).filter(Boolean).join(", ") || "—";
+  if (typeof v === "boolean") return v ? "да" : "нет";
+  return String(v);
+};
 const KINDS: Record<string, string> = { gsho: "ГШО", parts: "Запасные части" };
 
 /** Справочник поставщиков (ГШО и запасных частей): реквизиты, контакты по направлениям (заявки, логистика, финансы, сервис…), WeChat / WeCom / почта, история цен. */
@@ -36,12 +45,13 @@ export default function FactoriesPage({ me }: { me: Me }) {
   const [prices, setPrices] = useState<Price[]>([]);
   const [msg, setMsg] = useState("");
   const history = useUndoHistory({ cur }, (st) => setCur(st.cur), cur?.id || (cur ? "new" : null));
-  const editor = me.roles.some((r) => ["manager", "logistician", "cd", "gd", "admin"].includes(r.code));
-  const contactEditor = me.roles.some((r) => ["manager", "cd", "gd"].includes(r.code));   // контакты завода — менеджер, КД, ЗГД
+  const editor = me.roles.some((r) => r.code !== "observer");          // заводят и правят все; утверждают КД или ЗГД
+  const contactEditor = editor;
+  const approver = me.roles.some((r) => ["cd", "gd"].includes(r.code));
   const isGD = me.roles.some((r) => r.code === "gd");
   const [confirmDel, setConfirmDel] = useState(false);
   const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
-  const [kind, setKind] = useState<"gsho" | "parts" | "">(() => { try { return (localStorage.getItem("suppliers_kind") as "gsho" | "parts" | "") ?? "gsho"; } catch { return "gsho"; } });
+  const [kind, setKind] = useState<"gsho" | "parts" | "" | "approval">(() => { try { return (localStorage.getItem("suppliers_kind") as "gsho" | "parts" | "" | "approval") ?? "gsho"; } catch { return "gsho"; } });
   useEffect(() => { try { localStorage.setItem("suppliers_kind", kind); } catch { /* приватный режим */ } }, [kind]);
   const [routes, setRoutes] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => { api.get<{ id: string; name: string }[]>("/api/parts/routes").then(setRoutes).catch(() => setRoutes([])); }, []);
@@ -65,15 +75,18 @@ export default function FactoriesPage({ me }: { me: Me }) {
   async function save() {
     if (!cur) return;
     try {
-      const { id, models, deals, ...body } = cur;
-      void models; void deals;
-      const r = id ? await api.put<Factory>(`/api/refs/factories/${id}`, body) : await api.post<Factory>("/api/refs/factories", body);
-      setMsg("Сохранено"); load(); open(r.id!);
+      const { id, models, deals, pending_changes, ...body } = cur;
+      void models; void deals; void pending_changes;
+      const r = id ? await api.put<Factory & { proposed?: boolean }>(`/api/refs/factories/${id}`, body) : await api.post<Factory>("/api/refs/factories", body);
+      await open(r.id!); load();
+      setMsg((r as { proposed?: boolean }).proposed ? "Изменения отправлены на утверждение КД / ЗГД — в карточке они появятся после утверждения"
+        : r.approval_status === "pending" ? "Сохранено. Поставщик на утверждении КД / ЗГД" : "Сохранено");
     } catch (e) { setMsg((e as Error).message); }
   }
   const set = (p: Partial<Factory>) => cur && setCur({ ...cur, ...p });
   const setC = (i: number, p: Partial<Contact>) => cur && setCur({ ...cur, contacts: cur.contacts.map((c, j) => (j === i ? { ...c, ...p } : c)) });
-  const shown = list.filter((f) => (!kind || (f.supplies || ["gsho"]).includes(kind)) && (!q || `${f.name} ${f.name_zh} ${f.short_name} ${f.city} ${f.province} ${(f.trademarks || []).join(" ")}`.toLowerCase().includes(q.toLowerCase()))
+  const waiting = (f: Factory) => f.approval_status === "pending" || Number(f.pending_changes || 0) > 0;
+  const shown = list.filter((f) => (kind === "approval" ? waiting(f) : (!kind || (f.supplies || ["gsho"]).includes(kind))) && (!q || `${f.name} ${f.name_zh} ${f.short_name} ${f.city} ${f.province} ${(f.trademarks || []).join(" ")}`.toLowerCase().includes(q.toLowerCase()))
     && (!roleFilter || (f.contacts || []).some((c) => (c.roles || []).includes(roleFilter))));
   const field = (label: string, key: keyof Factory, ph = "") => (
     <label className="f">{label}<input value={String(cur?.[key] ?? "")} placeholder={ph} disabled={!editor} onChange={(e) => set({ [key]: e.target.value } as Partial<Factory>)} /></label>);
@@ -83,7 +96,8 @@ export default function FactoriesPage({ me }: { me: Me }) {
       <div className="page-head">
         <h1>Поставщики</h1>
         <div className="row" style={{ marginLeft: 12 }}>{([["gsho", "ГШО"], ["parts", "Запасные части"], ["", "Все"]] as const).map(([k, t]) => (
-          <button key={k} className={`btn ${kind === k ? "" : "ghost"}`} onClick={() => setKind(k)}>{t} <span className="muted">({list.filter((f) => !k || (f.supplies || ["gsho"]).includes(k)).length})</span></button>))}</div>
+          <button key={k} className={`btn ${kind === k ? "" : "ghost"}`} onClick={() => setKind(k)}>{t} <span className="muted">({list.filter((f) => !k || (f.supplies || ["gsho"]).includes(k)).length})</span></button>))}
+          {list.some(waiting) && <button className={`btn ${kind === "approval" ? "" : "ghost"}`} onClick={() => setKind("approval")}>На утверждении <span className="badge bad">{list.filter(waiting).length}</span></button>}</div>
         <div className="push">{editor && <button className="btn add" onClick={() => { setCur({ ...EMPTY, supplies: [kind || "gsho"], contacts: [{ ...EMPTY_CONTACT, roles: ["rfq"], primary: true }] }); setPrices([]); setMsg(""); }}>Добавить поставщика</button>}</div>
       </div>
       {msg && <div className="alert info">{msg}</div>}
@@ -95,7 +109,7 @@ export default function FactoriesPage({ me }: { me: Me }) {
             const rfq = (f.contacts || []).find((c) => (c.roles || []).includes("rfq"));
             return (
               <tr key={f.id} style={{ cursor: "pointer", background: cur?.id === f.id ? "var(--accent-soft)" : undefined, opacity: f.is_active === false ? 0.5 : 1 }} onClick={() => open(f.id!)}>
-                <td><b>{f.short_name || f.name}</b>{(f.trademarks || []).map((t) => <span key={t} className="badge accent" style={{ marginLeft: 4 }}>{t}</span>)}{!kind && (f.supplies || []).map((x) => <span key={x} className="badge" style={{ marginLeft: 4 }}>{KINDS[x]}</span>)}{f.name_zh && <div className="muted" style={{ fontSize: 11 }}>{f.name_zh}</div>}
+                <td><b>{f.short_name || f.name}</b>{(f.trademarks || []).map((t) => <span key={t} className="badge accent" style={{ marginLeft: 4 }}>{t}</span>)}{!kind && (f.supplies || []).map((x) => <span key={x} className="badge" style={{ marginLeft: 4 }}>{KINDS[x]}</span>)}{f.approval_status === "pending" && <span className="badge bad" style={{ marginLeft: 4 }}>на утверждении</span>}{Number(f.pending_changes || 0) > 0 && <span className="badge bad" style={{ marginLeft: 4 }}>изменения</span>}{f.name_zh && <div className="muted" style={{ fontSize: 11 }}>{f.name_zh}</div>}
                   <div className="muted" style={{ fontSize: 11 }}>{[f.city, f.province].filter(Boolean).join(", ")}{rfq ? ` · заявки: ${rfq.name}` : " · нет контакта по заявкам"}</div></td>
                 <td className="muted" style={{ fontSize: 11 }}>{(f.contacts || []).length} конт.</td></tr>);
           })}{shown.length === 0 && <tr><td className="muted">Не найдено</td></tr>}</tbody></table>
@@ -105,6 +119,21 @@ export default function FactoriesPage({ me }: { me: Me }) {
             <>
               <div className="card">
                 <h2 style={{ marginTop: 0 }}>{cur.id ? cur.name : "Новый поставщик"} {!cur.is_active && <span className="badge bad">не работаем</span>}</h2>
+                {cur.id && cur.approval_status === "pending" && (
+                  <div className="alert info">Новый поставщик{cur.created_by_name && ` (завёл ${cur.created_by_name})`} — ждёт утверждения КД или ЗГД. Пока правки сохраняются сразу; заказ у него оформить нельзя.
+                    {approver && <div className="row" style={{ marginTop: 6 }}><button className="btn" onClick={() => api.post(`/api/refs/factories/${cur.id}/approve`, {}).then(() => { open(cur.id!); load(); setMsg("Поставщик утверждён"); }).catch((e) => setMsg((e as Error).message))}>Утвердить</button>
+                      <button className="btn ghost" onClick={() => { const c = prompt("Почему не утверждаем? Карточка уйдёт в архив."); if (c !== null) api.post(`/api/refs/factories/${cur.id}/reject`, { comment: c }).then(() => { open(cur.id!); load(); setMsg("Не утверждён — в архиве"); }).catch((e) => setMsg((e as Error).message)); }}>Не утверждать</button></div>}</div>)}
+                {cur.id && cur.approval_status === "rejected" && <div className="alert info">Поставщик не утверждён (в архиве).</div>}
+                {cur.id && cur.approval_status === "approved" && !approver && <p className="muted" style={{ marginTop: 0 }}>Карточка утверждена{cur.approved_by_name && ` (${cur.approved_by_name})`}. Ваши правки уйдут на утверждение КД или ЗГД и появятся в карточке после него.</p>}
+                {Array.isArray(cur.pending_changes) && cur.pending_changes.map((ch) => (
+                  <div key={ch.id} className="alert info">
+                    <b>Предложены изменения</b> — {ch.proposed_by_name}, {fmtDate(ch.proposed_at)}{ch.comment && ` · ${ch.comment}`}
+                    <table style={{ marginTop: 4 }}><tbody>{ch.fields.map((x) => (
+                      <tr key={x.field}><td>{x.title}</td><td className="muted">{showVal(x.old)}</td><td>→</td><td><b>{showVal(x.new)}</b></td></tr>))}</tbody></table>
+                    {approver && <div className="row" style={{ marginTop: 4 }}>
+                      <button className="btn" onClick={() => api.post(`/api/refs/factory-changes/${ch.id}/approve`, {}).then(() => { open(cur.id!); load(); setMsg("Изменения утверждены и внесены в карточку"); }).catch((e) => setMsg((e as Error).message))}>Утвердить изменения</button>
+                      <button className="btn ghost" onClick={() => { const c = prompt("Причина отказа"); if (c !== null) api.post(`/api/refs/factory-changes/${ch.id}/reject`, { comment: c }).then(() => { open(cur.id!); load(); setMsg("Изменения отклонены"); }).catch((e) => setMsg((e as Error).message)); }}>Отклонить</button></div>}
+                  </div>))}
                 <div className="grid cols-3">
                   {field("Наименование (как в документах, EN)", "name")}{field("Наименование (中文)", "name_zh")}{field("Краткое название", "short_name")}
                   <label className="f">Что поставляет<div className="row">{Object.entries(KINDS).map(([k, t]) => (
@@ -174,8 +203,8 @@ export default function FactoriesPage({ me }: { me: Me }) {
                   </div>
                 </div>)}
 
-              {(editor || contactEditor) && <div className="row" style={{ marginBottom: 12 }}><button className="btn" onClick={save} disabled={!cur.name}>Сохранить завод</button><UndoButton h={history} /><button className="btn ghost" onClick={() => setCur(null)}>закрыть</button>
-                {isGD && cur.id && <button className="btn ghost" style={{ marginLeft: "auto", color: "var(--bad)" }} title="только ЗГД; если завод уже есть в сделках или каталоге — переносится в архив" onClick={remove}>{confirmDel ? "Подтвердить удаление" : "Удалить завод"}</button>}</div>}
+              {(editor || contactEditor) && <div className="row" style={{ marginBottom: 12 }}><button className="btn" onClick={save} disabled={!cur.name}>{cur.id && cur.approval_status === "approved" && !approver ? "Предложить изменения" : "Сохранить"}</button><UndoButton h={history} /><button className="btn ghost" onClick={() => setCur(null)}>закрыть</button>
+                {isGD && cur.id && <button className="btn ghost" style={{ marginLeft: "auto", color: "var(--bad)" }} title="только ЗГД; если завод уже есть в сделках или каталоге — переносится в архив" onClick={remove}>{confirmDel ? "Подтвердить удаление" : "Удалить поставщика"}</button>}</div>}
 
               {cur.id && (
                 <div className="card">

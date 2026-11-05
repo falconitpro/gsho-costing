@@ -108,6 +108,8 @@ def create_rfqs(rid: str, body: RfqCreateIn, db: Session = Depends(get_db), user
         sup = db.get(Factory, sid)
         if sup is None:
             raise HTTPException(404, "Поставщик не найден")
+        from ..services.suppliers import require_approved
+        require_approved(sup, "запросить у него цену")
         mark_supplier(db, sid, "parts")
         lang = supplier_language(sup.country, sup.language)
         rfq = SupplierRfq(number=_next_number(db), supplier_id=sid, language=lang, due_date=date.today() + timedelta(days=max(body.due_days, 0)),

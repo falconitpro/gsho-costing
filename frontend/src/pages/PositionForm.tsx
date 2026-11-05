@@ -151,7 +151,8 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
     if (code === "0.7") return (
       <div className="row">
         <select value={factoryId} onChange={(e) => pickFactory(e.target.value)}>
-          <option value="">— выбрать завод или ввести —</option>{factories.map((x) => <option key={x.id} value={x.id}>{x.name}{x.trademarks?.length ? ` (${x.trademarks.join(", ")})` : ""}</option>)}
+          <option value="">— выбрать завод или ввести —</option>{factories.map((x) => { const na = (x as { approval_status?: string }).approval_status === "pending";
+            return <option key={x.id} value={x.id} disabled={na}>{x.name}{x.trademarks?.length ? ` (${x.trademarks.join(", ")})` : ""}{na ? " — на утверждении КД / ЗГД" : ""}</option>; })}
         </select>
         {!factoryId && <input value={v} placeholder="новый завод: полное наименование" onChange={(e) => set(code, e.target.value)} />}
       </div>);

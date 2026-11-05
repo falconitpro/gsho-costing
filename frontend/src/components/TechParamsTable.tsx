@@ -136,7 +136,8 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
           {canEdit && (
             <select value="" onChange={(e) => e.target.value && setReqFactories([...reqFactories, e.target.value])} style={{ minWidth: 280 }}>
               <option value="">{reqFactories.length ? "+ добавить ещё завод…" : "— выбрать завод —"}</option>
-              {factories.filter((f) => !reqFactories.includes(f.id)).map((f) => <option key={f.id} value={f.id}>{fname(f)}</option>)}
+              {factories.filter((f) => !reqFactories.includes(f.id)).map((f) => { const na = (f as { approval_status?: string }).approval_status === "pending";
+                return <option key={f.id} value={f.id} disabled={na}>{fname(f)}{na ? " — на утверждении" : ""}</option>; })}
             </select>)}
           {reqFactories.length === 0 && <span className="badge warn">завод не выбран</span>}
         </div>

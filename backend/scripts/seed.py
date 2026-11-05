@@ -65,6 +65,7 @@ def run() -> None:
                 db.add(PaymentScheme(name=name, lines=lines))
         seed_parts_setup(db)
         mark_supplies(db)           # раздел «Поставщики»: ГШО / запасные части — по фактическому использованию
+        parts_manufacturer_paus(db)  # разово (05.11.2026): у всех запчастей каталога производитель PAUS, Германия
         from app.services.moysklad_import import relink_client_prices
         relink_client_prices(db)    # договорные цены запчастей → клиенты, заведённые после переноса
         # синтетическая история курса CNY/RUB за 4 года (в проде — загрузка с cbr.ru: POST /api/admin/fx/history)
@@ -148,5 +149,27 @@ def mark_supplies(db) -> int:
         if new != cur:
             f.supplies = new
             n += 1
+    db.flush()
+    return n
+
+
+def parts_manufacturer_paus(db) -> int:
+    """Разовая правка по решению владельца (05.11.2026): всем запчастям, которые есть в каталоге на момент выкатки, —
+    производитель PAUS, страна происхождения Германия. Прежние значения сохраняются в журнале интеграций (откат возможен).
+    Повторно не выполняется: карточки, заведённые позже, не трогает."""
+    from sqlalchemy import select
+    from app.models import IntegrationLog, Part
+    if db.scalars(select(IntegrationLog).where(IntegrationLog.system == "migration", IntegrationLog.operation == "parts_manufacturer_paus")).first():
+        return 0
+    backup, n = [], 0
+    for p in db.scalars(select(Part)).all():
+        if p.manufacturer == "PAUS" and p.origin_country == "Германия":
+            continue
+        if (p.manufacturer or "") not in ("", "PAUS") or (p.origin_country or "") not in ("", "Германия"):
+            backup.append({"id": p.id, "article": p.article, "manufacturer": p.manufacturer or "", "origin_country": p.origin_country or ""})
+        p.manufacturer, p.origin_country = "PAUS", "Германия"
+        n += 1
+    db.add(IntegrationLog(system="migration", operation="parts_manufacturer_paus", ok=True,
+                          details={"updated": n, "backup_count": len(backup), "backup": backup}))
     db.flush()
     return n
