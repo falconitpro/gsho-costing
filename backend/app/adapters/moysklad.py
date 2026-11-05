@@ -16,7 +16,7 @@ class MoySkladClient:
         import httpx
         self.base = base.rstrip("/")
         self.pause = pause          # лимит API — 45 запросов за 3 с на аккаунт
-        self.http = httpx.Client(timeout=60, headers={"Authorization": f"Bearer {token}", "Accept-Encoding": "gzip", "Accept": "application/json;charset=utf-8",
+        self.http = httpx.Client(timeout=60, headers={"Authorization": f"Bearer {token}", "Accept-Encoding": "gzip",
                                                       "User-Agent": "gsho-costing parts import"})
 
     def _get(self, url: str, **params: Any):
