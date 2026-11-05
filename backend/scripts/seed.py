@@ -66,6 +66,7 @@ def run() -> None:
         seed_parts_setup(db)
         mark_supplies(db)           # раздел «Поставщики»: ГШО / запасные части — по фактическому использованию
         parts_manufacturer_paus(db)  # разово (05.11.2026): у всех запчастей каталога производитель PAUS, Германия
+        parts_supplier_grp(db)       # разово (05.11.2026): запчасти из МойСклад — поставщик GRP, маршрут Германия → Киргизия → РФ
         from app.services.moysklad_import import relink_client_prices
         relink_client_prices(db)    # договорные цены запчастей → клиенты, заведённые после переноса
         # синтетическая история курса CNY/RUB за 4 года (в проде — загрузка с cbr.ru: POST /api/admin/fx/history)
@@ -171,5 +172,46 @@ def parts_manufacturer_paus(db) -> int:
         n += 1
     db.add(IntegrationLog(system="migration", operation="parts_manufacturer_paus", ok=True,
                           details={"updated": n, "backup_count": len(backup), "backup": backup}))
+    db.flush()
+    return n
+
+
+GRP_ROUTE = "Поставщик Германии → Киргизия → РФ"
+
+
+def parts_supplier_grp(db) -> int:
+    """Разовая правка по решению владельца (05.11.2026): всем запчастям, перенесённым из МойСклад, — основной поставщик GRP
+    и маршрут «Поставщик Германии → Киргизия → РФ». Поставщик GRP заводится (Германия, запасные части, утверждён), если его нет.
+    Прежние значения — в журнале интеграций; повторно не выполняется."""
+    from datetime import datetime, timezone
+    from sqlalchemy import func, or_, select
+    from app.models import Factory, IntegrationLog, Part, SupplyRoute
+    if db.scalars(select(IntegrationLog).where(IntegrationLog.system == "migration", IntegrationLog.operation == "parts_supplier_grp")).first():
+        return 0
+    route = db.scalars(select(SupplyRoute).where(SupplyRoute.name == GRP_ROUTE)).first()
+    if route is None:
+        return 0                                   # маршрут ещё не заведён — правка выполнится при следующем деплое
+    grp = db.scalars(select(Factory).where(or_(func.upper(Factory.short_name) == "GRP", func.upper(Factory.name) == "GRP"))).first() \
+        or db.scalars(select(Factory).where(or_(Factory.name.ilike("GRP %"), Factory.name.ilike("GRP,%")))).first()
+    created = grp is None
+    if created:
+        grp = Factory(name="GRP", short_name="GRP", country="DE", language="de", default_currency="EUR", default_basis="FCA", supplier_status="",
+                      supplies=["parts"], approval_status="approved", approved_at=datetime.now(timezone.utc),
+                      notes="Заведён автоматически: основной поставщик запчастей, перенесённых из МойСклад")
+        db.add(grp)
+        db.flush()
+    if "parts" not in (grp.supplies or []):
+        grp.supplies = [*(grp.supplies or []), "parts"]
+    grp.default_route_id = grp.default_route_id or route.id
+    backup, n = [], 0
+    for p in db.scalars(select(Part).where(Part.source == "moysklad")).all():
+        if p.supplier_id == grp.id and p.route_id == route.id:
+            continue
+        if p.supplier_id or p.route_id:
+            backup.append({"id": p.id, "article": p.article, "supplier_id": p.supplier_id, "route_id": p.route_id})
+        p.supplier_id, p.route_id = grp.id, route.id
+        n += 1
+    db.add(IntegrationLog(system="migration", operation="parts_supplier_grp", ok=True,
+                          details={"updated": n, "supplier_id": grp.id, "supplier_created": created, "route_id": route.id, "backup": backup}))
     db.flush()
     return n

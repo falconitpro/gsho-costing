@@ -5,6 +5,7 @@ import { lbl, IMAGE_KIND, PRICE_SOURCE } from "../labels";
 import { api, designation, fmtDate, fmtRub } from "../api";
 import type { TechParamRow } from "../types";
 import TechParamsView from "./TechParamsView";
+import { ImagesEditor, MoreEditor, TechEditor } from "./CatalogEdit";
 
 type Hist = { at: string | null; user: string; object: string; action: string; changes: { field: string; before: unknown; after: unknown }[]; comment: string; deal: string | null };
 const fmtVal = (v: unknown) => (v == null || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
@@ -54,6 +55,7 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
   const [msg, setMsg] = useState("");
   const [edit, setEdit] = useState<null | { model: string; machine_type: string; trademark: string; brand_name: string; comment: string }>(null);
   const [hist, setHist] = useState<Hist[] | null>(null);
+  const [editing, setEditing] = useState<"" | "tech" | "more" | "photo">("");
   const [newDeal, setNewDeal] = useState<null | { client_id: string; qty: string; site: string; kp_due: string; comment: string }>(null);
   const [clients, setClients] = useState<{ id: string; name: string; sites?: { name: string }[] }[]>([]);
   const nav = useNavigate();
@@ -61,7 +63,7 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
   const has = (...r: string[]) => !!me && me.roles.some((x) => r.includes(x.code));
   const canEdit = !!me && (me.perms?.catalog ?? 0) >= 2;
   const reload = () => api.get<Card>(`/api/catalog/models/${modelId}/card`).then((c) => { setCard(c); setEx((cur) => cur || execId || c.executions[0]?.id || ""); }).catch((e) => setErr(e.message));
-  useEffect(() => { setCard(null); setErr(""); setEdit(null); setHist(null); setNewDeal(null); setMsg(""); setEx(execId || ""); reload(); }, [modelId]);
+  useEffect(() => { setCard(null); setErr(""); setEdit(null); setEditing(""); setHist(null); setNewDeal(null); setMsg(""); setEx(execId || ""); reload(); }, [modelId]);
   useEffect(() => { if (tab === "history") api.get<Hist[]>(`/api/catalog/models/${modelId}/history`).then(setHist).catch(() => setHist([])); }, [tab, modelId]);
   async function saveModel() {
     if (!edit || !card) return;
@@ -85,7 +87,8 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
   const an = card.analytics;
   const tabs: [string, string][] = [["tech", "Технические характеристики"], ["photo", `Фото и чертежи (${images.length})`], ["more", "Опции, регламенты, логистика"],
     ...(card.with_prices ? [["prices", "Цены и сроки — список"], ["analytics", "Аналитическая справка"]] as [string, string][] : []), ["history", "История изменений"]];
-  const pickExec = (id: string) => { setEx(id); onExec?.(id); };
+  const pickExec = (id: string) => { setEx(id); setEditing(""); onExec?.(id); };
+  const done = (m: string) => { setEditing(""); if (m) { setMsg(m); reload(); } };
 
   return (
     <div className="card">
@@ -127,10 +130,14 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
         <>
           {card.executions.length > 1 && <label className="row" style={{ marginBottom: 6 }}>Исполнение
             <select value={e?.id} onChange={(x) => pickExec(x.target.value)}>{card.executions.map((x) => <option key={x.id} value={x.id}>{x.name}{x.status !== "approved" ? " (на проверке)" : ""}</option>)}</select></label>}
-          {e ? <TechParamsView rows={e.tech_params.map((r, i) => ({ ...r, no: r.no ?? i + 1, customer_requirement_ru: "", comment_ru: r.comment_ru || "" }))} /> : <div className="muted">Исполнений нет</div>}
+          {canEdit && e && editing !== "tech" && <button className="btn secondary" style={{ marginBottom: 6 }} onClick={() => setEditing("tech")}>Редактировать характеристики{e.status === "pending" ? " перед подтверждением" : ""}</button>}
+          {canEdit && e && editing === "tech" ? <TechEditor key={e.id} execId={e.id} name={e.name} brand={e.brand_name} rows={e.tech_params} onDone={done} />
+            : e ? <TechParamsView rows={e.tech_params.map((r, i) => ({ ...r, no: r.no ?? i + 1, customer_requirement_ru: "", comment_ru: r.comment_ru || "" }))} /> : <div className="muted">Исполнений нет</div>}
         </>)}
 
-      {tab === "photo" && (images.length === 0 ? <div className="muted">Фото и чертежей пока нет — они попадают в каталог из позиций сделок при занесении исполнения.</div> : (
+      {tab === "photo" && canEdit && e && editing !== "photo" && e.images.length > 0 && <button className="btn secondary" style={{ marginBottom: 6 }} onClick={() => setEditing("photo")}>Подписи, порядок, убрать — {e.name}</button>}
+      {tab === "photo" && canEdit && e && editing === "photo" && <ImagesEditor key={e.id} execId={e.id} images={e.images} kinds={IMAGE_KIND} onDone={done} />}
+      {tab === "photo" && editing !== "photo" && (images.length === 0 ? <div className="muted">Фото и чертежей пока нет — они попадают в каталог из позиций сделок при занесении исполнения.</div> : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
           {images.map((im, i) => (
             <a key={i} href={im.url} target="_blank" rel="noreferrer" style={{ border: "1px solid #eee", borderRadius: 4, padding: 6, textDecoration: "none", color: "inherit" }}>
@@ -141,7 +148,10 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
             </a>))}
         </div>))}
 
-      {tab === "more" && (
+      {tab === "more" && canEdit && editing !== "more" && <button className="btn secondary" style={{ marginBottom: 6 }} onClick={() => setEditing("more")}>Редактировать опции, регламенты, ТН ВЭД и логистику</button>}
+      {tab === "more" && canEdit && editing === "more" && <MoreEditor key={(e?.id || "") + card.id} modelId={card.id} execId={e?.id} options={e?.local_options || []} hs={card.hs || null}
+        logistics={card.logistics_params} regs={card.maintenance_regulations} hours={card.default_hours_per_month} onDone={done} />}
+      {tab === "more" && editing !== "more" && (
         <div className="grid cols-2">
           <div><h3>Опции РФ (доукомплектование)</h3>
             {e && e.local_options.length ? <ul>{e.local_options.map((o, i) => <li key={i}>{o.name}{o.cost != null && ` — ${fmtRub(o.cost)} ${o.currency || ""}`}{o.install_days ? `, установка ${o.install_days} дн.` : ""}</li>)}</ul> : <div className="muted">нет</div>}
