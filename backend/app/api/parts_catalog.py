@@ -18,6 +18,7 @@ from ..models import (
     Client, EquipmentModel, Factory, LegalEntity, Part, PartApplicability, PartClientPrice, PartCrossRef, PartStock, SupplyRoute, Warehouse,
 )
 from ..services.deal_service import audit
+from ..services.suppliers import mark as _mark_supplier
 from ..services.moysklad_import import apply_products, apply_stock, parse_products, parse_stock, read_rows
 from .common import serialize
 
@@ -310,6 +311,7 @@ def create_part(body: PartIn, force: bool = False, db: Session = Depends(get_db)
     db.add(p)
     _apply(db, p, body, user)
     db.flush()
+    _mark_supplier(db, p.supplier_id, "parts")
     audit(db, user.id, None, "part", p.id, "create", None, {"article": p.article, "name": p.name_ru, "forced": bool(dups)})
     db.commit()
     return _card(db, p, user)
@@ -321,6 +323,7 @@ def update_part(pid: str, body: PartIn, db: Session = Depends(get_db), user: Cur
     p = _part_or_404(db, pid)
     before = {"article": p.article, "name_ru": p.name_ru, "status": p.status}
     _apply(db, p, body, user)
+    _mark_supplier(db, p.supplier_id, "parts")
     audit(db, user.id, None, "part", p.id, "update", before, {"article": p.article, "name_ru": p.name_ru, "status": p.status})
     db.commit()
     db.refresh(p)

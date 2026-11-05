@@ -64,6 +64,7 @@ def run() -> None:
             if not db.scalar(select(PaymentScheme).where(PaymentScheme.name == name)):
                 db.add(PaymentScheme(name=name, lines=lines))
         seed_parts_setup(db)
+        mark_supplies(db)           # раздел «Поставщики»: ГШО / запасные части — по фактическому использованию
         from app.services.moysklad_import import relink_client_prices
         relink_client_prices(db)    # договорные цены запчастей → клиенты, заведённые после переноса
         # синтетическая история курса CNY/RUB за 4 года (в проде — загрузка с cbr.ru: POST /api/admin/fx/history)
@@ -128,3 +129,24 @@ def seed_parts_setup(db) -> None:
 
 if __name__ == "__main__":
     run()
+
+
+def mark_supplies(db) -> int:
+    """Что поставляет поставщик: ГШО — есть модели в каталоге или позиции сделок; запчасти — карточки, запросы цен, заказы.
+    Отметки только добавляются (снимает их пользователь); поставщик без признаков — ГШО (раздел раньше назывался «Заводы»)."""
+    from sqlalchemy import select
+    from app.models import EquipmentModel, Factory, Part, Position, PurchaseOrder, SupplierRfq
+    gsho = set(db.scalars(select(EquipmentModel.factory_id)).all()) | set(db.scalars(select(Position.factory_id)).all())
+    parts = set(db.scalars(select(Part.supplier_id).where(Part.supplier_id.is_not(None))).all()) \
+        | set(db.scalars(select(SupplierRfq.supplier_id)).all()) | set(db.scalars(select(PurchaseOrder.supplier_id).where(PurchaseOrder.supplier_id.is_not(None))).all())
+    n = 0
+    for f in db.scalars(select(Factory)).all():
+        cur = list(f.supplies or [])
+        new = cur + [k for k, ids in (("gsho", gsho), ("parts", parts)) if f.id in ids and k not in cur]
+        if not new:
+            new = ["gsho"]
+        if new != cur:
+            f.supplies = new
+            n += 1
+    db.flush()
+    return n

@@ -23,6 +23,7 @@ from ..services.markup_chain import ChainError, simulate
 from ..services.parts_po import (ORDERABLE, PO_LINE_STATUS, PO_STATUS, REQUEST_STATUS, build_po_xlsx, can_move, eta, intragroup_steps,
                                  po_status)
 from ..services.parts_requests import _route_steps
+from ..services.suppliers import mark as mark_supplier
 from ..services.parts_supplier import CARD_KEY, supplier_language
 from .common import serialize
 from .parts_rfq import send_supplier_file
@@ -159,6 +160,8 @@ class StockLineIn(BaseModel):
     qty: float = Field(gt=0)
     price: Optional[float] = None
     currency: str = ""
+    warranty_claim_id: Optional[str] = None      # гарантийная замена по претензии — цена 0
+    comment: str = ""
 
 
 class PoCreateIn(BaseModel):
@@ -178,6 +181,7 @@ def create(body: PoCreateIn, db: Session = Depends(get_db), user: CurrentUser = 
         raise HTTPException(404, "Поставщик не найден")
     if not body.request_line_ids and not body.stock_lines:
         raise HTTPException(422, "Отметьте строки для заказа")
+    mark_supplier(db, sup.id, "parts")
     done = _ordered_line_ids(db)
     lang = supplier_language(sup.country, sup.language)
     today = date.today()
@@ -209,10 +213,11 @@ def create(body: PoCreateIn, db: Session = Depends(get_db), user: CurrentUser = 
         part = db.get(Part, s.part_id)
         if part is None:
             raise HTTPException(404, "Карточка не найдена")
-        price = s.price if s.price is not None else part.purchase_price
-        if not price:
+        price = 0.0 if s.warranty_claim_id else (s.price if s.price is not None else part.purchase_price)
+        if not price and not s.warranty_claim_id:
             raise HTTPException(422, f"{part.article}: укажите цену поставщика")
-        items.append({"line": None, "part": part, "qty": s.qty, "unit": part.unit or "шт", "price": price,
+        items.append({"line": None, "part": part, "qty": s.qty, "unit": part.unit or "шт", "price": price, "warranty_claim_id": s.warranty_claim_id,
+                      "comment": s.comment or ("гарантийная замена" if s.warranty_claim_id else ""),
                       "currency": s.currency or part.purchase_currency or sup.default_currency or "CNY", "lead": part.lead_days,
                       "route_id": body.route_id or sup.default_route_id or part.route_id})
 
@@ -243,13 +248,18 @@ def create(body: PoCreateIn, db: Session = Depends(get_db), user: CurrentUser = 
                         number=next((c.number for c in part.cross_refs if c.kind == "supplier" and c.supplier_id == sup.id), None) or part.oem_number or part.article,
                         name=part.name_ru, name_foreign=(part.names or {}).get(CARD_KEY.get(lang, ""), "") or "", qty=it["qty"], unit=it["unit"],
                         price=round(float(it["price"]), 2), lead_days=it["lead"], eta=when,
-                        history=[{"at": datetime.now(timezone.utc).isoformat(), "status": "ordered", "eta": when.isoformat(), "by": user.id}])
+                        history=[{"at": datetime.now(timezone.utc).isoformat(), "status": "ordered", "eta": when.isoformat(), "by": user.id}],
+                        warranty_claim_id=it.get("warranty_claim_id"), comment=it.get("comment") or "")
             po.lines.append(pl)
             db.flush()
             if it["line"]:
                 rl = it["line"]
                 rl.status, rl.eta = "po", when
-            if len(steps) > 1:
+            if len(steps) > 1 and not it["price"]:       # гарантийная замена: по ступеням маршрута — тоже по нулевой цене
+                for no, st in enumerate(steps[1:], start=2):
+                    child_lines[no].append(({"no": no, "seller_entity_id": st["seller_entity_id"], "buyer_entity_id": st["buyer_entity_id"],
+                                             "currency": st["currency"], "incoterms": st.get("incoterms") or "", "price": 0.0}, {"pl": pl, "it": it}))
+            elif len(steps) > 1:
                 try:
                     sim = simulate(it["price"], steps, rules, fx=fx, part_group=part.part_group or None, supplier_id=sup.id, entity_names=names)
                 except ChainError as e:

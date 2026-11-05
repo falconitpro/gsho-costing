@@ -254,5 +254,10 @@ def close(deal_id: str, body: CloseIn, db: Session = Depends(get_db), user: Curr
         closing.actual_on, closing.done_by = date.today(), user.id
     complete_tasks(db, deal)
     apply_transition(db, deal, tr, user.id)
+    try:   # машины сделки — в парк клиента (запчасти, раздел 9)
+        from .parts_fleet import sync_from_deals
+        sync_from_deals(db, deal.id, user.id)
+    except Exception:   # pragma: no cover — закрытие сделки не зависит от парка
+        pass
     db.commit()
     return {"status": deal.status.value}

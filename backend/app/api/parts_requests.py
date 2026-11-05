@@ -116,6 +116,7 @@ class RequestIn(BaseModel):
     contact: str = ""
     channel: str = "email"
     machine: str = ""
+    machine_id: Optional[str] = None      # машина из парка клиента
     urgent: bool = False
     warranty: bool = False
     comment: str = ""
@@ -143,8 +144,15 @@ def create(body: RequestIn, db: Session = Depends(get_db), user: CurrentUser = D
         raise HTTPException(422, "Выберите клиента")
     if body.channel not in CHANNELS:
         raise HTTPException(422, "Неизвестный канал заявки")
+    machine = body.machine
+    if body.machine_id:
+        from ..models import ClientMachine
+        m = db.get(ClientMachine, body.machine_id)
+        if m is None or m.client_id != body.client_id:
+            raise HTTPException(422, "Машина не из парка этого клиента")
+        machine = machine or " ".join(x for x in (m.manufacturer, m.model, f"зав. № {m.serial}" if m.serial else "") if x)
     req = PartRequest(number=next_number(db), client_id=body.client_id, manager_id=user.id, contact=body.contact, channel=body.channel,
-                      machine=body.machine, urgent=body.urgent, warranty=body.warranty, comment=body.comment)
+                      machine=machine, machine_id=body.machine_id, urgent=body.urgent, warranty=body.warranty, comment=body.comment)
     _add_lines(req, [l.model_dump() for l in body.lines] + parse_lines_text(body.lines_text))
     if not req.lines:
         raise HTTPException(422, "Добавьте хотя бы одну строку: артикул или наименование")
