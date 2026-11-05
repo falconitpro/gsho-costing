@@ -10,7 +10,7 @@ type Line = {
   source: string; lead_days: number | null; price: number | null; currency: string; price_source: string; price_rub: number | null; sum_rub: number | null;
   available: number | null; status: string; comment: string; threshold_pct: number | null; approval: string | null;
   cost?: number | null; margin_pct?: number | null; profit_rub?: number | null; cost_note?: string;
-  supplier_id?: string | null; rfq_line_id?: string | null; quote_price?: number | null; quote_currency?: string;
+  eta?: string | null; supplier_id?: string | null; rfq_line_id?: string | null; quote_price?: number | null; quote_currency?: string;
 };
 type Req = {
   id: string; number: string; client_id: string; client_name: string; manager_name: string; machine: string; urgent: boolean; warranty: boolean;
@@ -162,7 +162,8 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
               {seesCost && <><td className="num">{l.cost != null ? fmtRub(l.cost) : <span className="muted" style={{ fontSize: 11 }}>{l.cost_note}</span>}</td>
                 <td className="num" style={{ color: l.approval ? "var(--bad)" : undefined }}>{l.margin_pct != null ? `${l.margin_pct} %` : "—"}</td></>}
               <td className="num">{l.threshold_pct != null ? `${l.threshold_pct} %` : "—"}{l.approval && <div className="badge bad">виза {l.approval === "fd" ? "ФД" : "КД"}</div>}</td>
-              <td><select value={l.status} disabled={closed} onChange={(e) => patch(l, { status: e.target.value })}>{Object.entries(meta.line_status).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></td>
+              <td><select value={l.status} disabled={closed} onChange={(e) => patch(l, { status: e.target.value })}>{Object.entries(meta.line_status).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+                {l.eta && <div className="muted" style={{ fontSize: 11, color: new Date(l.eta) < new Date() && !["in_stock", "shipped"].includes(l.status) ? "var(--bad)" : undefined }}>на складе ≈ {fmtDate(l.eta)}</div>}</td>
             </tr>))}</tbody>
         </table>
       </div>

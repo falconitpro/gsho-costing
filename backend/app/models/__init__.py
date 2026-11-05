@@ -1043,6 +1043,7 @@ class PartRequestLine(TimestampMixin, Base):
     rfq_line_id: Mapped[Optional[str]] = mapped_column(String(36))
     quote_price: Mapped[Optional[float]] = mapped_column(Float)
     quote_currency: Mapped[str] = mapped_column(String(3), default="")
+    eta: Mapped[Optional[date]] = mapped_column(Date)                    # ожидаемая дата на складе РФ — из заказа поставщику
 
 
 class PartKp(Base):
@@ -1123,3 +1124,54 @@ class SupplierRfqLine(Base):
     analog_number: Mapped[str] = mapped_column(String(128), default="")
     comment: Mapped[str] = mapped_column(Text, default="")
     answered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class PurchaseOrder(TimestampMixin, Base):
+    """Заказ поставщику (external) или внутригрупповой заказ на следующей ступени маршрута (intragroup, parent_po_id — внешний заказ)."""
+    __tablename__ = "purchase_orders"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(32), unique=True)                     # ЗК-2026-0001, внутригрупповые — ЗК-2026-0001/2
+    kind: Mapped[str] = mapped_column(String(16), default="external")                # external | intragroup
+    parent_po_id: Mapped[Optional[str]] = mapped_column(ForeignKey("purchase_orders.id", ondelete="CASCADE"), index=True)
+    step_no: Mapped[int] = mapped_column(Integer, default=1)
+    route_id: Mapped[Optional[str]] = mapped_column(ForeignKey("supply_routes.id"))
+    buyer_entity_id: Mapped[Optional[str]] = mapped_column(ForeignKey("legal_entities.id"))
+    seller_entity_id: Mapped[Optional[str]] = mapped_column(ForeignKey("legal_entities.id"))   # внутригрупповой: продавец — компания группы
+    supplier_id: Mapped[Optional[str]] = mapped_column(ForeignKey("factories.id"), index=True)  # внешний: поставщик
+    currency: Mapped[str] = mapped_column(String(3), default="CNY")
+    incoterms: Mapped[str] = mapped_column(String(8), default="")
+    language: Mapped[str] = mapped_column(String(4), default="ru")
+    status: Mapped[str] = mapped_column(String(16), default="draft")                 # draft | sent | confirmed | in_progress | closed | cancelled
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    send_log: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    supplier_ref: Mapped[str] = mapped_column(String(64), default="")                # номер подтверждения / счёта поставщика
+    planned_ship_date: Mapped[Optional[date]] = mapped_column(Date)
+    actual_ship_date: Mapped[Optional[date]] = mapped_column(Date)
+    payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)             # график оплат: [{due, amount, comment, paid_on}]
+    total: Mapped[float] = mapped_column(Float, default=0)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    lines: Mapped[list["PoLine"]] = relationship(cascade="all, delete-orphan", order_by="PoLine.no")
+
+
+class PoLine(Base):
+    """Строка заказа: под строку заявки клиента или на пополнение склада. Статус поставки ведётся по строке внешнего заказа."""
+    __tablename__ = "po_lines"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    po_id: Mapped[str] = mapped_column(ForeignKey("purchase_orders.id", ondelete="CASCADE"), index=True)
+    no: Mapped[int] = mapped_column(Integer)
+    request_line_id: Mapped[Optional[str]] = mapped_column(ForeignKey("part_request_lines.id", ondelete="SET NULL"), index=True)
+    parent_line_id: Mapped[Optional[str]] = mapped_column(String(36))                 # строка внешнего заказа (для внутригрупповых)
+    part_id: Mapped[Optional[str]] = mapped_column(ForeignKey("parts.id"))
+    number: Mapped[str] = mapped_column(String(128), default="")                     # номер у поставщика
+    name: Mapped[str] = mapped_column(String(512), default="")
+    name_foreign: Mapped[str] = mapped_column(String(512), default="")
+    qty: Mapped[float] = mapped_column(Float, default=1)
+    unit: Mapped[str] = mapped_column(String(16), default="шт")
+    price: Mapped[float] = mapped_column(Float, default=0)
+    lead_days: Mapped[Optional[int]] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="ordered")
+    eta: Mapped[Optional[date]] = mapped_column(Date)                                # плановая дата на складе РФ
+    history: Mapped[list[dict]] = mapped_column(JSONType, default=list)              # [{at, status, eta, by}]
+    comment: Mapped[str] = mapped_column(Text, default="")
