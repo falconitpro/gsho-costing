@@ -109,3 +109,51 @@ def test_request_flow(client):
     assert r["status_text"] == "проиграна"
     assert r["id"] not in {x["id"] for x in _ok(client.get("/api/parts/requests", headers=H(CD)))}
     assert r["id"] in {x["id"] for x in _ok(client.get("/api/parts/requests?open_only=false", headers=H(CD)))}
+
+
+def test_kp_partial_revisions_reserve(client):
+    import io
+    from openpyxl import Workbook
+    t = uuid.uuid4().hex[:5].upper()
+    cl = _ok(client.get("/api/refs/clients", headers=H(MGR)))[0]
+    a = _ok(client.post("/api/parts/catalog", headers=H(CD), json={"article": f"KP-{t}-1", "name_ru": "Насос", "purchase_price": 3000,
+                                                                   "purchase_currency": "RUB", "sale_price": 100, "sale_currency": "EUR"}), 201)
+    _ok(client.post("/api/parts/catalog", headers=H(CD), json={"article": f"KP-{t}-2", "name_ru": "Шайба", "purchase_price": 900,
+                                                               "purchase_currency": "RUB", "sale_price": 10, "sale_currency": "EUR"}), 201)
+    wb = Workbook()
+    ws = wb.active
+    for row in (("Наименование", "Артикул", "Ед. изм.", "Остаток", "Котельниково"), ("Насос", f"KP-{t}-1", "шт", 5, 5)):
+        ws.append(list(row))
+    buf = io.BytesIO()
+    wb.save(buf)
+    _ok(client.post("/api/parts/import/stock", headers=H(CD), files={"file": ("s.xlsx", buf.getvalue(), "application/octet-stream")}))
+    r = _ok(client.post("/api/parts/requests", headers=H(MGR), json={"client_id": cl["id"], "lines_text": f"KP-{t}-1\t\t2\nKP-{t}-2\t\t1"}), 201)
+    l1, l2 = sorted(r["lines"], key=lambda x: x["no"])
+    assert l1["source"] == "stock" and l2["source"] == "order"
+    # КП частями: сначала только первая строка, в евро
+    r = _ok(client.post(f"/api/parts/requests/{r['id']}/kp", headers=H(MGR), json={"line_ids": [l1["id"]], "currency": "EUR"}), 201)
+    kp1 = r["kps"][0]
+    assert kp1["number"].endswith("/1") and kp1["currency"] == "EUR" and kp1["lines"][0]["price"] == 100 and kp1["lines"][0]["lead"] == "в наличии"
+    assert kp1["handling_fee"] == 0 and kp1["valid_until"] and not kp1["expired"]
+    assert next(l for l in r["lines"] if l["id"] == l1["id"])["status"] == "in_kp"
+    stock = _ok(client.get(f"/api/parts/catalog/{a['id']}", headers=H(MGR)))["stock"]
+    assert [(s["qty"], s["reserved"], s["available"]) for s in stock if s["qty"]] == [(5.0, 2.0, 3.0)]        # мягкий резерв на срок КП
+    # строка с маржой ниже порога не войдёт в КП без визы
+    assert client.post(f"/api/parts/requests/{r['id']}/kp", headers=H(MGR), json={"line_ids": [l1["id"], l2["id"]]}).status_code == 409
+    _ok(client.post(f"/api/parts/requests/{r['id']}/approve", headers=H(FD), json={}))
+    r = _ok(client.post(f"/api/parts/requests/{r['id']}/kp", headers=H(MGR), json={"line_ids": [l1["id"], l2["id"]], "currency": "RUB"}), 201)
+    kp2 = r["kps"][0]
+    assert kp2["number"].endswith("/2") and {"article": f"KP-{t}-2", "change": "добавлена"} in kp2["changes"]
+    stock = _ok(client.get(f"/api/parts/catalog/{a['id']}", headers=H(MGR)))["stock"]
+    assert [s["reserved"] for s in stock if s["qty"]] == [2.0]                                                 # резерв строки не задвоился
+    # «Обработка заказа»: убрать может КД, не менеджер
+    assert client.post(f"/api/parts/requests/{r['id']}/kp", headers=H(MGR), json={"line_ids": [l2["id"]], "remove_handling_fee": True}).status_code == 403
+    r = _ok(client.post(f"/api/parts/requests/{r['id']}/kp", headers=H(MGR), json={"line_ids": [l2["id"]]}), 201)
+    assert r["kps"][0]["handling_fee"] > 0
+    r = _ok(client.post(f"/api/parts/requests/{r['id']}/kp", headers=H(CD), json={"line_ids": [l2["id"]], "remove_handling_fee": True}), 201)
+    assert r["kps"][0]["handling_fee"] == 0 and r["kps"][0]["handling_fee_removed_by"]
+    # документ и отметка об отправке
+    d = client.get(f"/api/parts/requests/kp/{kp2['id']}/docx", headers=H(MGR))
+    assert d.status_code == 200 and d.headers["content-type"].startswith("application/vnd.openxmlformats") and len(d.content) > 1000
+    r = _ok(client.post(f"/api/parts/requests/kp/{kp2['id']}/sent", headers=H(MGR)))
+    assert next(k for k in r["kps"] if k["id"] == kp2["id"])["sent_at"]

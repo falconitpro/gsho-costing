@@ -1,10 +1,14 @@
 """Запчасти, шаг 3: заявки клиентов с попозиционным учётом, подбор, цена и визы по марже (ТЗ запчастей, разделы 5–6)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import os
+import tempfile
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,9 +16,10 @@ from sqlalchemy.orm import Session
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role, filter_payload
 from ..db import get_db
-from ..models import Client, Part, PartRequest, PartRequestLine, User
+from ..models import Client, LegalEntity, Part, PartKp, PartRequest, PartRequestLine, User
 from ..services import settings_service
 from ..services.deal_service import audit, notify
+from ..services.parts_kp import build_kp_lines, diff_kp, release_expired, render_docx, reserve_soft
 from ..services.parts_pricing import LINE_STATUS, kp_summary, request_status
 from ..services.parts_requests import approvals_pending, line_payload, match_lines, next_number, parse_lines_text, price_lines
 from .common import serialize
@@ -66,6 +71,8 @@ def _payload(db: Session, req: PartRequest, user: CurrentUser) -> dict:
     d["summary"]["approval_needed"] = approvals_pending(req, active)
     d["status"] = request_status(lines)
     d["status_text"] = CLOSE_KINDS.get(req.closed) or d["status"]["text"]
+    kps = db.scalars(select(PartKp).where(PartKp.request_id == req.id).order_by(PartKp.revision_no.desc())).all()
+    d["kps"] = [{**serialize(k), "expired": k.valid_until < date.today()} for k in kps]
     return filter_payload(d, user)
 
 
@@ -152,7 +159,10 @@ def create(body: RequestIn, db: Session = Depends(get_db), user: CurrentUser = D
 
 @router.get("/{rid}")
 def card(rid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    return _payload(db, _req_or_404(db, rid, user), user)
+    req = _req_or_404(db, rid, user)
+    if release_expired(db):       # истёкшие мягкие резервы снимаются при обращении
+        db.commit()
+    return _payload(db, req, user)
 
 
 class AddLinesIn(BaseModel):
@@ -336,6 +346,108 @@ def reopen(rid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(
     if not user.has(*EDIT_ROLES):
         raise HTTPException(403, "Нет прав")
     req.closed, req.close_reason = "", ""
+    db.commit()
+    return _payload(db, req, user)
+
+
+# ------------------------------------------------------------------ КП (частичная отправка, редакции, мягкий резерв)
+
+class KpIn(BaseModel):
+    line_ids: list[str]
+    currency: str = "RUB"
+    remove_handling_fee: bool = False
+    comment: str = ""
+
+
+@router.post("/{rid}/kp", status_code=201)
+def create_kp(rid: str, body: KpIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Редакция КП по выбранным строкам: цены в валюте КП по курсу ЦБ, «Обработка заказа», срок действия, мягкий резерв строк «со склада»."""
+    req = _req_or_404(db, rid, user)
+    _editable(user, req)
+    release_expired(db)
+    _recalc(db, req)
+    full = _payload(db, req, Role_all())
+    chosen = [l for l in full["lines"] if l["id"] in set(body.line_ids)]
+    if not chosen:
+        raise HTTPException(422, "Отметьте строки, которые войдут в КП")
+    bad = [str(l["no"]) for l in chosen if l["price"] is None or l["status"] in ("cancelled", "unavailable")]
+    if bad:
+        raise HTTPException(422, f"В КП нельзя включить строки без цены или отменённые: {', '.join(bad)}")
+    need = approvals_pending(req, chosen)
+    if need:
+        raise HTTPException(409, f"Есть цены ниже порога маржи — сначала виза {'ФД' if need == 'fd' else 'КД'}")
+    fx = latest_fx(db)
+    try:
+        snap = build_kp_lines(chosen, body.currency, fx)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    summ = kp_summary(chosen, settings_service.get(db, "parts_min_margin_kp_rub"))
+    rate = 1.0 if body.currency == "RUB" else fx[body.currency]
+    fee = round(summ["handling_fee_rub"] / rate, 2)
+    removed_by = None
+    if fee and body.remove_handling_fee:
+        if not user.has(Role.CD, Role.GD):
+            raise HTTPException(403, "Убрать «Обработку заказа» может КД или ЗГД")
+        removed_by, fee = user.id, 0.0
+    prev = db.scalars(select(PartKp).where(PartKp.request_id == req.id).order_by(PartKp.revision_no.desc())).first()
+    rev = (prev.revision_no if prev else 0) + 1
+    today = date.today()
+    kp = PartKp(request_id=req.id, revision_no=rev, number=f"КП-{req.number}/{rev}", currency=body.currency, fx_rate=None if body.currency == "RUB" else rate,
+                lines=snap, handling_fee=fee, handling_fee_removed_by=removed_by, total=round(sum(l["sum"] for l in snap) + fee, 2),
+                valid_until=today + timedelta(days=int(settings_service.get(db, "parts_kp_validity_days") or 30)),
+                changes=diff_kp(prev.lines, snap) if prev else [], comment=body.comment, created_by=user.id)
+    db.add(kp)
+    db.flush()
+    short = []
+    for line in req.lines:
+        if line.id not in set(body.line_ids):
+            continue
+        if line.status in ("new", "quoted"):
+            line.status = "in_kp"
+        if line.source == "stock" and line.part_id:
+            got = reserve_soft(db, line, kp.id, kp.valid_until)
+            if got < (line.qty or 0):
+                short.append(f"{line.no} (зарезервировано {got:g} из {line.qty:g})")
+    if removed_by:   # ФД видит каждое снятие «Обработки заказа»
+        for u in db.scalars(select(User).where(User.is_active.is_(True))).all():
+            if "fd" in (u.roles or []):
+                notify(db, None, u.id, "parts_margin", None, f"В КП {kp.number} убрана «Обработка заказа» на {summ['handling_fee_rub']:,.0f} ₽".replace(",", " "))
+    audit(db, user.id, None, "part_kp", kp.id, "create", None, {"number": kp.number, "lines": len(snap), "total": kp.total, "currency": kp.currency,
+                                                                 "handling_fee_removed": bool(removed_by)})
+    db.commit()
+    out = _payload(db, req, user)
+    out["reserve_short"] = short
+    return out
+
+
+def _kp_or_404(db: Session, kid: str, user: CurrentUser) -> tuple[PartKp, PartRequest]:
+    kp = db.get(PartKp, kid)
+    if kp is None:
+        raise HTTPException(404, "КП не найдено")
+    return kp, _req_or_404(db, kp.request_id, user)
+
+
+@router.get("/kp/{kid}/docx")
+def kp_docx(kid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    kp, req = _kp_or_404(db, kid, user)
+    client = db.get(Client, req.client_id)
+    seller = db.scalar(select(LegalEntity).where(LegalEntity.sells_to_clients.is_(True)))
+    fd, path = tempfile.mkstemp(suffix=".docx")
+    os.close(fd)
+    render_docx({"number": kp.number, "date": (kp.created_at or datetime.now(timezone.utc)).strftime("%d.%m.%Y"), "valid_until": kp.valid_until.strftime("%d.%m.%Y"),
+                 "currency": kp.currency, "fx_rate": kp.fx_rate, "lines": kp.lines, "handling_fee": kp.handling_fee, "total": kp.total, "machine": req.machine},
+                client.name if client else "", path, seller.name if seller else "")
+    name = kp.number.replace("/", "-") + ".docx"
+    return FileResponse(path, filename=name, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        background=BackgroundTask(os.unlink, path))
+
+
+@router.post("/kp/{kid}/sent")
+def kp_sent(kid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    kp, req = _kp_or_404(db, kid, user)
+    _editable(user, req)
+    kp.sent_at, kp.sent_by = datetime.now(timezone.utc), user.id
+    audit(db, user.id, None, "part_kp", kp.id, "sent", None, {"number": kp.number})
     db.commit()
     return _payload(db, req, user)
 
