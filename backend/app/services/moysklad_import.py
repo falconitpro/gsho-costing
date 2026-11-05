@@ -273,7 +273,7 @@ def apply_stock(db, records: Iterable[dict], default_warehouse: Optional[str] = 
     from sqlalchemy import select
     from ..models import Part, PartStock
     by_art: dict[str, list] = {}
-    for p in db.scalars(select(Part)).all():
+    for p in db.scalars(select(Part).where(Part.status != "archive")).all():   # архивные (в т. ч. разобранные дубли) не учитываются
         by_art.setdefault(p.article, []).append(p)
     wh_cache: dict = {}
     now = datetime.now(timezone.utc)
