@@ -111,23 +111,27 @@ def _route_steps(db: Session, route_id: Optional[str]) -> list[dict]:
             for s in r.steps]
 
 
-def unit_cost_rub(db: Session, part: Part, route_id: Optional[str], rules: dict, fx: dict) -> tuple[Optional[float], str]:
-    """Себестоимость единицы для компании в РФ: закупочная цена по маршруту с наценками группы, в рублях по курсу ЦБ.
-    Без маршрута — закупочная цена в рублях. Без закупочной цены — неизвестна."""
-    if not part.purchase_price:
+def unit_cost_rub(db: Session, part: Part, route_id: Optional[str], rules: dict, fx: dict,
+                  quote: Optional[tuple[float, str, Optional[str]]] = None) -> tuple[Optional[float], str]:
+    """Себестоимость единицы для компании в РФ: цена поставщика по маршруту с наценками группы, в рублях по курсу ЦБ.
+    Цена поставщика — выбранный ответ на запрос (quote: цена, валюта, поставщик), иначе последняя закупочная цена.
+    Без маршрута — цена в рублях. Без цены — неизвестна."""
+    if quote and quote[0]:
+        price, cur, supplier_id, label = quote[0], quote[1] or "EUR", quote[2] or part.supplier_id, "ответ поставщика"
+    elif part.purchase_price:
+        price, cur, supplier_id, label = part.purchase_price, part.purchase_currency or "EUR", part.supplier_id, "закупочная цена"
+    else:
         return None, "нет закупочной цены"
     steps = _route_steps(db, route_id or part.route_id)
-    cur = part.purchase_currency or "EUR"
     if steps:
         if steps[0]["currency"] != cur:   # цена поставщика — в валюте первой ступени
             steps = [{**steps[0], "currency": cur}, *steps[1:]]
         try:
-            return simulate(part.purchase_price, steps, rules, fx=fx, part_group=part.part_group or None,
-                            supplier_id=part.supplier_id)["landed_rub"], "маршрут"
+            return simulate(price, steps, rules, fx=fx, part_group=part.part_group or None, supplier_id=supplier_id)["landed_rub"], f"{label}, маршрут"
         except ChainError as e:
             return None, str(e)
     rate = 1.0 if cur == "RUB" else fx.get(cur)
-    return (part.purchase_price * rate, "закупочная цена") if rate else (None, f"нет курса {cur}")
+    return (price * rate, label) if rate else (None, f"нет курса {cur}")
 
 
 def contract_price(db: Session, part: Part, client_id: str, on: date) -> Optional[tuple[float, str]]:
@@ -150,7 +154,8 @@ def price_lines(db: Session, req: PartRequest, fx: dict, rules: dict) -> None:
             line.source = "stock" if available >= (line.qty or 0) else "order"
         if line.source == "order" and line.lead_days is None:
             line.lead_days = part.lead_days
-        cost, cost_note = unit_cost_rub(db, part, line.route_id, rules, fx)
+        quote = (line.quote_price, line.quote_currency, line.supplier_id) if line.quote_price else None
+        cost, cost_note = unit_cost_rub(db, part, line.route_id, rules, fx, quote)
         manual = (line.price, line.currency) if line.price_source == "manual" and line.price else None
         pricelist = (part.sale_price, part.sale_currency or "EUR") if part.sale_price else None
         res = price_line(qty=line.qty, unit_cost_rub=cost, fx=fx, manual=manual, contract=contract_price(db, part, req.client_id, today),

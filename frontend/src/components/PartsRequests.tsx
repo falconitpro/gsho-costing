@@ -10,6 +10,7 @@ type Line = {
   source: string; lead_days: number | null; price: number | null; currency: string; price_source: string; price_rub: number | null; sum_rub: number | null;
   available: number | null; status: string; comment: string; threshold_pct: number | null; approval: string | null;
   cost?: number | null; margin_pct?: number | null; profit_rub?: number | null; cost_note?: string;
+  supplier_id?: string | null; rfq_line_id?: string | null; quote_price?: number | null; quote_currency?: string;
 };
 type Req = {
   id: string; number: string; client_id: string; client_name: string; manager_name: string; machine: string; urgent: boolean; warranty: boolean;
@@ -117,6 +118,7 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
     setPick({ line, q, items: res.items });
   }
   const closed = !!r.closed;
+  const kpSel = sel.filter((id) => r.lines.find((l) => l.id === id)?.price != null);
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between" }}>
@@ -130,11 +132,11 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
       </div>
       <div style={{ overflowX: "auto" }}>
         <table>
-          <thead><tr><th title="в КП">КП</th><th>№</th><th>Запрос клиента</th><th>Подобрано</th><th className="num">Кол-во</th><th>Источник</th><th className="num">Срок, дн</th><th className="num">Цена</th><th className="num">Сумма, ₽</th>
+          <thead><tr><th title="отметить для КП или запроса поставщикам">✓</th><th>№</th><th>Запрос клиента</th><th>Подобрано</th><th className="num">Кол-во</th><th>Источник</th><th className="num">Срок, дн</th><th className="num">Цена</th><th className="num">Сумма, ₽</th>
             {seesCost && <><th className="num">Себест., ₽/ед</th><th className="num">Маржа</th></>}<th className="num">Порог</th><th>Статус</th></tr></thead>
           <tbody>{r.lines.map((l) => (
             <tr key={l.id} style={{ opacity: ["cancelled", "unavailable"].includes(l.status) ? 0.5 : 1 }}>
-              <td><input type="checkbox" disabled={closed || l.price == null || ["cancelled", "unavailable"].includes(l.status)} checked={sel.includes(l.id)}
+              <td><input type="checkbox" disabled={closed || ["cancelled", "unavailable"].includes(l.status)} checked={sel.includes(l.id)}
                 onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></td>
               <td>{l.no}{l.parent_line_id && <div className="muted" style={{ fontSize: 11 }}>часть строки</div>}</td>
               <td><b>{l.raw_article}</b><div className="muted" style={{ fontSize: 11 }}>{l.raw_name}</div></td>
@@ -170,6 +172,8 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
           <button className="btn add" disabled={!add.trim()} onClick={() => act(() => api.post<Req>(`${base}/lines`, { lines_text: add })).then(() => setAdd(""))}>Строки</button>
         </div>)}
 
+      {!closed && <SupplierPanel r={r} sel={sel} act={act} />}
+
       <h3>Итого по строкам в работе</h3>
       <div className="grid cols-3">
         <div>Сумма: <b>{fmtRub(r.summary.sum_rub)} ₽</b> ({r.summary.lines} строк)</div>
@@ -186,11 +190,11 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
       <h3>Коммерческое предложение</h3>
       {!closed && (
         <div className="row" style={{ flexWrap: "wrap" }}>
-          <span className="muted">Отмечено строк: {sel.length}</span>
+          <span className="muted">В КП пойдут строки с ценой: {kpSel.length} из {sel.length}</span>
           <button className="btn ghost" onClick={() => setSel(r.lines.filter((l) => l.price != null && !["cancelled", "unavailable"].includes(l.status)).map((l) => l.id))}>отметить все с ценой</button>
           <label className="row">валюта КП<select value={kpCur} onChange={(e) => setKpCur(e.target.value)}>{["RUB", "EUR", "CNY", "USD"].map((c) => <option key={c}>{c}</option>)}</select></label>
           {approver && r.summary.handling_fee_rub > 0 && <label className="row"><input type="checkbox" checked={noFee} onChange={(e) => setNoFee(e.target.checked)} /> без «Обработки заказа» (ФД увидит)</label>}
-          <button className="btn" disabled={!sel.length} onClick={() => act(() => api.post<Req & { reserve_short?: string[] }>(`${base}/kp`, { line_ids: sel, currency: kpCur, remove_handling_fee: noFee })
+          <button className="btn" disabled={!kpSel.length} onClick={() => act(() => api.post<Req & { reserve_short?: string[] }>(`${base}/kp`, { line_ids: kpSel, currency: kpCur, remove_handling_fee: noFee })
             .then((x) => { if (x.reserve_short?.length) alert(`Свободного остатка не хватило для строк: ${x.reserve_short.join(", ")}`); return x; }), "КП сформировано, строки «со склада» в мягком резерве")}>Сформировать КП</button>
         </div>)}
       {r.kps?.length > 0 && (
@@ -215,6 +219,122 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
         </> : <><span className="muted">Закрыта: {meta.close_kinds[r.closed]}{r.close_reason && ` — ${r.close_reason}`}</span>
           <button className="btn ghost" onClick={() => act(() => api.post<Req>(`${base}/reopen`), "Заявка снова в работе")}>вернуть в работу</button></>}
       </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ запросы цен поставщикам, сравнение ответов и выбор (ТЗ запчастей, раздел 7)
+
+type RfqLine = { id: string; no: number; request_line_id: string; number: string; name_ru: string; name_foreign: string; machine_translated: boolean;
+  qty: number; unit: string; availability: string; price: number | null; currency: string; lead_days: number | null; moq: number | null;
+  analog_number: string; comment: string; chosen?: boolean };
+type Rfq = { id: string; number: string; supplier_id: string; supplier_name: string; language_title: string; status: string; status_title: string;
+  due_date: string | null; sent_at: string | null; answered: number; lines: RfqLine[]; lines_count?: number;
+  send_log: { at: string; via: string; ok: boolean; error?: string }[] };
+type Quote = RfqLine & { rfq_number: string; supplier_id: string; supplier_name: string };
+const AVAIL: Record<string, string> = { available: "в наличии", on_order: "под заказ", none: "нет", analog: "аналог" };
+
+function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: () => Promise<T>, ok?: string) => Promise<void> }) {
+  const [sups, setSups] = useState<{ id: string; name: string; short_name: string; country: string; supplier_status: string }[]>([]);
+  const [pickSup, setPickSup] = useState<string[]>([]);
+  const [due, setDue] = useState(3);
+  const [rfqs, setRfqs] = useState<Rfq[]>([]);
+  const [open, setOpen] = useState<Rfq | null>(null);
+  const [quotes, setQuotes] = useState<Record<string, Quote[]>>({});
+  const [err, setErr] = useState("");
+  const base = `/api/parts/requests/${r.id}`;
+  const reload = () => {
+    api.get<Rfq[]>(`/api/parts/rfq?open_only=false&request_id=${r.id}`).then(setRfqs).catch((e) => setErr((e as Error).message));
+    api.get<Record<string, Quote[]>>(`${base}/quotes`).then(setQuotes).catch(() => setQuotes({}));
+  };
+  useEffect(() => { api.get<typeof sups>("/api/refs/factories").then(setSups).catch(() => setSups([])); }, []);
+  useEffect(reload, [r]);
+  const run = async (fn: () => Promise<unknown>, ok = "") => { try { const x = await fn(); setErr(ok); if (x && (x as Rfq).lines && (x as Rfq).supplier_id) setOpen(x as Rfq); reload(); } catch (e) { setErr((e as Error).message); } };
+  const withQuotes = r.lines.filter((l) => quotes[l.id]?.length);
+
+  return (
+    <>
+      <h3>Запросы поставщикам</h3>
+      {err && <div className="muted" style={{ marginBottom: 4 }}>{err}</div>}
+      <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
+        <span className="muted">Отмечено строк: {sel.length}</span>
+        <select multiple size={4} style={{ minWidth: 260 }} value={pickSup} onChange={(e) => setPickSup(Array.from(e.target.selectedOptions as ArrayLike<HTMLOptionElement>).map((o: HTMLOptionElement) => o.value))}>
+          {sups.map((s) => <option key={s.id} value={s.id}>{s.short_name || s.name} · {s.country}</option>)}</select>
+        <label className="row">ответ за<input type="number" style={{ width: 50 }} value={due} onChange={(e) => setDue(Number(e.target.value))} />дн.</label>
+        <button className="btn" disabled={!sel.length || !pickSup.length} onClick={() => act(async () => {
+          const x = await api.post<{ request: Req }>(`${base}/rfq`, { line_ids: sel, supplier_ids: pickSup, due_days: due }); reload(); return x.request;
+        }, "Запросы созданы — скачайте файл или отправьте поставщику")}>Запросить цены</button>
+        <span className="muted" style={{ fontSize: 11 }}>Ctrl/⌘ — несколько поставщиков; файл — на языке поставщика</span>
+      </div>
+      {rfqs.length > 0 && (
+        <table style={{ marginTop: 6 }}>
+          <thead><tr><th>Запрос</th><th>Поставщик</th><th>Язык</th><th className="num">Ответ</th><th>Срок ответа</th><th>Статус</th><th></th></tr></thead>
+          <tbody>{rfqs.map((q) => (
+            <tr key={q.id} style={{ background: open?.id === q.id ? "var(--accent-soft)" : undefined }}>
+              <td><a href="#" onClick={(e) => { e.preventDefault(); api.get<Rfq>(`/api/parts/rfq/${q.id}`).then(setOpen); }}><b>{q.number}</b></a></td>
+              <td>{q.supplier_name}</td><td>{q.language_title}</td><td className="num">{q.answered} из {q.lines_count ?? q.lines?.length}</td>
+              <td style={{ color: q.due_date && !["answered", "closed"].includes(q.status) && new Date(q.due_date) < new Date() ? "var(--bad)" : undefined }}>{fmtDate(q.due_date)}</td>
+              <td>{q.status_title}</td>
+              <td><a className="btn ghost" href={`/api/parts/rfq/${q.id}/xlsx`}>Excel</a>
+                {q.status !== "closed" && <>
+                  <button className="btn ghost" onClick={() => run(async () => { const x = await api.post<Rfq & { send_results: { via: string; ok: boolean; error: string }[] }>(`/api/parts/rfq/${q.id}/send`, { only_unanswered: q.status !== "draft" });
+                    setErr(x.send_results.map((s) => `${s.via === "mail" ? "почта" : "WeCom"}: ${s.ok ? "отправлено" : s.error}`).join("; ")); return x; })}>{q.status === "draft" ? "отправить" : "напомнить"}</button>
+                  {q.status === "draft" && <button className="btn ghost" onClick={() => run(() => api.post(`/api/parts/rfq/${q.id}/mark-sent`), "Отмечено как отправленное")}>отправлен вручную</button>}
+                  <label className="btn ghost" style={{ cursor: "pointer" }}>ответ из файла<input type="file" accept=".xlsx" style={{ display: "none" }}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) run(() => api.upload(`/api/parts/rfq/${q.id}/import`, f), "Ответ загружен"); e.target.value = ""; }} /></label>
+                  <button className="btn ghost" onClick={() => run(() => api.post(`/api/parts/rfq/${q.id}/close`), "Запрос закрыт")}>закрыть</button></>}</td></tr>))}</tbody>
+        </table>)}
+      {open && <RfqAnswers rfq={open} onSave={(lines) => run(() => api.put(`/api/parts/rfq/${open.id}/answers`, { lines }), "Ответ сохранён")} onClose={() => setOpen(null)} />}
+      {withQuotes.length > 0 && (<>
+        <h3>Сравнение ответов</h3>
+        <table>
+          <thead><tr><th>№</th><th>Позиция</th><th>Поставщик</th><th>Наличие</th><th className="num">Цена</th><th className="num">Срок, дн</th><th className="num">Мин. партия</th><th>Комментарий</th><th></th></tr></thead>
+          <tbody>{withQuotes.map((l) => {
+            const qs = [...quotes[l.id]].sort((a, b) => (a.price == null ? 1 : 0) - (b.price == null ? 1 : 0));
+            return qs.map((q, i) => (
+              <tr key={q.id} style={{ background: l.rfq_line_id === q.id ? "var(--accent-soft)" : undefined, borderTop: i === 0 ? "2px solid var(--line)" : undefined }}>
+                {i === 0 && <><td rowSpan={qs.length}>{l.no}</td><td rowSpan={qs.length}><b>{l.part?.article || l.raw_article}</b><div className="muted" style={{ fontSize: 11 }}>{l.part?.name_ru || l.raw_name} · {l.qty} {l.unit}</div></td></>}
+                <td>{q.supplier_name}<div className="muted" style={{ fontSize: 11 }}>{q.rfq_number}</div></td>
+                <td>{q.availability ? AVAIL[q.availability] : <span className="muted">ждём ответ</span>}{q.analog_number && <div style={{ fontSize: 11 }}>аналог {q.analog_number}</div>}</td>
+                <td className="num">{q.price != null ? `${fmtRub(q.price, 2)} ${q.currency}` : "—"}</td>
+                <td className="num">{q.lead_days ?? "—"}</td><td className="num">{q.moq ?? "—"}</td><td style={{ fontSize: 12 }}>{q.comment}</td>
+                <td>{l.rfq_line_id === q.id ? <span className="badge">выбран</span>
+                  : q.price != null && q.availability !== "none" && <button className="btn ghost" onClick={() => act(() => api.post<Req>(`${base}/lines/${l.id}/choose`, { rfq_line_id: q.id }), "Поставщик выбран, цена пересчитана")}>выбрать</button>}</td>
+              </tr>));
+          })}</tbody>
+        </table>
+        <p className="muted" style={{ fontSize: 11 }}>Срок клиенту = срок поставщика + перевозка по маршруту. Цена клиенту считается от цены поставщика по маршруту с наценками группы.</p>
+      </>)}
+    </>
+  );
+}
+
+function RfqAnswers({ rfq, onSave, onClose }: { rfq: Rfq; onSave: (lines: Partial<RfqLine>[]) => void; onClose: () => void }) {
+  const [rows, setRows] = useState<RfqLine[]>(rfq.lines);
+  useEffect(() => setRows(rfq.lines), [rfq]);
+  const set = (i: number, k: keyof RfqLine, v: unknown) => setRows(rows.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+  return (
+    <div style={{ border: "1px solid var(--line)", padding: 8, marginTop: 6 }}>
+      <div className="row" style={{ justifyContent: "space-between" }}><b>{rfq.number} · {rfq.supplier_name} — ответ по строкам</b><button className="btn ghost" onClick={onClose}>свернуть</button></div>
+      {rfq.send_log?.length > 0 && <div className="muted" style={{ fontSize: 11 }}>Отправка: {rfq.send_log.map((s) => `${fmtDate(s.at)} ${s.via}${s.ok ? "" : ` — ${s.error}`}`).join("; ")}</div>}
+      <table>
+        <thead><tr><th>№</th><th>Номер у поставщика</th><th>Наименование</th><th className="num">Кол-во</th><th>Наличие</th><th className="num">Цена</th><th>Валюта</th><th className="num">Срок, дн</th><th className="num">Мин. партия</th><th>Аналог</th><th>Комментарий</th></tr></thead>
+        <tbody>{rows.map((l, i) => (
+          <tr key={l.id}>
+            <td>{l.no}</td><td>{l.number}</td>
+            <td>{l.name_ru}{l.name_foreign && <div className="muted" style={{ fontSize: 11 }}>{l.name_foreign}{l.machine_translated && " · машинный перевод, проверить"}</div>}</td>
+            <td className="num">{l.qty} {l.unit}</td>
+            <td><select value={l.availability} onChange={(e) => set(i, "availability", e.target.value)}><option value="">—</option>{Object.entries(AVAIL).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></td>
+            <td className="num"><input type="number" style={{ width: 80 }} value={l.price ?? ""} onChange={(e) => set(i, "price", e.target.value ? Number(e.target.value) : null)} /></td>
+            <td><select value={l.currency || ""} onChange={(e) => set(i, "currency", e.target.value)}><option value="">—</option>{CUR.map((c) => <option key={c}>{c}</option>)}</select></td>
+            <td className="num"><input type="number" style={{ width: 55 }} value={l.lead_days ?? ""} onChange={(e) => set(i, "lead_days", e.target.value ? Number(e.target.value) : null)} /></td>
+            <td className="num"><input type="number" style={{ width: 55 }} value={l.moq ?? ""} onChange={(e) => set(i, "moq", e.target.value ? Number(e.target.value) : null)} /></td>
+            <td><input style={{ width: 100 }} value={l.analog_number} onChange={(e) => set(i, "analog_number", e.target.value)} /></td>
+            <td><input value={l.comment} onChange={(e) => set(i, "comment", e.target.value)} /></td>
+          </tr>))}</tbody>
+      </table>
+      <button className="btn" style={{ marginTop: 6 }} onClick={() => onSave(rows.filter((x) => x.availability || x.price != null).map((x) => ({
+        id: x.id, availability: x.availability, price: x.price, currency: x.currency, lead_days: x.lead_days, moq: x.moq, analog_number: x.analog_number, comment: x.comment })))}>Сохранить ответ</button>
     </div>
   );
 }
