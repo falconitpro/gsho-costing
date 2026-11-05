@@ -113,3 +113,21 @@ def test_import_moysklad_products_and_stock(client):
     card = _ok(client.get(f"/api/parts/catalog/{most['id']}", headers=H(MGR)))
     assert card["stock_total"] == 3 and {s["warehouse"]: s["qty"] for s in card["stock"] if s["qty"]} == {"Котельниково": 1.0, "Куркино": 2.0}
     assert _ok(client.get(f"/api/parts/catalog?q=MS{tag}&in_stock=true", headers=H(MGR)))["total"] == 1
+
+    # клиент заведён после переноса — договорные цены привязываются к нему сами
+    assert card["client_prices"][0]["client_id"] is None
+    cl = _ok(client.post("/api/refs/clients", headers=H(CD), json={"name": "ООО «ЕВРОХИМ-ВОЛГАКАЛИЙ»", "inn": "7710473036"}), 201)
+    card = _ok(client.get(f"/api/parts/catalog/{most['id']}", headers=H(CD)))
+    assert card["client_prices"][0]["client_id"] == cl["id"]
+
+
+def test_stock_for_duplicate_article_by_name(client):
+    art = f"DUP-{uuid.uuid4().hex[:6]}"
+    a = _ok(client.post("/api/parts/catalog", headers=H(CD), json={"article": art, "name_ru": "Вентилятор"}), 201)
+    b = _ok(client.post("/api/parts/catalog?force=true", headers=H(CD), json={"article": art, "name_ru": "Вентилятор кабины"}), 201)
+    stock = [("Наименование", "Артикул", "Ед. изм.", "Остаток", "Котельниково"), ("Вентилятор кабины", art, "шт", 5, 5), ("Насос", art, "шт", 1, 1)]
+    st = _ok(client.post("/api/parts/import/stock", headers=H(CD),
+                         files={"file": ("stock.xlsx", _xlsx(stock), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}))
+    assert st["result"]["updated"] == 1 and st["result"]["ambiguous_articles"] == [art]   # «Насос» — не совпало наименование
+    assert _ok(client.get(f"/api/parts/catalog/{b['id']}", headers=H(CD)))["stock_total"] == 5
+    assert _ok(client.get(f"/api/parts/catalog/{a['id']}", headers=H(CD)))["stock_total"] == 0

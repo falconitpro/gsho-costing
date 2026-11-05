@@ -87,6 +87,8 @@ def create_client(body: ClientIn, db: Session = Depends(get_db), user: CurrentUs
         c.registry_checked_at = datetime.now(timezone.utc)
     db.add(c)
     db.flush()
+    from ..services.moysklad_import import relink_client_prices
+    relink_client_prices(db)        # договорные цены запчастей, перенесённые раньше клиента
     audit(db, user.id, None, "client", c.id, "create", after=body.model_dump())
     db.commit()
     return serialize(c)
