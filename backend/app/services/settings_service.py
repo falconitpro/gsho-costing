@@ -49,6 +49,11 @@ DEFAULTS: dict[str, Any] = {
     "sla_days": {"logistics": 1, "service": 2, "cd": 1, "fd": 1, "gd": 1, "manager_rework": 1},
     "kp_fx_clause_pct": 5.0,
     "kp_validity_days": 30,
+    # запасные части (ТЗ запчастей, раздел 6): порог маржи по себестоимости строки, минимум маржи КП, допуск КД
+    "parts_margin_bands": [{"up_to_rub": 10_000, "pct": 40.0}, {"up_to_rub": 100_000, "pct": 30.0}, {"up_to_rub": None, "pct": 20.0}],
+    "parts_min_margin_kp_rub": 5000.0,
+    "parts_cd_tolerance_pp": 5.0,
+    "parts_kp_validity_days": 30,
     "commissioning_days": 5,
     # задача 1: типовые схемы оплаты (пока КД не задал условия) и БГ на аванс
     "default_client_payment_scheme": [
@@ -263,6 +268,16 @@ META: dict[str, dict] = {
                  "fields": [{"key": "logistics", "label": "Логист"}, {"key": "service", "label": "Сервис"}, {"key": "cd", "label": "КД"},
                             {"key": "fd", "label": "ФД"}, {"key": "gd", "label": "ЗГД"}, {"key": "manager_rework", "label": "Доработка менеджером"}]},
     "kp_validity_days": {"group": "Сроки и календарь", "title": "Срок действия КП", "unit": "дн.", "type": "number"},
+    # Запасные части
+    "parts_margin_bands": {"group": "Запасные части", "title": "Порог маржи по себестоимости строки", "type": "table",
+                           "columns": [{"key": "up_to_rub", "label": "Себестоимость строки до, ₽", "type": "number", "nullable": True},
+                                       {"key": "pct", "label": "Порог маржи, %", "type": "number"}],
+                           "help": "Цена ниже порога — виза КД (в пределах допуска) или ФД."},
+    "parts_min_margin_kp_rub": {"group": "Запасные части", "title": "Минимальная маржа КП", "unit": "₽", "type": "number",
+                                "help": "Если маржа по строкам меньше — в КП добавляется строка «Обработка заказа» на разницу."},
+    "parts_cd_tolerance_pp": {"group": "Запасные части", "title": "Допуск КД ниже порога маржи", "unit": "п. п.", "type": "number",
+                              "help": "Ниже порога не более чем на допуск — утверждает КД, больше — ФД."},
+    "parts_kp_validity_days": {"group": "Запасные части", "title": "Срок действия КП и мягкого резерва", "unit": "дн.", "type": "number"},
     "lc_opening_days": {"group": "Сроки и календарь", "title": "Открытие аккредитива после контракта (план)", "unit": "дн.", "type": "number"},
     "factory_contract_lag_days": {"group": "Сроки и календарь", "title": "Контракт с заводом после контракта с клиентом", "unit": "дн.", "type": "number"},
     "delivery_reserve_pct": {"group": "Сроки и календарь", "title": "Резерв к сроку поставки в КП", "unit": "%", "type": "number",
