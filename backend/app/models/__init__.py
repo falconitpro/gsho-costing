@@ -1004,6 +1004,7 @@ class PartRequest(TimestampMixin, Base):
     __tablename__ = "part_requests"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     number: Mapped[str] = mapped_column(String(32), unique=True)          # ЗЧ-2026-0001
+    machine_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)   # машина клиента из парка (подбор по применимости, ТО)
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), index=True)
     manager_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     contact: Mapped[str] = mapped_column(String(255), default="")
@@ -1300,3 +1301,76 @@ class PartInventoryLine(Base):
     counted_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     counted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     comment: Mapped[str] = mapped_column(Text, default="")
+
+
+# ------------------------------------------------------------------ запчасти: парк машин клиентов, наработка, ТО-комплекты (ТЗ запчастей, раздел 9)
+
+class OtherMachineModel(TimestampMixin, Base):
+    """Модель другого производителя — без техпараметров и цен, только для парка и подбора запчастей."""
+    __tablename__ = "other_machine_models"
+    __table_args__ = (UniqueConstraint("manufacturer", "model", name="uq_other_machine_model"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    manufacturer: Mapped[str] = mapped_column(String(255))
+    model: Mapped[str] = mapped_column(String(255))
+    machine_type: Mapped[str] = mapped_column(String(255), default="")
+
+
+class ClientMachine(TimestampMixin, Base):
+    """Машина клиента: из закрытой сделки ГШО (по позиции и номеру единицы) или заведённая вручную."""
+    __tablename__ = "client_machines"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), index=True)
+    deal_id: Mapped[Optional[str]] = mapped_column(ForeignKey("deals.id"), index=True)
+    position_id: Mapped[Optional[str]] = mapped_column(String(36))
+    unit_no: Mapped[int] = mapped_column(Integer, default=1)                         # единица позиции сделки (qty > 1)
+    equipment_model_id: Mapped[Optional[str]] = mapped_column(ForeignKey("equipment_models.id"))
+    other_model_id: Mapped[Optional[str]] = mapped_column(ForeignKey("other_machine_models.id"))
+    manufacturer: Mapped[str] = mapped_column(String(255), default="")
+    model: Mapped[str] = mapped_column(String(255), default="")
+    serial: Mapped[str] = mapped_column(String(128), default="")
+    commissioned_on: Mapped[Optional[date]] = mapped_column(Date)
+    site: Mapped[str] = mapped_column(String(255), default="")                       # место работы
+    hours_per_day: Mapped[Optional[float]] = mapped_column(Float)                    # вручную, если замеров мало
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class MachineHours(Base):
+    """Замер наработки (моточасы) — сервис или менеджер со слов клиента."""
+    __tablename__ = "machine_hours"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    machine_id: Mapped[str] = mapped_column(ForeignKey("client_machines.id", ondelete="CASCADE"), index=True)
+    on: Mapped[date] = mapped_column(Date)
+    hours: Mapped[float] = mapped_column(Float)
+    entered_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MaintenanceKit(TimestampMixin, Base):
+    """ТО-комплект: запчасти на одно ТО модели с периодичностью в моточасах."""
+    __tablename__ = "maintenance_kits"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    equipment_model_id: Mapped[Optional[str]] = mapped_column(ForeignKey("equipment_models.id"), index=True)
+    other_model_id: Mapped[Optional[str]] = mapped_column(ForeignKey("other_machine_models.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))                                   # ТО-1, ТО-500 …
+    interval_hours: Mapped[float] = mapped_column(Float)
+    lines: Mapped[list[dict]] = mapped_column(JSONType, default=list)                # [{part_id, article, name, qty}]
+    source: Mapped[str] = mapped_column(String(16), default="manual")                # manual | deal_zip (ЗИП на ТО из RFQ сделки)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class MachineReminder(Base):
+    """Напоминание менеджеру о ТО машины (одно на машину и ТО по моточасам)."""
+    __tablename__ = "machine_reminders"
+    __table_args__ = (UniqueConstraint("machine_id", "to_hours", name="uq_machine_reminder"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    machine_id: Mapped[str] = mapped_column(ForeignKey("client_machines.id", ondelete="CASCADE"), index=True)
+    to_hours: Mapped[float] = mapped_column(Float)
+    due_on: Mapped[Optional[date]] = mapped_column(Date)
+    kit_ids: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    manager_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    notified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    request_id: Mapped[Optional[str]] = mapped_column(String(36))                    # заявка, созданная по напоминанию
+    dismissed: Mapped[bool] = mapped_column(Boolean, default=False)
