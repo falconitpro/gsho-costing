@@ -20,6 +20,7 @@ from ..db import get_db
 from ..models import Factory, IntegrationLog, Part, PartRequest, PartRequestLine, SupplierRfq, SupplierRfqLine, SupplyRoute
 from ..services.deal_service import audit
 from ..services.moysklad_import import read_rows
+from ..services.suppliers import mark as mark_supplier
 from ..services.parts_supplier import AVAILABILITY, CARD_KEY, LANG_TITLE, build_rfq_xlsx, parse_rfq_answer, rfq_status, supplier_language
 from .common import serialize
 from .parts_requests import _editable, _payload, _recalc, _req_or_404
@@ -107,6 +108,7 @@ def create_rfqs(rid: str, body: RfqCreateIn, db: Session = Depends(get_db), user
         sup = db.get(Factory, sid)
         if sup is None:
             raise HTTPException(404, "Поставщик не найден")
+        mark_supplier(db, sid, "parts")
         lang = supplier_language(sup.country, sup.language)
         rfq = SupplierRfq(number=_next_number(db), supplier_id=sid, language=lang, due_date=date.today() + timedelta(days=max(body.due_days, 0)),
                           comment=body.comment, created_by=user.id)
