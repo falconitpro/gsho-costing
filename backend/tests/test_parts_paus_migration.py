@@ -43,3 +43,25 @@ def test_paus_once():
     db.commit()
     assert db.get(Part, q.id).manufacturer == "Caterpillar"
     db.close()
+
+
+def test_grp_once():
+    from app.models import Factory, SupplyRoute
+    from scripts.seed import GRP_ROUTE, parts_supplier_grp
+    seed()
+    t = uuid.uuid4().hex[:6]
+    db = SessionLocal()
+    ms = Part(article=f"GRP-{t}", name_ru="Из МойСклад", source="moysklad", ms_id=f"ms-{t}")
+    manual = Part(article=f"GRP-{t}-M", name_ru="Вручную", source="manual")
+    db.add_all([ms, manual])
+    db.execute(delete(IntegrationLog).where(IntegrationLog.system == "migration", IntegrationLog.operation == "parts_supplier_grp"))
+    db.commit()
+    assert parts_supplier_grp(db) >= 1
+    db.commit()
+    route = db.scalars(select(SupplyRoute).where(SupplyRoute.name == GRP_ROUTE)).first()
+    grp = db.get(Factory, db.get(Part, ms.id).supplier_id)
+    assert grp.short_name == "GRP" and grp.country == "DE" and "parts" in grp.supplies and grp.approval_status == "approved"
+    assert db.get(Part, ms.id).route_id == route.id
+    assert db.get(Part, manual.id).supplier_id is None                     # заведённые вручную не трогаем
+    assert parts_supplier_grp(db) == 0
+    db.close()

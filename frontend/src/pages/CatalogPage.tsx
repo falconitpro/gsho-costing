@@ -98,6 +98,7 @@ export default function CatalogPage({ me }: { me: Me }) {
                   <h2 style={{ marginTop: 0 }}>{exec.model ? designation(exec.model) : ""} — {exec.name} {exec.brand_name && <span className="badge accent">{exec.brand_name}</span>} <span className={"badge " + (exec.status === "approved" ? "ok" : "warn")}>{lbl(CATALOG_STATUS, exec.status)}</span></h2>
                   {editor && exec.status === "pending" && <div className="row"><button className="btn" onClick={() => decide(exec.id, true)}>Подтвердить</button><button className="btn ghost" onClick={() => decide(exec.id, false)}>Отклонить</button></div>}
                 </div>
+                {editor && exec.status === "pending" && <p className="muted" style={{ marginTop: 0 }}>Перед подтверждением можно исправить любые данные в карточке ниже: технические характеристики, фото и подписи, опции, регламенты, ТН ВЭД и данные для логистики, а также модель («Изменить модель»).</p>}
                 {editor && exec.status === "approved" && (
                   <div className="row" style={{ marginBottom: 8 }}>
                     <select value={mergeExec} onChange={(e) => setMergeExec(e.target.value)} title="дубль: сделки и история цен перейдут в выбранное исполнение">

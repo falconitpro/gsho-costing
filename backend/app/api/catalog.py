@@ -104,6 +104,8 @@ class ExecutionPatch(BaseModel):
     name: Optional[str] = None
     brand_name: Optional[str] = None
     tech_params: Optional[list[dict]] = None
+    local_options: Optional[list[dict]] = None     # опции РФ: [{name, cost, currency, install_days}]
+    images: Optional[list[dict]] = None            # порядок, подписи, вид; только уже приложенные файлы
     status: Optional[str] = None
 
 
@@ -113,12 +115,29 @@ def execution_patch(exec_id: str, body: ExecutionPatch, db: Session = Depends(ge
     if ex is None:
         raise HTTPException(404)
     data = body.model_dump(exclude_none=True)
-    before = {k: getattr(ex, k) for k in data if k != "tech_params"}
+    if "name" in data and not data["name"].strip():
+        raise HTTPException(422, "Укажите наименование исполнения")
+    if body.tech_params is not None:
+        rows = []
+        for i, r in enumerate(body.tech_params, start=1):
+            if not str(r.get("name_ru") or "").strip() and not str(r.get("code") or "").strip():
+                continue                                   # пустая строка таблицы
+            rows.append({**r, "no": i, "name_ru": str(r.get("name_ru") or "").strip()})
+        data["tech_params"] = rows
+    if body.images is not None:
+        have = {im.get("attachment_id"): im for im in ex.images or []}
+        data["images"] = [{**have[im["attachment_id"]], **{k: im[k] for k in ("caption", "kind") if k in im}}
+                          for im in body.images if im.get("attachment_id") in have]
+    if body.local_options is not None:
+        data["local_options"] = [o for o in body.local_options if str(o.get("name") or "").strip()]
+    before = {k: getattr(ex, k) for k in data if k not in ("tech_params", "images", "local_options")}
     for k, v in data.items():
         setattr(ex, k, v)
-    if body.tech_params is not None:
-        ex.fingerprint = tps.fingerprint(body.tech_params)
-        before["tech_params"], data["tech_params"] = "прежний перечень", f"{len(body.tech_params)} строк"
+    if "tech_params" in data:
+        ex.fingerprint = tps.fingerprint(data["tech_params"])
+    for k, title in (("tech_params", "строк"), ("images", "файлов"), ("local_options", "опций")):
+        if k in data:
+            before[k], data[k] = "прежний перечень", f"{len(data[k])} {title}"
     audit(db, user.id, None, "equipment_execution", ex.id, "update", before, data)
     db.commit()
     return serialize(ex)
@@ -133,12 +152,17 @@ class ModelPatch(BaseModel):
     status: Optional[str] = None
     names: Optional[dict] = None
     default_hs_code: Optional[str] = None
+    hs_info: Optional[dict] = None            # {description, duty_pct, vat_pct, util_applies}
+    logistics_params: Optional[dict] = None   # {код: {name, value, unit}}
+    maintenance_regulations: Optional[list[dict]] = None   # [{name, interval_hours, operations: [{name, hours}]}]
+    default_hours_per_month: Optional[float] = None
     comment: str = ""                        # что и почему исправлено (в историю изменений)
 
 
 MODEL_FIELD_TITLES = {"model": "модель", "machine_type": "тип машины", "trademark": "торговая марка", "brand_name": "наименование под брендом компании",
                       "status": "статус", "names": "наименования", "default_hs_code": "код ТН ВЭД", "name": "наименование исполнения",
-                      "tech_params": "технические характеристики"}
+                      "tech_params": "технические характеристики", "hs_info": "ТН ВЭД: описание и ставки", "logistics_params": "данные для логистики",
+                      "maintenance_regulations": "регламенты ТО", "default_hours_per_month": "наработка в месяц"}
 
 
 @router.patch("/catalog/models/{model_id}")
@@ -169,6 +193,10 @@ def model_patch(model_id: str, body: ModelPatch, db: Session = Depends(get_db), 
             db.add(mt)
             db.flush()
         data["machine_type"], data["machine_type_id"] = name, mt.id
+    if "maintenance_regulations" in data:
+        data["maintenance_regulations"] = [r for r in data["maintenance_regulations"] if str(r.get("name") or "").strip() and float(r.get("interval_hours") or 0) > 0]
+    if "hs_info" in data:
+        data["hs_info"] = {**(m.hs_info or {}), **data["hs_info"]}
     if "status" in data and data["status"] not in ("approved", "pending", "archived"):
         raise HTTPException(422, "Статус: подтверждена, на проверке или в архиве")
     before = {k: getattr(m, k) for k in data if hasattr(m, k)}
@@ -176,7 +204,8 @@ def model_patch(model_id: str, body: ModelPatch, db: Session = Depends(get_db), 
     for k, v in data.items():
         setattr(m, k, v)
     m.approved_by = m.approved_by or user.id          # проверена вручную — автоматическая синхронизация из сделок больше не меняет тип и марку
-    if m.status == "pending" and "status" not in data:
+    waiting = db.scalar(select(EquipmentExecution.id).where(EquipmentExecution.model_id == m.id, EquipmentExecution.status == "pending").limit(1))
+    if m.status == "pending" and "status" not in data and not waiting:   # пока исполнение на подтверждении — правка не подтверждает модель
         m.status = "approved"
     if data.get("trademark"):
         cs.remember_trademark(db.get(Factory, m.factory_id), data["trademark"])
