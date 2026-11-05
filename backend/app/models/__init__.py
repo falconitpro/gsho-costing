@@ -992,6 +992,7 @@ class PartStock(Base):
     reserved: Mapped[float] = mapped_column(Float, default=0)
     in_transit: Mapped[float] = mapped_column(Float, default=0)
     min_qty: Mapped[Optional[float]] = mapped_column(Float)
+    cell: Mapped[str] = mapped_column(String(32), default="")           # ячейка хранения (последняя при приёмке)
     as_of: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
@@ -1044,6 +1045,7 @@ class PartRequestLine(TimestampMixin, Base):
     quote_price: Mapped[Optional[float]] = mapped_column(Float)
     quote_currency: Mapped[str] = mapped_column(String(3), default="")
     eta: Mapped[Optional[date]] = mapped_column(Date)                    # ожидаемая дата на складе РФ — из заказа поставщику
+    shipped_qty: Mapped[float] = mapped_column(Float, default=0)         # отгружено клиенту
 
 
 class PartKp(Base):
@@ -1172,6 +1174,96 @@ class PoLine(Base):
     price: Mapped[float] = mapped_column(Float, default=0)
     lead_days: Mapped[Optional[int]] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="ordered")
+    received_qty: Mapped[float] = mapped_column(Float, default=0)
     eta: Mapped[Optional[date]] = mapped_column(Date)                                # плановая дата на складе РФ
     history: Mapped[list[dict]] = mapped_column(JSONType, default=list)              # [{at, status, eta, by}]
     comment: Mapped[str] = mapped_column(Text, default="")
+
+
+# ------------------------------------------------------------------ запчасти: склад — приёмка, отклонения, отгрузка, движения (ТЗ запчастей, разделы 7–8)
+
+class PartStockMove(Base):
+    """Движение остатка: приёмка (+), отгрузка (−), корректировка. Остаток PartStock.qty — сумма движений поверх перенесённого снимка."""
+    __tablename__ = "part_stock_moves"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    part_id: Mapped[str] = mapped_column(ForeignKey("parts.id"), index=True)
+    warehouse_id: Mapped[str] = mapped_column(ForeignKey("warehouses.id"), index=True)
+    qty: Mapped[float] = mapped_column(Float)
+    kind: Mapped[str] = mapped_column(String(16))                                    # receipt | shipment | adjust
+    doc_number: Mapped[str] = mapped_column(String(32), default="")
+    receipt_line_id: Mapped[Optional[str]] = mapped_column(String(36))
+    shipment_line_id: Mapped[Optional[str]] = mapped_column(String(36))
+    user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    onec_status: Mapped[str] = mapped_column(String(16), default="pending")          # pending | sent | error — выгрузка в 1С
+
+
+class PartReceipt(TimestampMixin, Base):
+    """Приёмка по заказу поставщику на физический склад."""
+    __tablename__ = "part_receipts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(32), unique=True)                     # ПР-2026-0001
+    po_id: Mapped[str] = mapped_column(ForeignKey("purchase_orders.id"), index=True)
+    warehouse_id: Mapped[str] = mapped_column(ForeignKey("warehouses.id"))
+    received_on: Mapped[date] = mapped_column(Date)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    lines: Mapped[list["PartReceiptLine"]] = relationship(cascade="all, delete-orphan")
+
+
+class PartReceiptLine(Base):
+    __tablename__ = "part_receipt_lines"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    receipt_id: Mapped[str] = mapped_column(ForeignKey("part_receipts.id", ondelete="CASCADE"), index=True)
+    po_line_id: Mapped[str] = mapped_column(ForeignKey("po_lines.id"), index=True)
+    part_id: Mapped[Optional[str]] = mapped_column(ForeignKey("parts.id"))
+    qty_expected: Mapped[float] = mapped_column(Float, default=0)
+    qty: Mapped[float] = mapped_column(Float, default=0)                             # принято годного
+    qty_bad: Mapped[float] = mapped_column(Float, default=0)                         # брак / пересорт — не в остаток
+    cell: Mapped[str] = mapped_column(String(32), default="")
+    discrepancy: Mapped[str] = mapped_column(String(16), default="")                 # "" | short | over | wrong | damaged
+    reserved_for_line_id: Mapped[Optional[str]] = mapped_column(String(36))
+    comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class PartDeviation(TimestampMixin, Base):
+    """Отклонение поставки: недопоставка, излишек, пересорт, брак — решение и претензия поставщику."""
+    __tablename__ = "part_deviations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(32), unique=True)                     # ОТ-2026-0001
+    po_id: Mapped[str] = mapped_column(ForeignKey("purchase_orders.id"), index=True)
+    po_line_id: Mapped[str] = mapped_column(ForeignKey("po_lines.id"), index=True)
+    receipt_line_id: Mapped[Optional[str]] = mapped_column(ForeignKey("part_receipt_lines.id", ondelete="SET NULL"))
+    kind: Mapped[str] = mapped_column(String(16))                                    # short | over | wrong | damaged
+    qty: Mapped[float] = mapped_column(Float, default=0)
+    decision: Mapped[str] = mapped_column(String(16), default="")                    # "" | wait | replace | cancel | accept
+    status: Mapped[str] = mapped_column(String(16), default="open")                  # open | claim | closed
+    claim_text: Mapped[str] = mapped_column(Text, default="")
+    claim_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    photos: Mapped[list[dict]] = mapped_column(JSONType, default=list)               # [{path, name, at}]
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class PartShipment(TimestampMixin, Base):
+    """Отгрузка клиенту по заявке, частичная допускается. Документ уходит в 1С."""
+    __tablename__ = "part_shipments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(32), unique=True)                     # ОГ-2026-0001
+    request_id: Mapped[str] = mapped_column(ForeignKey("part_requests.id"), index=True)
+    warehouse_id: Mapped[str] = mapped_column(ForeignKey("warehouses.id"))
+    shipped_on: Mapped[date] = mapped_column(Date)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    onec_status: Mapped[str] = mapped_column(String(16), default="pending")
+    lines: Mapped[list["PartShipmentLine"]] = relationship(cascade="all, delete-orphan")
+
+
+class PartShipmentLine(Base):
+    __tablename__ = "part_shipment_lines"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    shipment_id: Mapped[str] = mapped_column(ForeignKey("part_shipments.id", ondelete="CASCADE"), index=True)
+    request_line_id: Mapped[str] = mapped_column(ForeignKey("part_request_lines.id"), index=True)
+    part_id: Mapped[str] = mapped_column(ForeignKey("parts.id"))
+    qty: Mapped[float] = mapped_column(Float)
