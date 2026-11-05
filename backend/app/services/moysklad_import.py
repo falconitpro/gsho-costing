@@ -228,11 +228,12 @@ def apply_products(db, records: Iterable[dict], user_id: Optional[str] = None, d
             cid = clients.get(norm_name(cp["client_name"]))
             if not cid:
                 unmatched_clients[cp["client_name"]] += 1
-            row = next((x for x in p.prices if (x.client_id and x.client_id == cid) or (not x.client_id and x.client_name == cp["client_name"])), None)
+            row = next((x for x in p.prices if (cid and x.client_id == cid) or norm_name(x.client_name) == norm_name(cp["client_name"])), None)
             if row is None:
                 p.prices.append(PartClientPrice(client_id=cid, client_name=cp["client_name"], price=cp["price"], currency=cp["currency"]))
             else:
                 row.price, row.currency = cp["price"], cp["currency"]
+                row.client_id = row.client_id or cid
         for wh_name, q in (rec.get("min_stock") or {}).items():
             if dry_run:
                 continue
@@ -246,8 +247,25 @@ def apply_products(db, records: Iterable[dict], user_id: Optional[str] = None, d
         db.rollback()
     else:
         db.flush()
+        relink_client_prices(db)
     total = db.scalar(select(func.count(Part.id)))
     return {"created": created, "updated": updated, "unmatched_clients": dict(unmatched_clients), "total_parts": total, "dry_run": dry_run}
+
+
+def relink_client_prices(db) -> int:
+    """Договорные цены, перенесённые до появления клиента в базе, привязываются к нему по названию организации."""
+    from sqlalchemy import select
+    from ..models import Client, PartClientPrice
+    clients = {norm_name(c.name): c.id for c in db.scalars(select(Client)).all()}
+    n = 0
+    for row in db.scalars(select(PartClientPrice).where(PartClientPrice.client_id.is_(None))).all():
+        cid = clients.get(norm_name(row.client_name))
+        if cid:
+            row.client_id = cid
+            n += 1
+    if n:
+        db.flush()
+    return n
 
 
 def apply_stock(db, records: Iterable[dict], default_warehouse: Optional[str] = None) -> dict:
@@ -265,9 +283,12 @@ def apply_stock(db, records: Iterable[dict], default_warehouse: Optional[str] = 
         if not parts:
             missing.append(rec["article"])
             continue
-        if len(parts) > 1:
-            ambiguous.append(rec["article"])
-            continue
+        if len(parts) > 1:   # артикул встречается дважды — выбираем по наименованию
+            same = [x for x in parts if rec.get("name") and norm_name(x.name_ru) == norm_name(rec["name"])]
+            if len(same) != 1:
+                ambiguous.append(rec["article"])
+                continue
+            parts = same
         p = parts[0]
         split = rec["by_warehouse"] or ({default_warehouse: rec["total"]} if default_warehouse else {})
         for wh_name, q in split.items():

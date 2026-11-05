@@ -64,6 +64,8 @@ def run() -> None:
             if not db.scalar(select(PaymentScheme).where(PaymentScheme.name == name)):
                 db.add(PaymentScheme(name=name, lines=lines))
         seed_parts_setup(db)
+        from app.services.moysklad_import import relink_client_prices
+        relink_client_prices(db)    # договорные цены запчастей → клиенты, заведённые после переноса
         # синтетическая история курса CNY/RUB за 4 года (в проде — загрузка с cbr.ru: POST /api/admin/fx/history)
         if not db.scalar(select(FxRate).where(FxRate.currency == "CNY")):
             import sys
