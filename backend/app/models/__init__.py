@@ -930,6 +930,7 @@ class Part(TimestampMixin, Base):
     min_price_currency: Mapped[str] = mapped_column(String(3), default="")
     # файлы и сделки
     photos: Mapped[list[str]] = mapped_column(JSONType, default=list)    # ссылки / пути к фото
+    photo_files: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # файлы фото в хранилище: [{path, name, ms_image_id, size}]
     spec_no: Mapped[str] = mapped_column(String(128), default="")        # спецификация, №
     addendum_no: Mapped[str] = mapped_column(String(128), default="")    # доп. соглашение, №
     # перенос из МойСклад

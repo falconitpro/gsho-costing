@@ -13,7 +13,7 @@ type Part = {
   description: string; manufacturer: string; oem_number: string; supplier_id: string | null; route_id: string | null;
   purchase_price?: number | null; purchase_currency?: string; purchase_on?: string | null; lead_days: number | null; hs_code: string; origin_country: string;
   moq: number | null; multiple: number | null; weight_kg: number | null; length_mm: number | null; width_mm: number | null; height_mm: number | null; volume_m3: number | null;
-  sale_price: number | null; sale_currency: string; min_price: number | null; min_price_currency: string; photos: string[]; spec_no: string; addendum_no: string;
+  sale_price: number | null; sale_currency: string; min_price: number | null; min_price_currency: string; photos: string[]; photo_files?: { name: string; ms_image_id?: string }[]; spec_no: string; addendum_no: string;
   cross_refs: Cross[]; applicability: Appl[]; client_prices: ClientPrice[]; stock?: Stock[]; stock_total?: number; source?: string;
 };
 type Row = { id: string; article: string; name_ru: string; unit: string; part_group: string; manufacturer: string; oem_number: string; status: string;
@@ -208,6 +208,15 @@ export default function PartsCatalog({ me }: { me: Me }) {
           {edit && <button className="btn add" onClick={() => set({ client_prices: [...cur.client_prices, { client_id: null, client_name: "", price: 0, currency: "EUR", valid_from: null, valid_to: null }] })}>Договорная цена клиента</button>}
 
           <h3>Файлы и сделки</h3>
+          {cur.id && (cur.photo_files?.length ?? 0) > 0 && (
+            <div className="row" style={{ flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+              {cur.photo_files!.map((f, i) => (
+                <div key={`${cur.id}-${i}-${f.name}`} style={{ textAlign: "center" }}>
+                  <a href={`/api/parts/catalog/${cur.id}/photo/${i}`} target="_blank" rel="noreferrer">
+                    <img src={`/api/parts/catalog/${cur.id}/photo/${i}`} alt={f.name} loading="lazy" style={{ width: 120, height: 120, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} /></a>
+                  {edit && <div><a href="#" style={{ fontSize: 11 }} onClick={(e) => { e.preventDefault(); if (confirm("Убрать фото из карточки?")) api.del<{ photo_files: { name: string }[] }>(`/api/parts/catalog/${cur.id}/photo/${i}`).then((x) => set({ photo_files: x.photo_files })); }}>убрать</a></div>}
+                </div>))}
+            </div>)}
           <div className="grid cols-3">
             <label className="f">Фото (ссылки, через запятую)<input value={cur.photos.join(", ")} disabled={!edit} onChange={(e) => set({ photos: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} /></label>
             {txt("Спецификация, №", "spec_no")}{txt("Доп. соглашение, №", "addendum_no")}
@@ -255,6 +264,8 @@ function ImportPanel({ warehouses, onDone }: { warehouses: { id: string; name: s
       <div className="row"><input type="file" accept=".xlsx" onChange={(e) => setStockFile(e.target.files?.[0] || null)} />
         <select value={wh} onChange={(e) => setWh(e.target.value)}><option value="">склады — из файла</option>{warehouses.map((w) => <option key={w.id} value={w.name}>{w.name}</option>)}</select>
         <button className="btn" disabled={!stockFile || busy} onClick={runStock}>Загрузить остатки</button></div>
+      <p className="muted">3. Фото: переносятся напрямую из МойСклад по коду товара; повторный запуск докачивает только новые фото.</p>
+      <MsPhotos />
       {busy && <div className="muted">Обрабатываю файл… 25 000 строк — около минуты.</div>}
       {err && <div className="alert info">{err}</div>}
       {res && (
@@ -267,6 +278,34 @@ function ImportPanel({ warehouses, onDone }: { warehouses: { id: string; name: s
           {res.result.missing_count != null && <div>Остатки: обновлено {res.result.updated}, не найдено в каталоге {res.result.missing_count}{res.result.ambiguous_articles?.length ? `, неоднозначных артикулов ${res.result.ambiguous_articles.length}` : ""}.</div>}
           {res.result.total_parts != null && <div className="muted">Всего карточек в каталоге: {res.result.total_parts}. Проверено {fmtDate(new Date().toISOString())}.</div>}
         </div>)}
+    </div>
+  );
+}
+
+type PhotoState = { running: boolean; processed?: number; total?: number; with_images?: number; parts_updated?: number; photos_added?: number;
+  not_found?: number; errors?: number; last_error?: string; finished_at?: string | null; token_set?: boolean;
+  last_run?: { at: string; ok: boolean; details: { photos_added?: number; parts_updated?: number; not_found?: number; errors?: number } } | null };
+
+function MsPhotos() {
+  const [st, setSt] = useState<PhotoState | null>(null);
+  const [err, setErr] = useState("");
+  const load = () => api.get<PhotoState>("/api/parts/import/moysklad-photos").then(setSt).catch((e) => setErr((e as Error).message));
+  useEffect(() => { load(); }, []);
+  useEffect(() => { if (!st?.running) return; const t = setInterval(load, 3000); return () => clearInterval(t); }, [st?.running]);
+  async function start() {
+    setErr("");
+    try { setSt(await api.post<PhotoState>("/api/parts/import/moysklad-photos")); setTimeout(load, 1500); } catch (e) { setErr((e as Error).message); }
+  }
+  if (!st) return null;
+  return (
+    <div style={{ marginBottom: 6 }}>
+      {!st.token_set && <div className="muted" style={{ fontSize: 12 }}>На сервере не задан токен МойСклад: владелец добавляет строку MOYSKLAD_TOKEN=… в backend/.env и перезапускает сервис.</div>}
+      <button className="btn" disabled={!st.token_set || st.running} onClick={start}>{st.running ? "Переношу фото…" : "Перенести фото из МойСклад"}</button>
+      {st.running && <span className="muted" style={{ marginLeft: 8 }}>товаров просмотрено {st.processed ?? 0} из {st.total || "…"}, фото добавлено {st.photos_added ?? 0}</span>}
+      {!st.running && st.last_run && <div className="muted" style={{ fontSize: 12 }}>Последний перенос {fmtDate(st.last_run.at)}: {st.last_run.ok ? "готово" : "ошибка"}
+        {st.last_run.details?.photos_added != null && ` — фото добавлено ${st.last_run.details.photos_added}, карточек ${st.last_run.details.parts_updated}, не найдено в каталоге ${st.last_run.details.not_found}, ошибок ${st.last_run.details.errors}`}</div>}
+      {st.last_error && <div className="muted" style={{ fontSize: 12 }}>Последняя ошибка: {st.last_error}</div>}
+      {err && <div className="alert info">{err}</div>}
     </div>
   );
 }

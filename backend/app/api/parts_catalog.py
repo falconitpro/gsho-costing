@@ -372,3 +372,67 @@ def import_stock(file: UploadFile = File(...), default_warehouse: str = Form("")
     audit(db, user.id, None, "part_import", "stock", "import", None, {"file": file.filename, **{k: v for k, v in result.items() if k != "missing_articles"}})
     db.commit()
     return {"report": report, "result": result}
+
+
+# ------------------------------------------------------------------ фото из МойСклад (файлы изображений товаров → хранилище модуля)
+
+@router.post("/import/moysklad-photos")
+def import_ms_photos(user: CurrentUser = Depends(_importer)):
+    """Запуск переноса фото в фоне: все товары МойСклад с изображениями, сопоставление по коду МойСклад (ms_id)."""
+    from .. import adapters
+    from ..adapters.moysklad import MoySkladClient, MoySkladError
+    from ..core.config import get_settings
+    from ..db import SessionLocal
+    from ..services import moysklad_photos
+    s = get_settings()
+    try:
+        client = MoySkladClient(s.moysklad_token, s.moysklad_api)
+    except MoySkladError as e:
+        raise HTTPException(422, str(e))
+    if not moysklad_photos.start(SessionLocal, client, adapters.storage(), user.id):
+        raise HTTPException(409, "Перенос фото уже идёт")
+    return moysklad_photos.STATE
+
+
+@router.get("/import/moysklad-photos")
+def import_ms_photos_state(db: Session = Depends(get_db), user: CurrentUser = Depends(_importer)):
+    from ..core.config import get_settings
+    from ..models import IntegrationLog
+    from ..services import moysklad_photos
+    last = db.scalars(select(IntegrationLog).where(IntegrationLog.system == "moysklad", IntegrationLog.operation == "photos")
+                      .order_by(IntegrationLog.at.desc())).first()
+    return {**moysklad_photos.STATE, "token_set": bool(get_settings().moysklad_token),
+            "last_run": {"at": last.at, "ok": last.ok, "details": last.details} if last else None}
+
+
+@router.get("/catalog/{pid}/photo/{i}")
+def part_photo(pid: str, i: int, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
+    from .. import adapters
+    p = _part_or_404(db, pid)
+    files = p.photo_files or []
+    if i < 0 or i >= len(files):
+        raise HTTPException(404, "Фото не найдено")
+    f = files[i]
+    fd, path = tempfile.mkstemp(suffix=os.path.splitext(f.get("name", ""))[1] or ".jpg")
+    os.close(fd)
+    adapters.storage().download(f["path"], path)
+    return FileResponse(path, filename=f.get("name") or "photo.jpg", content_disposition_type="inline", background=BackgroundTask(os.unlink, path),
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.delete("/catalog/{pid}/photo/{i}")
+def delete_part_photo(pid: str, i: int, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Убрать фото из карточки (файл в хранилище остаётся — удаление файлов выполняет владелец)."""
+    if not user.has(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN, Role.PURCHASING):
+        raise HTTPException(403, "Карточки ведут менеджеры, закупки, КД и ЗГД")
+    p = _part_or_404(db, pid)
+    files = list(p.photo_files or [])
+    if i < 0 or i >= len(files):
+        raise HTTPException(404, "Фото не найдено")
+    removed = files.pop(i)
+    p.photo_files = files
+    audit(db, user.id, None, "part", p.id, "photo_remove", removed, None)
+    db.commit()
+    return {"photo_files": files}

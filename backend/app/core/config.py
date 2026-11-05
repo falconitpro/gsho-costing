@@ -52,6 +52,8 @@ class Settings:
     smtp_from: str = field(default_factory=lambda: _env("SMTP_FROM", ""))
     # Мессенджер: console | wecom
     messenger_provider: str = field(default_factory=lambda: _env("MESSENGER_PROVIDER", "console"))
+    moysklad_token: str = field(default_factory=lambda: _env("MOYSKLAD_TOKEN", ""))          # токен JSON API МойСклад — только в backend/.env
+    moysklad_api: str = field(default_factory=lambda: _env("MOYSKLAD_API", "https://api.moysklad.ru/api/remap/1.2"))
     wecom_corp_id: str = field(default_factory=lambda: _env("WECOM_CORP_ID", ""))
     wecom_agent_id: str = field(default_factory=lambda: _env("WECOM_AGENT_ID", ""))
     wecom_secret: str = field(default_factory=lambda: _env("WECOM_SECRET", ""))
