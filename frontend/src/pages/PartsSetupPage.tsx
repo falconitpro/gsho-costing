@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
 import PartsCatalog from "../components/PartsCatalog";
+import PartsRequests from "../components/PartsRequests";
 
 // Запчасти, шаг 1: компании группы, маршруты поставки, политика наценок между компаниями (визы ЗГД и ФД).
 
@@ -27,7 +28,7 @@ const EMPTY_RULES: Rules = { default: {}, by_group: [], by_supplier: [], min_mar
 const num = (v: string) => (v === "" ? null : Number(v.replace(",", ".")));
 
 export default function PartsSetupPage({ me }: { me: Me }) {
-  const [tab, setTab] = useState<"catalog" | "entities" | "routes" | "markups">("catalog");
+  const [tab, setTab] = useState<"requests" | "catalog" | "entities" | "routes" | "markups">("requests");
   const [meta, setMeta] = useState<Meta | null>(null);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -47,12 +48,14 @@ export default function PartsSetupPage({ me }: { me: Me }) {
     <>
       <div className="page-head"><h1>Запасные части</h1></div>
       <div className="row" style={{ marginBottom: 10 }}>
+        <button className={`btn ${tab === "requests" ? "" : "ghost"}`} onClick={() => setTab("requests")}>Заявки</button>
         <button className={`btn ${tab === "catalog" ? "" : "ghost"}`} onClick={() => setTab("catalog")}>Каталог</button>
         {setupReader && <button className={`btn ${tab === "entities" ? "" : "ghost"}`} onClick={() => setTab("entities")}>Компании группы</button>}
         {setupReader && <button className={`btn ${tab === "routes" ? "" : "ghost"}`} onClick={() => setTab("routes")}>Маршруты поставки</button>}
         {markupReader && <button className={`btn ${tab === "markups" ? "" : "ghost"}`} onClick={() => setTab("markups")}>Наценки между компаниями</button>}
       </div>
       {msg && <div className="alert info">{msg}</div>}
+      {tab === "requests" && <PartsRequests me={me} />}
       {tab === "catalog" && <PartsCatalog me={me} />}
       {meta && tab === "entities" && <Entities meta={meta} list={entities} editor={entityEditor} onSaved={() => { loadEntities(); loadRoutes(); }} setMsg={setMsg} />}
       {meta && tab === "routes" && <RoutesTab meta={meta} list={routes} entities={entities} editor={routeEditor} name={name} onSaved={loadRoutes} setMsg={setMsg} />}

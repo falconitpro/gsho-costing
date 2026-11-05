@@ -993,3 +993,49 @@ class PartStock(Base):
     in_transit: Mapped[float] = mapped_column(Float, default=0)
     min_qty: Mapped[Optional[float]] = mapped_column(Float)
     as_of: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+# ------------------------------------------------------------------ запчасти: заявки клиентов (ТЗ запчастей, раздел 5, попозиционный учёт)
+
+class PartRequest(TimestampMixin, Base):
+    """Заявка клиента на запчасти. Статус заявки собирается из статусов строк."""
+    __tablename__ = "part_requests"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(32), unique=True)          # ЗЧ-2026-0001
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), index=True)
+    manager_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    contact: Mapped[str] = mapped_column(String(255), default="")
+    channel: Mapped[str] = mapped_column(String(16), default="email")    # email | wecom | phone | excel | other
+    machine: Mapped[str] = mapped_column(String(255), default="")        # машина клиента (текстом, до парка машин)
+    urgent: Mapped[bool] = mapped_column(Boolean, default=False)         # «машина стоит»
+    warranty: Mapped[bool] = mapped_column(Boolean, default=False)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    closed: Mapped[str] = mapped_column(String(16), default="")          # "" | lost | cancelled | done
+    close_reason: Mapped[str] = mapped_column(Text, default="")
+    approvals: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # [{role, user_id, name, at, comment, lines: [...], level}]
+    lines: Mapped[list["PartRequestLine"]] = relationship(cascade="all, delete-orphan", order_by="PartRequestLine.no")
+
+
+class PartRequestLine(TimestampMixin, Base):
+    """Строка заявки — единица учёта: свой подбор, источник, поставщик, срок, цена и статус."""
+    __tablename__ = "part_request_lines"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    request_id: Mapped[str] = mapped_column(ForeignKey("part_requests.id", ondelete="CASCADE"), index=True)
+    no: Mapped[int] = mapped_column(Integer)
+    parent_line_id: Mapped[Optional[str]] = mapped_column(ForeignKey("part_request_lines.id"))   # часть разделённой строки
+    raw_article: Mapped[str] = mapped_column(String(128), default="")    # как написал клиент
+    raw_name: Mapped[str] = mapped_column(String(512), default="")
+    qty: Mapped[float] = mapped_column(Float, default=1)
+    unit: Mapped[str] = mapped_column(String(16), default="шт")
+    part_id: Mapped[Optional[str]] = mapped_column(ForeignKey("parts.id"))
+    match_kind: Mapped[str] = mapped_column(String(16), default="")      # article | oem | supplier | analog | manual | ""
+    source: Mapped[str] = mapped_column(String(16), default="")          # stock | order
+    supplier_id: Mapped[Optional[str]] = mapped_column(ForeignKey("factories.id"))
+    route_id: Mapped[Optional[str]] = mapped_column(ForeignKey("supply_routes.id"))
+    lead_days: Mapped[Optional[int]] = mapped_column(Integer)            # срок поставки клиенту, дн
+    price: Mapped[Optional[float]] = mapped_column(Float)                # цена клиенту за единицу
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    price_source: Mapped[str] = mapped_column(String(16), default="")    # contract | pricelist | calc | manual
+    calc: Mapped[dict] = mapped_column(JSONType, default=dict)          # снимок расчёта: себестоимость, порог, маржа (видят КД, ФД, ЗГД)
+    status: Mapped[str] = mapped_column(String(24), default="new")
+    comment: Mapped[str] = mapped_column(Text, default="")

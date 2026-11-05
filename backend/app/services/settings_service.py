@@ -49,6 +49,11 @@ DEFAULTS: dict[str, Any] = {
     "sla_days": {"logistics": 1, "service": 2, "cd": 1, "fd": 1, "gd": 1, "manager_rework": 1},
     "kp_fx_clause_pct": 5.0,
     "kp_validity_days": 30,
+    # запасные части (ТЗ запчастей, раздел 6): порог маржи по себестоимости строки, минимум маржи КП, допуск КД
+    "parts_margin_bands": [{"up_to_rub": 10_000, "pct": 40.0}, {"up_to_rub": 100_000, "pct": 30.0}, {"up_to_rub": None, "pct": 20.0}],
+    "parts_min_margin_kp_rub": 5000.0,
+    "parts_cd_tolerance_pp": 5.0,
+    "parts_kp_validity_days": 30,
     "commissioning_days": 5,
     # задача 1: типовые схемы оплаты (пока КД не задал условия) и БГ на аванс
     "default_client_payment_scheme": [
