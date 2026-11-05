@@ -601,6 +601,9 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     assert mk["trademarks"] == ["SHILI", "SL"]
     cl0 = _ok(client.get("/api/refs/clients", headers=H(MGR)))[0]
     dtm = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": cl0["id"], "site": "марки"}), 201)
+    assert client.post(f"/api/deals/{dtm['id']}/positions", headers=H(MGR), json={"factory_id": fz["id"], "model": "FL-0.5(C)",
+                                                                                  "machine_type": "Погрузчик", "unit_price": 100000}).status_code == 409   # завод не утверждён
+    _ok(client.post(f"/api/refs/factories/{fz['id']}/approve", headers=H(CD), json={}))
     ptm = _ok(client.post(f"/api/deals/{dtm['id']}/positions", headers=H(MGR), json={"factory_id": fz["id"], "model": "FL-0.5(C)",
                                                                                      "machine_type": "Погрузчик", "unit_price": 100000}), 201)
     assert ptm["trademark"] == "SHILI"                                        # подставлена по заводу

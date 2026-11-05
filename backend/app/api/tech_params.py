@@ -287,6 +287,9 @@ def send_request(deal_id: str, pos_id: str, body: RequestIn, db: Session = Depen
                     image_paths.append(s.download(att.storage_path, os.path.join(tempfile.mkdtemp(), att.file_name)))
                 except Exception:
                     pass
+    from ..services.suppliers import require_approved
+    for fid in ids:
+        require_approved(db.get(Factory, fid), "отправить ему запрос")
     out = []
     for fid in ids:
         factory = db.get(Factory, fid)
@@ -318,6 +321,9 @@ def request_file(deal_id: str, pos_id: str, factory_id: str = "", factory_ids: s
     pos = _pos(db, deal, pos_id)
     ids = [x for x in (factory_ids or "").split(",") if x] or [factory_id or pos.factory_id]
     factories = [f for f in (db.get(Factory, i) for i in dict.fromkeys(ids)) if f] or [None]
+    from ..services.suppliers import require_approved
+    for f in factories:
+        require_approved(f, "сформировать ему запрос")
     paths = []
     for f in factories:
         path, _ = tps.build_request_xlsx(db, pos, f, deal.number, user.id)

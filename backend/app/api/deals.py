@@ -249,8 +249,11 @@ def update_deal(deal_id: str, body: DealUpdate, db: Session = Depends(get_db), u
 def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
     _editable_by_manager(deal, user)
-    if db.get(Factory, body.factory_id) is None:
+    fac = db.get(Factory, body.factory_id)
+    if fac is None:
         raise HTTPException(400, "Завод не найден")
+    from ..services.suppliers import require_approved
+    require_approved(fac, "выбрать его в сделке")
     data = body.model_dump()
     comment = data.pop("price_comment")
     form_rows = data.pop("form_rows") or []
@@ -319,6 +322,12 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
     if pos is None or pos.deal_id != deal.id:
         raise HTTPException(404)
     allowed = set(PositionIn.model_fields) - {"price_comment", "tech_params", "logistics_params", "factory_payments", "form_rows"}
+    if body.get("factory_id") and body["factory_id"] != pos.factory_id:
+        from ..services.suppliers import require_approved
+        fac = db.get(Factory, body["factory_id"])
+        if fac is None:
+            raise HTTPException(400, "Завод не найден")
+        require_approved(fac, "выбрать его в сделке")
     before = serialize(pos)
     for k, v in body.items():
         if k in allowed:
@@ -475,10 +484,17 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     # завод
     fname = parsed.header.get("factory_name")
     factory = db.scalar(select(Factory).where(Factory.name == fname))
+    from ..services.suppliers import is_approved, new_factory_status
     if factory is None:
-        factory = Factory(name=fname, address=parsed.header.get("factory_address") or "")
+        factory = Factory(name=fname, address=parsed.header.get("factory_address") or "", supplies=["gsho"], **new_factory_status(user))
         db.add(factory)
         db.flush()
+    if not is_approved(factory):
+        imp.factory_id = factory.id
+        imp.errors = [*(imp.errors or []), {"code": "0.7", "message": f"Завод «{fname}» не утверждён КД или ЗГД", "severity": "error"}]
+        db.commit()
+        raise HTTPException(409, f"Завод «{fname}» {'заведён и ' if factory.approval_status == 'pending' else ''}ждёт утверждения КД или ЗГД "
+                                 "(раздел «Поставщики») — загрузите RFQ повторно после утверждения")
     imp.factory_id = factory.id
     from ..services.catalog_service import resolve_trademark
     pos_data = parsed.position

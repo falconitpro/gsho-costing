@@ -319,7 +319,8 @@ def add_equipment(db: Session, data: dict, user, editor: bool) -> tuple[Equipmen
             raise ValueError("Укажите завод")
         factory = db.scalar(select(Factory).where(Factory.name == fname))
         if factory is None:
-            factory = Factory(name=fname, address=data.get("factory_address") or "")
+            from .suppliers import new_factory_status
+            factory = Factory(name=fname, address=data.get("factory_address") or "", supplies=["gsho"], **new_factory_status(user))
             db.add(factory)
             db.flush()
     mt_name = (data.get("machine_type") or "").strip()
