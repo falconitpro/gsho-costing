@@ -270,7 +270,8 @@ META: dict[str, dict] = {
     "kp_validity_days": {"group": "Сроки и календарь", "title": "Срок действия КП", "unit": "дн.", "type": "number"},
     # Запасные части
     "parts_margin_bands": {"group": "Запасные части", "title": "Порог маржи по себестоимости строки", "type": "table",
-                           "columns": [{"key": "up_to_rub", "label": "Себестоимость строки до, ₽ (пусто — дороже)"}, {"key": "pct", "label": "Порог маржи, %"}],
+                           "columns": [{"key": "up_to_rub", "label": "Себестоимость строки до, ₽", "type": "number", "nullable": True},
+                                       {"key": "pct", "label": "Порог маржи, %", "type": "number"}],
                            "help": "Цена ниже порога — виза КД (в пределах допуска) или ФД."},
     "parts_min_margin_kp_rub": {"group": "Запасные части", "title": "Минимальная маржа КП", "unit": "₽", "type": "number",
                                 "help": "Если маржа по строкам меньше — в КП добавляется строка «Обработка заказа» на разницу."},
