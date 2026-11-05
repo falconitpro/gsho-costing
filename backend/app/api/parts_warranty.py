@@ -424,6 +424,7 @@ def create_batch(body: BatchIn, db: Session = Depends(get_db), user: CurrentUser
     db.add(b)
     db.flush()
     _attach(db, b, body.po_line_ids)
+    db.flush()                       # autoflush выключен — строки партии должны быть видны запросам ниже
     _apply_status(db, b, user)
     db.commit()
     return _batch_payload(db, b, user)
