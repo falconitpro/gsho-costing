@@ -877,3 +877,119 @@ class MarkupPolicy(Base):
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+# ------------------------------------------------------------------ запчасти: каталог (карточка утверждена 05.11.2026, ТЗ запчастей, раздел 4)
+
+class Warehouse(TimestampMixin, Base):
+    """Склад: физический (РФ) или виртуальный (Киргизия). Имя — как в МойСклад, для сверки и переноса остатков."""
+    __tablename__ = "warehouses"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    legal_entity_id: Mapped[Optional[str]] = mapped_column(ForeignKey("legal_entities.id"))
+    kind: Mapped[str] = mapped_column(String(16), default="physical")    # physical | virtual
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Part(TimestampMixin, Base):
+    """Карточка запасной части. Артикул может повторяться у разных производителей — дубли показываются на разбор."""
+    __tablename__ = "parts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # основное
+    article: Mapped[str] = mapped_column(String(128), index=True)          # основной номер *
+    name_ru: Mapped[str] = mapped_column(String(512))                     # *
+    unit: Mapped[str] = mapped_column(String(16), default="шт")           # *
+    part_group: Mapped[str] = mapped_column(String(128), default="", index=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")     # active | archive
+    names: Mapped[dict] = mapped_column(JSONType, default=dict)           # {"en": …, "cn": …, "de": …}
+    description: Mapped[str] = mapped_column(Text, default="")
+    # номера
+    manufacturer: Mapped[str] = mapped_column(String(255), default="")   # производитель
+    oem_number: Mapped[str] = mapped_column(String(128), default="", index=True)   # артикул производителя (OEM)
+    # закупка
+    supplier_id: Mapped[Optional[str]] = mapped_column(ForeignKey("factories.id"))   # основной поставщик
+    route_id: Mapped[Optional[str]] = mapped_column(ForeignKey("supply_routes.id"))  # маршрут по умолчанию
+    purchase_price: Mapped[Optional[float]] = mapped_column(Float)        # последняя закупочная цена
+    purchase_currency: Mapped[str] = mapped_column(String(3), default="")
+    purchase_on: Mapped[Optional[date]] = mapped_column(Date)
+    lead_days: Mapped[Optional[int]] = mapped_column(Integer)            # срок поставки поставщика
+    hs_code: Mapped[str] = mapped_column(String(14), default="")
+    origin_country: Mapped[str] = mapped_column(String(64), default="")
+    moq: Mapped[Optional[float]] = mapped_column(Float)                  # минимальная партия
+    multiple: Mapped[Optional[float]] = mapped_column(Float)             # кратность
+    # логистика
+    weight_kg: Mapped[Optional[float]] = mapped_column(Float)
+    length_mm: Mapped[Optional[float]] = mapped_column(Float)
+    width_mm: Mapped[Optional[float]] = mapped_column(Float)
+    height_mm: Mapped[Optional[float]] = mapped_column(Float)
+    volume_m3: Mapped[Optional[float]] = mapped_column(Float)
+    # цены (себестоимость рассчитывается модулем и в карточке не хранится)
+    sale_price: Mapped[Optional[float]] = mapped_column(Float)           # цена продажи (прайс)
+    sale_currency: Mapped[str] = mapped_column(String(3), default="")
+    min_price: Mapped[Optional[float]] = mapped_column(Float)
+    min_price_currency: Mapped[str] = mapped_column(String(3), default="")
+    # файлы и сделки
+    photos: Mapped[list[str]] = mapped_column(JSONType, default=list)    # ссылки / пути к фото
+    spec_no: Mapped[str] = mapped_column(String(128), default="")        # спецификация, №
+    addendum_no: Mapped[str] = mapped_column(String(128), default="")    # доп. соглашение, №
+    # перенос из МойСклад
+    ms_id: Mapped[Optional[str]] = mapped_column(String(36), unique=True)   # UUID МойСклад
+    ms_code: Mapped[str] = mapped_column(String(64), default="")
+    source: Mapped[str] = mapped_column(String(16), default="manual")    # manual | moysklad | excel
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    cross_refs: Mapped[list["PartCrossRef"]] = relationship(cascade="all, delete-orphan", order_by="PartCrossRef.kind",
+                                                           foreign_keys="PartCrossRef.part_id")
+    applicability: Mapped[list["PartApplicability"]] = relationship(cascade="all, delete-orphan")
+    prices: Mapped[list["PartClientPrice"]] = relationship(cascade="all, delete-orphan")
+    stock: Mapped[list["PartStock"]] = relationship(cascade="all, delete-orphan")
+
+
+class PartCrossRef(Base):
+    """Номера поставщиков и аналоги."""
+    __tablename__ = "part_cross_refs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    part_id: Mapped[str] = mapped_column(ForeignKey("parts.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))           # supplier | analog_full | analog_rework
+    number: Mapped[str] = mapped_column(String(128), index=True)
+    supplier_id: Mapped[Optional[str]] = mapped_column(ForeignKey("factories.id"))   # для номера поставщика
+    analog_part_id: Mapped[Optional[str]] = mapped_column(ForeignKey("parts.id"))   # аналог, если он есть в каталоге
+    manufacturer: Mapped[str] = mapped_column(String(255), default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class PartApplicability(Base):
+    """Применимость: модель из каталога ГШО или модель другого производителя (текстом), узел / агрегат."""
+    __tablename__ = "part_applicability"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    part_id: Mapped[str] = mapped_column(ForeignKey("parts.id", ondelete="CASCADE"), index=True)
+    equipment_model_id: Mapped[Optional[str]] = mapped_column(ForeignKey("equipment_models.id"))
+    other_manufacturer: Mapped[str] = mapped_column(String(255), default="")
+    other_model: Mapped[str] = mapped_column(String(255), default="")
+    assembly: Mapped[str] = mapped_column(String(255), default="")      # узел / агрегат
+
+
+class PartClientPrice(Base):
+    """Договорная цена клиента (прайс-лист клиента в МойСклад — колонка «Цена: <клиент>»)."""
+    __tablename__ = "part_client_prices"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    part_id: Mapped[str] = mapped_column(ForeignKey("parts.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[Optional[str]] = mapped_column(ForeignKey("clients.id"))
+    client_name: Mapped[str] = mapped_column(String(255), default="")    # как в источнике — пока клиент не сопоставлен
+    price: Mapped[float] = mapped_column(Float)
+    currency: Mapped[str] = mapped_column(String(3), default="EUR")
+    valid_from: Mapped[Optional[date]] = mapped_column(Date)
+    valid_to: Mapped[Optional[date]] = mapped_column(Date)
+
+
+class PartStock(Base):
+    """Остаток, резерв и транзит по складу (до полного складского учёта — снимок из переноса) и минимальный остаток."""
+    __tablename__ = "part_stock"
+    __table_args__ = (UniqueConstraint("part_id", "warehouse_id", name="uq_part_stock"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    part_id: Mapped[str] = mapped_column(ForeignKey("parts.id", ondelete="CASCADE"), index=True)
+    warehouse_id: Mapped[str] = mapped_column(ForeignKey("warehouses.id"), index=True)
+    qty: Mapped[float] = mapped_column(Float, default=0)
+    reserved: Mapped[float] = mapped_column(Float, default=0)
+    in_transit: Mapped[float] = mapped_column(Float, default=0)
+    min_qty: Mapped[Optional[float]] = mapped_column(Float)
+    as_of: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

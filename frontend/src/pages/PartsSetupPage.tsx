@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
+import PartsCatalog from "../components/PartsCatalog";
 
 // Запчасти, шаг 1: компании группы, маршруты поставки, политика наценок между компаниями (визы ЗГД и ФД).
 
@@ -26,7 +27,7 @@ const EMPTY_RULES: Rules = { default: {}, by_group: [], by_supplier: [], min_mar
 const num = (v: string) => (v === "" ? null : Number(v.replace(",", ".")));
 
 export default function PartsSetupPage({ me }: { me: Me }) {
-  const [tab, setTab] = useState<"entities" | "routes" | "markups">("entities");
+  const [tab, setTab] = useState<"catalog" | "entities" | "routes" | "markups">("catalog");
   const [meta, setMeta] = useState<Meta | null>(null);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -35,6 +36,7 @@ export default function PartsSetupPage({ me }: { me: Me }) {
   const entityEditor = has("cd", "gd", "admin");
   const routeEditor = has("cd", "gd", "admin", "logistician");
   const markupReader = can(me, "cost") || has("cd", "fd", "gd");
+  const setupReader = has("cd", "fd", "gd", "admin", "logistician");
 
   const loadEntities = () => api.get<Entity[]>("/api/parts/entities").then(setEntities);
   const loadRoutes = () => api.get<Route[]>("/api/parts/routes?include_archived=true").then(setRoutes);
@@ -45,11 +47,13 @@ export default function PartsSetupPage({ me }: { me: Me }) {
     <>
       <div className="page-head"><h1>Запасные части</h1></div>
       <div className="row" style={{ marginBottom: 10 }}>
-        <button className={`btn ${tab === "entities" ? "" : "ghost"}`} onClick={() => setTab("entities")}>Компании группы</button>
-        <button className={`btn ${tab === "routes" ? "" : "ghost"}`} onClick={() => setTab("routes")}>Маршруты поставки</button>
+        <button className={`btn ${tab === "catalog" ? "" : "ghost"}`} onClick={() => setTab("catalog")}>Каталог</button>
+        {setupReader && <button className={`btn ${tab === "entities" ? "" : "ghost"}`} onClick={() => setTab("entities")}>Компании группы</button>}
+        {setupReader && <button className={`btn ${tab === "routes" ? "" : "ghost"}`} onClick={() => setTab("routes")}>Маршруты поставки</button>}
         {markupReader && <button className={`btn ${tab === "markups" ? "" : "ghost"}`} onClick={() => setTab("markups")}>Наценки между компаниями</button>}
       </div>
       {msg && <div className="alert info">{msg}</div>}
+      {tab === "catalog" && <PartsCatalog me={me} />}
       {meta && tab === "entities" && <Entities meta={meta} list={entities} editor={entityEditor} onSaved={() => { loadEntities(); loadRoutes(); }} setMsg={setMsg} />}
       {meta && tab === "routes" && <RoutesTab meta={meta} list={routes} entities={entities} editor={routeEditor} name={name} onSaved={loadRoutes} setMsg={setMsg} />}
       {meta && tab === "markups" && markupReader && <Markups me={me} meta={meta} entities={entities} routes={routes.filter((r) => r.is_active)} setMsg={setMsg} />}
