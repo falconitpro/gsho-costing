@@ -29,3 +29,11 @@ def test_next_to():
 def test_kit_lines():
     k = [{"lines": [{"part_id": "a", "article": "A", "qty": 2}, {"part_id": "b", "article": "B", "qty": 1}]}, {"lines": [{"part_id": "a", "article": "A", "qty": 1}]}]
     assert kit_lines(k) == [{"part_id": "a", "article": "A", "name": "", "qty": 3.0}, {"part_id": "b", "article": "B", "name": "", "qty": 1.0}]
+
+
+def test_sla_norms():
+    from app.services.parts_sla import norm_days, overdue
+    assert norm_days(5, False) == 5 and norm_days(5, True) == 3 and norm_days(1, True) == 1
+    assert overdue(date(2026, 11, 1), 2, False, date(2026, 11, 4)) and not overdue(date(2026, 11, 1), 2, False, date(2026, 11, 3))
+    assert overdue(date(2026, 11, 1), 2, True, date(2026, 11, 3))
+    assert not overdue(None, 2, False, date(2026, 11, 3))

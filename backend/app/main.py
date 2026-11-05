@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api import admin, auth, catalog, deal_trash, deals, documents, execution, images_options, logistics, parts_catalog, parts_fleet, parts_po, parts_requests, parts_rfq, parts_inventory, parts_setup, parts_stock, pricing, references, service, tasks_files_planfact, team, tech_params
+from .api import admin, auth, catalog, deal_trash, deals, documents, execution, images_options, logistics, parts_catalog, parts_fleet, parts_po, parts_requests, parts_rfq, parts_inventory, parts_setup, parts_reports, parts_stock, parts_warranty, pricing, references, service, tasks_files_planfact, team, tech_params
 from .core.config import get_settings
 from .db import init_db
 
@@ -63,6 +63,13 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("daily job failed: %s", e)
+        try:   # запчасти: нормативные сроки (КП клиенту, ответ и подтверждение поставщика, просроченная поставка)
+            from .services.parts_sla import check as check_parts_sla
+            with SessionLocal() as db:
+                if check_parts_sla(db):
+                    db.commit()
+        except Exception as e:   # pragma: no cover
+            log.warning("parts SLA check failed: %s", e)
         try:   # запчасти: напоминания менеджерам о ТО машин клиентов
             from .api.parts_fleet import check_reminders
             with SessionLocal() as db:
@@ -94,7 +101,7 @@ app = FastAPI(title="Модуль расчёта себестоимости и �
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 for r in (auth.router, deals.router, logistics.router, service.router, pricing.router, references.router, admin.router, tasks_files_planfact.router,
-          execution.router, tech_params.router, catalog.router, images_options.router, team.router, documents.router, deal_trash.router, parts_setup.router, parts_catalog.router, parts_requests.router, parts_rfq.router, parts_po.router, parts_stock.router, parts_inventory.router, parts_fleet.router):
+          execution.router, tech_params.router, catalog.router, images_options.router, team.router, documents.router, deal_trash.router, parts_setup.router, parts_catalog.router, parts_requests.router, parts_rfq.router, parts_po.router, parts_stock.router, parts_inventory.router, parts_fleet.router, parts_warranty.router, parts_reports.router):
     app.include_router(r)
 
 

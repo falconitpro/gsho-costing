@@ -180,6 +180,7 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
           <span className="muted" style={{ fontSize: 11 }}>строки «со склада» — жёсткий резерв; «под заказ» — в «Заказы поставщикам» → «К заказу»</span>
         </div>)}
       {!closed && <SupplierPanel r={r} sel={sel} act={act} />}
+      {r.warranty && <ClaimFromRequest r={r} />}
       {!closed && r.lines.some((l) => ["ordered", "po", "transit", "in_stock"].includes(l.status)) && <ShipPanel r={r} act={act} />}
 
       <h3>Итого по строкам в работе</h3>
@@ -377,5 +378,21 @@ function ShipPanel({ r, act }: { r: Req; act: <T>(fn: () => Promise<T>, ok?: str
           warehouse_id: w, lines: Object.entries(qty).filter(([, v]) => Number(v) > 0).map(([line_id, v]) => ({ line_id, qty: Number(v.replace(",", ".")) })) }), "Отгрузка проведена, остаток и резерв уменьшены")}>Отгрузить</button>
       </div>
     </>
+  );
+}
+
+function ClaimFromRequest({ r }: { r: Req }) {
+  const [sups, setSups] = useState<{ id: string; name: string; short_name: string }[]>([]);
+  const [sid, setSid] = useState("");
+  const [msg, setMsg] = useState("");
+  useEffect(() => { api.get<typeof sups>("/api/refs/factories").then(setSups).catch(() => setSups([])); }, []);
+  return (
+    <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
+      <b>Гарантийная заявка:</b> претензия заводу
+      <select value={sid} onChange={(e) => setSid(e.target.value)}><option value="">— завод —</option>{sups.map((s) => <option key={s.id} value={s.id}>{s.short_name || s.name}</option>)}</select>
+      <button className="btn ghost" disabled={!sid} onClick={() => api.post<{ number: string }>("/api/parts/claims", { supplier_id: sid, request_id: r.id, machine_id: (r as Req & { machine_id?: string }).machine_id || null })
+        .then((c) => setMsg(`Создана претензия ${c.number} — откройте вкладку «Гарантия», приложите фото и отправьте заводу`)).catch((e) => setMsg((e as Error).message))}>Создать претензию</button>
+      {msg && <span className="muted">{msg}</span>}
+    </div>
   );
 }

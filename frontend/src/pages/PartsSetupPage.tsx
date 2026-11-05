@@ -6,6 +6,9 @@ import PartsRequests from "../components/PartsRequests";
 import PartsPurchase from "../components/PartsPurchase";
 import PartsWarehouse from "../components/PartsWarehouse";
 import PartsFleet from "../components/PartsFleet";
+import PartsBatches from "../components/PartsBatches";
+import PartsClaims from "../components/PartsClaims";
+import PartsReports from "../components/PartsReports";
 
 // Запчасти, шаг 1: компании группы, маршруты поставки, политика наценок между компаниями (визы ЗГД и ФД).
 
@@ -31,7 +34,7 @@ const EMPTY_RULES: Rules = { default: {}, by_group: [], by_supplier: [], min_mar
 const num = (v: string) => (v === "" ? null : Number(v.replace(",", ".")));
 
 export default function PartsSetupPage({ me }: { me: Me }) {
-  const [tab, setTab] = useState<"requests" | "po" | "stock" | "fleet" | "catalog" | "entities" | "routes" | "markups">("requests");
+  const [tab, setTab] = useState<"requests" | "po" | "batches" | "stock" | "fleet" | "claims" | "reports" | "catalog" | "entities" | "routes" | "markups">("requests");
   const [meta, setMeta] = useState<Meta | null>(null);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -52,11 +55,14 @@ export default function PartsSetupPage({ me }: { me: Me }) {
   return (
     <>
       <div className="page-head"><h1>Запасные части</h1></div>
-      <div className="row" style={{ marginBottom: 10 }}>
+      <div className="row" style={{ marginBottom: 10, flexWrap: "wrap" }}>
         <button className={`btn ${tab === "requests" ? "" : "ghost"}`} onClick={() => setTab("requests")}>Заявки</button>
         {poReader && <button className={`btn ${tab === "po" ? "" : "ghost"}`} onClick={() => setTab("po")}>Заказы поставщикам</button>}
+        {poReader && <button className={`btn ${tab === "batches" ? "" : "ghost"}`} onClick={() => setTab("batches")}>Партии</button>}
         {poReader && <button className={`btn ${tab === "stock" ? "" : "ghost"}`} onClick={() => setTab("stock")}>Склад</button>}
         {fleetReader && <button className={`btn ${tab === "fleet" ? "" : "ghost"}`} onClick={() => setTab("fleet")}>Парк машин</button>}
+        {fleetReader && <button className={`btn ${tab === "claims" ? "" : "ghost"}`} onClick={() => setTab("claims")}>Гарантия</button>}
+        {fleetReader && <button className={`btn ${tab === "reports" ? "" : "ghost"}`} onClick={() => setTab("reports")}>Отчёты</button>}
         <button className={`btn ${tab === "catalog" ? "" : "ghost"}`} onClick={() => setTab("catalog")}>Каталог</button>
         {setupReader && <button className={`btn ${tab === "entities" ? "" : "ghost"}`} onClick={() => setTab("entities")}>Компании группы</button>}
         {setupReader && <button className={`btn ${tab === "routes" ? "" : "ghost"}`} onClick={() => setTab("routes")}>Маршруты поставки</button>}
@@ -67,6 +73,9 @@ export default function PartsSetupPage({ me }: { me: Me }) {
       {tab === "po" && <PartsPurchase me={me} />}
       {tab === "stock" && <PartsWarehouse />}
       {tab === "fleet" && <PartsFleet me={me} />}
+      {tab === "batches" && <PartsBatches />}
+      {tab === "claims" && <PartsClaims me={me} />}
+      {tab === "reports" && <PartsReports />}
       {tab === "catalog" && <PartsCatalog me={me} />}
       {meta && tab === "entities" && <Entities meta={meta} list={entities} editor={entityEditor} onSaved={() => { loadEntities(); loadRoutes(); }} setMsg={setMsg} />}
       {meta && tab === "routes" && <RoutesTab meta={meta} list={routes} entities={entities} editor={routeEditor} name={name} onSaved={loadRoutes} setMsg={setMsg} />}

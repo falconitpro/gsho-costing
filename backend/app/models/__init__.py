@@ -1006,6 +1006,7 @@ class PartRequest(TimestampMixin, Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     number: Mapped[str] = mapped_column(String(32), unique=True)          # ЗЧ-2026-0001
     machine_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)   # машина клиента из парка (подбор по применимости, ТО)
+    sla_notified: Mapped[list[str]] = mapped_column(JSONType, default=list)   # отправленные напоминания о сроках: kp
     client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), index=True)
     manager_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     contact: Mapped[str] = mapped_column(String(255), default="")
@@ -1095,6 +1096,7 @@ class SupplierRfq(TimestampMixin, Base):
     __tablename__ = "supplier_rfqs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     number: Mapped[str] = mapped_column(String(32), unique=True)          # ЗП-2026-0001
+    sla_notified: Mapped[list[str]] = mapped_column(JSONType, default=list)   # overdue — напоминание о просроченном ответе
     supplier_id: Mapped[str] = mapped_column(ForeignKey("factories.id"), index=True)
     language: Mapped[str] = mapped_column(String(4), default="ru")        # ru | zh | de | en
     status: Mapped[str] = mapped_column(String(16), default="draft")      # draft | sent | partial | answered | closed
@@ -1136,6 +1138,7 @@ class PurchaseOrder(TimestampMixin, Base):
     __tablename__ = "purchase_orders"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     number: Mapped[str] = mapped_column(String(32), unique=True)                     # ЗК-2026-0001, внутригрупповые — ЗК-2026-0001/2
+    sla_notified: Mapped[list[str]] = mapped_column(JSONType, default=list)   # confirm — нет подтверждения поставщика в срок
     kind: Mapped[str] = mapped_column(String(16), default="external")                # external | intragroup
     parent_po_id: Mapped[Optional[str]] = mapped_column(ForeignKey("purchase_orders.id", ondelete="CASCADE"), index=True)
     step_no: Mapped[int] = mapped_column(Integer, default=1)
@@ -1179,6 +1182,10 @@ class PoLine(Base):
     status: Mapped[str] = mapped_column(String(16), default="ordered")
     received_qty: Mapped[float] = mapped_column(Float, default=0)
     eta: Mapped[Optional[date]] = mapped_column(Date)                                # плановая дата на складе РФ
+    overdue_eta: Mapped[Optional[date]] = mapped_column(Date)                         # по какой дате уже было уведомление о просрочке
+    warranty_claim_id: Mapped[Optional[str]] = mapped_column(String(36))              # гарантийная замена по претензии (цена 0)
+    batch_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)           # сборная партия у экспедитора
+    extra_cost_rub: Mapped[float] = mapped_column(Float, default=0)                   # доля расходов партии на строку, ₽
     history: Mapped[list[dict]] = mapped_column(JSONType, default=list)              # [{at, status, eta, by}]
     comment: Mapped[str] = mapped_column(Text, default="")
 
@@ -1375,3 +1382,49 @@ class MachineReminder(Base):
     notified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     request_id: Mapped[Optional[str]] = mapped_column(String(36))                    # заявка, созданная по напоминанию
     dismissed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+# ------------------------------------------------------------------ запчасти: гарантийные претензии к заводу, сборные партии (ТЗ запчастей, разделы 7, 9)
+
+class WarrantyClaim(TimestampMixin, Base):
+    """Гарантийная претензия к заводу: что вышло из строя, наработка, фото; ответ завода и компенсация (деталью, деньгами, скидкой)."""
+    __tablename__ = "warranty_claims"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(32), unique=True)                     # ГП-2026-0001
+    supplier_id: Mapped[str] = mapped_column(ForeignKey("factories.id"), index=True)
+    client_id: Mapped[Optional[str]] = mapped_column(ForeignKey("clients.id"))
+    machine_id: Mapped[Optional[str]] = mapped_column(String(36))
+    deal_id: Mapped[Optional[str]] = mapped_column(ForeignKey("deals.id"))            # сделка ГШО — расход на её гарантийный резерв
+    request_id: Mapped[Optional[str]] = mapped_column(String(36))                     # гарантийная заявка клиента
+    failure_on: Mapped[Optional[date]] = mapped_column(Date)
+    machine_hours: Mapped[Optional[float]] = mapped_column(Float)
+    description: Mapped[str] = mapped_column(Text, default="")
+    lines: Mapped[list[dict]] = mapped_column(JSONType, default=list)                # [{part_id, article, name, qty, cost_rub}]
+    photos: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="draft")                 # draft | sent | accepted | partial | rejected | compensated | closed
+    answer_due: Mapped[Optional[date]] = mapped_column(Date)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    answered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    answer: Mapped[str] = mapped_column(Text, default="")
+    compensations: Mapped[list[dict]] = mapped_column(JSONType, default=list)        # [{id, kind: part|money|discount, qty, amount, currency, note, po_line_id, received_on}]
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    close_reason: Mapped[str] = mapped_column(Text, default="")
+    sla_notified: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class PartBatch(TimestampMixin, Base):
+    """Сборная партия у перевозчика или экспедитора: строки заказов поставщикам, статусы перевозки, расходы и их распределение."""
+    __tablename__ = "part_batches"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(32), unique=True)                     # ПТ-2026-0001
+    forwarder: Mapped[str] = mapped_column(String(255), default="")
+    route_id: Mapped[Optional[str]] = mapped_column(ForeignKey("supply_routes.id"))
+    status: Mapped[str] = mapped_column(String(16), default="forming")               # forming | transit | customs | arrived | closed
+    shipped_on: Mapped[Optional[date]] = mapped_column(Date)
+    eta: Mapped[Optional[date]] = mapped_column(Date)
+    costs: Mapped[list[dict]] = mapped_column(JSONType, default=list)                # [{item, amount, currency}]
+    allocation: Mapped[str] = mapped_column(String(8), default="weight")             # weight | value
+    tracking: Mapped[str] = mapped_column(String(128), default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))

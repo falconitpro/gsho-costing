@@ -55,6 +55,8 @@ DEFAULTS: dict[str, Any] = {
     "parts_cd_tolerance_pp": 5.0,
     "parts_kp_validity_days": 30,
     "parts_to_reminder_days": 30,
+    "parts_sla_kp_days": 2,
+    "parts_sla_po_confirm_days": 5,
     "commissioning_days": 5,
     # задача 1: типовые схемы оплаты (пока КД не задал условия) и БГ на аванс
     "default_client_payment_scheme": [
@@ -280,6 +282,9 @@ META: dict[str, dict] = {
                               "help": "Ниже порога не более чем на допуск — утверждает КД, больше — ФД."},
     "parts_kp_validity_days": {"group": "Запасные части", "title": "Срок действия КП и мягкого резерва", "unit": "дн.", "type": "number"},
     "parts_to_reminder_days": {"group": "Запасные части", "title": "Напоминание менеджеру о ТО машины клиента — за", "unit": "дн.", "type": "number"},
+    "parts_sla_kp_days": {"group": "Запасные части", "title": "Норматив: КП клиенту после заявки", "unit": "дн.", "type": "number",
+                          "help": "По аварийной заявке («машина стоит») норматив вдвое короче и уведомляется КД."},
+    "parts_sla_po_confirm_days": {"group": "Запасные части", "title": "Норматив: подтверждение заказа поставщиком", "unit": "дн.", "type": "number"},
     "lc_opening_days": {"group": "Сроки и календарь", "title": "Открытие аккредитива после контракта (план)", "unit": "дн.", "type": "number"},
     "factory_contract_lag_days": {"group": "Сроки и календарь", "title": "Контракт с заводом после контракта с клиентом", "unit": "дн.", "type": "number"},
     "delivery_reserve_pct": {"group": "Сроки и календарь", "title": "Резерв к сроку поставки в КП", "unit": "%", "type": "number",

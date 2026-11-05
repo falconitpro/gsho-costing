@@ -162,6 +162,9 @@ def create_receipt(body: ReceiptIn, db: Session = Depends(get_db), user: Current
         pl.received_qty = round((pl.received_qty or 0) + x.qty, 4)
         if pl.received_qty >= pl.qty:
             pl.status = "received"
+            if pl.warranty_claim_id:         # гарантийная замена пришла — компенсация деталью по претензии получена
+                from .parts_warranty import part_compensation_received
+                part_compensation_received(db, pl, rc.received_on)
             for od in db.scalars(select(PartDeviation).where(PartDeviation.po_line_id == pl.id, PartDeviation.kind == "short",
                                                              PartDeviation.status == "open", PartDeviation.decision.in_(("", "wait")))).all():
                 od.status, od.closed_at, od.comment = "closed", datetime.now(timezone.utc), (od.comment + "; " if od.comment else "") + f"допоставлено, {rc.number}"
