@@ -1039,6 +1039,10 @@ class PartRequestLine(TimestampMixin, Base):
     calc: Mapped[dict] = mapped_column(JSONType, default=dict)          # снимок расчёта: себестоимость, порог, маржа (видят КД, ФД, ЗГД)
     status: Mapped[str] = mapped_column(String(24), default="new")
     comment: Mapped[str] = mapped_column(Text, default="")
+    # выбранный ответ поставщика (заказ у поставщиков): цена поставщика по этой строке вместо последней закупочной
+    rfq_line_id: Mapped[Optional[str]] = mapped_column(String(36))
+    quote_price: Mapped[Optional[float]] = mapped_column(Float)
+    quote_currency: Mapped[str] = mapped_column(String(3), default="")
 
 
 class PartKp(Base):
@@ -1076,3 +1080,46 @@ class PartReservation(Base):
     expires_at: Mapped[Optional[date]] = mapped_column(Date)            # мягкий — до конца срока КП
     released_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ------------------------------------------------------------------ запчасти: запросы цен поставщикам (ТЗ запчастей, раздел 7)
+
+class SupplierRfq(TimestampMixin, Base):
+    """Запрос цены одному поставщику по строкам одной или нескольких заявок. Язык — по поставщику (Китай — CN, Германия — DE…)."""
+    __tablename__ = "supplier_rfqs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(32), unique=True)          # ЗП-2026-0001
+    supplier_id: Mapped[str] = mapped_column(ForeignKey("factories.id"), index=True)
+    language: Mapped[str] = mapped_column(String(4), default="ru")        # ru | zh | de | en
+    status: Mapped[str] = mapped_column(String(16), default="draft")      # draft | sent | partial | answered | closed
+    due_date: Mapped[Optional[date]] = mapped_column(Date)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    send_log: Mapped[list[dict]] = mapped_column(JSONType, default=list)  # [{at, via, to, ok, error}]
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    lines: Mapped[list["SupplierRfqLine"]] = relationship(cascade="all, delete-orphan", order_by="SupplierRfqLine.no")
+
+
+class SupplierRfqLine(Base):
+    """Строка запроса поставщику и его ответ по ней: цена, срок, наличие, минимальная партия или аналог."""
+    __tablename__ = "supplier_rfq_lines"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    rfq_id: Mapped[str] = mapped_column(ForeignKey("supplier_rfqs.id", ondelete="CASCADE"), index=True)
+    no: Mapped[int] = mapped_column(Integer)
+    request_line_id: Mapped[Optional[str]] = mapped_column(ForeignKey("part_request_lines.id", ondelete="SET NULL"), index=True)
+    part_id: Mapped[Optional[str]] = mapped_column(ForeignKey("parts.id"))
+    number: Mapped[str] = mapped_column(String(128), default="")          # номер для поставщика: его артикул, OEM или наш артикул
+    name_ru: Mapped[str] = mapped_column(String(512), default="")
+    name_foreign: Mapped[str] = mapped_column(String(512), default="")
+    machine_translated: Mapped[bool] = mapped_column(Boolean, default=False)
+    qty: Mapped[float] = mapped_column(Float, default=1)
+    unit: Mapped[str] = mapped_column(String(16), default="шт")
+    # ответ
+    availability: Mapped[str] = mapped_column(String(16), default="")     # "" (нет ответа) | available | on_order | none | analog
+    price: Mapped[Optional[float]] = mapped_column(Float)
+    currency: Mapped[str] = mapped_column(String(3), default="")
+    lead_days: Mapped[Optional[int]] = mapped_column(Integer)
+    moq: Mapped[Optional[float]] = mapped_column(Float)
+    analog_number: Mapped[str] = mapped_column(String(128), default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    answered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
