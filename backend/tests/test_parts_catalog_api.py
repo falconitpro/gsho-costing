@@ -131,3 +131,15 @@ def test_stock_for_duplicate_article_by_name(client):
     assert st["result"]["updated"] == 1 and st["result"]["ambiguous_articles"] == [art]   # «Насос» — не совпало наименование
     assert _ok(client.get(f"/api/parts/catalog/{b['id']}", headers=H(CD)))["stock_total"] == 5
     assert _ok(client.get(f"/api/parts/catalog/{a['id']}", headers=H(CD)))["stock_total"] == 0
+
+    # полный дубль (тот же артикул и наименование): лишнюю карточку — в архив, остаток уходит на оставшуюся
+    c = _ok(client.post("/api/parts/catalog?force=true", headers=H(CD), json={"article": art, "name_ru": "Вентилятор кабины"}), 201)
+    st = _ok(client.post("/api/parts/import/stock", headers=H(CD),
+                         files={"file": ("stock.xlsx", _xlsx(stock[:2]), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}))
+    assert st["result"]["ambiguous_articles"] == [art]
+    _ok(client.put(f"/api/parts/catalog/{c['id']}", headers=H(CD), json={"article": art, "name_ru": "Вентилятор кабины", "status": "archive"}))
+    stock2 = [stock[0], ("Вентилятор кабины", art, "шт", 7, 7)]
+    st = _ok(client.post("/api/parts/import/stock", headers=H(CD),
+                         files={"file": ("stock.xlsx", _xlsx(stock2), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}))
+    assert st["result"]["updated"] == 1 and st["result"]["ambiguous_articles"] == []
+    assert _ok(client.get(f"/api/parts/catalog/{b['id']}", headers=H(CD)))["stock_total"] == 7
