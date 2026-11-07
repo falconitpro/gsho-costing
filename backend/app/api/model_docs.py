@@ -368,10 +368,11 @@ def zip_for_hours(items: list[dict], hours: float) -> tuple[list[dict], dict]:
         qty = float(z.get("qty") or 0) * n
         amount = round(qty * float(z["price"]), 2) if z.get("price") not in (None, "") else None
         z.update(replacements=n, qty_period=qty, amount=amount)
+        if n <= 0:
+            continue
         if amount is not None:
             total[z.get("currency", "CNY")] = round(total.get(z.get("currency", "CNY"), 0) + amount, 2)
-        if n > 0:
-            rows.append(z)
+        rows.append(z)
     return rows, total
 
 
