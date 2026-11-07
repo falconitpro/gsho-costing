@@ -19,7 +19,7 @@ const human = (v: unknown): unknown => (v && typeof v === "object" && !Array.isA
 const short = (v: unknown) => { const s = v == null ? "" : JSON.stringify(human(v)); return s.length > 160 ? s.slice(0, 160) + "…" : s; };
 
 /** Администрирование: сотрудники и роли, справочник ТН ВЭД, курсы, шаблоны, журнал действий и интеграций, отчёт точности оценок. */
-export default function AdminPage({ me }: { me: Me }) {
+export default function AdminPage({ me, embedded = false }: { me: Me; embedded?: boolean }) {
   const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
   const isAdmin = has("admin", "gd");
   const tabs: [string, string, boolean][] = [
@@ -32,7 +32,7 @@ export default function AdminPage({ me }: { me: Me }) {
   if (!visible.length) return <div className="alert info">Раздел доступен администратору, ЗГД и ФД.</div>;
   return (
     <>
-      <h1>Администрирование</h1>
+      {!embedded && <h1>Администрирование</h1>}
       <div className="tabs">{visible.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{t}</button>)}</div>
       {tab === "users" && <Users me={me} />}
       {tab === "hs" && <HsCodes />}

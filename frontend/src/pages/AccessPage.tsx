@@ -10,7 +10,7 @@ type Matrix = {
 };
 
 /** Задача 11: уровни доступа как данные — матрица «роль × группа полей», исключения для сотрудников, предпросмотр. Меняют администратор и ЗГД. */
-export default function AccessPage({ me }: { me: Me }) {
+export default function AccessPage({ me, embedded = false }: { me: Me; embedded?: boolean }) {
   const [m, setM] = useState<Matrix | null>(null);
   const [tab, setTab] = useState<"roles" | "overrides" | "preview">("roles");
   const [ov, setOv] = useState({ user_id: "", group: "", level: 1, valid_to: "", comment: "" });
@@ -26,7 +26,7 @@ export default function AccessPage({ me }: { me: Me }) {
   }
   return (
     <>
-      <h1>Уровни доступа</h1>
+      {!embedded && <h1>Уровни доступа</h1>}
       <p className="muted">0 — не видит, 1 — видит, 2 — редактирует. {m.note} Изменения записываются в журнал. Пользователь: {me.display_name}.</p>
       {msg && <div className="alert error">{msg}</div>}
       <div className="tabs">

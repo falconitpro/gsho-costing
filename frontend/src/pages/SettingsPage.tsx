@@ -125,7 +125,7 @@ function Editor({ m, value, onChange }: { m: Meta; value: unknown; onChange: (v:
 }
 
 /** Ставки и нормативы: группы, понятные названия и пояснения, поля по типу значения; изменения — с комментарием и историей. */
-export default function SettingsPage({ me }: { me: Me }) {
+export default function SettingsPage({ me, embedded = false }: { me: Me; embedded?: boolean }) {
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [meta, setMeta] = useState<{ groups: string[]; items: Record<string, Meta> } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -151,7 +151,7 @@ export default function SettingsPage({ me }: { me: Me }) {
   return (
     <>
       <div className="page-head">
-        <h1>Настройки: ставки и нормативы</h1>
+        {!embedded && <h1>Настройки: ставки и нормативы</h1>}
         <div className="push"><input placeholder="поиск настройки" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240, maxWidth: "100%" }} /></div>
       </div>
       <p className="muted">Значения применяются к новым расчётам; каждое изменение сохраняется в истории с комментарием. ФД меняет пороги, сценарии и стоимость денег; КД — внешнюю комиссию и комиссию менеджера; остальное — ЗГД или администратор. Ваши роли: {me.roles.map((r) => r.title).join(", ")}.</p>

@@ -20,7 +20,7 @@ const FIELDS: [keyof Contacts, string, string][] = [
 const STATUS: Record<string, string> = { sent: "отправлено", queued: "ожидает подключения канала", failed: "ошибка", read: "прочитано" };
 
 /** Сотрудники: карточки контактов исполнителей; каналы уведомлений о задачах выбирают КД, ЗГД или администратор. */
-export default function TeamPage({ me }: { me: Me }) {
+export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: boolean }) {
   const [users, setUsers] = useState<Card[]>([]);
   const [channels, setChannels] = useState<Record<string, string>>({});
   const [cur, setCur] = useState<Card | null>(null);
@@ -91,7 +91,7 @@ export default function TeamPage({ me }: { me: Me }) {
   return (
     <>
       <div className="page-head">
-        <h1>Сотрудники</h1>
+        {!embedded && <h1>Сотрудники</h1>}
         <div className="push">
           <input placeholder="поиск: имя, должность, телефон" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 260, maxWidth: "100%" }} />
           {canManage && <button className="btn add" onClick={() => { setShowNew(!showNew); setErr(""); }}>Добавить сотрудника</button>}
