@@ -91,29 +91,30 @@ FIELD_GROUPS: dict[str, tuple[str, set[str]]] = {
     "settings": ("Ставки и нормативы", set()),
     "access_admin": ("Уровни доступа", set()),
     "legal_docs": ("Документы клиента и юридические (тендерная документация, договор, протокол разногласий)", set()),
+    "legal_profiles": ("Юридические профили контрагентов и БЕРГ-ХАУС, банковские реквизиты", set()),
 }
 
 # Стартовая матрица: роль → {группа: уровень}. Не перечисленные группы = 0.
 DEFAULT_MATRIX: dict[Role, dict[str, int]] = {
     Role.MANAGER: {"price": READ, "payment_terms": READ, "local_options": EDIT, "tech_params": EDIT,
-                   "images": EDIT, "glossary": EDIT, "execution": EDIT, "legal_docs": EDIT},
-    Role.LOGISTICIAN: {"logistics_input": EDIT, "local_options": READ, "tech_params": READ, "images": READ, "execution": EDIT},
-    Role.SERVICE_HEAD: {"service_input": EDIT, "local_options": EDIT, "tech_params": READ, "images": READ, "execution": EDIT},
+                   "images": EDIT, "glossary": EDIT, "execution": EDIT, "legal_docs": EDIT, "legal_profiles": EDIT},
+    Role.LOGISTICIAN: {"logistics_input": EDIT, "local_options": READ, "tech_params": READ, "images": READ, "execution": EDIT, "legal_profiles": READ},
+    Role.SERVICE_HEAD: {"service_input": EDIT, "local_options": EDIT, "tech_params": READ, "images": READ, "execution": EDIT, "legal_profiles": READ},
     Role.CD: {"cost": READ, "price": EDIT, "logistics_input": READ, "service_input": READ, "factory_price_history": EDIT,
               "client_price_history": READ, "finance_analytics": READ, "payment_terms": EDIT, "local_options": EDIT, "tech_params": EDIT, "images": EDIT,
               "kp_images_select": EDIT, "catalog": EDIT, "glossary": EDIT, "factory_offers": EDIT, "cost_files": READ,
-              "execution": EDIT, "execution_close": EDIT, "settings": READ, "legal_docs": EDIT},
+              "execution": EDIT, "execution_close": EDIT, "settings": READ, "legal_docs": EDIT, "legal_profiles": EDIT},
     Role.FD: {"cost": READ, "price": READ, "logistics_input": READ, "service_input": READ, "factory_price_history": READ,
               "client_price_history": READ, "finance_analytics": READ, "payment_terms": READ, "local_options": READ, "tech_params": READ, "images": READ, "cost_files": READ,
-              "execution": READ, "execution_payments": EDIT, "settings": EDIT, "legal_docs": READ},
+              "execution": READ, "execution_payments": EDIT, "settings": EDIT, "legal_docs": READ, "legal_profiles": EDIT},
     Role.GD: {"cost": READ, "price": EDIT, "logistics_input": EDIT, "service_input": EDIT, "factory_price_history": EDIT,
               "client_price_history": READ, "finance_analytics": READ, "payment_terms": EDIT, "local_options": EDIT, "tech_params": EDIT, "images": EDIT,
               "kp_images_select": EDIT, "catalog": EDIT, "glossary": EDIT, "factory_offers": EDIT, "cost_files": READ,
-              "execution": EDIT, "execution_payments": EDIT, "execution_close": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_docs": EDIT},
-    Role.ADMIN: {"tech_params": READ, "images": READ, "catalog": READ, "glossary": EDIT, "settings": EDIT, "access_admin": EDIT},
+              "execution": EDIT, "execution_payments": EDIT, "execution_close": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_docs": EDIT, "legal_profiles": EDIT},
+    Role.ADMIN: {"tech_params": READ, "images": READ, "catalog": READ, "glossary": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_profiles": EDIT},
     Role.OBSERVER: {"price": READ, "payment_terms": READ, "tech_params": READ, "images": READ, "execution": READ},
-    Role.PURCHASING: {"local_options": EDIT, "tech_params": READ, "images": READ, "execution": READ},
-    Role.LAWYER: {"price": READ, "payment_terms": READ, "tech_params": READ, "images": READ, "execution": READ, "legal_docs": EDIT},
+    Role.PURCHASING: {"local_options": EDIT, "tech_params": READ, "images": READ, "execution": READ, "legal_profiles": READ},
+    Role.LAWYER: {"price": READ, "payment_terms": READ, "tech_params": READ, "images": READ, "execution": READ, "legal_docs": EDIT, "legal_profiles": EDIT},
 }
 
 # Группы, которые нельзя закрыть для ЗГД и администратора (защита от потери доступа)

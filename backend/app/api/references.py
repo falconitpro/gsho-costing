@@ -111,12 +111,35 @@ def clients(q: str = "", stats: bool = False, db: Session = Depends(get_db), use
         stmt = stmt.where(or_(Client.name.ilike(f"%{q}%"), Client.inn.like(f"{q}%")))
     rows = [serialize(c) for c in db.scalars(stmt).all()]
     if stats:
+        from ..models import LegalProfile
+        from sqlalchemy import func as _f
+        prof_counts = dict(db.execute(select(LegalProfile.owner_id, _f.count()).where(LegalProfile.owner_kind == "client", LegalProfile.is_active.is_(True)).group_by(LegalProfile.owner_id)).all())
         st = _client_stats(db, user)
         empty = {"deals": 0, "open": 0, "won": 0, "lost": 0, "last_on": None, "last_number": "", "last_status": "", "manager": "", "sum_won_rub": None}
         for r in rows:
             r["stats"] = st.get(r["id"], empty)
-            r["requisites_count"] = len(r.get("requisites") or [])
+            r["requisites_count"] = prof_counts.get(r["id"], 0)
     return rows
+
+
+@router.post("/clients", status_code=201)
+def create_client(body: ClientIn, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN))):
+    from datetime import datetime, timezone
+    from ..adapters.company_registry import inn_valid
+    if not inn_valid(body.inn):
+        raise HTTPException(422, "ИНН неверный: проверьте контрольные цифры")
+    if db.scalar(select(Client).where(Client.inn == body.inn)):
+        raise HTTPException(409, "Клиент с таким ИНН уже есть")
+    c = Client(manager_id=user.id, **body.model_dump())
+    if body.registry:
+        c.registry_checked_at = datetime.now(timezone.utc)
+    db.add(c)
+    db.flush()
+    from ..services.moysklad_import import relink_client_prices
+    relink_client_prices(db)        # договорные цены запчастей, перенесённые раньше клиента
+    audit(db, user.id, None, "client", c.id, "create", after=body.model_dump())
+    db.commit()
+    return serialize(c)
 
 
 # ------------------------------------------------------------------ наборы реквизитов клиента (для договоров)
@@ -153,7 +176,7 @@ class RequisitesIn(BaseModel):
 
 
 def requisites_from_card(c: Client) -> dict:
-    """Набор реквизитов «по карточке»: из ЕГРЮЛ/ЕГРИП (без банка и подписанта)."""
+    """Реквизиты «по карточке» (ЕГРЮЛ) — подсказка для заполнения профиля."""
     return {"id": "card", "title": "Из карточки (ЕГРЮЛ)", "is_default": False, "legal_name": c.full_name or c.name, "short_name": c.name, "inn": c.inn, "kpp": c.kpp or "",
             "ogrn": c.ogrn or "", "legal_address": c.address or "", "postal_address": "", "bank_name": "", "bik": "", "account": "", "corr_account": "",
             "signatory_name": c.director or "", "signatory_position": "Генеральный директор" if c.director else "", "signatory_basis": "Устава" if c.director else "",
@@ -161,65 +184,41 @@ def requisites_from_card(c: Client) -> dict:
 
 
 def client_requisites_options(c: Client) -> list[dict]:
-    """Все варианты реквизитов клиента для выбора в договор: сохранённые наборы + «из карточки»."""
-    return list(c.requisites or []) + [requisites_from_card(c)]
+    """Варианты реквизитов клиента для договора — юридические профили (юридический блок, этап 1)."""
+    from sqlalchemy.orm import object_session
+    from ..services.legal_profiles import client_requisites_options as _opts
+    db = object_session(c)
+    return _opts(db, c) if db is not None else []
 
 
 @router.get("/clients/{client_id}/requisites")
 def get_requisites(client_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Совместимость: наборы реквизитов = юридические профили клиента (ведутся в юридическом блоке)."""
     c = db.get(Client, client_id)
     if c is None:
         raise HTTPException(404)
-    return {"items": c.requisites or [], "from_card": requisites_from_card(c)}
+    items = client_requisites_options(c)
+    db.commit()
+    return {"items": items, "from_card": requisites_from_card(c)}
 
 
 @router.put("/clients/{client_id}/requisites")
 def put_requisites(client_id: str, body: RequisitesIn, db: Session = Depends(get_db),
                    user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN, Role.LAWYER))):
-    """Наборы реквизитов клиента: несколько юрлиц/филиалов, банков и подписантов; один — по умолчанию."""
-    import uuid
+    """Совместимость: наборы реквизитов записываются в юридические профили клиента; один — по умолчанию."""
+    from ..services.legal_profiles import upsert_requisites
     c = db.get(Client, client_id)
     if c is None:
         raise HTTPException(404)
-    items = []
-    for r in body.items:
-        if not (r.title.strip() or r.legal_name.strip()):
-            continue
-        d = r.model_dump()
-        d["id"] = d["id"] or uuid.uuid4().hex
-        d["title"] = d["title"].strip() or d["legal_name"].strip()
-        for k in REQ_FIELDS:
-            d[k] = (d.get(k) or "").strip()
-        items.append(d)
-    if items and not any(x["is_default"] for x in items):
-        items[0]["is_default"] = True
+    items = [r.model_dump() for r in body.items if (r.title.strip() or r.legal_name.strip())]
     if sum(1 for x in items if x["is_default"]) > 1:
         raise HTTPException(422, "По умолчанию может быть только один набор реквизитов")
     before = len(c.requisites or [])
-    c.requisites = items
+    upsert_requisites(db, c, items, user.id)
+    c.requisites = []          # единый источник — профили
     audit(db, user.id, None, "client", c.id, "requisites", {"items": before}, {"items": len(items)})
     db.commit()
-    return {"items": c.requisites, "from_card": requisites_from_card(c)}
-
-
-@router.post("/clients", status_code=201)
-def create_client(body: ClientIn, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN))):
-    from datetime import datetime, timezone
-    from ..adapters.company_registry import inn_valid
-    if not inn_valid(body.inn):
-        raise HTTPException(422, "ИНН неверный: проверьте контрольные цифры")
-    if db.scalar(select(Client).where(Client.inn == body.inn)):
-        raise HTTPException(409, "Клиент с таким ИНН уже есть")
-    c = Client(manager_id=user.id, **body.model_dump())
-    if body.registry:
-        c.registry_checked_at = datetime.now(timezone.utc)
-    db.add(c)
-    db.flush()
-    from ..services.moysklad_import import relink_client_prices
-    relink_client_prices(db)        # договорные цены запчастей, перенесённые раньше клиента
-    audit(db, user.id, None, "client", c.id, "create", after=body.model_dump())
-    db.commit()
-    return serialize(c)
+    return {"items": client_requisites_options(c), "from_card": requisites_from_card(c)}
 
 
 @router.get("/clients/{client_id}")

@@ -4,7 +4,7 @@ import { UndoButton, useUndoHistory } from "../undo";
 import { api, ApiError, fmtDate, fmtPct, fmtRub } from "../api";
 import { STATUS_TITLES } from "../types";
 import { toneOf } from "../colors";
-import ClientRequisites from "../components/ClientRequisites";
+import LegalProfileBlock from "../components/LegalProfileBlock";
 import type { Me } from "../types";
 import { payText } from "../components/PaymentTermsEditor";
 import type { PaymentLine } from "../types";
@@ -51,7 +51,6 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState({ model: "", outcome: "", factory: "", from: "", to: "" });
   const canCreate = me.roles.some((r) => ["manager", "cd", "gd", "admin"].includes(r.code));
-  const canReq = me.roles.some((r) => ["manager", "cd", "gd", "admin", "lawyer"].includes(r.code));
   const [q, setQ] = useState("");
   const [view, setView] = useState<"all" | "open" | "won" | "none">("all");
   const [mgr, setMgr] = useState("");
@@ -222,7 +221,7 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
             ) : <p className="muted">История КП и цен клиентам доступна КД и ЗГД (настраивается в уровнях доступа).</p>}
           </div>
         )}
-        {card && <ClientRequisites clientId={card.id} canEdit={canReq} />}
+        {card && <LegalProfileBlock ownerKind="client" ownerId={card.id} title="Юридический профиль и реквизиты для договоров" />}
       </div>
     </div>
   );
