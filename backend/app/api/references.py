@@ -122,6 +122,26 @@ def clients(q: str = "", stats: bool = False, db: Session = Depends(get_db), use
     return rows
 
 
+@router.post("/clients", status_code=201)
+def create_client(body: ClientIn, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN))):
+    from datetime import datetime, timezone
+    from ..adapters.company_registry import inn_valid
+    if not inn_valid(body.inn):
+        raise HTTPException(422, "ИНН неверный: проверьте контрольные цифры")
+    if db.scalar(select(Client).where(Client.inn == body.inn)):
+        raise HTTPException(409, "Клиент с таким ИНН уже есть")
+    c = Client(manager_id=user.id, **body.model_dump())
+    if body.registry:
+        c.registry_checked_at = datetime.now(timezone.utc)
+    db.add(c)
+    db.flush()
+    from ..services.moysklad_import import relink_client_prices
+    relink_client_prices(db)        # договорные цены запчастей, перенесённые раньше клиента
+    audit(db, user.id, None, "client", c.id, "create", after=body.model_dump())
+    db.commit()
+    return serialize(c)
+
+
 # ------------------------------------------------------------------ наборы реквизитов клиента (для договоров)
 
 REQ_FIELDS = ("title", "legal_name", "short_name", "inn", "kpp", "ogrn", "legal_address", "postal_address", "bank_name", "bik", "account", "corr_account",
