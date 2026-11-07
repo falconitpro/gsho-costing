@@ -517,10 +517,11 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     prop = _ok(client.post(f"/api/deals/{did}/catalog/propose", headers=H(MGR), json={"position_ids": [pid], "names": {pid: "ZL50 базовое"}}))
     _ok(client.post(f"/api/catalog/executions/{prop['created'][0]['id']}/decision", headers=H(GD), json={"approve": True, "brand_name": "BH-50"}))
     assert _ok(client.patch(f"/api/deals/{did}/kp-settings", headers=H(CD), json={"kp_brand": "company"}))["kp_brand"] == "company"
-    # задача 7: справка цен при вводе позиции — менеджер видит цены завода, цены клиентам — нет
+    # справка цен при вводе позиции — финансовая аналитика: менеджеру закрыты и цены завода, и цены клиентам; ЗГД видит обе
     ref_m = _ok(client.get(f"/api/catalog/price-reference?factory_id={factories[0]['id']}&model=ZL50", headers=H(MGR)))
-    assert ref_m["factory_prices"] and ref_m["client_prices"] is None
-    assert _ok(client.get(f"/api/catalog/price-reference?factory_id={factories[0]['id']}&model=ZL50", headers=H(GD)))["client_prices"] is not None
+    assert not ref_m["factory_prices"] and ref_m["client_prices"] is None
+    ref_g = _ok(client.get(f"/api/catalog/price-reference?factory_id={factories[0]['id']}&model=ZL50", headers=H(GD)))
+    assert ref_g["factory_prices"] and ref_g["client_prices"] is not None
     # объединение дублей исполнений: ссылки позиции переходят, дубль в архив
     rows_now = _ok(client.get(f"/api/deals/{did}/positions/{pid}/tech-params", headers=H(MGR)))["rows"]
     rows_now[0]["value_ru"] = "6"                                                          # другой набор параметров → новое исполнение
@@ -629,10 +630,11 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     assert client.post("/api/refs/factories", headers=H("observer@example.com"), json={"name": "X"}).status_code == 403
     card = _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(MGR)))
     assert card["contacts"][1]["wechat"] == "zhangsan_wx" and "models" in card
-    _ok(client.put(f"/api/refs/factories/{fz['id']}", headers=H(MGR), json={**{k: card[k] for k in ("name", "name_zh", "contacts")}, "bank_details": {"swift": "BKCHCNBJ"}}))
+    _ok(client.put(f"/api/refs/factories/{fz['id']}", headers=H(CD), json={**{k: card[k] for k in ("name", "name_zh", "contacts")}, "bank_details": {"swift": "BKCHCNBJ"}}))
     up = _ok(client.put(f"/api/refs/factories/{fz['id']}", headers=H(LOG), json={**{k: card[k] for k in ("name", "name_zh", "contacts")}, "website": "https://test.cn"}))
     assert up["website"] == "https://test.cn" and "bank_details" not in up              # логист не видит реквизиты…
-    assert _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(MGR)))["bank_details"] == {"swift": "BKCHCNBJ"}   # …и не стирает их
+    assert _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(CD)))["bank_details"] == {"swift": "BKCHCNBJ"}   # …и не стирает их
+    assert "bank_details" not in _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(MGR)))                     # менеджеру реквизиты закрыты
     assert all("bank_details" not in f_ for f_ in _ok(client.get("/api/refs/factories", headers=H(LOG))))
     assert "rfq" in _ok(client.get("/api/refs/factories/contact-roles", headers=H(MGR)))
     # --- торговые марки: сопоставление «завод → марка», обозначение = марка + модель

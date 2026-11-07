@@ -117,11 +117,11 @@ def test_batch_and_reports(client):
     s = _ok(client.get("/api/parts/reports/sales?by=supplier", headers=H(CD)))
     row = next(x for x in s["rows"] if x["key"] == sup["id"])
     assert row["lines"] == 2 and row["revenue_rub"] > 0 and "margin_pct" in row
-    assert "margin_pct" not in next(x for x in _ok(client.get("/api/parts/reports/sales?by=supplier", headers=H(MGR)))["rows"] if x["key"] == sup["id"])
+    assert client.get("/api/parts/reports/sales?by=supplier", headers=H(MGR)).status_code == 403                  # финансовая аналитика закрыта менеджеру
     assert any(x["supplier_id"] == sup["id"] and x["lines"] == 2 for x in _ok(client.get("/api/parts/reports/lead-accuracy", headers=H(CD)))["rows"])
     assert any(x["article"] == f"NO-{t}" and not x["in_catalog"] for x in _ok(client.get("/api/parts/reports/missing", headers=H(MGR)))["rows"])
     sv = _ok(client.get("/api/parts/reports/service", headers=H(MGR)))
     assert sv["requests"] >= 1 and sv["lines"] >= 3
-    assert any(x["request_number"] == r["number"] for x in _ok(client.get("/api/parts/reports/shipments", headers=H(MGR)))["rows"])
+    assert any(x["request_number"] == r["number"] for x in _ok(client.get("/api/parts/reports/shipments", headers=H(CD)))["rows"])
     st = _ok(client.get("/api/parts/reports/stock?idle_days=0", headers=H(CD)))
     assert st["positions"] >= 0

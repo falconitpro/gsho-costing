@@ -70,7 +70,9 @@ def test_po_flow(client):
     assert len(pos) == 1
     po = pos[0]
     assert po["number"].startswith("ЗК-") and po["status"] == "draft" and po["buyer_name"] and po["currency"] == "CNY" and len(po["lines"]) == 3
-    assert po["total"] == 2 * 100 + 5 * 40 + 10 * 40
+    assert "total" not in po and "price" not in po["lines"][0]                        # цены поставщика менеджеру закрыты (финансовая аналитика)
+    po_cd = _ok(client.get(f"/api/parts/po/{po['id']}", headers=H(CD)))
+    assert po_cd["total"] == 2 * 100 + 5 * 40 + 10 * 40
     assert po["lines"][0]["eta"] == (date.today() + timedelta(days=15 + 35)).isoformat()
     assert [c["number"] for c in po["intragroup"]] == [f"{po['number']}/2", f"{po['number']}/3"]
     assert "price" not in po["intragroup"][0]["lines"][0]                         # наценки группы менеджеру не видны
@@ -82,7 +84,8 @@ def test_po_flow(client):
     assert {l["status"] for l in rq["lines"]} == {"po"} and rq["lines"][0]["eta"]
 
     # файл заказа на двух языках
-    x = client.get(f"/api/parts/po/{po['id']}/xlsx", headers=H(MGR))
+    assert client.get(f"/api/parts/po/{po['id']}/xlsx", headers=H(MGR)).status_code == 403              # файл с ценами — менеджеру закрыт
+    x = client.get(f"/api/parts/po/{po['id']}/xlsx", headers=H(CD))
     rows = list(load_workbook(io.BytesIO(x.content)).active.iter_rows(values_only=True))
     assert "订单" in rows[0][0]
     assert client.get(f"/api/parts/po/{po['intragroup'][0]['id']}/xlsx", headers=H(MGR)).status_code == 403
