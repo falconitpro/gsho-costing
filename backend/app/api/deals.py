@@ -16,7 +16,7 @@ from .. import adapters
 from ..adapters.storage import sha256_file
 from ..core.auth import CurrentUser, get_current_user, require_roles
 from ..core.roles import Role, filter_payload
-from ..core.workflow import DealState, DealStatus, close as wf_close, kp_sent as wf_kp_sent, manager_checks, send_to_calc
+from ..core.workflow import DealState, DealStatus, close as wf_close, kp_sent as wf_kp_sent, manager_check_items, manager_checks, send_to_calc
 from ..db import get_db
 from ..models import Attachment, Client, Deal, DealVersion, EquipmentModel, Factory, FactoryPriceHistory, FeedEntry, Position, RfqImport, Variant
 from ..services import settings_service
@@ -164,7 +164,8 @@ def create_deal(body: DealCreate, db: Session = Depends(get_db), user: CurrentUs
 @router.get("/{deal_id}")
 def get_deal(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
-    extra: dict[str, Any] = {"checks": manager_checks(_deal_dict(deal))}
+    dd = _deal_dict(deal)
+    extra: dict[str, Any] = {"checks": manager_checks(dd), "check_items": manager_check_items(dd)}
     return deal_payload(deal, user, extra)
 
 

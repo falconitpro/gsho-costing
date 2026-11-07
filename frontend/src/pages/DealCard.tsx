@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ChecksPanel from "../components/ChecksPanel";
 import { lbl, FEED_KIND } from "../labels";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
@@ -84,7 +85,9 @@ export default function DealCard({ me }: { me: Me }) {
     const checks = deal!.checks || [];
     let body: { force?: boolean; comment?: string } = {};
     if (checks.length) {   // КД / ЗГД — отправка без полностью заполненных обязательных данных
-      const c = prompt(`Не заполнено:\n• ${checks.join("\n• ")}\n\nОтправить на расчёт всё равно? Логист и сервис увидят пометку в ленте. Комментарий (необязательно):`, "");
+      const items = deal!.check_items || [];
+      const list = items.length ? items.map((x) => `• ${x.group}: ${[...x.fields, ...x.tech].join(", ")}`).join("\n") : `• ${checks.join("\n• ")}`;
+      const c = prompt(`Не заполнено:\n${list}\n\nОтправить на расчёт всё равно? Логист и сервис увидят пометку в ленте. Комментарий (необязательно):`, "");
       if (c === null) return;
       body = { force: true, comment: c };
     }
@@ -146,7 +149,8 @@ export default function DealCard({ me }: { me: Me }) {
       <OutcomePanel deal={deal} me={me} onDone={(m) => { setErr(m); load(); if (m.startsWith("Сделка выиграна")) setTab("execution"); }} />
       <div style={{ margin: "6px 0" }}><KpActions dealId={deal.id} status={deal.status} canAct={isOwner || has("cd", "gd", "admin")} onDone={() => { load(); }} /></div>
       {["approved", "kp_sent"].includes(deal.status) && <KpRevisions dealId={deal.id} status={deal.status} onDone={() => { load(); }} />}
-      {(deal.checks || []).length > 0 && editable && <div className="alert warn">Перед отправкой на расчёт: {deal.checks!.join(" ")}</div>}
+      {(editable || has("cd", "gd")) && ["draft", "rework"].includes(deal.status) && (deal.check_items || []).length > 0 &&
+        <ChecksPanel items={deal.check_items!} onGo={(it) => { setTab(it.tab as Tab); if (it.position_id) openPos(it.position_id); }} />}
       <RelatedDeals dealId={deal.id} me={me} />
 
       <div className="tabs">
