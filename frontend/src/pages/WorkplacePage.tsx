@@ -16,7 +16,7 @@ type Data = {
   user: { name: string; first_name: string; role: string; role_title: string; greeting: string };
   date: { iso: string; text: string };
   layout: { order: string[]; hidden: string[]; required: string[]; available: { code: string; title: string }[]; can_lock: boolean; role_required: Record<string, string[]>; roles: Record<string, string>; role_blocks: Record<string, string[]>; all_blocks: Record<string, string> };
-  kpis: { title: string; value: string; sub: string; tone: string }[];
+  kpis: { title: string; value: string; sub: string; tone: string; url?: string }[];
   focus: { title: string; text: string; action: string; url: string; tone: string } | null;
   today: { events: Ev[]; week: { date: string; wd: string; day: number; today: boolean; count: number; tones: string[] }[] };
   upcoming: Ev[]; tasks: TaskRow[]; tasks_total: number; tasks_overdue: number; deals: DealRow[]; approvals: Approval[]; attention: Att[];
@@ -215,7 +215,10 @@ export default function WorkplacePage({ me }: { me: Me }) {
         </div>
       </header>
       {visible.includes("kpis") && (
-        <section className="wp-kpis">{d.kpis.map((k) => <div key={k.title} className="wp-kpi"><small>{k.title}</small><b style={{ color: TONE_FG[k.tone] && k.tone ? TONE_FG[k.tone] : "inherit" }}>{k.value}</b><span className="muted">{k.sub}</span></div>)}</section>)}
+        <section className="wp-kpis">{d.kpis.map((k) => (
+          <button key={k.title} type="button" className={`wp-kpi ${k.url ? "link" : ""}`} title={k.url ? "открыть" : undefined}
+            onClick={() => { if (!k.url) return; if (k.url.startsWith("#")) { const el = rootRef.current?.querySelector<HTMLElement>(`[data-block="${k.url.slice(1)}"]`); el?.scrollIntoView({ behavior: "smooth", block: "start" }); el?.classList.add("wp-flash"); setTimeout(() => el?.classList.remove("wp-flash"), 1600); } else nav(k.url); }}>
+            <small>{k.title}</small><b style={{ color: TONE_FG[k.tone] && k.tone ? TONE_FG[k.tone] : "inherit" }}>{k.value}</b><span className="muted">{k.sub}</span></button>))}</section>)}
       <section className="wp-cols">
         <div className="wp-col">{cols[0].map(block)}</div>
         <div className="wp-col">{cols[1].map(block)}</div>

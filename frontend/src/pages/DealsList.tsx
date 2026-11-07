@@ -101,11 +101,13 @@ export default function DealsList({ me }: { me: Me }) {
     if (canAssign) api.get<{ users: { id: string; display_name: string; roles: string[] }[] }>("/api/team").then((r) => setManagers(r.users.filter((u) => u.roles.includes("manager") && u.id !== me.id))).catch(() => setManagers([]));
   }, [canAssign, me.id]);
 
-  const [block, setBlockState] = useState<Block>(() => load<Block>("gsho.dealsBlock", "work"));
+  const urlBlock = new URLSearchParams(window.location.search).get("block") as Block | null;   // с рабочего места: ?block=won|work|archive
+  const [block, setBlockState] = useState<Block>(() => (urlBlock && ["work", "won", "lost", "archive"].includes(urlBlock) ? urlBlock : load<Block>("gsho.dealsBlock", "work")));
   const setBlock = (b: Block) => { setBlockState(b); save("gsho.dealsBlock", b); setF({ ...f, statuses: [] }); };
   const [f, setFState] = useState<Filters>(() => ({ ...EMPTY_F, ...load<Partial<Filters>>("gsho.dealsFilters", {}) }));
   const setF = (x: Filters) => { setFState(x); save("gsho.dealsFilters", x); };
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(() => load("gsho.dealsSort2", { key: "date" as SortKey, dir: -1 as 1 | -1 }));
+  const urlSort = new URLSearchParams(window.location.search).get("sort") as SortKey | null;
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(() => (urlSort ? { key: urlSort, dir: 1 as 1 | -1 } : load("gsho.dealsSort2", { key: "date" as SortKey, dir: -1 as 1 | -1 })));
   const toggleSort = (key: SortKey) => {
     const next = { key, dir: (sort.key === key ? -sort.dir : ["date", "priority", "price", "progress"].includes(key) ? -1 : 1) as 1 | -1 };
     setSort(next); save("gsho.dealsSort2", next);

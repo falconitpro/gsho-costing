@@ -306,17 +306,18 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
     won_sum = sum(_price(d) or 0 for d in won_q)
     if role in ("manager", "observer", "logistician", "service_head", "purchasing"):
         kp_week = [d for d in open_deals if d.kp_due and today <= d.kp_due <= today + timedelta(days=7) and (d.manager_id == user.id or d.manager_id in user.acting_for or role != "manager")]
-        kpis = [{"title": "Сделок в работе", "value": str(len([d for d in open_deals if role != "manager" or d.manager_id == user.id or d.manager_id in user.acting_for])), "sub": (_fmt_money(in_work_sum) if fin else "") , "tone": ""},
-                {"title": "КП со сроком на неделе", "value": str(len(kp_week)), "sub": f"ближайшее — {min(d.kp_due for d in kp_week):%d.%m}" if kp_week else "сроков нет", "tone": "warn" if kp_week else ""},
-                {"title": "Просрочено задач", "value": str(len(overdue_tasks)), "sub": f"и {sum(1 for r in exec_rows if r['overdue'])} этапов исполнения" if exec_rows else "", "tone": "bad" if overdue_tasks else "ok"},
-                {"title": "Выиграно в квартале", "value": str(len(won_q)), "sub": (_fmt_money(won_sum) if fin else "сделок"), "tone": "ok" if won_q else ""}]
+        kpis = [{"title": "Сделок в работе", "value": str(len([d for d in open_deals if role != "manager" or d.manager_id == user.id or d.manager_id in user.acting_for])), "sub": (_fmt_money(in_work_sum) if fin else "") , "tone": "", "url": "/deals?block=work"},
+                {"title": "КП со сроком на неделе", "value": str(len(kp_week)), "sub": f"ближайшее — {min(d.kp_due for d in kp_week):%d.%m}" if kp_week else "сроков нет", "tone": "warn" if kp_week else "", "url": "/deals?block=work&sort=kp_due"},
+                {"title": "Просрочено задач", "value": str(len(overdue_tasks)), "sub": f"и {sum(1 for r in exec_rows if r['overdue'])} этапов исполнения" if exec_rows else "", "tone": "bad" if overdue_tasks else "ok", "url": "/tasks"},
+                {"title": "Выиграно в квартале", "value": str(len(won_q)), "sub": (_fmt_money(won_sum) if fin else "сделок"), "tone": "ok" if won_q else "", "url": "/deals?block=won"}]
     else:
-        kpis = [{"title": "Воронка · в работе", "value": str(len(open_deals)), "sub": (_fmt_money(in_work_sum) + " · " if fin else "") + f"{len({d.manager_id for d in open_deals})} менеджеров", "tone": ""},
-                {"title": "Выиграно в квартале", "value": str(len(won_q)), "sub": _fmt_money(won_sum) if fin else "", "tone": "ok" if won_q else ""},
-                {"title": "Ждут решения", "value": str(len(approvals)), "sub": "согласований", "tone": "warn" if approvals else "ok"},
-                {"title": "Дебиторка просрочена", "value": str(len(receivables)), "sub": _fmt_money(sum(r["amount"] for r in receivables if r["currency"] == "RUB")) if fin and receivables else "платежей", "tone": "bad" if receivables else "ok"} if lead else
-                {"title": "Просрочено задач", "value": str(len(overdue_tasks)), "sub": "", "tone": "bad" if overdue_tasks else "ok"},
-                {"title": "Исполнение", "value": str(len(exec_rows)), "sub": f"{sum(1 for r in exec_rows if r['delay'] > 0)} с отставанием", "tone": "warn" if any(r["delay"] > 0 for r in exec_rows) else ""}]
+        board = user.has(Role.CD, Role.FD, Role.GD, Role.OBSERVER)
+        kpis = [{"title": "Воронка · в работе", "value": str(len(open_deals)), "sub": (_fmt_money(in_work_sum) + " · " if fin else "") + f"{len({d.manager_id for d in open_deals})} менеджеров", "tone": "", "url": "/board" if board else "/deals?block=work"},
+                {"title": "Выиграно в квартале", "value": str(len(won_q)), "sub": _fmt_money(won_sum) if fin else "", "tone": "ok" if won_q else "", "url": "/deals?block=won"},
+                {"title": "Ждут решения", "value": str(len(approvals)), "sub": "согласований", "tone": "warn" if approvals else "ok", "url": "#approvals"},
+                {"title": "Дебиторка просрочена", "value": str(len(receivables)), "sub": _fmt_money(sum(r["amount"] for r in receivables if r["currency"] == "RUB")) if fin and receivables else "платежей", "tone": "bad" if receivables else "ok", "url": "/summary?kind=money"} if lead else
+                {"title": "Просрочено задач", "value": str(len(overdue_tasks)), "sub": "", "tone": "bad" if overdue_tasks else "ok", "url": "/tasks"},
+                {"title": "Исполнение", "value": str(len(exec_rows)), "sub": f"{sum(1 for r in exec_rows if r['delay'] > 0)} с отставанием", "tone": "warn" if any(r["delay"] > 0 for r in exec_rows) else "", "url": "/summary?kind=shipments" if user.can("finance_analytics") or user.has(Role.LOGISTICIAN) else "/deals?block=won"}]
 
     # ---------------- главное сейчас
     focus = None
