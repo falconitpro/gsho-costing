@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api import acceptance, admin, auth, catalog, model_docs, deal_trash, deals, documents, execution, images_options, logistics, parts_catalog, parts_fleet, parts_po, parts_requests, parts_rfq, parts_inventory, parts_setup, parts_reports, parts_stock, parts_warranty, pricing, references, service, tasks_files_planfact, team, tech_params
+from .api import acceptance, admin, auth, catalog, model_docs, notifications, deal_trash, deals, documents, execution, images_options, logistics, parts_catalog, parts_fleet, parts_po, parts_requests, parts_rfq, parts_inventory, parts_setup, parts_reports, parts_stock, parts_warranty, pricing, references, service, tasks_files_planfact, team, tech_params
 from .core.config import get_settings
 from .db import init_db
 
@@ -97,11 +97,34 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Модуль расчёта себестоимости и маржинальности поставок ГШО", version="0.1.0", lifespan=lifespan,
-              docs_url="/api/docs", openapi_url="/api/openapi.json")
+              docs_url="/api/docs" if settings.is_dev else None, openapi_url="/api/openapi.json" if settings.is_dev else None)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+
+@app.middleware("http")
+async def security_headers_and_upload_limit(request: Request, call_next):
+    """Лимит размера загрузок по Content-Length (фото и видео приёмки — крупнее, остальное — документы)
+    и заголовки безопасности на каждый ответ API."""
+    from .core.files import LIMIT_DOCUMENT, LIMIT_MEDIA, MB
+    if request.method in ("POST", "PUT", "PATCH"):
+        try:
+            length = int(request.headers.get("content-length") or 0)
+        except ValueError:
+            length = 0
+        path = request.url.path
+        limit = LIMIT_MEDIA if ("/acceptance/" in path and "/files" in path) or "/photos" in path or "/photo" in path else LIMIT_DOCUMENT
+        if length > limit:
+            return JSONResponse(status_code=413, content={"detail": f"Файл больше допустимого размера ({limit // MB} МБ)"})
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.url.path.startswith("/api/") and not request.url.path.startswith("/api/docs") and not request.url.path.startswith("/api/openapi"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
 for r in (auth.router, deals.router, logistics.router, service.router, pricing.router, references.router, admin.router, tasks_files_planfact.router,
-          execution.router, tech_params.router, catalog.router, images_options.router, team.router, documents.router, deal_trash.router, parts_setup.router, parts_catalog.router, parts_requests.router, parts_rfq.router, parts_po.router, parts_stock.router, parts_inventory.router, parts_fleet.router, parts_warranty.router, parts_reports.router, model_docs.router, acceptance.router):
+          execution.router, tech_params.router, catalog.router, images_options.router, team.router, documents.router, deal_trash.router, parts_setup.router, parts_catalog.router, parts_requests.router, parts_rfq.router, parts_po.router, parts_stock.router, parts_inventory.router, parts_fleet.router, parts_warranty.router, parts_reports.router, model_docs.router, acceptance.router, notifications.router):
     app.include_router(r)
 
 

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..calc.types import COST_ITEMS
 from ..core.auth import CurrentUser, get_current_user, require_roles
+from ..core.files import file_response
 from ..core.config import get_settings
 from ..core.roles import Role
 from ..core.workflow import DealStatus, STATUS_TITLES, overdue
@@ -157,12 +158,12 @@ def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depen
         try:
             fresh = rebuild_version_excel(db, ver, manager=path == ver.excel_manager_path)
             if fresh:
-                return FileResponse(fresh, filename=os.path.basename(full) if os.path.basename(full) else os.path.basename(fresh))
+                return file_response(fresh, os.path.basename(full) if os.path.basename(full) else os.path.basename(fresh), inline=False)
         except Exception:   # pragma: no cover — при ошибке отдаём сохранённый файл
             pass
     if not os.path.isfile(full):
         raise HTTPException(404)
-    return FileResponse(full, filename=os.path.basename(full))
+    return file_response(full, os.path.basename(full), inline=False)
 
 
 # ------------------------------------------------------------------ план vs факт

@@ -14,6 +14,7 @@ from starlette.background import BackgroundTask
 
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
+from ..core.files import file_response
 from ..core.roles import Role
 from ..db import get_db
 from ..models import EquipmentExecution, EquipmentModel, ModelDocument, Position, User
@@ -93,7 +94,7 @@ def get_doc(doc_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     fd, path = tempfile.mkstemp(suffix=os.path.splitext(d.file_name)[1])
     os.close(fd)
     adapters.storage().download(d.storage_path, path)
-    return FileResponse(path, filename=d.file_name, content_disposition_type="inline", background=BackgroundTask(os.unlink, path))
+    return file_response(path, d.file_name, background=BackgroundTask(os.unlink, path))
 
 
 @router.delete("/catalog/documents/{doc_id}")

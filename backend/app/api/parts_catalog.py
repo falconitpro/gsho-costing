@@ -12,6 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..core.auth import CurrentUser, get_current_user
+from ..core.files import file_response
 from ..core.roles import Role
 from ..db import get_db
 from ..models import (
@@ -421,8 +422,9 @@ def part_photo(pid: str, i: int, db: Session = Depends(get_db), user: CurrentUse
     fd, path = tempfile.mkstemp(suffix=os.path.splitext(f.get("name", ""))[1] or ".jpg")
     os.close(fd)
     adapters.storage().download(f["path"], path)
-    return FileResponse(path, filename=f.get("name") or "photo.jpg", content_disposition_type="inline", background=BackgroundTask(os.unlink, path),
-                        headers={"Cache-Control": "private, max-age=86400"})
+    r = file_response(path, f.get("name") or "photo.jpg", background=BackgroundTask(os.unlink, path))
+    r.headers["Cache-Control"] = "private, max-age=86400"
+    return r
 
 
 @router.delete("/catalog/{pid}/photo/{i}")

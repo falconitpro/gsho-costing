@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser, get_current_user
+from ..core.files import file_response
 from ..core.roles import Role
 from ..db import get_db
 from ..models import EquipmentExecution, EquipmentModel, Factory, FactoryPriceHistory, Glossary, MachineType, TechParamTemplate
@@ -62,7 +63,7 @@ def catalog_image(attachment_id: str, db: Session = Depends(get_db), user: Curre
     full = os.path.join(s.storage_local_root, att.storage_path)
     if not os.path.isfile(full):
         raise HTTPException(404)
-    return FileResponse(full, filename=att.file_name)
+    return file_response(full, att.file_name)
 
 
 @router.get("/catalog/executions/{exec_id}")

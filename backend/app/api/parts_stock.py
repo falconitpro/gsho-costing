@@ -15,6 +15,7 @@ from starlette.background import BackgroundTask
 
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
+from ..core.files import file_response
 from ..core.roles import Role
 from ..db import get_db
 from ..models import (Client, Factory, Part, PartDeviation, PartReceipt, PartReceiptLine, PartRequest, PartRequestLine, PartReservation,
@@ -311,7 +312,7 @@ def photo(did: str, i: int, db: Session = Depends(get_db), user: CurrentUser = D
     fd, path = tempfile.mkstemp(suffix=os.path.splitext(p.get("name", ""))[1])
     os.close(fd)
     adapters.storage().download(p["path"], path)
-    return FileResponse(path, filename=p.get("name") or "photo", background=BackgroundTask(os.unlink, path))
+    return file_response(path, p.get("name") or "photo", background=BackgroundTask(os.unlink, path))
 
 
 # ------------------------------------------------------------------ заказ клиента и отгрузка

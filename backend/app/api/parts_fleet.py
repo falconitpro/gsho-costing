@@ -10,6 +10,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser, get_current_user
+from ..core.files import file_response
 from ..core.roles import Role
 from ..db import get_db
 from ..models import (Client, ClientMachine, Deal, EquipmentModel, Factory, MachineHours, MachineReminder, MaintenanceKit, OtherMachineModel, Part,
@@ -234,7 +235,7 @@ def machine_file(mid: str, uid: str, i: str, db: Session = Depends(get_db), user
     fd, path = tempfile.mkstemp(suffix=os.path.splitext(f.get("name") or "")[1])
     os.close(fd)
     adapters.storage().download(f["path"], path)
-    return FileResponse(path, filename=f.get("name") or "file", content_disposition_type="inline", background=BackgroundTask(os.unlink, path))
+    return file_response(path, f.get("name") or "file", background=BackgroundTask(os.unlink, path))
 
 
 @router.put("/machines/{mid}")

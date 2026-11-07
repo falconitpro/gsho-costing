@@ -5,6 +5,20 @@
 
 (app) {
 	encode gzip
+	# заголовки безопасности: HSTS, запрет встраивания во фреймы, политика источников для приложения
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		-Server
+	}
+	# лимит тела запроса: видео с приёмки до 300 МБ, остальное ограничивает API
+	request_body {
+		max_size 310MB
+	}
 	@protected not path /api/health
 	basic_auth @protected {
 		{$BASIC_AUTH_USER:berghaus} {$BASIC_AUTH_HASH}

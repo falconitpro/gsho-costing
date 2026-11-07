@@ -20,6 +20,7 @@ from starlette.background import BackgroundTask
 
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
+from ..core.files import file_response
 from ..core.roles import Role
 from ..db import get_db
 from ..models import AcceptanceUnit, Client, ClientMachine, Deal, ExecutionStage, Factory, ModelDocument, Position, User
@@ -222,7 +223,7 @@ def get_file(deal_id: str, uid: str, i: int, db: Session = Depends(get_db), user
     fd, path = tempfile.mkstemp(suffix=os.path.splitext(f.get("name") or "")[1])
     os.close(fd)
     adapters.storage().download(f["path"], path)
-    return FileResponse(path, filename=f.get("name") or "file", content_disposition_type="inline", background=BackgroundTask(os.unlink, path))
+    return file_response(path, f.get("name") or "file", background=BackgroundTask(os.unlink, path))
 
 
 class DecisionIn(BaseModel):
@@ -353,7 +354,7 @@ def act_file_get(deal_id: str, uid: str, db: Session = Depends(get_db), user: Cu
     fd, path = tempfile.mkstemp(suffix=os.path.splitext(f.get("name") or "")[1])
     os.close(fd)
     adapters.storage().download(f["path"], path)
-    return FileResponse(path, filename=f.get("name") or "act", background=BackgroundTask(os.unlink, path))
+    return file_response(path, f.get("name") or "act", background=BackgroundTask(os.unlink, path))
 
 
 @router.get("/{uid}/act.docx")
