@@ -44,8 +44,9 @@ def _can_upload(user: CurrentUser, deal: Deal, category: str) -> bool:
 def _rows(db: Session, deal: Deal) -> list[dict]:
     names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
     out = []
-    for a in db.scalars(select(Attachment).where(Attachment.deal_id == deal.id, Attachment.entity == "deal_doc").order_by(Attachment.uploaded_at.desc())).all():
-        out.append({"id": a.id, "category": a.category, "category_title": CATEGORIES.get(a.category, a.category), "legal": a.category in LEGAL_CATEGORIES,
+    # документы сделки + файлы юридических пакетов (они удаляются только вместе с пакетом)
+    for a in db.scalars(select(Attachment).where(Attachment.deal_id == deal.id, Attachment.entity.in_(("deal_doc", "legal_package"))).order_by(Attachment.uploaded_at.desc())).all():
+        out.append({"id": a.id, "category": a.category, "category_title": CATEGORIES.get(a.category, a.category), "legal": a.category in LEGAL_CATEGORIES, "package": a.entity == "legal_package",
                     "file_name": a.file_name, "comment": a.comment, "size": a.size, "url": f"/api/files/{a.storage_path}",
                     "uploaded_by": names.get(a.uploaded_by, ""), "uploaded_at": a.uploaded_at.isoformat() if a.uploaded_at else None,
                     "uploaded_by_id": a.uploaded_by})
