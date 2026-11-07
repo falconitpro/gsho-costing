@@ -15,7 +15,7 @@ export type Profile = { id: string; owner_kind: string; owner_id: string; kind: 
   documents: { id?: string; title: string; number: string; issued_on: string; valid_until: string; file?: { id: string; name: string; size: number; uploaded_at: string } }[]; powers_of_attorney: { person: string; number: string; issued_on: string; valid_until: string; scope: string }[];
   extra: Record<string, string>; check_status: string; check_status_title: string; checked_at: string | null; checked_by_name: string; lawyer_comment: string; is_active: boolean;
   country_fields: { key: string; title: string }[]; banks: Bank[]; summary: string; history: Hist[] };
-type Resp = { owner_name: string; items: Profile[]; can_edit: boolean; can_check: boolean; can_verify_bank: boolean };
+type Resp = { owner_name: string; items: Profile[]; can_edit: boolean; can_check: boolean; can_verify_bank: boolean; can_delete?: boolean };
 type Dicts = { profile_kinds: Record<string, string>; check_status: Record<string, string>; country_fields: Record<string, { key: string; title: string }[]> };
 
 const FIELD_T: Record<string, string> = { kind: "тип", title: "название", is_default: "по умолчанию", country: "страна", names: "наименования", opf: "ОПФ", reg_number: "рег. номер", tax_number: "налоговый номер",
@@ -72,7 +72,7 @@ function BankCard({ b, canEdit, canVerify, onSaved, onMsg }: { b: Bank; canEdit:
 }
 
 /** Один юридический профиль: форма по группам полей, банковские профили, проверка юристом, история. */
-function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, onSaved, onMsg, open, onToggle }: { p: Profile; dicts: Dicts; canEdit: boolean; canCheck: boolean; canVerify: boolean; onSaved: () => void; onMsg: (m: string) => void; open: boolean; onToggle: () => void }) {
+function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, canDelete, onSaved, onMsg, open, onToggle }: { p: Profile; dicts: Dicts; canEdit: boolean; canCheck: boolean; canVerify: boolean; canDelete: boolean; onSaved: () => void; onMsg: (m: string) => void; open: boolean; onToggle: () => void }) {
   const [f, setF] = useState<Profile>(p);
   const [dirty, setDirty] = useState(false);
   const [newBank, setNewBank] = useState<Partial<Bank> | null>(null);
@@ -168,6 +168,8 @@ function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, onSaved, onMsg, o
               <button className="btn secondary" onClick={() => api.post(`/api/legal/profiles/${p.id}/check`, { status: "checked", comment: f.lawyer_comment }).then(onSaved).catch((e) => onMsg((e as Error).message))}>Проверен юристом</button>
               <button className="btn ghost" style={{ color: "var(--bad)" }} onClick={() => api.post(`/api/legal/profiles/${p.id}/check`, { status: "issues", comment: f.lawyer_comment }).then(onSaved).catch((e) => onMsg((e as Error).message))}>Есть замечания</button></>}
             {canEdit && p.is_active && <button className="btn ghost" style={{ marginLeft: "auto", color: "var(--muted)", borderColor: "var(--line)" }} onClick={() => { if (confirm("Перевести профиль в архив? В новые договоры он подставляться не будет.")) api.put(`/api/legal/profiles/${p.id}`, { is_active: false, is_default: false }).then(onSaved).catch((e) => onMsg((e as Error).message)); }}>в архив</button>}
+            {canDelete && <button className="btn ghost" style={{ color: "var(--bad)", marginLeft: p.is_active && canEdit ? 0 : "auto" }} title="только ЗГД; профиль, использованный в пакетах или реквизитах контракта, удалить нельзя"
+              onClick={() => { if (confirm(`Удалить профиль «${p.title || "без названия"}» вместе со счетами и сканами? Действие необратимо.`)) api.del<{ message: string }>(`/api/legal/profiles/${p.id}`).then((r) => { onSaved(); onMsg(r.message); }).catch((e) => onMsg((e as Error).message)); }}>Удалить</button>}
           </div>
           {branches.length > 0 && <div style={{ fontSize: 12, marginTop: 6 }}><span className="muted">Филиалы в реестре — подставить вместо головной: </span>
             {branches.map((b) => <button key={b.kpp} className="btn ghost" style={{ padding: "1px 8px", fontSize: 11, marginRight: 4 }} title={b.address} onClick={() => fillByInn(b.kpp)}>{b.name} · КПП {b.kpp}</button>)}
@@ -213,6 +215,6 @@ export default function LegalProfileBlock({ ownerKind, ownerId, title = "Юри�
       </div>
       <p className="muted" style={{ margin: "4px 0 8px", fontSize: 12 }}>Юрлицо, регистрация, адреса, подписант и доверенности, банковские реквизиты со статусом и подтверждением. Профиль «по умолчанию» подставляется в договоры; первый профиль создан из карточки автоматически.</p>
       {msg && <div className="muted" style={{ fontSize: 12 }}>{msg}</div>}
-      {data.items.map((p) => <ProfileCard key={p.id} p={p} dicts={dicts} canEdit={data.can_edit} canCheck={data.can_check} canVerify={data.can_verify_bank} onSaved={load} onMsg={setMsg} open={open === p.id} onToggle={() => setOpen(open === p.id ? null : p.id)} />)}
+      {data.items.map((p) => <ProfileCard key={p.id} p={p} dicts={dicts} canEdit={data.can_edit} canCheck={data.can_check} canVerify={data.can_verify_bank} canDelete={!!data.can_delete} onSaved={load} onMsg={setMsg} open={open === p.id} onToggle={() => setOpen(open === p.id ? null : p.id)} />)}
     </div>);
 }

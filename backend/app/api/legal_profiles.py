@@ -130,7 +130,7 @@ def list_profiles(owner_kind: str, owner_id: str, db: Session = Depends(get_db),
     names = svc.user_names(db)
     can_edit = user.can("legal_profiles", 2) and (owner_kind != "own" or user.has(Role.CD, Role.GD, Role.FD, Role.LAWYER, Role.ADMIN))
     return {"owner_kind": owner_kind, "owner_id": owner_id, "owner_name": owner_name, "items": [svc.profile_payload(p, names) for p in rows],
-            "can_edit": can_edit, "can_check": user.has(Role.LAWYER, Role.CD, Role.GD), "can_verify_bank": user.has(Role.FD, Role.LAWYER, Role.CD, Role.GD)}
+            "can_edit": can_edit, "can_check": user.has(Role.LAWYER, Role.CD, Role.GD), "can_verify_bank": user.has(Role.FD, Role.LAWYER, Role.CD, Role.GD), "can_delete": user.has(Role.GD)}
 
 
 @router.post("/profiles", status_code=201)
@@ -236,6 +236,34 @@ def fill_by_inn(pid: str, body: FillByInnIn, db: Session = Depends(get_db), user
     db.commit()
     branches = [{"kpp": f.get("kpp", ""), "name": f.get("name", ""), "address": f.get("address", "")} for f in found if f is not main and is_branch(f)]
     return {"profile": svc.profile_payload(p, svc.user_names(db)), "registry_status": main.get("status") or "", "branches": branches}
+
+
+@router.delete("/profiles/{pid}")
+def delete_profile(pid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Удаление юридического профиля — только ЗГД. Если профиль уже использован в пакетах документов или выбран в реквизитах контракта сделки —
+    удалить нельзя (архив); иначе удаляется вместе с банковскими счетами и файлами сканов. Последний активный профиль владельца не удаляется."""
+    from ..models import Deal, LegalPackage
+    if not user.has(Role.GD):
+        raise HTTPException(403, "Удалить юридический профиль может только ЗГД")
+    p = _profile(db, pid)
+    used_pkg = db.scalar(select(LegalPackage.id).where((LegalPackage.own_profile_id == p.id) | (LegalPackage.cp_profile_id == p.id)).limit(1))
+    used_deal = db.scalar(select(Deal.id).where(Deal.client_requisites_id == p.id).limit(1))
+    if used_pkg or used_deal:
+        raise HTTPException(409, "Профиль использован в пакетах документов или в реквизитах контракта сделки — удалить нельзя, переведите в архив")
+    others = [o for o in svc.ensure_profiles(db, p.owner_kind, p.owner_id) if o.id != p.id and o.is_active]
+    if p.is_active and not others:
+        raise HTTPException(409, "Это единственный активный профиль — сначала создайте другой или переведите в архив")
+    title = p.title
+    docs_dir = os.path.join(get_settings().storage_local_root, "_legal", "profiles", p.id)
+    if os.path.isdir(docs_dir):
+        shutil.rmtree(docs_dir, ignore_errors=True)
+    audit(db, user.id, None, "legal_profile", p.id, "delete", before={"owner_kind": p.owner_kind, "owner_id": p.owner_id, "title": title, "banks": len(p.banks), "documents": len(p.documents or [])})
+    db.delete(p)
+    db.flush()
+    if p.is_default and others:
+        others[0].is_default = True
+    db.commit()
+    return {"deleted": True, "message": f"Профиль «{title}» удалён"}
 
 
 @router.post("/profiles/{pid}/check")
