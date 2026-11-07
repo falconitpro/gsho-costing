@@ -353,6 +353,14 @@ class Template(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     uploaded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # юридический блок (этап 2): библиотека шаблонов договоров и приложений + база примеров
+    title: Mapped[str] = mapped_column(String(255), default="")
+    language: Mapped[str] = mapped_column(String(16), default="ru")           # ru | ru-zh | ru-en | en | zh
+    country: Mapped[str] = mapped_column(String(64), default="")              # страна контрагента / сделки (CN, KG, RU, …)
+    deal_kind: Mapped[str] = mapped_column(String(16), default="")            # purchase | sale
+    variables: Mapped[dict] = mapped_column(JSONType, default=dict)           # найденные при загрузке: {"variables": [...], "loops": {...}, "unknown": [...]}
+    notes: Mapped[str] = mapped_column(Text, default="")
+    is_example: Mapped[bool] = mapped_column(Boolean, default=False)          # база примеров (договоры заказчиков, протоколы), не шаблон
 
 
 class FxRate(Base):

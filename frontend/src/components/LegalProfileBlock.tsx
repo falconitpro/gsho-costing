@@ -12,7 +12,7 @@ export type Hist = { at: string; by_name: string; action: string; fields: Record
 export type Profile = { id: string; owner_kind: string; owner_id: string; kind: string; kind_title: string; title: string; is_default: boolean; country: string; names: Names;
   opf: string; reg_number: string; tax_number: string; kpp: string; legal_address: string; actual_address: string; postal_address: string; director: string;
   signatory_name: string; signatory_position: string; signatory_basis: string; contacts: { name: string; position: string; phone: string; email: string }[];
-  documents: { title: string; number: string; issued_on: string; valid_until: string }[]; powers_of_attorney: { person: string; number: string; issued_on: string; valid_until: string; scope: string }[];
+  documents: { id?: string; title: string; number: string; issued_on: string; valid_until: string; file?: { id: string; name: string; size: number; uploaded_at: string } }[]; powers_of_attorney: { person: string; number: string; issued_on: string; valid_until: string; scope: string }[];
   extra: Record<string, string>; check_status: string; check_status_title: string; checked_at: string | null; checked_by_name: string; lawyer_comment: string; is_active: boolean;
   country_fields: { key: string; title: string }[]; banks: Bank[]; summary: string; history: Hist[] };
 type Resp = { owner_name: string; items: Profile[]; can_edit: boolean; can_check: boolean; can_verify_bank: boolean };
@@ -134,12 +134,20 @@ function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, onSaved, onMsg, o
                 onChange={(e) => set({ powers_of_attorney: f.powers_of_attorney.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x)) })} /></td>)}
               {canEdit && <td><button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => set({ powers_of_attorney: f.powers_of_attorney.filter((_, j) => j !== i) })}>×</button></td>}</tr>)}
               {canEdit && <tr><td colSpan={6}><button className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => set({ powers_of_attorney: [...(f.powers_of_attorney || []), { person: "", number: "", issued_on: "", valid_until: "", scope: "" }] })}>+ доверенность</button></td></tr>}</tbody></table>
-          <table style={{ fontSize: 12, marginTop: 4 }}><thead><tr><th>Документ</th><th>№</th><th>Дата</th><th>Действует до</th>{canEdit && <th />}</tr></thead>
-            <tbody>{(f.documents || []).map((d, i) => <tr key={i}>
-              {(["title", "number", "issued_on", "valid_until"] as const).map((k) => <td key={k}><input type={k.includes("_on") || k.includes("until") ? "date" : "text"} value={d[k] || ""} disabled={!canEdit} style={{ width: k === "title" ? 260 : 120 }}
+          <table style={{ fontSize: 12, marginTop: 4 }}><thead><tr><th>Документ</th><th>№</th><th>Дата</th><th>Действует до</th><th>Скан</th>{canEdit && <th />}</tr></thead>
+            <tbody>{(f.documents || []).map((d, i) => <tr key={d.id || i}>
+              {(["title", "number", "issued_on", "valid_until"] as const).map((k) => <td key={k}><input type={k.includes("_on") || k.includes("until") ? "date" : "text"} value={d[k] || ""} disabled={!canEdit} style={{ width: k === "title" ? 240 : 120 }}
                 onChange={(e) => set({ documents: f.documents.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x)) })} /></td>)}
+              <td style={{ whiteSpace: "nowrap" }}>{d.file ? <><a href={`/api/legal/profiles/${p.id}/documents/${d.file.id}`} target="_blank" rel="noreferrer">{d.file.name}</a><span className="muted"> · {Math.max(1, Math.round(d.file.size / 1024))} КБ</span>
+                  {canEdit && <button className="btn ghost" style={{ padding: "0 6px", marginLeft: 4 }} title="убрать файл" onClick={() => api.del(`/api/legal/profiles/${p.id}/documents/${d.file!.id}`).then(onSaved).catch((e) => onMsg((e as Error).message))}>×</button>}</>
+                : canEdit && d.id ? <label className="btn ghost" style={{ padding: "1px 8px", fontSize: 11, cursor: "pointer" }}>приложить<input type="file" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.docx,.zip" style={{ display: "none" }}
+                  onChange={(e) => { const fl = e.target.files?.[0]; if (fl) api.upload(`/api/legal/profiles/${p.id}/documents`, fl, { doc_id: d.id!, title: d.title }).then(onSaved).catch((er) => onMsg((er as Error).message)); e.target.value = ""; }} /></label>
+                : canEdit ? <span className="muted" title="сначала сохраните профиль">после сохранения</span> : <span className="muted">—</span>}</td>
               {canEdit && <td><button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => set({ documents: f.documents.filter((_, j) => j !== i) })}>×</button></td>}</tr>)}
-              {canEdit && <tr><td colSpan={5}><button className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => set({ documents: [...(f.documents || []), { title: "", number: "", issued_on: "", valid_until: "" }] })}>+ документ (устав, свидетельство, лицензия…)</button></td></tr>}</tbody></table>
+              {canEdit && <tr><td colSpan={6}><div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <button className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => set({ documents: [...(f.documents || []), { id: crypto.randomUUID().replace(/-/g, ""), title: "", number: "", issued_on: "", valid_until: "" }] })}>+ документ (устав, свидетельство, лицензия…)</button>
+                <label className="btn ghost" style={{ padding: "2px 8px", fontSize: 12, cursor: "pointer" }} title="загрузить скан — строка документа создастся по имени файла">+ скан файлом<input type="file" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.docx,.zip" style={{ display: "none" }}
+                  onChange={(e) => { const fl = e.target.files?.[0]; if (fl) api.upload(`/api/legal/profiles/${p.id}/documents`, fl, {}).then(onSaved).catch((er) => onMsg((er as Error).message)); e.target.value = ""; }} /></label></div></td></tr>}</tbody></table>
           <div className="muted" style={{ fontSize: 11, letterSpacing: ".4px", textTransform: "uppercase", margin: "8px 0 2px" }}>Контактные лица</div>
           <table style={{ fontSize: 12 }}><tbody>{(f.contacts || []).map((c, i) => <tr key={i}>
             {(["name", "position", "phone", "email"] as const).map((k) => <td key={k}><input placeholder={{ name: "имя", position: "должность", phone: "телефон", email: "e-mail" }[k]} value={c[k] || ""} disabled={!canEdit} style={{ width: 170 }}
@@ -149,6 +157,10 @@ function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, onSaved, onMsg, o
           <label className="f" style={{ marginTop: 6 }}>Комментарий юриста<textarea rows={2} value={f.lawyer_comment} disabled={!canEdit && !canCheck} onChange={(e) => set({ lawyer_comment: e.target.value })} /></label>
           <div className="row" style={{ marginTop: 8, gap: 6, flexWrap: "wrap" }}>
             {canEdit && <button className="btn" disabled={!dirty} onClick={save}>Сохранить профиль</button>}
+            {canEdit && isRu && <button className="btn secondary" title="заполнить наименования, ОГРН, КПП, адрес и руководителя из ЕГРЮЛ/ЕГРИП по ИНН" disabled={!/^\d{10}$|^\d{12}$/.test(f.tax_number)}
+              onClick={() => api.post<Profile & { changed: string[]; registry_status: string }>(`/api/legal/profiles/${p.id}/fill-by-inn?inn=${f.tax_number}`).then((r) => { onSaved(); onMsg(r.changed.length ? `Заполнено из реестра: ${r.changed.map((k) => FIELD_T[k] || k).join(", ")}${r.registry_status && r.registry_status !== "ACTIVE" ? ` · внимание: статус ${r.registry_status}` : ""}` : "Данные в реестре совпадают с профилем"); }).catch((e) => onMsg((e as Error).message))}>Заполнить по ИНН</button>}
+            <a className="btn ghost" href={`/api/legal/profiles/${p.id}/card`} title="карточка компании с реквизитами и счетами — DOCX для отправки контрагенту">Карточка DOCX</a>
+            <a className="btn ghost" href={`/api/legal/profiles/${p.id}/card?fmt=pdf`} target="_blank" rel="noreferrer">Карточка PDF</a>
             {canCheck && <>
               <button className="btn secondary" onClick={() => api.post(`/api/legal/profiles/${p.id}/check`, { status: "checked", comment: f.lawyer_comment }).then(onSaved).catch((e) => onMsg((e as Error).message))}>Проверен юристом</button>
               <button className="btn ghost" style={{ color: "var(--bad)" }} onClick={() => api.post(`/api/legal/profiles/${p.id}/check`, { status: "issues", comment: f.lawyer_comment }).then(onSaved).catch((e) => onMsg((e as Error).message))}>Есть замечания</button></>}

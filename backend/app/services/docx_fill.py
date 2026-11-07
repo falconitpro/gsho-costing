@@ -71,18 +71,23 @@ def scan_variables(path: str) -> dict[str, Any]:
     doc = Document(path)
     plain: set[str] = set()
     loops: dict[str, set[str]] = {}
-    loop_rows: set[int] = set()
+    loop_rows = []            # элементы w:tr повторяемых строк (держим ссылки — lxml сохраняет один прокси на элемент)
     for t in _iter_tables(doc):
         for row in t.rows:
             text = " ".join(c.text for c in row.cells)
             m = LOOP_RE.search(text)
             if m:
-                loop_rows.add(id(row._tr))
+                loop_rows.append(row._tr)
                 fields = {v for v in VAR_RE.findall(text) if not v.startswith(("#", "/"))}
                 loops.setdefault(m.group(1), set()).update(fields)
     for p in _iter_paragraphs(doc):
-        tr = p._p.getparent().getparent() if p._p.getparent() is not None else None
-        in_loop = tr is not None and tr.tag == qn("w:tr") and id(tr) in loop_rows
+        el = p._p
+        in_loop = False
+        while el is not None:
+            if el.tag == qn("w:tr"):
+                in_loop = any(el is tr for tr in loop_rows)
+                break
+            el = el.getparent()
         for v in VAR_RE.findall(p.text):
             if v.startswith(("#", "/")):
                 continue
