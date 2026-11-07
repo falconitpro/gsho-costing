@@ -122,6 +122,6 @@ def test_batch_and_reports(client):
     assert any(x["article"] == f"NO-{t}" and not x["in_catalog"] for x in _ok(client.get("/api/parts/reports/missing", headers=H(MGR)))["rows"])
     sv = _ok(client.get("/api/parts/reports/service", headers=H(MGR)))
     assert sv["requests"] >= 1 and sv["lines"] >= 3
-    assert any(x["request_number"] == r["number"] for x in _ok(client.get("/api/parts/reports/shipments", headers=H(MGR)))["rows"])
+    assert any(x["request_number"] == r["number"] for x in _ok(client.get("/api/parts/reports/shipments", headers=H(CD)))["rows"])
     st = _ok(client.get("/api/parts/reports/stock?idle_days=0", headers=H(CD)))
     assert st["positions"] >= 0
