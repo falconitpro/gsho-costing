@@ -22,7 +22,7 @@ from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
 from ..db import get_db
-from ..models import AcceptanceUnit, Client, ClientMachine, Deal, ExecutionStage, Factory, Position, User
+from ..models import AcceptanceUnit, Client, ClientMachine, Deal, ExecutionStage, Factory, ModelDocument, Position, User
 from ..services import acceptance_service as acs
 from ..services.deal_service import audit, notify
 from .common import get_deal_or_404, serialize
@@ -45,13 +45,26 @@ def _unit_payload(db: Session, u: AcceptanceUnit, pos: Optional[Position] = None
     d["open_remarks"] = len(acs.open_remarks(u.remarks or []))
     d["checked"] = sum(1 for x in u.checklist or [] if x.get("result")) + sum(1 for x in u.tests or [] if x.get("result"))
     d["to_check"] = len(u.checklist or []) + len(u.tests or [])
-    d["files"] = [{"i": i, "name": f.get("name"), "kind": f.get("kind"), "at": f.get("at")} for i, f in enumerate(u.files or [])]
+    d["files"] = [{"i": i, "name": f.get("name"), "kind": f.get("kind"), "kind_title": acs.FILE_KINDS.get(f.get("kind"), f.get("kind")), "title": f.get("title") or "",
+                   "item_id": f.get("item_id"), "at": f.get("at"), "round_no": f.get("round_no") or 1} for i, f in enumerate(u.files or [])]
     act = dict(u.act or {})
     if act.get("file"):
         act["file"] = {"name": act["file"].get("name")}
     d["act"] = act
     u_ = db.get(User, u.decided_by) if u.decided_by else None
     d["decided_by_name"] = u_.display_name if u_ else ""
+    d["mode_title"] = acs.MODES.get(u.mode or "factory", u.mode)
+    d["prev_fail_count"] = sum(1 for x in [*(u.checklist or []), *(u.tests or [])] if x.get("prev_fail"))
+    names = {x.id: x.display_name for x in db.scalars(select(User)).all()} if u.rounds else {}
+    hist = []
+    for r in reversed(u.rounds or []):
+        fails = [x.get("item") for x in r.get("checklist") or [] if x.get("result") == "fail"] + [x.get("name") for x in r.get("tests") or [] if x.get("result") == "fail"]
+        hist.append({**{k: v for k, v in r.items() if k != "act"}, "act_number": (r.get("act") or {}).get("number") or "",
+                     "mode_title": acs.MODES.get(r.get("mode") or "factory", r.get("mode")), "decision_title": acs.DECISIONS.get(r.get("decision") or "", "без решения"),
+                     "decided_by_name": names.get(r.get("decided_by"), ""), "fails": fails,
+                     "open_remarks": len(acs.open_remarks(r.get("remarks") or []))})
+    d["history"] = hist
+    d.pop("rounds", None)
     return d
 
 
@@ -84,7 +97,8 @@ def units(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depen
     positions = {p.id: p for p in db.scalars(select(Position).where(Position.deal_id == deal.id)).all()}
     total = sum(int(p.qty or 1) for p in positions.values())
     return {"units": [_unit_payload(db, u, positions.get(u.position_id)) for u in rows], "machines_total": total,
-            "can_edit": user.has(*EDIT_ROLES), "decisions": acs.DECISIONS, "results": acs.RESULTS}
+            "can_edit": user.has(*EDIT_ROLES), "decisions": acs.DECISIONS, "results": acs.RESULTS, "file_kinds": acs.FILE_KINDS,
+            "modes": acs.MODES, "to_model_kinds": list(acs.TO_MODEL_KINDS)}
 
 
 @router.post("/init")
@@ -123,6 +137,8 @@ class UnitIn(BaseModel):
     place: Optional[str] = None
     inspected_on: Optional[date] = None
     comment: Optional[str] = None
+    mode: Optional[str] = None          # online | factory — до решения по приёмке
+    is_final: Optional[bool] = None     # онлайн-приёмка окончательная
 
 
 def _clean(rows: list[dict], key: str) -> list[dict]:
@@ -139,6 +155,15 @@ def update(deal_id: str, uid: str, body: UnitIn, db: Session = Depends(get_db), 
     _editor(user)
     u = _unit(db, deal_id, uid, user)
     data = body.model_dump(exclude_unset=True)
+    if ("mode" in data or "is_final" in data) and u.decision:
+        raise HTTPException(409, "Решение по этой приёмке уже принято — для новой приёмки нажмите «Новая приёмка»")
+    if data.get("mode") is not None:
+        if data["mode"] not in acs.MODES:
+            raise HTTPException(422, "Вид приёмки: онлайн или на заводе")
+        if data["mode"] == "factory":
+            data["is_final"] = True
+        elif "is_final" not in data:
+            data["is_final"] = False
     if u.decision in ("accepted", "accepted_remarks") and any(k in data for k in ("serial", "checklist", "tests")) and not user.has(Role.CD, Role.GD):
         raise HTTPException(409, "Машина уже принята — номера и результаты проверок меняют КД или ЗГД")
     for k in ("checklist", "tests", "remarks", "components"):
@@ -156,9 +181,10 @@ def update(deal_id: str, uid: str, body: UnitIn, db: Session = Depends(get_db), 
 
 
 @router.post("/{uid}/files", status_code=201)
-def add_file(deal_id: str, uid: str, file: UploadFile = File(...), kind: str = Form("photo"), db: Session = Depends(get_db),
-             user: CurrentUser = Depends(get_current_user)):
-    """Фото, видео испытаний, протоколы — к машине."""
+def add_file(deal_id: str, uid: str, file: UploadFile = File(...), kind: str = Form("photo"), title: str = Form(""), language: str = Form("ru"),
+             to_model: bool = Form(False), item_id: str = Form(""), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Фото, видео испытаний, документы машины (паспорт, руководство, сертификат, протоколы…) — прямо во время приёмки.
+    Документы машины видны в карточке машины в парке; руководство / каталог / сертификат можно сделать общими для модели."""
     _editor(user)
     u = _unit(db, deal_id, uid, user)
     deal = db.get(Deal, u.deal_id)
@@ -171,8 +197,18 @@ def add_file(deal_id: str, uid: str, file: UploadFile = File(...), kind: str = F
                                            f"Приёмка {u.unit_no} {len(u.files or []) + 1:02d} {name}")
     finally:
         os.unlink(path)
-    u.files = [*(u.files or []), {"path": stored.path, "name": name, "kind": kind if kind in ("photo", "video", "doc") else "doc",
-                                   "at": datetime.now(timezone.utc).isoformat(), "by": user.id}]
+    size = int(getattr(stored, "size", 0) or 0)
+    kind = kind if kind in acs.FILE_KINDS else "doc"
+    u.files = [*(u.files or []), {"path": stored.path, "name": name, "kind": kind, "title": title.strip(),
+                                   "item_id": item_id.strip() or None,
+                                   "at": datetime.now(timezone.utc).isoformat(), "by": user.id, "round_no": u.round_no or 1}]
+    if to_model and kind in acs.TO_MODEL_KINDS:
+        pos = db.get(Position, u.position_id)
+        m = position_model(db, pos, create=True, user_id=user.id) if pos else None
+        if m is not None:
+            db.add(ModelDocument(model_id=m.id, kind=acs.TO_MODEL_KINDS[kind], title=title.strip() or acs.FILE_KINDS[kind], language=language or "ru",
+                                 file_name=name, storage_path=stored.path, size=size, source_deal_id=u.deal_id, comment=f"из приёмки машины № {u.unit_no}",
+                                 uploaded_by=user.id))
     db.commit()
     return _unit_payload(db, u)
 
@@ -213,7 +249,17 @@ def _to_park(db: Session, u: AcceptanceUnit, pos: Position, user: CurrentUser) -
 def _mark_stage(db: Session, deal: Deal, pos: Position, user: CurrentUser) -> bool:
     """Все машины позиции приняты — этап «Приёмка на заводе» выполнен."""
     units = db.scalars(select(AcceptanceUnit).where(AcceptanceUnit.position_id == pos.id)).all()
-    done = len(units) >= int(pos.qty or 1) and all(x.decision in ("accepted", "accepted_remarks") for x in units)
+    full = len(units) >= int(pos.qty or 1)
+    done = full and all(x.decision in ("accepted", "accepted_remarks") and x.is_final is not False for x in units)
+    pre = db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.code == "factory_preacceptance",
+                                                  ExecutionStage.position_id == pos.id)).first()
+    if pre is not None:   # предварительная (онлайн) приёмка — когда все машины приняты онлайн
+        from ..services import execution_service as ex_
+        on = [acs.online_accepted_on(serialize(x)) for x in units]
+        pre_on = date.fromisoformat(max(on)[:10]) if full and on and all(on) else None
+        if pre_on != pre.actual_on:
+            pre.actual_on, pre.done_by = pre_on, (user.id if pre_on else None)
+            ex_.push_history(pre, "actual", pre_on, "онлайн-приёмка всех машин позиции" if pre_on else "онлайн-приёмка не завершена", user.id)
     st = db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.code == "factory_acceptance",
                                                  ExecutionStage.position_id == pos.id)).first()
     if st is not None:
@@ -327,4 +373,32 @@ def act_docx(deal_id: str, uid: str, db: Session = Depends(get_db), user: Curren
 def position_accepted(db: Session, position_id: str) -> bool:
     pos = db.get(Position, position_id)
     units = db.scalars(select(AcceptanceUnit).where(AcceptanceUnit.position_id == position_id)).all()
-    return bool(pos) and len(units) >= int(pos.qty or 1) and all(x.decision in ("accepted", "accepted_remarks") for x in units)
+    return bool(pos) and len(units) >= int(pos.qty or 1) and all(x.decision in ("accepted", "accepted_remarks") and x.is_final is not False for x in units)
+
+
+class RoundIn(BaseModel):
+    mode: str = "factory"
+    is_final: Optional[bool] = None
+
+
+@router.post("/{uid}/rounds")
+def new_round(deal_id: str, uid: str, body: RoundIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Новая (повторная) приёмка машины: онлайн или на заводе. Текущая уходит в историю целиком; пункты, не принятые
+    в предыдущих приёмках, отмечены; неустранённые замечания переносятся."""
+    _editor(user)
+    u = _unit(db, deal_id, uid, user)
+    if u.decision == "accepted" and u.is_final is not False and not user.has(Role.CD, Role.GD):
+        raise HTTPException(409, "Машина окончательно принята — повторную приёмку начинают КД или ЗГД")
+    try:
+        nr = acs.new_round(serialize(u), body.mode, body.is_final)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    for k, v in nr.items():
+        setattr(u, k, v)
+    deal = db.get(Deal, u.deal_id)
+    pos = db.get(Position, u.position_id)
+    db.flush()
+    _mark_stage(db, deal, pos, user)
+    audit(db, user.id, deal.id, "acceptance_unit", u.id, "new_round", None, {"round_no": u.round_no, "mode": body.mode})
+    db.commit()
+    return _unit_payload(db, u, pos)

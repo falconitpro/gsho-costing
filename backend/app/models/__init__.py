@@ -1504,3 +1504,7 @@ class AcceptanceUnit(TimestampMixin, Base):
     act: Mapped[dict] = mapped_column(JSONType, default=dict)                        # {number, date, signed_factory_on, signed_ours_on, file: {path, name}}
     comment: Mapped[str] = mapped_column(Text, default="")
     machine_id: Mapped[Optional[str]] = mapped_column(String(36))                    # машина в парке (эксплуатация, сервис)
+    mode: Mapped[str] = mapped_column(String(16), default="factory")                 # текущая приёмка: online — онлайн | factory — на заводе
+    is_final: Mapped[bool] = mapped_column(Boolean, default=True)                    # приёмка окончательная (на заводе — всегда; онлайн — по отметке)
+    round_no: Mapped[int] = mapped_column(Integer, default=1)                        # номер текущей приёмки машины
+    rounds: Mapped[list[dict]] = mapped_column(JSONType, default=list)               # история предыдущих приёмок (полные снимки)
