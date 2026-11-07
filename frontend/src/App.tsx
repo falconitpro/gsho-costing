@@ -9,13 +9,10 @@ import DealCard from "./pages/DealCard";
 import TasksPage from "./pages/TasksPage";
 import SummaryPage from "./pages/SummaryPage";
 import BoardPage from "./pages/BoardPage";
-import SettingsPage from "./pages/SettingsPage";
+import SettingsHub from "./pages/SettingsHub";
 import CounterpartiesPage from "./pages/CounterpartiesPage";
 import LegalPage from "./pages/LegalPage";
-import TeamPage from "./pages/TeamPage";
-import AccessPage from "./pages/AccessPage";
 import CatalogPage from "./pages/CatalogPage";
-import AdminPage from "./pages/AdminPage";
 import PartsSetupPage from "./pages/PartsSetupPage";
 
 export const MeContext = { current: null as Me | null };
@@ -82,12 +79,9 @@ export default function App() {
             <NavLink to="/counterparties">Контрагенты</NavLink>
             {has("cd", "fd", "gd", "lawyer", "admin", "manager") && <NavLink to="/legal">Юридический блок</NavLink>}
 
-            <NavLink to="/team">Сотрудники</NavLink>
             <NavLink to="/catalog">Каталог</NavLink>
             {has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head") && <NavLink to="/parts/setup">Запасные части</NavLink>}
-            {has("admin", "fd", "gd", "cd") && <NavLink to="/settings">Настройки</NavLink>}
-            {perm("access_admin", 2) && <NavLink to="/access">Уровни доступа</NavLink>}
-            {has("admin", "gd", "fd") && <NavLink to="/admin">Администрирование</NavLink>}
+            <NavLink to="/settings">Настройки</NavLink>
           </nav>
         )}
       </header>
@@ -106,13 +100,13 @@ export default function App() {
             <Route path="/legal" element={<LegalPage me={me} />} />
             <Route path="/clients" element={<Navigate to="/counterparties?type=clients" replace />} />
 
-            <Route path="/team" element={<TeamPage me={me} />} />
-            <Route path="/settings" element={<SettingsPage me={me} />} />
+            <Route path="/team" element={<Navigate to="/settings?s=team" replace />} />
+            <Route path="/settings" element={<SettingsHub me={me} />} />
             <Route path="/catalog" element={<CatalogPage me={me} />} />
             <Route path="/factories" element={<Navigate to="/counterparties?type=suppliers" replace />} />
             <Route path="/parts/setup" element={<PartsSetupPage me={me} />} />
-            {perm("access_admin", 2) && <Route path="/access" element={<AccessPage me={me} />} />}
-            <Route path="/admin" element={<AdminPage me={me} />} />
+            <Route path="/access" element={<Navigate to="/settings?s=access" replace />} />
+            <Route path="/admin" element={<Navigate to="/settings?s=admin" replace />} />
           </Routes>
         )}
       </main>
