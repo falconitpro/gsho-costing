@@ -3,13 +3,14 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { Me } from "../types";
 import LegalProfileBlock from "../components/LegalProfileBlock";
+import LegalTemplates from "../components/LegalTemplates";
 
 // Юридический блок: карточка БЕРГ-ХАУС (компании группы с юридическими и банковскими профилями).
 // Следующие этапы добавят сюда реестр пакетов, библиотеку шаблонов и правил.
 
 type Own = { id: string; code: string; name: string; country: string; currency: string; sells_to_clients: boolean; is_active: boolean; profiles: { id: string; summary: string; check_status_title: string; banks: { status: string; verified: boolean; currency: string }[] }[] };
 type Tab = "own" | "packages" | "templates" | "rules";
-const TABS: [Tab, string, boolean][] = [["own", "Карточка БЕРГ-ХАУС", true], ["packages", "Реестр пакетов", false], ["templates", "Шаблоны", false], ["rules", "Правила и примеры", false]];
+const TABS: [Tab, string, boolean][] = [["own", "Карточка БЕРГ-ХАУС", true], ["packages", "Реестр пакетов", false], ["templates", "Шаблоны и примеры", true], ["rules", "Правила", false]];
 
 export default function LegalPage({ me }: { me: Me }) {
   void me;
@@ -31,6 +32,7 @@ export default function LegalPage({ me }: { me: Me }) {
         </div>
       </div>
       {msg && <div className="alert error">{msg}</div>}
+      {tab === "templates" && <LegalTemplates />}
       {tab === "own" && own && (
         <div className="grid" style={{ gridTemplateColumns: "320px 1fr" }}>
           <div className="card">
