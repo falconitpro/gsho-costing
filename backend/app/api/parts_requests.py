@@ -36,7 +36,7 @@ READ_ROLES = (Role.MANAGER, Role.CD, Role.FD, Role.GD, Role.PURCHASING, Role.SER
 def _can_see(user: CurrentUser, req: PartRequest) -> bool:
     if user.has(Role.CD, Role.FD, Role.GD, Role.PURCHASING, Role.SERVICE_HEAD, Role.LOGISTICIAN, Role.ADMIN, Role.OBSERVER):
         return True
-    return user.has(Role.MANAGER) and req.manager_id == user.id
+    return user.has(Role.MANAGER) and user.is_manager_of(req.manager_id)
 
 
 def _req_or_404(db: Session, rid: str, user: CurrentUser) -> PartRequest:

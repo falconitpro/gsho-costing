@@ -101,3 +101,13 @@ def set_override(db: Session, user: User, group: str, level: int, valid_to: Opti
     else:
         row.level, row.valid_to, row.comment, row.created_by = level, valid_to, comment, created_by
     return row
+
+
+def acting_for(db, user) -> set[str]:
+    """Кого пользователь замещает сегодня: сотрудники, у которых он назначен заместителем и период активен."""
+    from datetime import date
+    from sqlalchemy import select
+    from ..models import User
+    today = date.today()
+    rows = db.scalars(select(User).where(User.deputy_id == user.id, User.is_active.is_(True))).all()
+    return {u.id for u in rows if (u.deputy_from is None or u.deputy_from <= today) and (u.deputy_to is None or u.deputy_to >= today)}

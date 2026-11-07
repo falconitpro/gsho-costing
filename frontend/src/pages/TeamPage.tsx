@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
 import type { Me } from "../types";
+import { DeputyBlock, ObserverScopeBlock } from "../components/TeamExtras";
 
 type Contacts = { position: string; department: string; mobile: string; work_phone: string; wechat: string; telegram: string; whatsapp: string; max: string; extra_email: string; note: string };
 type Card = { id: string; display_name: string; email: string; roles: string[]; role_titles: string[]; contacts: Contacts; wecom_user_id: string;
-  notify_channels: string[]; can_edit: boolean; can_channels: boolean; is_active: boolean };
+  notify_channels: string[]; can_edit: boolean; can_channels: boolean; is_active: boolean;
+  deputy_id: string | null; deputy_from: string | null; deputy_to: string | null; deputy_active?: boolean; observer_scope?: Record<string, unknown> };
 type RoleT = { code: string; title: string };
 type Perm = { group: string; title: string; level: number; level_title: string };
 type Override = { id: string; user_id: string; group: string; level: number; valid_to: string | null; comment: string };
@@ -146,6 +148,8 @@ export default function TeamPage({ me }: { me: Me }) {
                 {cur.can_edit && <button className="btn" onClick={save}>Сохранить карточку</button>}
                 {cur.can_edit && <button className="btn ghost" onClick={test}>Проверить уведомления</button>}
               </div>
+              <DeputyBlock userId={cur.id} value={cur} users={users} canEdit={cur.can_edit} onSaved={(m) => { setMsg(m); load().then(() => api.get<{ users: Card[] }>("/api/team").then((r) => { const u = r.users.find((x) => x.id === cur.id); if (u) setCur({ ...cur, deputy_id: u.deputy_id, deputy_from: u.deputy_from, deputy_to: u.deputy_to, deputy_active: u.deputy_active }); })); }} />
+              {cur.roles.includes("observer") && cur.can_channels && <ObserverScopeBlock userId={cur.id} value={(cur.observer_scope || {}) as Record<string, unknown>} users={users} onSaved={(m) => { setMsg(m); load(); }} />}
               {canManage && (
                 <>
                   <h3>Роли и доступы</h3>

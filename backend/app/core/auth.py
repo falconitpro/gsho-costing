@@ -141,9 +141,14 @@ class CurrentUser:
     roles: set[Role]
     observer_scope: dict
     perms: dict[str, int] = field(default_factory=dict)   # группа полей → уровень (0/1/2), см. core/roles.py
+    acting_for: set[str] = field(default_factory=set)      # сотрудники, которых пользователь сейчас замещает (заместитель на период)
 
     def has(self, *roles: Role) -> bool:
         return bool(self.roles & set(roles))
+
+    def is_manager_of(self, manager_id) -> bool:
+        """Менеджер сделки — сам или как действующий заместитель."""
+        return bool(manager_id) and (manager_id == self.id or manager_id in self.acting_for)
 
     def can(self, group: str, level: int = 1) -> bool:
         """Право по группе доступа: 1 — видит, 2 — редактирует (настраивается администратором/ЗГД)."""
@@ -172,9 +177,9 @@ async def get_current_user(request: Request, response: Response, db: Session = D
         if user is None or not user.is_active:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Учётная запись отключена")
         set_session_cookie(response, issue_session(user, s), s)   # скользящий срок 8 ч
-    from ..services.access_service import perms_for
+    from ..services.access_service import acting_for, perms_for
     return CurrentUser(id=user.id, email=user.email, display_name=user.display_name,
-                       roles={Role(r) for r in user.roles}, observer_scope=user.observer_scope or {}, perms=perms_for(db, user))
+                       roles={Role(r) for r in user.roles}, observer_scope=user.observer_scope or {}, perms=perms_for(db, user), acting_for=acting_for(db, user))
 
 
 def require_roles(*roles: Role):

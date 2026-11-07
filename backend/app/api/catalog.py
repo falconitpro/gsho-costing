@@ -621,7 +621,7 @@ class ProposeIn(BaseModel):
 def propose(deal_id: str, body: ProposeIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Менеджер подтверждает состав для занесения → исполнения «на проверке» и задача КД/ЗГД."""
     deal = get_deal_or_404(db, deal_id, user)
-    if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):
+    if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id))):
         raise HTTPException(403)
     created = cs.propose(db, deal, body.position_ids, body.names, user.id)
     audit(db, user.id, deal.id, "catalog", deal.id, "propose", after={"executions": [e.id for e in created]})

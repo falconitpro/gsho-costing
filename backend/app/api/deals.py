@@ -187,9 +187,41 @@ def create_deal(body: DealCreate, db: Session = Depends(get_db), user: CurrentUs
     db.add(deal)
     db.flush()
     audit(db, user.id, deal.id, "deal", deal.id, "create", after=body.model_dump(mode="json"))
+    # по этому клиенту уже работает коллега — предупреждение в ответе и в ленте
+    others = [d for d in db.scalars(select(Deal).where(Deal.client_id == deal.client_id, Deal.id != deal.id, Deal.archived_at.is_(None), Deal.deleted_at.is_(None),
+                                                       Deal.status.notin_([DealStatus.LOST, DealStatus.CANCELLED, DealStatus.CLOSED]))).all() if not user.is_manager_of(d.manager_id)]
+    warning = None
+    if others:
+        from ..models import User
+        who = sorted({(db.get(User, d.manager_id).display_name if d.manager_id and db.get(User, d.manager_id) else "—") for d in others})
+        warning = f"По этому клиенту уже работает {', '.join(who)}: {', '.join(d.number for d in others[:3])}"
+        db.add(FeedEntry(deal_id=deal.id, kind="system", direction="in", counterparty="", subject="Внимание: по клиенту есть открытые сделки коллег", body=warning, user_id=user.id))
     db.commit()
     db.refresh(deal)
-    return deal_payload(deal, user)
+    return deal_payload(deal, user, {"warning": warning} if warning else None)
+
+
+@router.get("/colleagues")
+def colleagues_deals(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Сделки коллег для менеджера — в минимальном объёме, только чтение: номер, клиент, объект, оборудование без цен, статус, менеджер, срок КП.
+    Нужны, чтобы не дублировать работу по одному клиенту и знать, к кому обратиться."""
+    if not user.has(Role.MANAGER) or user.has(Role.CD, Role.FD, Role.GD):
+        return []
+    from ..models import User
+    from ..services.execution_service import status_detail
+    names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    deals = db.scalars(select(Deal).where(Deal.archived_at.is_(None), Deal.deleted_at.is_(None),
+                                          Deal.status.notin_([DealStatus.LOST, DealStatus.CANCELLED, DealStatus.CLOSED])).order_by(Deal.updated_at.desc())).all()
+    out = []
+    for d in deals:
+        if user.is_manager_of(d.manager_id):
+            continue
+        poss = list(d.positions)
+        out.append({"id": d.id, "number": d.number, "client_id": d.client_id, "client_name": d.client.name if d.client else "", "site": d.site,
+                    "equipment": "; ".join(f"{int(p.qty or 1)} × {p.designation}" for p in poss[:3]) + (f" … ещё {len(poss) - 3}" if len(poss) > 3 else ""),
+                    "status": d.status.value, "status_detail": status_detail(d), "manager_name": names.get(d.manager_id, ""), "kp_due": d.kp_due.isoformat() if d.kp_due else None,
+                    "updated_at": d.updated_at.isoformat() if d.updated_at else None})
+    return out
 
 
 @router.get("/{deal_id}")
@@ -761,7 +793,7 @@ def status_check(deal_id: str, body: StatusCheckIn, db: Session = Depends(get_db
     deal = get_deal_or_404(db, deal_id, user)
     if deal.status != DealStatus.KP_SENT:
         raise HTTPException(409, "Ожидание результата — только после отправки КП")
-    if not (user.has(Role.CD, Role.GD) or deal.manager_id == user.id):
+    if not (user.has(Role.CD, Role.GD) or user.is_manager_of(deal.manager_id)):
         raise HTTPException(403, "Статус уточняет менеджер сделки, КД или ЗГД")
     if body.expected_on and body.expected_on < date.today():
         raise HTTPException(422, "Дата ожидаемого решения уже прошла")
@@ -786,7 +818,7 @@ class OutcomeIn(BaseModel):
 def outcome_ep(deal_id: str, body: OutcomeIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
     # исход сделки отмечают менеджер сделки, КД и ЗГД
-    if not (user.has(Role.CD, Role.GD) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):
+    if not (user.has(Role.CD, Role.GD) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id))):
         raise HTTPException(403, "Результат сделки отмечают менеджер сделки, КД или ЗГД")
     if not body.reason.strip():
         raise HTTPException(422, "Укажите причину")
@@ -860,7 +892,7 @@ def duplicate(deal_id: str, body: DuplicateIn, db: Session = Depends(get_db), us
     """Задача 9: «Дублировать заявку» — новая сделка того же клиента с копией требований, технических характеристик, изображений,
     выбранного ответа завода и (по умолчанию) расчётов логиста и сервиса. Номер — производный (D-2026-0042-2)."""
     deal = get_deal_or_404(db, deal_id, user)
-    if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):
+    if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id))):
         raise HTTPException(403)
     from ..services.offers_service import duplicate_deal
     new = duplicate_deal(db, deal, user.id, offer_id=body.offer_id, copy_calcs=body.copy_calcs, comment=body.comment)

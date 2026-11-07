@@ -43,7 +43,10 @@ class User(TimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(255), unique=True)
     display_name: Mapped[str] = mapped_column(String(255))
     roles: Mapped[list[str]] = mapped_column(JSONType, default=list)        # несколько ролей на пользователя
-    observer_scope: Mapped[dict] = mapped_column(JSONType, default=dict)    # объём доступа наблюдателя
+    observer_scope: Mapped[dict] = mapped_column(JSONType, default=dict)    # объём доступа наблюдателя: client_ids, manager_ids, deal_ids, phase, until
+    deputy_id: Mapped[Optional[str]] = mapped_column(String(36))             # заместитель на период отсутствия
+    deputy_from: Mapped[Optional[date]] = mapped_column(Date)
+    deputy_to: Mapped[Optional[date]] = mapped_column(Date)
     visa_limit_rub: Mapped[Optional[float]] = mapped_column(Float)
     notify_channels: Mapped[list[str]] = mapped_column(JSONType, default=lambda: ["outlook", "wecom", "app"])
     wecom_user_id: Mapped[Optional[str]] = mapped_column(String(100))

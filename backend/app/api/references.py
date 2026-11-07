@@ -103,7 +103,7 @@ def client_card(client_id: str, db: Session = Depends(get_db), user: CurrentUser
         raise HTTPException(404)
     deals = db.scalars(select(Deal).where(Deal.client_id == c.id, Deal.deleted_at.is_(None)).order_by(Deal.created_at.desc())).all()
     if user.has(Role.MANAGER) and not user.has(Role.CD, Role.FD, Role.GD):
-        deals = [d for d in deals if d.manager_id == user.id]
+        deals = [d for d in deals if user.is_manager_of(d.manager_id)]
     # задача 2: выигранная сделка дальше идёт «Контракт → Исполнение → Закрыта»; выигрыш определяем по исходу или по этим стадиям
     won_statuses = (DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED)
     is_won = lambda d: d.outcome == "won" or d.status in won_statuses  # noqa: E731

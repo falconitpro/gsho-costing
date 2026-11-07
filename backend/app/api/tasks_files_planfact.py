@@ -34,9 +34,10 @@ def my_tasks(db: Session = Depends(get_db), user: CurrentUser = Depends(get_curr
     today = date.today()
     out = []
     for t in rows:
-        if t.assignee_id == user.id or (t.assignee_id is None and Role(t.role) in user.roles):
+        if t.assignee_id == user.id or t.assignee_id in user.acting_for or (t.assignee_id is None and Role(t.role) in user.roles):
             deal = db.get(Deal, t.deal_id)
             d = serialize(t)
+            d["as_deputy"] = bool(t.assignee_id and t.assignee_id in user.acting_for)
             poss = list(deal.positions) if deal else []
             d.update({"deal_number": deal.number if deal else None, "deal_status": deal.status.value if deal else None, "overdue": overdue(t.due, today),
                       "days_left": (t.due - today).days,
@@ -67,7 +68,7 @@ def task_done(task_id: str, body: TaskDoneIn, db: Session = Depends(get_db), use
     t = db.get(Task, task_id)
     if t is None or t.done_at is not None:
         raise HTTPException(404, "Задача не найдена или уже закрыта")
-    if not (t.assignee_id == user.id or (t.assignee_id is None and Role(t.role) in user.roles) or user.has(Role.CD, Role.GD)):
+    if not (t.assignee_id == user.id or t.assignee_id in user.acting_for or (t.assignee_id is None and Role(t.role) in user.roles) or user.has(Role.CD, Role.GD)):
         raise HTTPException(403, "Закрыть задачу может исполнитель, КД или ЗГД")
     t.done_at = datetime.now(timezone.utc)
     audit(db, user.id, t.deal_id, "task", t.id, "done", None, {"title": t.title, "comment": body.comment, "manual": True})

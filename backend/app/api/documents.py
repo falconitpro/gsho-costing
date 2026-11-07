@@ -37,7 +37,7 @@ def _can_upload(user: CurrentUser, deal: Deal, category: str) -> bool:
     if user.has(Role.GD, Role.CD, Role.LAWYER):
         return True
     if category in CLIENT_CATEGORIES:
-        return user.has(Role.MANAGER) and deal.manager_id == user.id
+        return user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id)
     return False
 
 
@@ -177,7 +177,7 @@ def _signed(deal: Deal, kind: str) -> bool:
 
 
 def _can_scan(user: CurrentUser, deal: Deal) -> bool:
-    return user.has(Role.GD, Role.CD, Role.LAWYER) or (user.has(Role.MANAGER) and deal.manager_id == user.id)
+    return user.has(Role.GD, Role.CD, Role.LAWYER) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id))
 
 
 def _scans(db: Session, deal: Deal, user: CurrentUser) -> dict:

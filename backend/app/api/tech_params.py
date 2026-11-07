@@ -36,7 +36,7 @@ def _pos(db: Session, deal, pos_id: str) -> Position:
 def _can_edit(user: CurrentUser, deal) -> None:
     if user.has(Role.GD, Role.CD, Role.ADMIN):
         return
-    if not (user.can("tech_params", 2) and user.has(Role.MANAGER) and deal.manager_id == user.id):
+    if not (user.can("tech_params", 2) and user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id)):
         raise HTTPException(403, "Таблицу технических характеристик ведёт менеджер сделки")
 
 
