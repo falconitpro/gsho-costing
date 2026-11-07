@@ -131,37 +131,9 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
     from ..calc import calc_deal
 
     inp = build_calc_input(db, deal)
-    refined = [st for st in db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.refined_on.is_not(None),
-                                                                     ExecutionStage.actual_on.is_(None))).all()]
-    for st in refined:
-        ev = STAGE_DEFS.get(st.code, {}).get("event")
-        if not ev or ev == "production_start":
-            continue
-        try:
-            from ..calc.types import PaymentEvent
-            pe = PaymentEvent(ev)
-        except ValueError:
-            continue
-        if st.position_id:
-            for pi in inp.positions:
-                if pi.id == st.position_id and pe.value not in pi.actual_events:
-                    pi.actual_events[pe.value] = st.refined_on
-        elif st.batch_id:
-            for bi in inp.batches:
-                if bi.id == st.batch_id and pe.value not in bi.actual_events:
-                    bi.actual_events[pe.value] = st.refined_on
-        elif ev not in inp.deal_actual_events:
-            inp.deal_actual_events[ev] = st.refined_on
-    # приёмка на заводе позже готовности → готовность к отгрузке сдвигается на дату приёмки (факт или ожидаемая по данным завода / по замечаниям)
-    for st in db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.code == "factory_acceptance")).all():
-        acc = st.actual_on or st.refined_on
-        if not acc or not st.position_id:
-            continue
-        for pi in inp.positions:
-            if pi.id == st.position_id:
-                cur = pi.actual_events.get("readiness")
-                if cur is None or _d(cur) < acc:
-                    pi.actual_events["readiness"] = acc
+    if not deal.execution_started:   # до начала исполнения уточнённые даты тоже участвуют в прогнозе этапов
+        from .deal_calc import apply_expected_events
+        apply_expected_events(db, deal, inp)
     res = calc_deal(inp)
     v = won_variant(deal)
     if v is None:
@@ -259,6 +231,12 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
         if id(st) not in keep and st.actual_on is None:
             db.delete(st)
     db.flush()
+    # открытые задачи по этапам — срок по новому прогнозу (уточнённые даты, факты, приёмка)
+    open_tasks = {t.block: t for t in db.scalars(select(Task).where(Task.deal_id == deal.id, Task.done_at.is_(None), Task.block.like("stage:%"))).all()}
+    for s_ in by_key.values():
+        t = open_tasks.get(f"stage:{s_.id}")
+        if t is not None and id(s_) in keep and not s_.actual_on and s_.planned_on:
+            t.due = s_.planned_on if s_.code.startswith("local_option") else add_business_days(s_.planned_on, 1)
     # задачи по этапам, у которых уже есть факт (например, дата подписания из реквизитов), закрываются
     done_blocks = {f"stage:{s.id}" for s in by_key.values() if id(s) in keep and s.actual_on}
     if done_blocks:

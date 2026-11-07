@@ -268,6 +268,16 @@ def test_full_flow(client, tmp_path):
     st = _ok(client.post(f"/api/deals/{did}/execution/stages/{fa['id']}/refine", headers=H(MGR), json={"refined_on": acc, "note": "приёмка перенесена"}))
     ship_after = min(str(s["planned_on"]) for s in st["stages"] if s["code"] == "shipment")
     assert ship_after > ship_before and ship_after >= acc                                    # окончательная приёмка сдвигает отгрузку
+    cl_ = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))                          # и расчёт сделки (платежи, денежный поток) — от новых дат
+    pc_ = cl_["result"]["variants"][var["id"]]["base"]["positions"][0]["events"]
+    assert str(pc_["readiness"])[:10] >= acc
+    from app.db import SessionLocal as _SL
+    from sqlalchemy import select
+    with _SL() as db_:
+        from app.models import Task as _T, ExecutionStage as _ES
+        shp = db_.scalars(select(_ES).where(_ES.deal_id == did, _ES.code == "shipment")).first()
+        t_ = db_.scalars(select(_T).where(_T.block == f"stage:{shp.id}", _T.done_at.is_(None))).first()
+        assert t_ is None or t_.due >= shp.planned_on                                            # срок задачи — по новому прогнозу
     assert client.post(f"/api/deals/{did}/execution/stages/{fa['id']}/actual", headers=H(MGR), json={"actual_on": acc}).status_code == 409
     # изменение условий контракта в исполнении → повторная виза → возврат в исполнение
     assert _ok(client.post(f"/api/deals/{did}/execution/terms-changed", headers=H(CD), json={"reason": "аванс 40 %"}))["status"] == "cd_approval"
