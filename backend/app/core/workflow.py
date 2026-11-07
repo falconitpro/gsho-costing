@@ -169,6 +169,32 @@ def manager_checks(deal: dict[str, Any]) -> list[str]:
     return errors
 
 
+def manager_check_items(deal: dict[str, Any]) -> list[dict[str, Any]]:
+    """Те же проверки, что manager_checks, но полным перечнем по группам — для раскрывающегося списка в шапке сделки."""
+    out: list[dict[str, Any]] = []
+    general: list[str] = []
+    if not deal.get("client_id"):
+        general.append("Клиент")
+    positions = deal.get("positions") or []
+    if not positions:
+        general.append("Позиции оборудования — нет ни одной")
+    if deal.get("has_alternatives") and len([v for v in (deal.get("variants") or []) if not _is_default_variant(v)]) < 2:
+        general.append("Альтернативные предложения — нужно минимум два")
+    if deal.get("service_flag") and not deal.get("target_hours"):
+        general.append("Целевая наработка (активен флаг сервиса)")
+    if general:
+        out.append({"group": "Сделка", "tab": "main", "position_id": None, "fields": general, "tech": []})
+    for i, p in enumerate(positions, 1):
+        fields = [title for key, title in (("factory", "Завод"), ("model", "Модель"), ("qty", "Количество"), ("unit_price", "Цена"), ("currency", "Валюта"))
+                  if not p.get(key)]
+        tech = [r.get("name_ru") or r.get("code") or "?" for r in (p.get("tech_param_rows") or [])
+                if r.get("required") and not r.get("local_ru") and not (r.get("value_ru") or r.get("value_zh"))]
+        if fields or tech:
+            name = " ".join(x for x in (p.get("machine_type") or "", p.get("model") or "") if x).strip()
+            out.append({"group": f"Позиция {i}" + (f" · {name}" if name else ""), "tab": "positions", "position_id": p.get("id"), "fields": fields, "tech": tech})
+    return out
+
+
 def _is_default_variant(v: Any) -> bool:
     return bool(v.get("is_default")) if isinstance(v, dict) else bool(getattr(v, "is_default", False))
 
