@@ -7,6 +7,7 @@ import type { Me } from "./types";
 import DealsList from "./pages/DealsList";
 import DealCard from "./pages/DealCard";
 import TasksPage from "./pages/TasksPage";
+import SummaryPage from "./pages/SummaryPage";
 import BoardPage from "./pages/BoardPage";
 import SettingsPage from "./pages/SettingsPage";
 import ClientsPage from "./pages/ClientsPage";
@@ -77,6 +78,7 @@ export default function App() {
             <NavLink to="/deals">Сделки</NavLink>
             <NavLink to="/tasks">Мои задачи</NavLink>
             {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
+            {has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager") && <NavLink to="/summary">Сводка</NavLink>}
             <NavLink to="/clients">Клиенты</NavLink>
 
             <NavLink to="/team">Сотрудники</NavLink>
@@ -99,6 +101,7 @@ export default function App() {
             <Route path="/deals/:id" element={<DealCard me={me} />} />
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/board" element={<BoardPage />} />
+            <Route path="/summary" element={<SummaryPage me={me} />} />
             <Route path="/clients" element={<ClientsPage me={me} />} />
 
             <Route path="/team" element={<TeamPage me={me} />} />
