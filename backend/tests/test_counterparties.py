@@ -75,7 +75,7 @@ def test_client_list_stats_and_requisites_in_contract():
         # реквизиты контракта: варианты = наборы + «из карточки»; выбор фиксирует снимок
         _set(d["id"], status=DealStatus.CONTRACT)
         ex = c.get(f"/api/deals/{d['id']}/execution/stages", headers=H(MGR)).json()
-        assert [o["id"] for o in ex["client_requisites_options"]] == [saved[0]["id"], saved[1]["id"], "card"]
+        assert [o["id"] for o in ex["client_requisites_options"]] == [saved[0]["id"], saved[1]["id"]]   # юридические профили клиента
         assert ex["client_requisites"] == {}
         r = c.patch(f"/api/deals/{d['id']}/execution/contract", headers=H(MGR), json={"client_requisites_id": saved[1]["id"]})
         assert r.status_code == 200, r.text

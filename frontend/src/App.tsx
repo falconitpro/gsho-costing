@@ -11,6 +11,7 @@ import SummaryPage from "./pages/SummaryPage";
 import BoardPage from "./pages/BoardPage";
 import SettingsPage from "./pages/SettingsPage";
 import CounterpartiesPage from "./pages/CounterpartiesPage";
+import LegalPage from "./pages/LegalPage";
 import TeamPage from "./pages/TeamPage";
 import AccessPage from "./pages/AccessPage";
 import CatalogPage from "./pages/CatalogPage";
@@ -79,6 +80,7 @@ export default function App() {
             {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
             {has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager") && <NavLink to="/summary">Сводка</NavLink>}
             <NavLink to="/counterparties">Контрагенты</NavLink>
+            {has("cd", "fd", "gd", "lawyer", "admin", "manager") && <NavLink to="/legal">Юридический блок</NavLink>}
 
             <NavLink to="/team">Сотрудники</NavLink>
             <NavLink to="/catalog">Каталог</NavLink>
@@ -101,6 +103,7 @@ export default function App() {
             <Route path="/board" element={<BoardPage />} />
             <Route path="/summary" element={<SummaryPage me={me} />} />
             <Route path="/counterparties" element={<CounterpartiesPage me={me} />} />
+            <Route path="/legal" element={<LegalPage me={me} />} />
             <Route path="/clients" element={<Navigate to="/counterparties?type=clients" replace />} />
 
             <Route path="/team" element={<TeamPage me={me} />} />
