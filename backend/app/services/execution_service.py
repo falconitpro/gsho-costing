@@ -32,7 +32,8 @@ STAGE_DEFS: dict[str, dict[str, Any]] = {
     "factory_advance":   {"title": "Оплата заводу (аванс)", "level": "position", "event": "factory_prepayment", "roles": ["fd"], "kind": "payment_out", "sort": 50},
     "production":        {"title": "Производство", "level": "position", "event": "production_start", "roles": ["manager", "logistician"], "kind": "date", "sort": 60},
     "readiness":         {"title": "Готовность на заводе", "level": "position", "event": "readiness", "roles": ["logistician", "manager"], "kind": "date", "sort": 70},
-    "factory_acceptance": {"title": "Приёмка на заводе", "level": "position", "event": "", "roles": ["manager", "service_head", "cd", "gd"], "kind": "date", "sort": 75},
+    "factory_preacceptance": {"title": "Предварительная (онлайн) приёмка", "level": "position", "event": "", "roles": ["manager", "service_head", "cd", "gd"], "kind": "date", "sort": 72},
+    "factory_acceptance": {"title": "Окончательная приёмка на заводе", "level": "position", "event": "", "roles": ["manager", "service_head", "cd", "gd"], "kind": "date", "sort": 75},
     "factory_final":     {"title": "Окончательный расчёт с заводом", "level": "position", "event": "", "roles": ["fd"], "kind": "payment_out", "sort": 80},
     "shipment":          {"title": "Отгрузка", "level": "batch", "event": "shipment", "roles": ["logistician"], "kind": "date", "sort": 90},
     "border":            {"title": "Пересечение границы (CMR с отметкой таможни)", "level": "batch", "event": "border", "roles": ["logistician"], "kind": "date", "sort": 100},
@@ -114,6 +115,16 @@ def _d(v) -> Optional[date]:
     return v if isinstance(v, date) else date.fromisoformat(str(v)[:10])
 
 
+HISTORY_KINDS = {"factory": "по данным завода", "refine": "уточнение", "actual": "факт", "acceptance": "по результатам приёмки"}
+FACTORY_DATE_CODES = ("readiness", "factory_preacceptance", "factory_acceptance")   # даты, которые вносятся по данным завода
+
+
+def push_history(st: ExecutionStage, kind: str, on: Optional[date], note: str = "", user_id: Optional[str] = None) -> None:
+    """История изменений даты этапа (каждое изменение по данным завода, уточнение, факт)."""
+    st.date_history = [*(st.date_history or []), {"kind": kind, "on": on.isoformat() if on else None, "note": note, "by": user_id,
+                                                  "at": datetime.now(timezone.utc).isoformat()}]
+
+
 def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
     """Пересобирает плановые (прогнозные) даты этапов из расчёта, сохраняя фактические даты и суммы.
     Уточнённые внутренние даты этапов без факта участвуют в прогнозе как ожидаемые события — сдвигают следующие этапы."""
@@ -141,6 +152,16 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
                     bi.actual_events[pe.value] = st.refined_on
         elif ev not in inp.deal_actual_events:
             inp.deal_actual_events[ev] = st.refined_on
+    # приёмка на заводе позже готовности → готовность к отгрузке сдвигается на дату приёмки (факт или ожидаемая по данным завода / по замечаниям)
+    for st in db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.code == "factory_acceptance")).all():
+        acc = st.actual_on or st.refined_on
+        if not acc or not st.position_id:
+            continue
+        for pi in inp.positions:
+            if pi.id == st.position_id:
+                cur = pi.actual_events.get("readiness")
+                if cur is None or _d(cur) < acc:
+                    pi.actual_events["readiness"] = acc
     res = calc_deal(inp)
     v = won_variant(deal)
     if v is None:
@@ -209,7 +230,8 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
         start_ev = "factory_prepayment" if (p.production_term or {}).get("start_event") == "factory_prepayment" else "factory_contract"
         upsert("production", pc.events.get(start_ev), position_id=p.id, title=f"Производство — {p.designation}")
         upsert("readiness", pc.events.get("readiness"), position_id=p.id, title=f"Готовность на заводе — {p.designation}")
-        upsert("factory_acceptance", pc.events.get("readiness"), position_id=p.id, title=f"Приёмка на заводе — {p.designation}")
+        upsert("factory_preacceptance", pc.events.get("readiness"), position_id=p.id, title=f"Предварительная (онлайн) приёмка — {p.designation}")
+        upsert("factory_acceptance", pc.events.get("readiness"), position_id=p.id, title=f"Окончательная приёмка на заводе — {p.designation}")
         upsert("commissioning", pc.events.get("commissioning"), position_id=p.id, title=f"ПНР — {p.designation}")
         if p.batch_id is None:
             for code in ("shipment", "border", "declaration", "delivery"):
@@ -249,6 +271,8 @@ def stage_rows(db: Session, deal: Deal) -> list[dict]:
     rows = db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id)).all()
     pos = {p.id: p for p in deal.positions}
     bat = {b.id: b for b in deal.batches}
+    from ..models import User
+    names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
     out = []
     for s in sorted(rows, key=lambda s: ((s.actual_on or s.planned_on or date.max), s.sort)):
         out.append({"id": s.id, "code": s.code, "title": s.title, "planned_on": s.planned_on, "actual_on": s.actual_on, "amount": s.amount,
@@ -258,6 +282,9 @@ def stage_rows(db: Session, deal: Deal) -> list[dict]:
                     "note": s.note, "done": s.actual_on is not None, "overdue": s.actual_on is None and s.planned_on is not None and s.planned_on < date.today(),
                     # контроль сроков: базовый план, уточнённая дата, прогноз, факт, отклонение от базового плана (дни, + — позже)
                     "baseline_on": s.baseline_on, "refined_on": s.refined_on, "refined_note": s.refined_note,
+                    "factory_date": s.code in FACTORY_DATE_CODES,
+                    "history": [{**h, "kind_title": HISTORY_KINDS.get(h.get("kind"), h.get("kind")), "by_name": names.get(h.get("by"), "")}
+                                for h in reversed(s.date_history or [])],
                     "deviation_days": ((s.actual_on or s.refined_on or s.planned_on) - s.baseline_on).days
                     if s.baseline_on and (s.actual_on or s.refined_on or s.planned_on) else None})
     return out

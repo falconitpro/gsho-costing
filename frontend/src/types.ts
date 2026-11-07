@@ -120,4 +120,5 @@ export interface Stage {
   id: string; code: string; title: string; planned_on: string | null; actual_on: string | null; amount?: number | null; currency: string; actual_amount?: number | null;
   responsible_roles: string[]; kind: string; position_id: string | null; position: string | null; batch_id: string | null; batch: string | null; note: string; done: boolean; overdue: boolean; can_set: boolean;
   baseline_on?: string | null; refined_on?: string | null; refined_note?: string; deviation_days?: number | null;
+  factory_date?: boolean; history?: { kind: string; kind_title: string; on: string | null; note: string; by_name: string; at: string }[];
 }

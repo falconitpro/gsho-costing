@@ -252,6 +252,23 @@ def test_full_flow(client, tmp_path):
     assert _ok(client.post(f"/api/deals/{did}/execution/start", headers=H(MGR)))["status"] == "execution"
     st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(FD)))
     assert next(s for s in st["stages"] if s["code"] == "contract_signed")["done"]           # дата подписания из реквизитов = факт этапа
+    # даты по данным завода: готовность (несколько изменений — история), предварительная и окончательная приёмка
+    rd = next(s for s in st["stages"] if s["code"] == "readiness")
+    assert rd["factory_date"] and any(s["code"] == "factory_preacceptance" for s in st["stages"])
+    from datetime import date as _date, timedelta as _td
+    r1 = (_date.fromisoformat(str(rd["planned_on"])[:10]) + _td(days=10)).isoformat()
+    r2 = (_date.fromisoformat(str(rd["planned_on"])[:10]) + _td(days=20)).isoformat()
+    _ok(client.post(f"/api/deals/{did}/execution/stages/{rd['id']}/refine", headers=H(MGR), json={"refined_on": r1, "note": "письмо завода 1"}))
+    st = _ok(client.post(f"/api/deals/{did}/execution/stages/{rd['id']}/refine", headers=H(MGR), json={"refined_on": r2, "note": "письмо завода 2"}))
+    rd = next(s for s in st["stages"] if s["id"] == rd["id"])
+    assert [h["note"] for h in rd["history"]] == ["письмо завода 2", "письмо завода 1"] and rd["history"][0]["kind_title"] == "по данным завода"
+    fa = next(s for s in st["stages"] if s["code"] == "factory_acceptance")
+    ship_before = min(str(s["planned_on"]) for s in st["stages"] if s["code"] == "shipment")
+    acc = (_date.fromisoformat(r2) + _td(days=30)).isoformat()
+    st = _ok(client.post(f"/api/deals/{did}/execution/stages/{fa['id']}/refine", headers=H(MGR), json={"refined_on": acc, "note": "приёмка перенесена"}))
+    ship_after = min(str(s["planned_on"]) for s in st["stages"] if s["code"] == "shipment")
+    assert ship_after > ship_before and ship_after >= acc                                    # окончательная приёмка сдвигает отгрузку
+    assert client.post(f"/api/deals/{did}/execution/stages/{fa['id']}/actual", headers=H(MGR), json={"actual_on": acc}).status_code == 409
     # изменение условий контракта в исполнении → повторная виза → возврат в исполнение
     assert _ok(client.post(f"/api/deals/{did}/execution/terms-changed", headers=H(CD), json={"reason": "аванс 40 %"}))["status"] == "cd_approval"
     assert _ok(client.post(f"/api/deals/{did}/submit", headers=H(CD)))["status"] == "execution"

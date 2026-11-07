@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { lbl, STATUS } from "../labels";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Deal, type Me, type Stage } from "../types";
@@ -17,6 +17,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
   const [actual, setActual] = useState<Record<string, { actual_on: string; actual_amount: string; note: string }>>({});
   const [reason, setReason] = useState("");
   const [refine, setRefine] = useState<Record<string, { on: string; note: string }>>({});
+  const [hist, setHist] = useState<Record<string, boolean>>({});
   const [err, setErr] = useState("");
   const [step, setStep] = useState<Record<string, { on: string; comment: string; number: string; fnumber: string }>>({});
   const [scan, setScan] = useState<Record<string, File | null>>({});
@@ -125,40 +126,48 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
               <table style={{ marginTop: 8 }}><thead><tr><th>Ключевой срок</th><th>Базовый план</th><th>Прогноз / факт</th><th className="num">Отклонение</th></tr></thead>
                 <tbody>{key.map((s) => <tr key={s.id}><td>{s.title}</td><td>{fmtDate(s.baseline_on)}</td><td>{s.done ? <b>{fmtDate(s.actual_on)}</b> : fmtDate(s.refined_on || s.planned_on)}</td><td className="num"><Dev d={s.deviation_days} /></td></tr>)}</tbody></table>);
           })()}
-          <p className="muted">Базовый план фиксируется при начале исполнения и не меняется. Уточнённая дата (например, завод подтвердил готовность) пересчитывает прогноз следующих этапов; отклонение — от базового плана, «+» — позже. Фактическую дату вносят ответственные (логист — отгрузка, CMR, ДТ, доставка; сервис — ПНР; менеджер — подписание и готовность), платежи и аккредитив — ФД. Ввод факта пересчитывает плановые даты следующих этапов и платежей.</p>
+          <p className="muted">Базовый план фиксируется при начале исполнения и не меняется. Даты готовности, предварительной (онлайн) и окончательной приёмки вносятся по данным завода — каждое изменение хранится в истории и пересчитывает прогноз следующих этапов; окончательная приёмка позже готовности сдвигает отгрузку, а замечания приёмки со сроком устранения — ожидаемую дату приёмки; отклонение — от базового плана, «+» — позже. Фактическую дату вносят ответственные (логист — отгрузка, CMR, ДТ, доставка; сервис — ПНР; менеджер — подписание и готовность), платежи и аккредитив — ФД. Ввод факта пересчитывает плановые даты следующих этапов и платежей.</p>
         </div>
       </div>
       {Object.entries(groups).map(([g, stages]) => (
         <div className="card" key={g}>
           <h2 style={{ marginTop: 0 }}>{g}</h2>
           <table>
-            <thead><tr><th>Этап</th><th>Базовый план</th><th>Уточнено</th><th>Прогноз</th><th>Факт</th><th className="num">Отклонение</th>{can(me, "cost") && <th className="num">Сумма</th>}<th>Ответственный</th><th>Отметка</th></tr></thead>
+            <thead><tr><th>Этап</th><th>Базовый план</th><th>Уточнено / по данным завода</th><th>Прогноз</th><th>Факт</th><th className="num">Отклонение</th>{can(me, "cost") && <th className="num">Сумма</th>}<th>Ответственный</th><th>Отметка</th></tr></thead>
             <tbody>{stages.map((s) => {
               const a = actual[s.id] || { actual_on: s.actual_on || "", actual_amount: s.actual_amount != null ? String(s.actual_amount) : (s.amount != null ? String(s.amount) : ""), note: s.note || "" };
               return (
-                <tr key={s.id} style={{ background: s.done ? "#e6f5ec" : s.overdue ? "#fde7e7" : undefined }}>
-                  <td>{s.title}{s.note && <div className="muted" style={{ fontSize: 11 }}>{s.note}</div>}</td>
+                <Fragment key={s.id}>
+                <tr style={{ background: s.done ? "#e6f5ec" : s.overdue ? "#fde7e7" : undefined }}>
+                  <td>{s.title}{s.note && <div className="muted" style={{ fontSize: 11 }}>{s.note}</div>}
+                    {(s.history || []).length > 0 && <div><a href="#" style={{ fontSize: 11 }} onClick={(e) => { e.preventDefault(); setHist({ ...hist, [s.id]: !hist[s.id] }); }}>
+                      история дат ({s.history!.length}) {hist[s.id] ? "▴" : "▾"}</a></div>}</td>
                   <td>{fmtDate(s.baseline_on) || <span className="muted">—</span>}</td>
-                  <td>{s.refined_on ? <>{fmtDate(s.refined_on)}{s.refined_note && <div className="muted" style={{ fontSize: 11 }}>{s.refined_note}</div>}</> : <span className="muted">—</span>}
+                  <td>{s.refined_on ? <>{fmtDate(s.refined_on)}{s.factory_date && <span className="badge" style={{ marginLeft: 4, fontSize: 10 }}>завод</span>}{s.refined_note && <div className="muted" style={{ fontSize: 11 }}>{s.refined_note}</div>}</> : <span className="muted">—</span>}
                     {s.can_set && !s.done && deal.status !== "closed" && (() => { const r = refine[s.id] || { on: s.refined_on || "", note: s.refined_note || "" };
                       return <div className="row" style={{ marginTop: 2 }}>
                         <input type="date" value={r.on} style={{ width: 130 }} onChange={(e) => setRefine({ ...refine, [s.id]: { ...r, on: e.target.value } })} />
-                        <input placeholder="основание" value={r.note} style={{ width: 100 }} onChange={(e) => setRefine({ ...refine, [s.id]: { ...r, note: e.target.value } })} />
-                        <button className="btn ghost" style={{ padding: "2px 6px" }} onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/stages/${s.id}/refine`, { refined_on: r.on || null, note: r.note }))}>уточнить</button>
+                        <input placeholder={s.factory_date ? "основание (письмо завода…)" : "основание"} value={r.note} style={{ width: s.factory_date ? 150 : 100 }} onChange={(e) => setRefine({ ...refine, [s.id]: { ...r, note: e.target.value } })} />
+                        <button className="btn ghost" style={{ padding: "2px 6px" }} onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/stages/${s.id}/refine`, { refined_on: r.on || null, note: r.note }))}>{s.factory_date ? "дата завода" : "уточнить"}</button>
                       </div>; })()}</td>
                   <td>{s.done ? <span className="muted">—</span> : fmtDate(s.planned_on)}</td>
                   <td>{s.done ? <b>{fmtDate(s.actual_on)}</b> : s.overdue ? <span className="badge bad">просрочен</span> : <span className="muted">—</span>}</td>
                   <td className="num"><Dev d={s.deviation_days} /></td>
                   {can(me, "cost") && <td className="num">{s.amount != null ? `${fmtRub(s.amount)} ${s.currency}` : ""}{s.actual_amount != null && <div className="muted">факт {fmtRub(s.actual_amount)}</div>}</td>}
                   <td className="muted">{s.responsible_roles.map((r) => ROLE_T[r] || r).join(", ")}</td>
-                  <td>{s.can_set && deal.status !== "closed" ? (
+                  <td>{s.code === "factory_acceptance" ? <span className="muted" style={{ fontSize: 11 }}>факт — по решению приёмки всех машин (вкладка «Приёмка на заводе»)</span> : s.can_set && deal.status !== "closed" ? (
                     <div className="row">
                       <input type="date" value={a.actual_on} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, actual_on: e.target.value } })} />
                       {(s.kind === "payment_in" || s.kind === "payment_out") && <input type="number" placeholder="сумма" value={a.actual_amount} style={{ width: 120 }} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, actual_amount: e.target.value } })} />}
                       <input placeholder="примечание" value={a.note} style={{ width: 120 }} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, note: e.target.value } })} />
                       <button className="btn ghost" style={{ padding: "3px 8px" }} onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/stages/${s.id}/actual`, { actual_on: a.actual_on || null, actual_amount: a.actual_amount ? Number(a.actual_amount) : null, note: a.note }))}>{s.done ? "изменить" : "отметить"}</button>
                     </div>) : null}</td>
-                </tr>);
+                </tr>
+                {hist[s.id] && <tr><td colSpan={9} style={{ background: "#fafafa", fontSize: 12 }}>
+                  <table style={{ fontSize: 12 }}><thead><tr><th>Когда внесено</th><th>Вид</th><th>Дата</th><th>Основание</th><th>Кто</th></tr></thead>
+                    <tbody>{s.history!.map((h, i) => <tr key={i}><td>{fmtDate(h.at)} {h.at?.slice(11, 16)}</td><td>{h.kind_title}</td><td><b>{h.on ? fmtDate(h.on) : "снято"}</b></td><td>{h.note}</td><td>{h.by_name}</td></tr>)}</tbody></table>
+                </td></tr>}
+                </Fragment>);
             })}</tbody>
           </table>
         </div>

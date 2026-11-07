@@ -217,8 +217,23 @@ def _mark_stage(db: Session, deal: Deal, pos: Position, user: CurrentUser) -> bo
     st = db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.code == "factory_acceptance",
                                                  ExecutionStage.position_id == pos.id)).first()
     if st is not None:
-        st.actual_on = date.today() if done else None
+        from ..services import execution_service as ex
+        acc_on = max((x.inspected_on for x in units if x.inspected_on), default=None) or date.today()
+        was = st.actual_on
+        st.actual_on = acc_on if done else None
         st.done_by = user.id if done else None
+        if done and was != acc_on:
+            ex.push_history(st, "actual", acc_on, "все машины позиции приняты", user.id)
+        elif not done:
+            # не принята / замечания со сроком устранения → ожидаемая дата окончательной приёмки (сдвигает готовность к отгрузке)
+            dues = [date.fromisoformat(str(r["due"])[:10]) for x in units for r in acs.open_remarks(x.remarks or []) if r.get("due")]
+            exp = max(dues, default=None)
+            if exp and (st.refined_on is None or exp > st.refined_on):
+                st.refined_on, st.refined_note = exp, "устранение замечаний приёмки"
+                ex.push_history(st, "acceptance", exp, "устранение замечаний приёмки — повторная / окончательная приёмка", user.id)
+        if deal.status.value == "execution":
+            db.flush()
+            ex.rebuild_stages(db, deal)
     return done
 
 

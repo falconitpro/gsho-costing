@@ -189,6 +189,7 @@ def set_actual(deal_id: str, stage_id: str, body: ActualIn, db: Session = Depend
     if ex.STAGE_DEFS[st.code]["kind"] in ("payment_in", "payment_out") and body.actual_on and body.actual_amount is None:
         raise HTTPException(422, "Укажите фактическую сумму платежа")
     ex.set_actual(db, deal, st, body.actual_on, body.actual_amount, body.note, user)
+    ex.push_history(st, "actual", body.actual_on, body.note or ("" if body.actual_on else "факт снят"), user.id)
     if deal.status == DealStatus.EXECUTION:
         ex.create_stage_tasks(db, deal, user.id)
     db.commit()
@@ -214,6 +215,7 @@ def refine(deal_id: str, stage_id: str, body: RefineIn, db: Session = Depends(ge
         raise HTTPException(409, "Этап уже выполнен — уточнять нечего")
     before = st.refined_on
     st.refined_on, st.refined_note = body.refined_on, body.note
+    ex.push_history(st, "factory" if st.code in ex.FACTORY_DATE_CODES else "refine", body.refined_on, body.note or ("" if body.refined_on else "уточнение снято"), user.id)
     audit(db, user.id, deal.id, "execution_stage", st.id, "refine", {"refined_on": str(before) if before else None},
           {"refined_on": str(body.refined_on) if body.refined_on else None, "note": body.note})
     db.flush()

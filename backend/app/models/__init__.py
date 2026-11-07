@@ -594,6 +594,7 @@ class ExecutionStage(TimestampMixin, Base):
     event: Mapped[str] = mapped_column(String(32), default="")                # событие расчёта, которое закрывает этап
     done_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     note: Mapped[str] = mapped_column(Text, default="")
+    date_history: Mapped[list[dict]] = mapped_column(JSONType, default=list)  # изменения дат: [{kind: factory|refine|actual|acceptance, on, note, by, at}]
 
 
 class Batch(TimestampMixin, Base):
