@@ -180,8 +180,8 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 @media (max-width: 760px) { .wp-cols { grid-template-columns: 1fr; } }
 .wp-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .wp-card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; min-width: 0; }
-.wp-card.wp-dark, .wp-card.wp-focus { background: #141413; color: #fff; border-color: #141413; }
-.wp-focus { border-left: 4px solid #ff3131; }
+.wp-card.wp-focus { background: linear-gradient(0deg, #fff6f2, #fff6f2); border-color: #f6d9cf; border-left: 4px solid var(--accent); }
+.wp-card.wp-dark { background: #f6f6f7; border-color: #e4e4e7; }
 .wp-h { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .wp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .wp-head h2 { margin: 0; font-size: 15px; }
@@ -234,8 +234,8 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .wp-mini { display: flex; flex-direction: column; background: #fafafa; border-radius: 10px; padding: 10px 12px; color: var(--ink); text-decoration: none; }
 .wp-mini b { font-size: 22px; }
 .wp-mini small { font-size: 11px; color: var(--muted); }
-.wp-qa { height: 40px; border: 1px solid #3f3f46; background: #27272a; color: #fff; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; }
-.wp-qa:hover { background: #3f3f46; }
+.wp-qa { height: 40px; border: 1px solid #e4e4e7; background: #fff; color: var(--ink); border-radius: 8px; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.wp-qa:hover { border-color: var(--accent); color: var(--accent); }
 .wp-bars { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; align-items: end; }
 .wp-bars > div { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; }
 .wp-bars .pair { display: flex; gap: 2px; align-items: flex-end; height: 72px; width: 100%; justify-content: center; }
