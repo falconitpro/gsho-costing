@@ -12,8 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..calc.types import COST_ITEMS
-from ..core.auth import CurrentUser, get_current_user
-from ..core.files import file_response, require_roles
+from ..core.auth import CurrentUser, get_current_user, require_roles
+from ..core.files import file_response
 from ..core.config import get_settings
 from ..core.roles import Role
 from ..core.workflow import DealStatus, STATUS_TITLES, overdue
