@@ -26,7 +26,8 @@ export default function SummaryPage({ me }: { me: Me }) {
     has("purchasing", "cd", "gd", "service_head", "fd") && "purchasing",
   ].filter(Boolean)) as Kind[];
   const pref = load<Kind>("gsho.summaryKind", has("logistician") ? "shipments" : has("fd") ? "money" : has("service_head") ? "service" : has("purchasing") ? "purchasing" : kinds[0]);
-  const [kind, setKindState] = useState<Kind>(kinds.includes(pref) ? pref : kinds[0]);
+  const urlKind = new URLSearchParams(window.location.search).get("kind") as Kind | null;   // с рабочего места
+  const [kind, setKindState] = useState<Kind>(urlKind && kinds.includes(urlKind) ? urlKind : kinds.includes(pref) ? pref : kinds[0]);
   const setKind = (k: Kind) => { setKindState(k); try { localStorage.setItem("gsho.summaryKind", JSON.stringify(k)); } catch { /* нет хранилища */ } };
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [err, setErr] = useState("");

@@ -56,6 +56,7 @@ class User(TimestampMixin, Base):
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     # изменения карточки, ожидающие подтверждения администратора / ЗГД: {fields: {name: [old, new]}, requested_at, requested_by}
     pending_changes: Mapped[dict] = mapped_column(JSONType, default=dict)
+    prefs: Mapped[dict] = mapped_column(JSONType, default=dict)                # личные настройки интерфейса: {workplace: {order, hidden}}
 
 
 # ------------------------------------------------------------------ уровни доступа (задача 11)
