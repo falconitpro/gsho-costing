@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { PRIORITY_COLOR, toneOf } from "../colors";
 import { lbl, PRIORITY } from "../labels";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtRub } from "../api";
@@ -19,14 +20,8 @@ const BLOCK_STATUSES: Record<Exclude<Block, "archive">, string[]> = {
 const blockOf = (st: string): Exclude<Block, "archive"> => (BLOCK_STATUSES.won.includes(st) ? "won" : BLOCK_STATUSES.lost.includes(st) ? "lost" : "work");
 // цвет статуса по этапу воронки
 // фирменная палитра: красный акцент, чёрный, серые — без зелёного и синего. Чем дальше по воронке, тем темнее; после выигрыша — красный.
-const ST_COLOR: Record<string, [string, string]> = {
-  draft: ["#f1f1f1", "#6b6b6b"], logistics_calc: ["#e6e6e6", "#4a4a4a"], service_calc: ["#e6e6e6", "#4a4a4a"], calc_ready: ["#d9d9d9", "#333"],
-  cd_approval: ["#d9d9d9", "#333"], fd_visa: ["#d9d9d9", "#333"], gd_visa: ["#d9d9d9", "#333"], rework: ["#fff0f0", "#c22"],
-  approved: ["#cfcfcf", "#222"], kp_sent: ["#000", "#fff"], won: ["#ff3131", "#fff"], contract: ["#ffd6d6", "#b00000"],
-  execution: ["#fff0f0", "#c22"], closed: ["#000", "#fff"], lost: ["#fff", "#c22"], cancelled: ["#f1f1f1", "#9a9a9a"],
-};
 const PRIO_ORDER: Record<string, number> = { low: 0, normal: 1, medium: 1, high: 2, urgent: 3, critical: 3 };
-const PRIO_COLOR: Record<number, string> = { 0: "#cfcfcf", 1: "#8a8a8a", 2: "#000", 3: "#ff3131" };
+const PRIO_COLOR = PRIORITY_COLOR;
 const dealDate = (d: Row) => (d.requested_at || d.created_at || "") as string;
 const today = () => new Date().toISOString().slice(0, 10);
 const daysTo = (iso?: string | null) => (iso ? Math.round((new Date(iso.slice(0, 10)).getTime() - new Date(today()).getTime()) / 86400000) : null);
@@ -58,7 +53,7 @@ function grouped(deals: Row[]): Row[] {
 }
 
 function StatusBadge({ d }: { d: Row }) {
-  const [bg, fg] = ST_COLOR[d.status] || ["#eee", "#333"];
+  const [bg, fg] = toneOf(d.status);
   const detail = (d.status_detail || "").split(" · ").slice(1).join(" · ");
   return <div style={{ minWidth: 120 }}><span className="badge" style={{ background: bg, color: fg, fontWeight: 600, whiteSpace: "nowrap" }}>{STATUS_TITLES[d.status] || d.status}</span>
     {detail && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{detail}</div>}</div>;
@@ -237,7 +232,7 @@ export default function DealsList({ me }: { me: Me }) {
         </div>
         {statusChips.length > 1 && <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 8 }}>
           <span className="muted" style={{ fontSize: 12 }}>Этап:</span>
-          {statusChips.map(([st, n]) => { const on = f.statuses.includes(st); const [bg, fg] = ST_COLOR[st] || ["#eee", "#333"];
+          {statusChips.map(([st, n]) => { const on = f.statuses.includes(st); const [bg, fg] = toneOf(st);
             return <button key={st} onClick={() => setF({ ...f, statuses: on ? f.statuses.filter((x) => x !== st) : [...f.statuses, st] })}
               style={{ border: `1px solid ${on ? fg : "transparent"}`, background: bg, color: fg, borderRadius: 14, padding: "3px 10px", cursor: "pointer", fontSize: 12, fontWeight: on ? 700 : 500 }}>
               {STATUS_TITLES[st]} · {n}</button>; })}
@@ -245,7 +240,7 @@ export default function DealsList({ me }: { me: Me }) {
         <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
           {kpis.map(([t, v, c]) => (
             <div key={String(t)} style={{ flex: "1 1 130px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", background: "#fff" }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: (c === "bad" || c === "warn") && Number(v) > 0 ? "var(--accent)" : undefined }}>{v}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: Number(v) > 0 && c === "bad" ? "var(--bad)" : Number(v) > 0 && c === "warn" ? "var(--warn)" : undefined }}>{v}</div>
               <div className="muted" style={{ fontSize: 12 }}>{t}</div></div>))}
         </div>
       </div>

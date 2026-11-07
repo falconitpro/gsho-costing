@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toneOf } from "../colors";
 import ChecksPanel from "../components/ChecksPanel";
 import { NowLine, POST_WIN_STATUSES, SaleSummary, StageStrip, dealPhase } from "../components/DealHeader";
 import { lbl, FEED_KIND } from "../labels";
@@ -138,7 +139,7 @@ export default function DealCard({ me }: { me: Me }) {
           <div className="row" style={{ gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
             <h1 style={{ margin: 0 }}>{deal.number}</h1>
             <span style={{ fontSize: 15 }}>{deal.client_name}{deal.site && <span className="muted"> · {deal.site}</span>}</span>
-            <span className="badge accent">{deal.status_detail || STATUS_TITLES[deal.status]}</span>
+            <span className="badge" style={{ background: toneOf(deal.status)[0], color: toneOf(deal.status)[1], fontWeight: 600 }}>{deal.status_detail || STATUS_TITLES[deal.status]}</span>
             {deal.parent_deal_id && <span className="badge">дубликат</span>}
             {deal.legal_review?.status && <span className={"badge " + (REVIEW_BADGE[deal.legal_review.status] || "")} title={deal.legal_review.comment || ""}>юрист: {{ in_review: "на проверке", ok: "замечаний нет", remarks: "есть замечания" }[deal.legal_review.status] || deal.legal_review.status}</span>}
           </div>

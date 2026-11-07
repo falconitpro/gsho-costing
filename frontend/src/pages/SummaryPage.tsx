@@ -11,10 +11,10 @@ const load = <T,>(k: string, d: T): T => { try { return (JSON.parse(localStorage
 
 function Kpi({ v, l, bad }: { v: string | number; l: string; bad?: boolean }) {
   return <div style={{ flex: "1 1 130px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", background: "#fff" }}>
-    <div style={{ fontSize: 20, fontWeight: 700, color: bad && Number(v) > 0 ? "var(--accent)" : undefined }}>{v}</div><div className="muted" style={{ fontSize: 12 }}>{l}</div></div>;
+    <div style={{ fontSize: 20, fontWeight: 700, color: bad && Number(v) > 0 ? "var(--bad)" : undefined }}>{v}</div><div className="muted" style={{ fontSize: 12 }}>{l}</div></div>;
 }
 const d = (x: string | null | undefined) => (x ? fmtDate(x) : "—");
-const late = (n: number) => (n > 0 ? <span style={{ color: "var(--accent)", fontWeight: 600 }}> · просрочено {n} дн.</span> : null);
+const late = (n: number) => (n > 0 ? <span style={{ color: "var(--bad)", fontWeight: 600 }}> · просрочено {n} дн.</span> : null);
 
 export default function SummaryPage({ me }: { me: Me }) {
   const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
@@ -59,7 +59,7 @@ function Shipments({ data, t }: { data: Record<string, unknown>; t: Record<strin
   const [only, setOnly] = useState<"" | "late" | "transit">("");
   const shown = rows.filter((r) => (!q || [r.deal_number, r.client, r.site, r.route, r.manager].some((x) => (x || "").toLowerCase().includes(q.toLowerCase())))
     && (only !== "late" || r.overdue > 0) && (only !== "transit" || (r.stages.some((s) => s.code === "shipment" && s.done) && !r.stages.every((s) => s.done))));
-  const cell = (s: Stage | undefined) => s ? <td style={{ whiteSpace: "nowrap", background: s.done ? "#ededed" : s.overdue_days > 0 ? "#ffe3e3" : undefined }}>{d(s.on)}{s.done ? " ✓" : ""}{!s.done && late(s.overdue_days)}</td> : <td>—</td>;
+  const cell = (s: Stage | undefined) => s ? <td style={{ whiteSpace: "nowrap", background: s.done ? "var(--ok-bg)" : s.overdue_days > 0 ? "var(--late-bg)" : undefined }}>{d(s.on)}{s.done ? " ✓" : ""}{!s.done && late(s.overdue_days)}</td> : <td>—</td>;
   return (
     <>
       <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
@@ -78,7 +78,7 @@ function Shipments({ data, t }: { data: Record<string, unknown>; t: Record<strin
           <tbody>{shown.map((r, i) => {
             const st = (c: string) => r.stages.find((s) => s.code === c);
             return (
-              <tr key={i} style={r.overdue > 0 ? { boxShadow: "inset 3px 0 0 var(--accent)" } : undefined}>
+              <tr key={i} style={r.overdue > 0 ? { boxShadow: "inset 3px 0 0 var(--bad)" } : undefined}>
                 <td><Link to={`/deals/${r.deal_id}?tab=execution`} style={{ fontWeight: 600 }}>{r.deal_number}</Link></td>
                 <td><b>{r.client}</b>{r.site && <div className="muted" style={{ fontSize: 12 }}>{r.site}</div>}</td>
                 <td><b>{r.batch}</b><div className="muted" style={{ fontSize: 12 }}>{r.route}{r.units ? ` · ${r.units} ТС` : ""}{r.weight_kg ? ` · ${Math.round(r.weight_kg)} кг` : ""}</div></td>
@@ -121,8 +121,8 @@ function Money({ data, t }: { data: Record<string, unknown>; t: Record<string, n
             {curve.map((c) => (
               <div key={c.week} title={`${fmtDate(c.week)}: +${fmtRub(c.in)} / −${fmtRub(c.out)} · итог ${fmtRub(c.cum)}`} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center", gap: 2, height: "100%" }}>
                 <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", height: "85%" }}>
-                  <div style={{ flex: 1, background: "var(--ink)", height: `${(c.in / maxAbs) * 100}%` }} /><div style={{ flex: 1, background: "var(--accent)", height: `${(c.out / maxAbs) * 100}%` }} /></div>
-                <div style={{ fontSize: 10, color: c.cum < 0 ? "var(--accent)" : "var(--muted)", whiteSpace: "nowrap" }}>{fmtDate(c.week).slice(0, 5)}</div>
+                  <div style={{ flex: 1, background: "var(--ok)", height: `${(c.in / maxAbs) * 100}%` }} /><div style={{ flex: 1, background: "var(--bad)", height: `${(c.out / maxAbs) * 100}%` }} /></div>
+                <div style={{ fontSize: 10, color: c.cum < 0 ? "var(--bad)" : "var(--muted)", whiteSpace: "nowrap" }}>{fmtDate(c.week).slice(0, 5)}</div>
               </div>))}
           </div>
         </div>)}
@@ -130,7 +130,7 @@ function Money({ data, t }: { data: Record<string, unknown>; t: Record<string, n
         <table>
           <thead><tr><th>Дата</th><th>Сделка</th><th>Клиент</th><th>Платёж</th><th className="num">Сумма</th><th>Менеджер</th></tr></thead>
           <tbody>{rows.map((p, i) => (
-            <tr key={i} style={p.overdue_days > 0 ? { boxShadow: "inset 3px 0 0 var(--accent)" } : undefined}>
+            <tr key={i} style={p.overdue_days > 0 ? { boxShadow: "inset 3px 0 0 var(--bad)" } : undefined}>
               <td style={{ whiteSpace: "nowrap" }}>{d(p.on)}{late(p.overdue_days)}</td><td><Link to={`/deals/${p.deal_id}?tab=planfact`}>{p.deal_number}</Link></td><td>{p.client}</td>
               <td>{p.direction === "in" ? <span className="badge ok">получить</span> : <span className="badge bad">заплатить</span>} {p.title}</td>
               <td className="num" style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{money(p)}</td><td>{p.manager}</td></tr>))}
@@ -159,10 +159,10 @@ function Service({ data, t }: { data: Record<string, unknown>; t: Record<string,
       <table>
         <thead><tr><th>Дата</th><th>Этап</th><th>Сделка</th><th>Клиент / объект</th><th>Позиция</th><th>Принято</th><th>Замечаний открыто</th><th>Менеджер</th></tr></thead>
         <tbody>{rows.map((r, i) => (
-          <tr key={i} style={{ opacity: r.done ? .6 : 1, ...(r.overdue_days > 0 ? { boxShadow: "inset 3px 0 0 var(--accent)" } : {}) }}>
+          <tr key={i} style={{ opacity: r.done ? .6 : 1, ...(r.overdue_days > 0 ? { boxShadow: "inset 3px 0 0 var(--bad)" } : {}) }}>
             <td style={{ whiteSpace: "nowrap" }}>{d(r.on)}{r.done ? " ✓" : late(r.overdue_days)}</td><td>{r.title}</td>
             <td><Link to={`/deals/${r.deal_id}?tab=acceptance`}>{r.deal_number}</Link></td><td><b>{r.client}</b>{r.site && <div className="muted" style={{ fontSize: 12 }}>{r.site}</div>}</td>
-            <td>{r.position}</td><td>{r.accepted} из {r.qty}</td><td style={{ color: r.open_remarks ? "var(--accent)" : undefined }}>{r.open_remarks || "—"}</td><td>{r.manager}</td></tr>))}
+            <td>{r.position}</td><td>{r.accepted} из {r.qty}</td><td style={{ color: r.open_remarks ? "var(--warn)" : undefined }}>{r.open_remarks || "—"}</td><td>{r.manager}</td></tr>))}
         {rows.length === 0 && <tr><td colSpan={8} className="muted" style={{ padding: 16 }}>Нет</td></tr>}</tbody>
       </table>
     </div>);
@@ -202,8 +202,8 @@ function Purchasing({ data, t }: { data: Record<string, unknown>; t: Record<stri
         <table>
           <thead><tr><th>Заказать до</th><th>Нужно к</th><th>Опция</th><th>Поставщик · срок</th><th>Сделка</th><th>Клиент</th><th>Статус</th><th>Менеджер</th></tr></thead>
           <tbody>{opts.map((o, i) => (
-            <tr key={i} style={o.late ? { boxShadow: "inset 3px 0 0 var(--accent)" } : undefined}>
-              <td style={{ whiteSpace: "nowrap", fontWeight: 600, color: o.late ? "var(--accent)" : undefined }}>{d(o.order_by)}{o.late && " · упущен"}</td><td>{d(o.need_by)}</td>
+            <tr key={i} style={o.late ? { boxShadow: "inset 3px 0 0 var(--bad)" } : undefined}>
+              <td style={{ whiteSpace: "nowrap", fontWeight: 600, color: o.late ? "var(--bad)" : undefined }}>{d(o.order_by)}{o.late && " · упущен"}</td><td>{d(o.need_by)}</td>
               <td>{o.option}{o.qty > 1 && ` × ${o.qty}`}</td><td>{o.supplier || "—"}{o.lead_days ? ` · ${o.lead_days} дн.` : ""}</td>
               <td><Link to={`/deals/${o.deal_id}?tab=positions`}>{o.deal_number}</Link></td><td>{o.client}</td>
               <td>{o.ordered_at ? <span className="badge ok">заказано {fmtDate(o.ordered_at)}</span> : <span className="badge">{o.status}</span>}</td><td>{o.manager}</td></tr>))}
@@ -215,7 +215,7 @@ function Purchasing({ data, t }: { data: Record<string, unknown>; t: Record<stri
           <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{reqs.map((r) => <tr key={r.id}><td><Link to="/parts/setup">{r.number}</Link>{r.urgent && <span className="badge bad" style={{ marginLeft: 4 }}>машина стоит</span>}</td><td>{r.client}</td><td>{r.unordered} из {r.lines} строк</td><td>{d(r.created_at)}</td></tr>)}
             {reqs.length === 0 && <tr><td className="muted">Нет</td></tr>}</tbody></table></div>
         <div className="card"><b>Заказы поставщикам</b>
-          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{pos.map((p) => <tr key={p.id} style={p.overdue ? { boxShadow: "inset 3px 0 0 var(--accent)" } : undefined}><td><Link to="/parts/setup">{p.number}</Link></td><td>{p.supplier}</td><td>{p.received} из {p.lines} принято</td><td style={{ whiteSpace: "nowrap" }}>ETA {d(p.eta)}{p.overdue ? <span style={{ color: "var(--accent)" }}> · просрочено {p.overdue}</span> : ""}</td></tr>)}
+          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{pos.map((p) => <tr key={p.id} style={p.overdue ? { boxShadow: "inset 3px 0 0 var(--bad)" } : undefined}><td><Link to="/parts/setup">{p.number}</Link></td><td>{p.supplier}</td><td>{p.received} из {p.lines} принято</td><td style={{ whiteSpace: "nowrap" }}>ETA {d(p.eta)}{p.overdue ? <span style={{ color: "var(--bad)" }}> · просрочено {p.overdue}</span> : ""}</td></tr>)}
             {pos.length === 0 && <tr><td className="muted">Нет</td></tr>}</tbody></table></div>
       </div>
     </>

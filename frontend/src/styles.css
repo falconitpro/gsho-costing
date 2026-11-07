@@ -5,10 +5,13 @@
   --muted: #6b6b6b;
   --line: #e4e4e4;
   --bg: #fafafa;
-  /* фирменная палитра: красный акцент, чёрный, серые; без зелёного, жёлтого и синего */
-  --ok: #000;
-  --warn: #b00000;
-  --bad: #ff3131;
+  /* фирменный акцент — красный; статусы и этапы — спокойные светлые оттенки (решение владельца 07.11.2026) */
+  --ok: #1f6b3a;        --ok-bg: #e4f3e9;
+  --warn: #8a5a00;      --warn-bg: #fdf1dc;
+  --bad: #b3261e;       --bad-bg: #fdecec;
+  --info: #1d4f91;      --info-bg: #e4eefa;
+  --done: #4b5563;      --done-bg: #eceef1;
+  --late-bg: #fdecec;
   --font: "Intro", "Arial", system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
@@ -75,9 +78,10 @@ input, select, textarea { font-family: inherit; font-size: 14px; padding: 7px 9p
 label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #eee; }
 .badge.accent { background: var(--accent-soft); color: var(--accent); }
-.badge.ok { background: #000; color: #fff; }
-.badge.warn { background: #ffd6d6; color: #8a0000; }
-.badge.bad { background: var(--accent); color: #fff; }
+.badge.ok { background: var(--ok-bg); color: var(--ok); }
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
+.badge.bad { background: var(--bad-bg); color: var(--bad); font-weight: 600; }
+.badge.info { background: var(--info-bg); color: var(--info); }
 .margin-ind { font-size: 28px; font-weight: 800; }
 .margin-ind.ok { color: var(--ok); }
 .margin-ind.warn { color: var(--warn); }
@@ -87,19 +91,19 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; colo
 .tabs button { background: none; border: 0; padding: 8px 12px; cursor: pointer; font-family: inherit; font-size: 14px; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tabs button.active { border-color: var(--accent); font-weight: 700; }
 .alert { padding: 10px 12px; border-radius: 6px; margin: 8px 0; }
-.alert.error { background: #fff0f0; color: #b00000; border-left: 4px solid var(--accent); }
-.alert.warn { background: #f3f3f3; border-left: 4px solid var(--accent); }
-.alert.info { background: #f3f3f3; border-left: 4px solid #000; }
+.alert.error { background: var(--bad-bg); color: var(--bad); border-left: 4px solid var(--bad); }
+.alert.warn { background: var(--warn-bg); color: #5c3d00; border-left: 4px solid var(--warn); }
+.alert.info { background: var(--info-bg); color: var(--info); border-left: 4px solid var(--info); }
 .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); gap: 10px; overflow-x: auto; }
 .board .col { background: #f1f1f1; border-radius: 8px; padding: 8px; min-height: 200px; }
 .board .col h3 { font-size: 13px; margin: 4px 0 8px; }
-.board .deal { background: #fff; border-radius: 6px; padding: 8px; margin-bottom: 8px; border-left: 3px solid var(--accent); }
+.board .deal { background: #fff; border-radius: 6px; padding: 8px; margin-bottom: 8px; border-left: 3px solid var(--line); }
 .board .deal.overdue { border-left-color: var(--bad); }
 .kpi { display: flex; flex-direction: column; }
 .kpi .v { font-size: 20px; font-weight: 700; }
 .kpi .l { font-size: 12px; color: var(--muted); }
 @media (max-width: 700px) { main { padding: 10px; } th, td { padding: 5px; font-size: 12px; } .margin-ind { font-size: 22px; } }
-.alert.ok { background: #e6f5ec; color: var(--ok); }
+.alert.ok { background: var(--ok-bg); color: var(--ok); border-left: 4px solid var(--ok); }
 .btn[style*="padding"] { min-height: 0; }
 /* кнопки добавления — у правого края своего блока (в строке кнопок — первая из них сдвигает группу вправо) */
 .btn.add { display: flex; width: max-content; margin-left: auto; }

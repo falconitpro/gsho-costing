@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toneOf } from "../colors";
 import { lbl, PRIORITY, ROLE } from "../labels";
 import { Link } from "react-router-dom";
 import { api, fmtDate } from "../api";
@@ -15,8 +16,8 @@ export default function BoardPage() {
       <h1>Доска сделок</h1>
       <div className="board">
         {order.filter((k) => cols[k]).map((k) => (
-          <div className="col" key={k}>
-            <h3>{cols[k].title} <span className="muted">({cols[k].deals.length})</span></h3>
+          <div className="col" key={k} style={{ background: toneOf(k)[0] }}>
+            <h3 style={{ color: toneOf(k)[1] }}>{cols[k].title} <span className="muted">({cols[k].deals.length})</span></h3>
             {cols[k].deals.map((d) => (
               <div key={d.id} className={"deal" + (d.overdue ? " overdue" : "")}>
                 <Link to={`/deals/${d.id}`}><b>{d.number}</b></Link> <span className="badge">{lbl(PRIORITY, d.priority)}</span>{d.status_detail && d.status_detail.includes("·") && <div className="muted" style={{ fontSize: 12 }}>{d.status_detail.split("·")[1].trim()}</div>}
