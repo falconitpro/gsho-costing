@@ -390,8 +390,11 @@ def package_status(pid: str, body: StatusIn, db: Session = Depends(get_db), user
     is_mgr = user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id)
     if not (any(user.has(Role(r)) for r in allowed if r != "manager") or ("manager" in allowed and is_mgr)):
         raise HTTPException(403, f"Статус «{svc.STATUS_TITLES.get(body.status)}» ставят: {', '.join(allowed)}")
-    if body.status == "signed" and not deal.factory_contract_signed_at:
-        raise HTTPException(409, "Сначала отметьте подписание договора с заводом в реквизитах контракта (номер и дата)")
+    if body.status == "signed":
+        if p.kind == "purchase" and not deal.factory_contract_signed_at:
+            raise HTTPException(409, "Сначала отметьте подписание договора с заводом в реквизитах контракта (номер и дата)")
+        if p.kind == "sale" and not deal.contract_signed_at:
+            raise HTTPException(409, "Сначала отметьте подписание договора с клиентом в реквизитах контракта (номер и дата)")
     if body.status == "draft" and len(body.comment.strip()) < 3:
         raise HTTPException(422, "Укажите причину возврата в черновик")
     before = p.status
@@ -401,3 +404,252 @@ def package_status(pid: str, body: StatusIn, db: Session = Depends(get_db), user
     audit(db, user.id, deal.id, "legal_package", p.id, "status", {"status": before}, {"status": body.status, "comment": body.comment})
     db.commit()
     return svc.package_payload(p, svc.user_names(db))
+
+
+# ================================================================== этап 4: клиентский пакет (договор заказчика)
+
+from fastapi import File, Form, UploadFile  # noqa: E402
+
+from ..services import legal_sale as sale  # noqa: E402
+from ..services import legal_rules as rules  # noqa: E402
+from ..services import settings_service as settings  # noqa: E402
+from ..adapters.llm import PROVIDERS, DEFAULT_MODELS, configured_providers, make_llm, LLMNotConfigured  # noqa: E402
+
+
+class AiSettingsIn(BaseModel):
+    provider: str
+    model: str = ""
+
+
+@router.get("/legal/ai")
+def ai_settings(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Провайдер ИИ для анализа договоров: текущий выбор, какие настроены ключами (сами ключи не показываются), версия правил."""
+    if not user.can("legal_docs"):
+        raise HTTPException(403)
+    cur = settings.get(db, "legal_ai") or {}
+    return {"provider": cur.get("provider", "yandexgpt"), "model": cur.get("model", ""), "providers": PROVIDERS, "default_models": DEFAULT_MODELS, "configured": configured_providers(),
+            "can_edit": user.has(Role.GD), "rules_version": rules.RULES_VERSION, "rules_count": len(rules.RULES), "groups": rules.GROUPS,
+            "env_hint": {"yandexgpt": "LLM_YANDEX_API_KEY (или YANDEX_TRANSLATE_API_KEY) + YANDEX_FOLDER_ID", "openai": "LLM_OPENAI_API_KEY, LLM_OPENAI_BASE_URL, LLM_OPENAI_MODEL", "kimi": "LLM_KIMI_API_KEY, LLM_KIMI_MODEL"}}
+
+
+@router.put("/legal/ai")
+def set_ai_settings(body: AiSettingsIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    if not user.has(Role.GD):
+        raise HTTPException(403, "Провайдера ИИ выбирает ЗГД")
+    if body.provider not in PROVIDERS:
+        raise HTTPException(422, "Неизвестный провайдер")
+    settings.set_value(db, "legal_ai", {"provider": body.provider, "model": body.model.strip()}, user.id, "юридический блок: ИИ-провайдер")
+    audit(db, user.id, None, "settings", "legal_ai", "update", after={"provider": body.provider, "model": body.model})
+    db.commit()
+    return ai_settings(db, user)
+
+
+@router.post("/legal/ai/test")
+def test_ai(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Проверка соединения с выбранной моделью коротким запросом (ЗГД, КД, юрист)."""
+    if not user.has(Role.GD, Role.CD, Role.LAWYER):
+        raise HTTPException(403)
+    cur = settings.get(db, "legal_ai") or {}
+    try:
+        llm = make_llm(cur.get("provider", "yandexgpt"), cur.get("model", ""))
+        if llm.name == "none":
+            return {"ok": False, "message": "Выбран режим без ИИ — работают только правила"}
+        r = llm.complete("Ты помощник юриста.", "Ответь одним словом: готов", max_tokens=20)
+        return {"ok": True, "provider": r.provider, "model": r.model, "answer": r.text[:100], "usage": r.usage}
+    except LLMNotConfigured as e:
+        return {"ok": False, "message": str(e)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "message": f"Ошибка провайдера: {str(e)[:300]}"}
+
+
+def _llm_for(db: Session, use_ai: bool):
+    if not use_ai:
+        return None
+    cur = settings.get(db, "legal_ai") or {}
+    try:
+        return make_llm(cur.get("provider", "yandexgpt"), cur.get("model", ""))
+    except LLMNotConfigured:
+        return None
+
+
+class SaleChoiceIn(BaseModel):
+    source_attachment_id: str = ""
+    own_profile_id: Optional[str] = None
+    own_bank_id: Optional[str] = None
+    client_profile_id: Optional[str] = None
+    templates: dict[str, Optional[str]] = Field(default_factory=dict)
+    approved_replacements: list[str] = Field(default_factory=list)
+    use_ai: bool = True
+    notes: str = ""
+
+
+def _sale_templates(db: Session, override: dict[str, Optional[str]]) -> dict[str, Optional[Template]]:
+    out: dict[str, Optional[Template]] = {}
+    for kind in ("disagreements_protocol", "tech_spec_client"):
+        if kind in override:
+            tid = override[kind]
+            if not tid:
+                out[kind] = None
+                continue
+            t = db.get(Template, tid)
+            if t is None or t.is_example or not t.is_active:
+                raise HTTPException(422, f"Шаблон для «{sale.SALE_TITLES[kind]}» не найден или в архиве")
+            out[kind] = t
+        else:
+            out[kind] = svc.active_template(db, kind, "ru")
+    return out
+
+
+def _source_path(db: Session, deal: Deal, att_id: str) -> tuple[str, str, Attachment]:
+    att = db.get(Attachment, att_id) if att_id else None
+    if att is None or att.deal_id != deal.id or not att.file_name.lower().endswith(".docx"):
+        raise HTTPException(404, "Договор заказчика (DOCX) не найден среди документов сделки")
+    d = tempfile.mkdtemp()
+    local = os.path.join(d, att.file_name)
+    adapters.storage().download(att.storage_path, local)
+    return local, d, att
+
+
+@router.get("/deals/{deal_id}/legal/sale/options")
+def sale_options(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Данные мастера «Договор заказчика»: загруженные договоры заказчика (DOCX), профили продавца и клиента, шаблоны, состояние ИИ."""
+    deal = _deal(db, deal_id, user)
+    sources = [{"id": a.id, "file_name": a.file_name, "uploaded_at": a.uploaded_at, "category": a.category, "comment": a.comment}
+               for a in db.scalars(select(Attachment).where(Attachment.deal_id == deal.id, Attachment.entity == "deal_doc", Attachment.category.in_(("contract_form", "client_other"))).order_by(Attachment.uploaded_at.desc())).all()
+               if a.file_name.lower().endswith(".docx")]
+    ent = next((e for e in db.scalars(select(LegalEntity).where(LegalEntity.is_active.is_(True))).all() if e.sells_to_clients), None)
+    own = []
+    if ent:
+        for p in lp.ensure_profiles(db, "own", ent.id):
+            if p.is_active:
+                own.append({"id": p.id, "title": p.title, "is_default": p.is_default, "summary": lp.profile_summary(p), "check_status": p.check_status,
+                            "banks": [{"id": b.id, "title": b.title, "currency": b.currency, "bank_name": b.bank_name, "account": b.account, "verified": b.verified} for b in p.banks if b.status == "active"]})
+    client_profiles = [{"id": p.id, "title": p.title, "is_default": p.is_default, "summary": lp.profile_summary(p), "selected_in_contract": p.id == deal.client_requisites_id}
+                       for p in lp.ensure_profiles(db, "client", deal.client_id) if p.is_active]
+    db.commit()
+    templates = [{"id": t.id, "kind": t.kind, "title": t.title, "version": t.version, "language": t.language, "unknown": (t.variables or {}).get("unknown", [])}
+                 for t in db.scalars(select(Template).where(Template.kind.in_(("disagreements_protocol", "tech_spec_client")), Template.is_active.is_(True), Template.is_example.is_(False))).all()]
+    ai = settings.get(db, "legal_ai") or {}
+    return {"sources": sources, "own_entity": {"id": ent.id, "name": ent.name} if ent else None, "own_profiles": own, "client_profiles": client_profiles, "templates": templates,
+            "doc_titles": sale.SALE_TITLES, "ai": {"provider": ai.get("provider", "yandexgpt"), "model": ai.get("model", ""), "configured": configured_providers().get(ai.get("provider", "yandexgpt"), False), "title": PROVIDERS.get(ai.get("provider", "yandexgpt"), "")},
+            "can_build": (user.has(Role.LAWYER, Role.CD, Role.GD) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id))) and deal.status in LEGAL_STATUSES,
+            "brand_company": deal.kp_brand == "company", "variant": {"id": deal.won_variant_id}, "deal_version": {"id": deal.approved_version_id}}
+
+
+@router.post("/deals/{deal_id}/legal/sale/upload", status_code=201)
+def sale_upload(deal_id: str, file: UploadFile = File(...), comment: str = Form(""), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Загрузка договора заказчика (DOCX): исходник сохраняется в «08 Документы клиента и юридические» неизменным (категория «Типовая форма договора клиента»)."""
+    from .documents import _save
+    deal = _deal(db, deal_id, user)
+    if not (file.filename or "").lower().endswith(".docx"):
+        raise HTTPException(422, "Договор заказчика нужен в формате DOCX (PDF и сканы система не разбирает)")
+    att = _save(db, deal, user, file, "contract_form", comment or "договор заказчика для юридического пакета")
+    db.commit()
+    return {"id": att.id, "file_name": att.file_name}
+
+
+@router.post("/deals/{deal_id}/legal/sale/preview")
+def sale_preview(deal_id: str, body: SaleChoiceIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Разбор договора заказчика: пункты, план подстановки реквизитов (high — подставится, medium — после подтверждения), замечания правил (+ ИИ), проверки."""
+    deal = _deal(db, deal_id, user)
+    ch = sale.SaleChoice(**body.model_dump())
+    try:
+        ctx = sale.build_sale_context(db, deal, ch)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    templates = _sale_templates(db, body.templates)
+    has_source = bool(body.source_attachment_id)
+    out: dict = {"context": {k: v for k, v in ctx.items() if k not in ("rule_ctx",)}, "templates": {k: ({"id": t.id, "title": t.title, "version": t.version} if t else None) for k, t in templates.items()}}
+    if has_source:
+        local, d, att = _source_path(db, deal, body.source_attachment_id)
+        try:
+            from ..services.legal_client_contract import plan_replacements, replacements_payload
+            reps, stats = plan_replacements(local, ctx["seller"])
+            clauses = rules.parse_clauses(local)
+            findings = rules.analyze(clauses, ctx["rule_ctx"])
+            ai_f, ai_warn = rules.ai_findings(_llm_for(db, body.use_ai), clauses, findings, ctx["rule_ctx"])
+            findings += ai_f
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        out.update({"source": {"id": att.id, "file_name": att.file_name}, "replacements": replacements_payload(reps), "replacement_stats": stats,
+                    "clauses": [{"no": c.no, "section": c.section, "text": c.text[:300]} for c in clauses], "findings": rules.findings_payload(findings),
+                    "ai": {"used": bool(ai_f), "warning": ai_warn, "count": len(ai_f)}})
+    checks = sale.check_sale(ctx, has_source, templates)
+    if has_source and not out.get("clauses"):
+        checks["warnings"].append("В договоре не найдены нумерованные пункты — анализ правил не сработал, протокол будет пустым")
+    if has_source and out.get("replacement_stats", {}).get("high", 0) == 0:
+        checks["warnings"].append("Блок реквизитов Поставщика в договоре не распознан — подстановка только по подтверждённым местам")
+    out["checks"] = checks
+    db.commit()
+    return out
+
+
+@router.post("/deals/{deal_id}/legal/sale/build", status_code=201)
+def sale_build(deal_id: str, body: SaleChoiceIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Формирует клиентский пакет: рабочая копия договора заказчика, протокол разногласий (черновик), техническая спецификация."""
+    deal = _deal(db, deal_id, user)
+    _can_build(deal, user)
+    ch = sale.SaleChoice(**body.model_dump())
+    try:
+        ctx = sale.build_sale_context(db, deal, ch)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    templates = _sale_templates(db, body.templates)
+    checks = sale.check_sale(ctx, bool(body.source_attachment_id), templates)
+    if checks["errors"]:
+        raise HTTPException(422, {"message": "Пакет не сформирован — есть блокирующие ошибки", "errors": checks["errors"], "warnings": checks["warnings"]})
+    local, d, att = _source_path(db, deal, body.source_attachment_id)
+    prev = db.scalars(select(LegalPackage).where(LegalPackage.deal_id == deal.id, LegalPackage.kind == "sale").order_by(LegalPackage.version_no.desc())).all()
+    version_no = (prev[0].version_no + 1) if prev else 1
+    try:
+        from ..services.legal_client_contract import plan_replacements, replacements_payload
+        reps, stats = plan_replacements(local, ctx["seller"])
+        clauses = rules.parse_clauses(local)
+        findings = rules.analyze(clauses, ctx["rule_ctx"])
+        ai_f, ai_warn = rules.ai_findings(_llm_for(db, body.use_ai), clauses, findings, ctx["rule_ctx"])
+        findings += ai_f
+        if ai_warn:
+            checks["warnings"].append(ai_warn)
+        docs = sale.render_sale_documents(db, ctx, findings, templates, local, reps, set(body.approved_replacements), d, user.display_name, version_no)
+        unresolved = [f"{x['title']}: {', '.join(x['unresolved'])}" for x in docs if x["unresolved"]]
+        if unresolved:
+            raise HTTPException(422, {"message": "В шаблоне остались незаполненные переменные", "errors": unresolved, "warnings": checks["warnings"]})
+        ensure_folders(db, deal)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
+        files = []
+        for x in docs:
+            name = os.path.basename(x["path"])
+            stem, ext = os.path.splitext(name)
+            stored = adapters.storage().upload(x["path"], deal.storage_folder, "08_legal", f"{stem} [v{version_no} {stamp}]{ext}")
+            cat = "disagreements" if x["kind"] == "disagreements_protocol" else "contract_draft"
+            a = Attachment(deal_id=deal.id, folder="08_legal", entity="legal_package", entity_id="", category=cat, comment=f"{x['title']} · клиентский пакет v{version_no}",
+                           file_name=name, storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=user.id)
+            db.add(a)
+            db.flush()
+            files.append({"kind": x["kind"], "title": x["title"], "file_name": name, "attachment_id": a.id, "size": stored.size, "format": "docx", "template": x["template"], "report": x.get("report")})
+    except RuntimeError as e:
+        shutil.rmtree(d, ignore_errors=True)
+        raise HTTPException(422, {"message": str(e), "errors": [str(e)], "warnings": checks["warnings"]})
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+    pkg = LegalPackage(deal_id=deal.id, kind="sale", counterparty_kind="client", counterparty_id=deal.client_id, version_no=version_no, deal_version_id=ctx["deal_version"]["id"], deal_version_no=ctx["deal_version"]["no"],
+                       own_entity_id=ctx["own_entity"]["id"], own_profile_id=(ctx["seller"] or {}).get("profile_id"), own_bank_id=((ctx["seller"] or {}).get("bank") or {}).get("id"),
+                       cp_profile_id=(ctx["buyer"] or {}).get("profile_id"), cp_bank_id=None, language="ru",
+                       templates={k: ({"id": t.id, "version": t.version, "title": t.title} if t else None) for k, t in templates.items()}, rules_version=rules.RULES_VERSION,
+                       snapshot={**{k: v for k, v in ctx.items() if k != "rule_ctx"}, "source": {"id": att.id, "file_name": att.file_name, "sha256": att.sha256}, "replacements": replacements_payload(reps), "replacement_stats": stats,
+                                 "approved_replacements": body.approved_replacements, "findings": rules.findings_payload(findings), "ai": {"used": bool(ai_f), "warning": ai_warn}},
+                       checks=checks, files=files, status="draft", stage_code="contract_signed", notes=body.notes.strip(), created_by=user.id,
+                       approvals=[{"at": datetime.now(timezone.utc).isoformat(), "by": user.id, "from": "", "to": "draft", "comment": "сформирован"}])
+    db.add(pkg)
+    db.flush()
+    for f in files:
+        db.get(Attachment, f["attachment_id"]).entity_id = pkg.id
+    for p in prev:
+        if p.status not in ("signed", "archived", "superseded"):
+            p.status, p.superseded_by = "superseded", pkg.id
+            p.approvals = list(p.approvals or []) + [{"at": datetime.now(timezone.utc).isoformat(), "by": user.id, "from": p.status, "to": "superseded", "comment": f"заменён версией v{version_no}"}]
+    db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"Клиентский юридический пакет v{version_no}: рабочая копия договора, протокол разногласий ({len(findings)} замечаний), техспецификация — черновик, проверить юристу",
+                     body="; ".join(checks["warnings"][:5]), user_id=user.id))
+    audit(db, user.id, deal.id, "legal_package", pkg.id, "build", after={"kind": "sale", "version": version_no, "findings": len(findings), "ai": bool(ai_f), "files": [f["file_name"] for f in files]})
+    db.commit()
+    return {**svc.package_payload(pkg, svc.user_names(db)), "findings": rules.findings_payload(findings)}

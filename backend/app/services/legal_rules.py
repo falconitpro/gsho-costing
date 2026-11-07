@@ -222,7 +222,7 @@ def protocol_rows(findings: list[Finding]) -> list[dict]:
     """Строки протокола разногласий (внешняя часть): № / пункт / редакция заказчика / редакция БЕРГ-ХАУС / комментарий."""
     rows = []
     for i, f in enumerate(findings, 1):
-        rows.append({"n": i, "clause": f.clause, "client_text": f.client_text, "our_text": f.our_text, "comment": f.comment, "severity": SEVERITY.get(f.severity, f.severity)})
+        rows.append({"n": i, "clause": f.clause, "client_text": f.client_text, "our_text": f.our_text, "comment": f.comment})   # критичность и риск — только внутри системы
     return rows
 
 

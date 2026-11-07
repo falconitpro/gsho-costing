@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import type { Deal, Me } from "../types";
+import LegalSaleWizard from "./LegalSaleWizard";
 
 // Юридический блок, этап 3: вкладка «Юридические документы» в сделке — пакеты (реестр), мастер закупочного пакета,
 // экран подтверждения договорного комплекта ЗИП, предпросмотр источников и проверки перед формированием.
@@ -24,7 +25,7 @@ type Pkg = { id: string; kind: string; version_no: number; deal_version_no: numb
   checks: { warnings: string[] }; approvals: { at: string; by_name: string; from: string; to: string; comment: string }[]; created_by_name: string; created_at: string; counterparty_name: string; language: string;
   totals: { amount?: number; currency?: string }; contract: { number?: string }; next_statuses: string[]; superseded_by: string | null };
 
-const KIND_SHORT: Record<string, string> = { purchase_contract: "Договор", spec_equipment: "Прил. 1 — оборудование", spec_zip: "Прил. 2 — ЗИП" };
+const KIND_SHORT: Record<string, string> = { purchase_contract: "Договор", spec_equipment: "Прил. 1 — оборудование", spec_zip: "Прил. 2 — ЗИП", client_contract_copy: "Рабочая копия договора", disagreements_protocol: "Протокол разногласий", tech_spec_client: "Техспецификация" };
 const num = (v: unknown) => (v === "" || v == null ? null : Number(String(v).replace(",", ".")));
 
 function ZipSetEditor({ dealId, factoryId, onChanged }: { dealId: string; factoryId: string; onChanged: () => void }) {
@@ -97,6 +98,7 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
   const [pkgs, setPkgs] = useState<Pkg[]>([]);
   const [msg, setMsg] = useState("");
   const [wizard, setWizard] = useState(false);
+  const [saleWizard, setSaleWizard] = useState(false);
   const [ch, setCh] = useState<{ factory_id: string; own_entity_id: string; own_profile_id: string; own_bank_id: string; cp_profile_id: string; cp_bank_id: string; language: string; templates: Record<string, string>; contract_number: string; contract_date: string; place: string; notes: string }>(
     { factory_id: "", own_entity_id: "", own_profile_id: "", own_bank_id: "", cp_profile_id: "", cp_bank_id: "", language: "", templates: {}, contract_number: "", contract_date: "", place: "" , notes: "" });
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -144,7 +146,7 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
           <h2 style={{ margin: 0 }}>Юридические документы <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· пакетов: {pkgs.length}</span></h2>
           <div className="row" style={{ gap: 6 }}>
             {opt.can_build && opt.suppliers.length > 0 && <button className={"btn " + (wizard ? "secondary" : "")} onClick={() => setWizard(!wizard)}>{wizard ? "Свернуть мастер" : "Закупка у поставщика"}</button>}
-            <button className="btn ghost" disabled title="этап 4 — следующий PR">Договор заказчика</button>
+            {opt.can_build && <button className={"btn " + (saleWizard ? "secondary" : "")} onClick={() => setSaleWizard(!saleWizard)}>{saleWizard ? "Свернуть мастер" : "Договор заказчика"}</button>}
           </div>
         </div>
         {!opt.can_build && <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>Пакеты формируют менеджер сделки, юрист, КД или ЗГД после выигрыша сделки.</p>}
@@ -210,6 +212,8 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
               </div>
             </div>)}
         </div>)}
+
+      {saleWizard && <LegalSaleWizard dealId={deal.id} onBuilt={() => { setSaleWizard(false); loadPkgs(); reload(); }} onMsg={setMsg} />}
 
       {pkgs.length > 0 && (
         <div className="card">
