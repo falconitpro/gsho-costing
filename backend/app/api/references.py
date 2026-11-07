@@ -77,7 +77,7 @@ def _client_stats(db: Session, user: CurrentUser) -> dict[str, dict]:
     менеджер последней сделки, сумма выигранных (только finance_analytics)."""
     from ..models import User
     fin = user.can("finance_analytics")
-    users = {u.id: u.name for u in db.scalars(select(User)).all()}
+    users = {u.id: u.display_name for u in db.scalars(select(User)).all()}
     out: dict[str, dict] = {}
     deals = db.scalars(select(Deal).where(Deal.deleted_at.is_(None)).order_by(Deal.created_at)).all()
     for d in deals:
