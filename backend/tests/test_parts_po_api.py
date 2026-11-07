@@ -70,7 +70,9 @@ def test_po_flow(client):
     assert len(pos) == 1
     po = pos[0]
     assert po["number"].startswith("ЗК-") and po["status"] == "draft" and po["buyer_name"] and po["currency"] == "CNY" and len(po["lines"]) == 3
-    assert po["total"] == 2 * 100 + 5 * 40 + 10 * 40
+    assert "total" not in po and "price" not in po["lines"][0]                        # цены поставщика менеджеру закрыты (финансовая аналитика)
+    po_cd = _ok(client.get(f"/api/parts/po/{po['id']}", headers=H(CD)))
+    assert po_cd["total"] == 2 * 100 + 5 * 40 + 10 * 40
     assert po["lines"][0]["eta"] == (date.today() + timedelta(days=15 + 35)).isoformat()
     assert [c["number"] for c in po["intragroup"]] == [f"{po['number']}/2", f"{po['number']}/3"]
     assert "price" not in po["intragroup"][0]["lines"][0]                         # наценки группы менеджеру не видны
