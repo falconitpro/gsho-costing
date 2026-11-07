@@ -48,7 +48,6 @@ export default function App() {
         <div className="top-row">
           <NavLink to="/" className="brand">
             <img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" />
-            <span>Себестоимость ГШО</span>
           </NavLink>
           <div className="account">
             {devUsers.length > 0 && (
