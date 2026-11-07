@@ -896,7 +896,7 @@ def test_factory_delete_and_contacts(client):
     assert client.post("/api/parts/po", headers=H(CD), json={"supplier_id": n["id"], "stock_lines": [{"part_id": pt["id"], "qty": 1}]}).status_code == 409
     rj = _ok(client.post(f"/api/refs/factories/{n['id']}/reject", headers=H(CD), json={"comment": "дубль"}))
     assert rj["approval_status"] == "rejected" and rj["is_active"] is False
-    assert client.delete(f"/api/refs/factories/{f['id']}", headers=H(CD)).status_code == 403
+    assert client.delete(f"/api/refs/factories/{f['id']}", headers=H(MGR)).status_code == 403   # удаляют ФД, КД, ЗГД
     r = _ok(client.delete(f"/api/refs/factories/{f['id']}", headers=H(GD)))
     assert r["deleted"] and not any(x["id"] == f["id"] for x in _ok(client.get("/api/refs/factories", headers=H(MGR))))
     used = _ok(client.get("/api/refs/factories", headers=H(MGR)))[0]
