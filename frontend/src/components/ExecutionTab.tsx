@@ -78,11 +78,21 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
       <div className="grid cols-2">
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Реквизиты контракта</h2>
+          {(() => { const showScans = ["won", "contract", "execution", "closed"].includes(deal.status); return <>
+          <h3 style={{ margin: "4px 0" }}>Договор с клиентом</h3>
           <div className="grid cols-2">
-            <label className="f">Номер контракта<input value={form.contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_number: e.target.value })} /></label>
-            <label className="f">Дата подписания с клиентом<input type="date" value={form.contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_signed_at: e.target.value })} /></label>
-            <label className="f">Номер контракта с заводом<input value={form.factory_contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, factory_contract_number: e.target.value })} /></label>
-            <label className="f">Дата подписания с заводом<input type="date" value={form.factory_contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, factory_contract_signed_at: e.target.value })} /></label>
+            <label className="f">Номер договора с клиентом<input value={form.contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_number: e.target.value })} /></label>
+            <label className="f">Дата договора с клиентом<input type="date" value={form.contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_signed_at: e.target.value })} /></label>
+          </div>
+          {showScans && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} only="client" />}
+          <h3 style={{ margin: "12px 0 4px" }}>Договор с заводом</h3>
+          <div className="grid cols-2">
+            <label className="f">Номер договора с заводом<input value={form.factory_contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, factory_contract_number: e.target.value })} /></label>
+            <label className="f">Дата договора с заводом<input type="date" value={form.factory_contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, factory_contract_signed_at: e.target.value })} /></label>
+          </div>
+          {showScans && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} only="factory" />}
+          </>; })()}
+          <div className="grid cols-2" style={{ marginTop: 8 }}>
             {deal.has_alternatives && <label className="f">Предложение, которое выбрал клиент
               <select value={form.won_variant_id} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, won_variant_id: e.target.value })}><option value="">—</option>{deal.variants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>}
           </div>
@@ -91,7 +101,6 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
               <button className="btn secondary" onClick={() => act(() => api.patch(`/api/deals/${deal.id}/execution/contract`, { ...form, contract_signed_at: form.contract_signed_at || null, factory_contract_signed_at: form.factory_contract_signed_at || null, won_variant_id: form.won_variant_id || null }))}>Сохранить реквизиты</button>
             </div>
           )}
-          {["won", "contract", "execution", "closed"].includes(deal.status) && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} />}
           {(deal.status === "contract" || deal.status === "execution") && (isMgr || isCdGd) && (
             <div className="row" style={{ marginTop: 10 }}>
               <input placeholder="что изменилось в условиях контракта относительно КП" value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: 360 }} />
