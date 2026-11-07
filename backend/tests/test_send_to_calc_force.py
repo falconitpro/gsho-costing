@@ -32,7 +32,7 @@ def test_force_send():
         assert r.status_code == 422 and "нет позиций" in r.text                   # без позиций считать нечего
         fac = next(f for f in c.get("/api/refs/factories", headers=H(MGR)).json() if f["approval_status"] == "approved")
         d = c.post("/api/deals", headers=H(MGR), json={"client_id": cl["id"], "site": "y"}).json()
-        p = c.post(f"/api/deals/{d['id']}/positions", headers=H(MGR), json={"factory_id": fac["id"], "model": "FORCE-1", "machine_type": "Самосвал"})
+        p = c.post(f"/api/deals/{d['id']}/positions", headers=H(MGR), json={"factory_id": fac["id"], "model": "FORCE-1", "machine_type": "Самосвал", "unit_price": 0})
         assert p.status_code == 201, p.text
         r = c.post(f"/api/deals/{d['id']}/send-to-calc", headers=H(MGR), json={"force": True})
         assert r.status_code == 422 and r.json()["detail"]["can_force"] is False
