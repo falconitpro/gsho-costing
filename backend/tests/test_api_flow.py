@@ -130,6 +130,14 @@ def test_full_flow(client, tmp_path):
     assert calc["terms"][var["id"]][0]["delivery_term"]["promised"] % 7 == 0           # задача 3: срок клиенту кратен неделе
     p = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "margin", "value": 8.0}))
     assert abs(p["result"]["base"]["margin_pct"] - 8.0) < 0.05 and p["approval_flags"]["margin_below_threshold"] is False
+    # цена клиенту — по умолчанию в валюте предложения завода; можно выбрать другую валюту
+    pv_ = p["variant"]
+    assert pv_["price_currency"] == pos["currency"] and abs(pv_["price_amount"] * pv_["price_fx_rate"] - pv_["price_rub"]) < 1
+    p_cny = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "amount", "value": pv_["price_amount"]}))
+    assert abs(p_cny["variant"]["price_rub"] - pv_["price_rub"]) < 1                                       # та же сумма в валюте завода
+    p_rub = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "amount", "value": 1000000, "currency": "RUB"}))
+    assert p_rub["variant"]["price_rub"] == 1000000 and p_rub["variant"]["price_currency"] == "RUB"
+    p = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "margin", "value": 8.0, "currency": pos["currency"]}))
     # без условий оплаты от КД утверждение не проходит
     assert client.post(f"/api/deals/{did}/submit", headers=H(CD)).status_code == 422
     terms = _ok(client.post(f"/api/deals/{did}/payment-terms", headers=H(CD), json={

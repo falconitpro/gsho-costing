@@ -14,6 +14,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   const [vid, setVid] = useState<string>((deal.variants || [])[0]?.id || "");
   const [mode, setMode] = useState<"amount" | "markup" | "margin">("amount");
   const [value, setValue] = useState("");
+  const [cur, setCur] = useState("");   // валюта цены клиенту; пусто — ранее выбранная или валюта предложения завода
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [tab, setTab] = useState<"cost" | "terms" | "cashflow" | "fx" | "history" | "kp">("cost");
@@ -52,14 +53,15 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
     if (!value) return;
     setBusy(true);
     try {
-      await api.post(`/api/deals/${deal.id}/price`, { variant_id: vid, mode, value: Number(value) });
-      await load(); setErr("");
+      await api.post(`/api/deals/${deal.id}/price`, { variant_id: vid, mode, value: Number(value), currency: priceCur });
+      await load(); reload(); setCur(""); setErr("");
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
   async function toggleService() {
     const v = (deal.variants || []).find((x) => x.id === vid);
     if (!v || base?.price_rub == null) return;
-    await api.post(`/api/deals/${deal.id}/price`, { variant_id: vid, mode: "amount", value: base.price_rub, service_in_kp: !v.service_in_kp });
+    const keep = v.price_currency && v.price_amount != null ? { value: v.price_amount, currency: v.price_currency } : { value: base.price_rub, currency: "RUB" };
+    await api.post(`/api/deals/${deal.id}/price`, { variant_id: vid, mode: "amount", ...keep, service_in_kp: !v.service_in_kp });
     reload(); load();
   }
   async function act(url: string, body?: unknown) {
@@ -72,6 +74,13 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
 
   const variant = (deal.variants || []).find((v) => v.id === vid);
   if (!variant) return <div className="muted">Нет предложений</div>;
+  // валюта предложения завода — самая частая валюта цен позиций предложения
+  const posCurs = (deal.positions || []).filter((p) => !variant.position_ids?.length || variant.position_ids.includes(p.id)).map((p) => (p.currency || "").toUpperCase()).filter(Boolean);
+  const offerCur = posCurs.sort((a, b) => posCurs.filter((x) => x === b).length - posCurs.filter((x) => x === a).length)[0] || (deal.base_currency || "CNY").toUpperCase();
+  const priceCur = cur || variant.price_currency || offerCur;
+  const curs = Array.from(new Set(["RUB", offerCur, ...Object.keys(calc.input.fx.rates || {})])).filter((c) => c === "RUB" || calc.input.fx.rates[c]);
+  const inCur = (v: { price_currency?: string | null; price_amount?: number | null }) =>
+    v.price_currency && v.price_currency !== "RUB" && v.price_amount != null ? `${fmtRub(v.price_amount)} ${v.price_currency}` : "";
   const canPrice = isCD && ["calc_ready", "cd_approval", "rework", "fd_visa", "gd_visa", "approved"].includes(deal.status);
   const cdChecks = calc.cd_checks || [];
   const terms = calc.terms?.[vid] || [];
@@ -86,7 +95,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
             return (
               <div key={v.id} onClick={() => setVid(v.id)} style={{ padding: 8, borderRadius: 6, cursor: "pointer", background: v.id === vid ? "var(--accent-soft)" : "transparent", marginBottom: 4 }}>
                 <b>{v.name}</b>
-                <div className="muted">цена {fmtRub(b?.price_rub)} · маржа {fmtPct(b?.margin_pct)}</div>
+                <div className="muted">цена {inCur(v) ? `${inCur(v)} (≈ ${fmtRub(b?.price_rub)} RUB)` : fmtRub(b?.price_rub)} · маржа {fmtPct(b?.margin_pct)}</div>
               </div>
             );
           })}
@@ -111,14 +120,21 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
             <div>
               <div className={"margin-ind " + indicator.cls}>{fmtPct(base?.margin_pct)}</div>
               <div className="muted">маржа от выручки (базовый) · {indicator.text}</div>
+              {base?.price_rub != null && <div style={{ fontSize: 13 }}>Цена клиенту без НДС: <b>{inCur(variant) || `${fmtRub(base.price_rub)} RUB`}</b>
+                {inCur(variant) && <span className="muted"> · по курсу {variant.price_fx_rate?.toFixed(4)} ≈ {fmtRub(base.price_rub)} RUB · КП — в {variant.price_currency}</span>}</div>}
               <div className="muted">наценка {fmtPct(base?.markup_pct)} · прибыль {fmtRub(base?.profit_rub)} RUB · разрыв {fmtRub(base?.cash_gap.amount_rub)} RUB ({base?.cash_gap.days} дн)</div>
             </div>
             {canPrice && (
               <div className="row">
                 <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-                  <option value="amount">сумма, RUB без НДС</option><option value="markup">наценка, %</option><option value="margin">целевая маржа, %</option>
+                  <option value="amount">сумма без НДС</option><option value="markup">наценка, %</option><option value="margin">целевая маржа, %</option>
                 </select>
-                <input type="number" value={value} onChange={(e) => setValue(e.target.value)} placeholder={mode === "amount" ? String(base?.price_rub ?? "") : ""} style={{ width: 160 }} />
+                <input type="number" value={value} onChange={(e) => setValue(e.target.value)}
+                  placeholder={mode === "amount" ? String((priceCur === variant.price_currency ? variant.price_amount : null) ?? (priceCur === "RUB" ? base?.price_rub ?? "" : "")) : ""} style={{ width: 160 }} />
+                <label className="muted" style={{ fontSize: 12 }} title={`по умолчанию — валюта предложения завода (${offerCur}); пересчёт в RUB по курсу ЦБ на дату расчёта`}>
+                  {mode === "amount" ? "валюта" : "цена в"}{" "}
+                  <select value={priceCur} onChange={(e) => setCur(e.target.value)}>{curs.map((c) => <option key={c} value={c}>{c}{c === offerCur ? " (завод)" : ""}</option>)}</select>
+                </label>
                 <button className="btn" onClick={setPrice} disabled={busy}>Назначить цену</button>
               </div>
             )}

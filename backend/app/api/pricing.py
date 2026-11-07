@@ -159,6 +159,7 @@ class PriceIn(BaseModel):
     variant_id: str
     mode: str = "amount"            # amount | markup | margin
     value: float
+    currency: Optional[str] = None  # валюта цены клиенту; по умолчанию — валюта предложения завода (или ранее выбранная)
     service_in_kp: Optional[bool] = None
     client_payments: Optional[list[dict]] = None
     overhead_pct_override: Optional[float] = None
@@ -182,8 +183,12 @@ def set_price(deal_id: str, body: PriceIn, db: Session = Depends(get_db), user: 
     v.overhead_pct_override, v.overhead_override_comment = body.overhead_pct_override, body.overhead_override_comment
     db.flush()
     inp = build_calc_input(db, deal)
+    cur = (body.currency or v.price_currency or offer_currency(deal, v)).upper()
+    rate = 1.0 if cur == "RUB" else (inp.fx.rates or {}).get(cur)
+    if not rate:
+        raise HTTPException(422, f"Нет курса ЦБ для валюты {cur} на дату расчёта")
     if body.mode == "amount":
-        price = body.value
+        price = body.value * rate
     elif body.mode == "markup":
         price = solve_price(inp, v.id, target_markup_pct=body.value)
     elif body.mode == "margin":
@@ -191,15 +196,24 @@ def set_price(deal_id: str, body: PriceIn, db: Session = Depends(get_db), user: 
     else:
         raise HTTPException(422, "Способ задания цены: сумма, наценка или маржа")
     v.price_rub, v.price_mode = round(price, 2), body.mode
+    v.price_currency, v.price_fx_rate = cur, rate
+    v.price_amount = round(body.value, 2) if body.mode == "amount" else round(price / rate, 2)
     reset = price_changed_after_visa(DealState(status=deal.status, service_flag=deal.service_flag))
     if reset and before.get("price_rub") != v.price_rub:
         for a in db.scalars(select(Approval).where(Approval.deal_id == deal.id, Approval.reset_at.is_(None))).all():
             a.reset_at = datetime.now(timezone.utc)
         apply_transition(db, deal, reset, user.id)
-    audit(db, user.id, deal.id, "variant", v.id, "price", {"price_rub": before.get("price_rub")}, {"price_rub": v.price_rub, "mode": body.mode})
+    audit(db, user.id, deal.id, "variant", v.id, "price", {"price_rub": before.get("price_rub")}, {"price_rub": v.price_rub, "mode": body.mode, "currency": cur, "amount": v.price_amount, "rate": rate})
     db.commit()
     inp, res = run_calc(db, deal)
     return {"variant": serialize(v), "result": res.variants[v.id], "approval_flags": approval_flags(res), "warnings": res.warnings}
+
+
+def offer_currency(deal: Deal, v: Optional[Variant] = None) -> str:
+    """Валюта предложения завода: самая частая валюта цен позиций предложения (иначе — базовая валюта сделки)."""
+    poss = [p for p in deal.positions if v is None or not v.position_ids or p.id in v.position_ids]
+    curs = [(p.currency or "").upper() for p in poss if p.currency]
+    return max(set(curs), key=curs.count) if curs else (deal.base_currency or "CNY").upper()
 
 
 class ComparePaymentsIn(BaseModel):
@@ -424,6 +438,12 @@ def revision_totals(deal: Deal, ver: DealVersion, changes: dict) -> dict:
     return out
 
 
+def _kp_currency(deal: Deal) -> Optional[str]:
+    """Валюта КП: если у всех предложений в КП цена назначена в одной валюте, не RUB."""
+    curs = {(v.price_currency or "RUB") for v in deal.variants if v.in_kp and v.price_rub is not None}
+    return next(iter(curs)) if len(curs) == 1 and next(iter(curs)) != "RUB" else None
+
+
 def _build_kp_file(db: Session, deal: Deal, ver: DealVersion, changes: Optional[dict] = None, revision_no: int = 0) -> str:
     s = settings_service.get_all(db)
     rev = revision_totals(deal, ver, changes) if changes is not None else {}
@@ -464,6 +484,15 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion, changes: Optional[
                 kv.configuration = r["configuration"]
             if r["service_in_kp"] is not None and deal.service_flag:
                 kv.service_line = "включено в цену" if r["service_in_kp"] else None
+    kp_currency = _kp_currency(deal)
+    if kp_currency:   # цена клиенту назначена в валюте — КП в этой валюте (по курсу на момент назначения цены)
+        for v, kv in zip([x for x in deal.variants if x.in_kp and x.price_rub is not None], variants):
+            k = float(v.price_fx_rate or 1.0)
+            kv.unit_price_rub, kv.total_rub = kv.unit_price_rub / k, kv.total_rub / k
+            if kv.base_total_rub is not None:
+                kv.base_total_rub = kv.base_total_rub / k
+            kv.extra_lines = [(n, a / k if a else a) for n, a in kv.extra_lines]
+            kv.adjustments = [(n, a / k) for n, a in kv.adjustments]
     tech: dict[str, list[tuple[str, str, str]]] = {}
     images: dict[str, list[tuple[str, str]]] = {}
     attach_files: list[str] = []
@@ -507,7 +536,7 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion, changes: Optional[
         variants=variants, tech_specs=tech, service_block=service_block, delivery_terms=delivery_terms,
         payment_and_warranty="Условия оплаты и гарантии — согласно таблице предложения.", fx_clause_pct=s["kp_fx_clause_pct"],
         signatures="Коммерческий директор ________________", requisites=s.get("company_requisites", ""),
-        single_offer=single, images=images, brand_company=company, forbidden_words=[w for w in forbidden if w],
+        single_offer=single, images=images, brand_company=company, forbidden_words=[w for w in forbidden if w], currency=kp_currency or "RUB",
     )
     if not revision_no:
         ver.kp_meta = {"kp_brand": deal.kp_brand, "kp_images_mode": deal.kp_images_mode, "images_in_document": sum(len(v) for v in images.values()),

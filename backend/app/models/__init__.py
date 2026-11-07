@@ -627,6 +627,9 @@ class Variant(TimestampMixin, Base):
     position_ids: Mapped[list[str]] = mapped_column(JSONType, default=list)
     price_rub: Mapped[Optional[float]] = mapped_column(Float)              # без НДС, назначает КД
     price_mode: Mapped[str] = mapped_column(String(16), default="amount")  # amount | markup | margin
+    price_currency: Mapped[Optional[str]] = mapped_column(String(3))       # валюта цены клиенту (по умолчанию — валюта предложения завода)
+    price_amount: Mapped[Optional[float]] = mapped_column(Float)           # цена в этой валюте без НДС
+    price_fx_rate: Mapped[Optional[float]] = mapped_column(Float)          # курс ЦБ (RUB за единицу) на момент назначения цены
     service_in_kp: Mapped[bool] = mapped_column(Boolean, default=False)
     client_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     client_payments_alt: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # сравнение двух условий оплаты
