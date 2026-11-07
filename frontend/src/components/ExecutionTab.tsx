@@ -3,9 +3,11 @@ import { lbl, STATUS } from "../labels";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Deal, type Me, type Stage } from "../types";
 import ContractScans from "./ContractScans";
+import { reqSummary, type ReqSet } from "./ClientRequisites";
 
 type Resp = { stages: Stage[]; status: string; contract_number: string; contract_signed_at: string | null; factory_contract_signed_at: string | null; factory_contract_number?: string | null; won_variant_id: string | null;
-  related: { id: string; number: string; status: string }[]; contract_steps: CStep[]; status_detail: string };
+  related: { id: string; number: string; status: string }[]; contract_steps: CStep[]; status_detail: string;
+  client_requisites_id?: string | null; client_requisites?: Partial<ReqSet>; client_requisites_options?: { id: string; title: string; is_default: boolean; legal_name: string; inn: string; kpp: string }[] };
 type CStep = { code: string; title: string; roles: string[]; hint: string; state: "done" | "current" | "pending"; on: string | null; by: string; comment: string };
 const ROLE_T: Record<string, string> = { manager: "менеджер", logistician: "логист", service_head: "сервис", fd: "ФД", cd: "КД", gd: "ЗГД", purchasing: "закупки", lawyer: "юрист" };
 
@@ -13,7 +15,7 @@ const ROLE_T: Record<string, string> = { manager: "менеджер", logisticia
  *  платежи (ФД), изменение условий (повторная визация), закрытие (КД). Задача 6: этапы «заказать/установить опцию РФ». */
 export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me; reload: () => void }) {
   const [data, setData] = useState<Resp | null>(null);
-  const [form, setForm] = useState({ contract_number: deal.contract_number || "", contract_signed_at: deal.contract_signed_at || "", factory_contract_signed_at: deal.factory_contract_signed_at || "", factory_contract_number: deal.factory_contract_number || "", won_variant_id: deal.won_variant_id || "" });
+  const [form, setForm] = useState({ contract_number: deal.contract_number || "", contract_signed_at: deal.contract_signed_at || "", factory_contract_signed_at: deal.factory_contract_signed_at || "", factory_contract_number: deal.factory_contract_number || "", won_variant_id: deal.won_variant_id || "", client_requisites_id: "" });
   const [actual, setActual] = useState<Record<string, { actual_on: string; actual_amount: string; note: string }>>({});
   const [reason, setReason] = useState("");
   const [refine, setRefine] = useState<Record<string, { on: string; note: string }>>({});
@@ -85,6 +87,19 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
             <label className="f">Номер договора с клиентом<input value={form.contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_number: e.target.value })} /></label>
             <label className="f">Дата договора с клиентом<input type="date" value={form.contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_signed_at: e.target.value })} /></label>
           </div>
+          {(() => {
+            const opts = data.client_requisites_options || [];
+            const curId = form.client_requisites_id || data.client_requisites_id || opts.find((o) => o.is_default)?.id || "";
+            const snap = data.client_requisites && Object.keys(data.client_requisites).length ? data.client_requisites : undefined;
+            return (
+              <div style={{ marginTop: 6 }}>
+                <label className="f">Реквизиты клиента в договоре <span className="muted">— из карточки клиента (раздел «Контрагенты»); по умолчанию подставляется набор «по умолчанию»</span>
+                  <select value={curId} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, client_requisites_id: e.target.value })}>
+                    <option value="">— не выбраны —</option>{opts.map((o) => <option key={o.id} value={o.id}>{o.title}{o.is_default ? " (по умолчанию)" : ""}{o.inn ? ` · ИНН ${o.inn}${o.kpp ? "/" + o.kpp : ""}` : ""}</option>)}</select></label>
+                {snap ? <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>В договоре: {reqSummary(snap)}{data.client_requisites_id && form.client_requisites_id && form.client_requisites_id !== data.client_requisites_id && <b style={{ color: "var(--warn)" }}> · выбран другой набор — нажмите «Сохранить реквизиты»</b>}</div>
+                  : <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Реквизиты ещё не зафиксированы в договоре{opts.length <= 1 ? " — добавьте наборы реквизитов в карточке клиента" : ""}.</div>}
+              </div>);
+          })()}
           {showScans && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} only="client" />}
           <h3 style={{ margin: "12px 0 4px" }}>Договор с заводом</h3>
           <div className="grid cols-2">
@@ -99,7 +114,8 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
           </div>
           {(isMgr || isCdGd) && (
             <div className="row" style={{ marginTop: 8 }}>
-              <button className="btn secondary" onClick={() => act(() => api.patch(`/api/deals/${deal.id}/execution/contract`, { ...form, contract_signed_at: form.contract_signed_at || null, factory_contract_signed_at: form.factory_contract_signed_at || null, won_variant_id: form.won_variant_id || null }))}>Сохранить реквизиты</button>
+              <button className="btn secondary" onClick={() => act(() => api.patch(`/api/deals/${deal.id}/execution/contract`, { ...form, contract_signed_at: form.contract_signed_at || null, factory_contract_signed_at: form.factory_contract_signed_at || null, won_variant_id: form.won_variant_id || null,
+                client_requisites_id: form.client_requisites_id || data.client_requisites_id || (data.client_requisites_options || []).find((o) => o.is_default)?.id || null }))}>Сохранить реквизиты</button>
             </div>
           )}
           {(deal.status === "contract" || deal.status === "execution") && (isMgr || isCdGd) && (
