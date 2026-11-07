@@ -27,10 +27,19 @@ H = lambda email: {"X-Dev-User": email}   # noqa: E731
 MGR, CD, FD, LAW, LOG = "manager@example.com", "cd@example.com", "fd@example.com", "lawyer@example.com", "logist@example.com"
 
 
+def _inn() -> str:
+    import random
+    d = [random.randint(0, 9) for _ in range(9)]
+    d[0] = d[0] or 7
+    return "".join(map(str, d)) + str(sum(c * x for c, x in zip([2, 4, 10, 3, 5, 9, 4, 6, 8], d)) % 11 % 10)
+
+
 def test_legal_profiles():
     seed()
     with TestClient(app) as c:
-        cl = c.get("/api/refs/clients", headers=H(MGR)).json()[0]
+        # свой клиент — в общей тестовой БД у первого клиента профили уже есть
+        cl = c.post("/api/refs/clients", headers=H(MGR), json={"name": f"ООО «Юртест-{uuid.uuid4().hex[:4]}»", "inn": _inn(), "full_name": "Общество с ограниченной ответственностью «Юртест»", "director": "Сидоров С. С.", "address": "Якутск"}).json()
+        assert "id" in cl, cl
         fac = c.get("/api/refs/factories", headers=H(MGR)).json()[0]
 
         # наблюдателю (чистая роль) закрыто — проверяем по матрице, т. к. в общей тестовой БД ему могли добавить роли; логист читает, но не правит
