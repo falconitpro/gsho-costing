@@ -54,6 +54,8 @@ class User(TimestampMixin, Base):
     contacts: Mapped[dict] = mapped_column(JSONType, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # изменения карточки, ожидающие подтверждения администратора / ЗГД: {fields: {name: [old, new]}, requested_at, requested_by}
+    pending_changes: Mapped[dict] = mapped_column(JSONType, default=dict)
 
 
 # ------------------------------------------------------------------ уровни доступа (задача 11)

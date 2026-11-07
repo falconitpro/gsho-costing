@@ -4,7 +4,7 @@ import type { Me } from "../types";
 import { DeputyBlock, ObserverScopeBlock } from "../components/TeamExtras";
 
 type Contacts = { position: string; department: string; mobile: string; work_phone: string; wechat: string; telegram: string; whatsapp: string; max: string; extra_email: string; note: string };
-type Card = { id: string; display_name: string; email: string; roles: string[]; role_titles: string[]; contacts: Contacts; wecom_user_id: string;
+type Card = { id: string; display_name: string; email: string; roles: string[]; role_titles: string[]; contacts: Contacts; wecom_user_id: string; can_manage?: boolean; pending_changes?: { fields?: Record<string, [string, string]>; requested_at?: string };
   notify_channels: string[]; can_edit: boolean; can_channels: boolean; is_active: boolean;
   deputy_id: string | null; deputy_from: string | null; deputy_to: string | null; deputy_active?: boolean; observer_scope?: Record<string, unknown> };
 type RoleT = { code: string; title: string };
@@ -17,6 +17,7 @@ const FIELDS: [keyof Contacts, string, string][] = [
   ["position", "Должность", ""], ["department", "Подразделение", ""], ["mobile", "Мобильный телефон", "+7 900 000-00-00"], ["work_phone", "Рабочий телефон", ""],
   ["wechat", "WeChat ID", ""], ["telegram", "Telegram", "@имя"], ["whatsapp", "WhatsApp", "+7…"], ["max", "MAX", "+7…"], ["extra_email", "Доп. e-mail", ""], ["note", "Примечание", ""],
 ];
+const FIELD_T: Record<string, string> = { display_name: "ФИО", wecom_user_id: "WeCom ID", position: "Должность", department: "Подразделение", mobile: "Мобильный", work_phone: "Рабочий телефон", wechat: "WeChat", telegram: "Telegram", whatsapp: "WhatsApp", max: "MAX", extra_email: "Доп. e-mail", note: "Примечание" };
 const STATUS: Record<string, string> = { sent: "отправлено", queued: "ожидает подключения канала", failed: "ошибка", read: "прочитано" };
 
 /** Сотрудники: карточки контактов исполнителей; каналы уведомлений о задачах выбирают КД, ЗГД или администратор. */
@@ -76,10 +77,22 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
   async function save() {
     if (!cur) return;
     try {
-      let r = await api.put<Card>(`/api/team/${cur.id}/contacts`, { contacts: cur.contacts, wecom_user_id: cur.wecom_user_id });
-      if (cur.can_channels) r = await api.put<Card>(`/api/team/${cur.id}/channels`, { channels: cur.notify_channels.filter((c) => c !== "app") });
-      setCur(r); setMsg("Карточка сохранена"); load();
-    } catch (e) { setMsg((e as Error).message); }
+      let r = await api.put<Card & { applied: string[]; pending: string[] }>(`/api/team/${cur.id}/contacts`, { contacts: cur.contacts, wecom_user_id: cur.wecom_user_id, display_name: cur.display_name });
+      const pend = r.pending || [];
+      if (cur.can_channels) r = { ...r, ...(await api.put<Card>(`/api/team/${cur.id}/channels`, { channels: cur.notify_channels.filter((c) => c !== "app") })) };
+      if (canManage && cur.email && cur.email !== users.find((u) => u.id === cur.id)?.email) { await api.patch(`/api/admin/users/${cur.id}`, { email: cur.email.trim() }); }
+      setCur(r); setMsg(pend.length ? `Карточка сохранена; изменение заполненных полей (${pend.map((k) => FIELD_T[k] || k).join(", ")}) отправлено на подтверждение администратору / ЗГД` : "Карточка сохранена"); setErr(""); load();
+    } catch (e) { setErr((e as Error).message); }
+  }
+  async function decide(approve: boolean, fields?: string[]) {
+    if (!cur) return;
+    try { const r = await api.post<Card>(`/api/team/${cur.id}/pending/decide`, { approve, fields }); setCur({ ...cur, ...r }); setMsg(approve ? "Изменения подтверждены" : "Изменения отклонены"); load(); }
+    catch (e) { setErr((e as Error).message); }
+  }
+  async function removeUser() {
+    if (!cur) return;
+    if (!confirm(`Удалить сотрудника «${cur.display_name}»? Если он участвует в сделках или задачах, учётная запись будет отключена с сохранением истории.`)) return;
+    try { const r = await api.del<{ message: string }>(`/api/admin/users/${cur.id}`); setMsg(r.message); setCur(null); load(); } catch (e) { setErr((e as Error).message); }
   }
   async function test() {
     if (!cur) return;
@@ -130,9 +143,23 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
         <div>
           {!cur ? <div className="card muted">Выберите сотрудника слева</div> : (
             <div className="card">
-              <h2 style={{ marginTop: 0 }}>{cur.display_name}</h2>
-              <div className="muted" style={{ marginBottom: 8 }}>{cur.role_titles.join(", ")} · {cur.email}</div>
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+                <h2 style={{ margin: 0 }}>{cur.display_name}{!cur.is_active && <span className="badge" style={{ marginLeft: 8, fontSize: 12 }}>отключён</span>}</h2>
+                {canManage && cur.id !== me.id && <button className="btn ghost" style={{ color: "var(--bad)" }} title="администратор / ЗГД; участник сделок и задач отключается с сохранением истории" onClick={removeUser}>Удалить сотрудника</button>}
+              </div>
+              <div className="muted" style={{ marginBottom: 8 }}>{cur.role_titles.join(", ")}</div>
+              {cur.pending_changes?.fields && Object.keys(cur.pending_changes.fields).length > 0 && (
+                <div className="alert warn" style={{ fontSize: 13 }}>
+                  <b>Ожидают подтверждения{cur.pending_changes.requested_at ? ` с ${fmtDate(cur.pending_changes.requested_at)}` : ""}:</b>
+                  <table style={{ fontSize: 12, marginTop: 4 }}><tbody>{Object.entries(cur.pending_changes.fields).map(([k, [a, b]]) => (
+                    <tr key={k}><td>{FIELD_T[k] || k}</td><td className="muted">{a || "—"}</td><td>→</td><td><b>{b || "—"}</b></td>
+                      {canManage && <td><button className="btn ghost" style={{ padding: "0 8px", fontSize: 11 }} onClick={() => decide(true, [k])}>подтвердить</button> <button className="btn ghost" style={{ padding: "0 8px", fontSize: 11, color: "var(--bad)" }} onClick={() => decide(false, [k])}>отклонить</button></td>}</tr>))}</tbody></table>
+                  {canManage && <div className="row" style={{ gap: 6, marginTop: 6 }}><button className="btn" style={{ padding: "4px 12px" }} onClick={() => decide(true)}>Подтвердить все</button><button className="btn ghost" onClick={() => decide(false)}>Отклонить все</button></div>}
+                  {!canManage && <div className="muted" style={{ fontSize: 12 }}>До подтверждения администратором / ЗГД действуют прежние значения.</div>}
+                </div>)}
               <table><tbody>
+                <tr><td style={{ width: "36%" }}>ФИО</td><td><input style={{ width: "100%" }} value={cur.display_name} disabled={!cur.can_edit} onChange={(e) => setCur({ ...cur, display_name: e.target.value })} /></td></tr>
+                <tr><td>E-mail (логин){!canManage && <span className="muted" style={{ fontSize: 11 }}> · меняет администратор / ЗГД</span>}</td><td><input style={{ width: "100%" }} value={cur.email} disabled={!canManage} onChange={(e) => setCur({ ...cur, email: e.target.value })} /></td></tr>
                 {FIELDS.map(([k, t, ph]) => (
                   <tr key={k}><td style={{ width: "36%" }}>{t}</td><td><input style={{ width: "100%" }} value={cur.contacts[k] || ""} placeholder={ph} disabled={!cur.can_edit} onChange={(e) => setC(k, e.target.value)} /></td></tr>))}
                 <tr><td>WeCom ID (корпоративный WeChat)</td><td><input style={{ width: "100%" }} value={cur.wecom_user_id || ""} disabled={!cur.can_edit} onChange={(e) => setCur({ ...cur, wecom_user_id: e.target.value })} /></td></tr>
@@ -148,6 +175,7 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
                 {cur.can_edit && <button className="btn" onClick={save}>Сохранить карточку</button>}
                 {cur.can_edit && <button className="btn ghost" onClick={test}>Проверить уведомления</button>}
               </div>
+              {cur.can_edit && !canManage && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Пустые поля сохраняются сразу; изменение уже заполненного значения уходит на подтверждение администратору / ЗГД.</div>}
               <DeputyBlock userId={cur.id} value={cur} users={users} canEdit={cur.can_edit} onSaved={(m) => { setMsg(m); load().then(() => api.get<{ users: Card[] }>("/api/team").then((r) => { const u = r.users.find((x) => x.id === cur.id); if (u) setCur({ ...cur, deputy_id: u.deputy_id, deputy_from: u.deputy_from, deputy_to: u.deputy_to, deputy_active: u.deputy_active }); })); }} />
               {cur.roles.includes("observer") && cur.can_channels && <ObserverScopeBlock userId={cur.id} value={(cur.observer_scope || {}) as Record<string, unknown>} users={users} onSaved={(m) => { setMsg(m); load(); }} />}
               {canManage && (

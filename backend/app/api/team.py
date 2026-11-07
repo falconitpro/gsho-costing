@@ -30,7 +30,8 @@ def _card(u: User, viewer: CurrentUser) -> dict:
             "notify_channels": _channels_of(u), "is_active": u.is_active,
             "deputy_id": u.deputy_id, "deputy_from": u.deputy_from.isoformat() if u.deputy_from else None, "deputy_to": u.deputy_to.isoformat() if u.deputy_to else None,
             "deputy_active": _deputy_active(u), "observer_scope": u.observer_scope or {},
-            "can_edit": viewer.id == u.id or _can_channels(viewer), "can_channels": _can_channels(viewer)}
+            "can_edit": viewer.id == u.id or _can_channels(viewer), "can_channels": _can_channels(viewer),
+            "can_manage": viewer.has(Role.GD, Role.ADMIN), "pending_changes": u.pending_changes or {}}
 
 
 def _deputy_active(u: User) -> bool:
@@ -112,21 +113,95 @@ def team(include_inactive: bool = False, db: Session = Depends(get_db), user: Cu
 class ContactsIn(BaseModel):
     contacts: dict[str, str] = {}
     wecom_user_id: Optional[str] = None
+    display_name: Optional[str] = None     # ФИО тоже правится из карточки (у сотрудника — с подтверждением)
+
+
+FIELD_TITLES = {"display_name": "ФИО", "wecom_user_id": "WeCom ID", "position": "Должность", "department": "Подразделение", "mobile": "Мобильный", "work_phone": "Рабочий телефон",
+                "wechat": "WeChat", "telegram": "Telegram", "whatsapp": "WhatsApp", "max": "MAX", "extra_email": "Доп. e-mail", "note": "Примечание"}
 
 
 @router.put("/{user_id}/contacts")
 def set_contacts(user_id: str, body: ContactsIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Контакты заполняет сам сотрудник; КД, ЗГД и администратор — любому."""
+    """Карточка сотрудника. Администратор и ЗГД меняют всё сразу. Сам сотрудник: пустые поля заполняет сразу, а изменение уже заполненного значения
+    уходит на подтверждение администратору / ЗГД (до подтверждения действует прежнее значение). КД — как сотрудник, но для любого."""
     u = db.get(User, user_id)
     if u is None:
         raise HTTPException(404)
+    manage = user.has(Role.GD, Role.ADMIN)
     if not (user.id == u.id or _can_channels(user)):
-        raise HTTPException(403, "Контакты сотрудника меняет он сам, КД, ЗГД или администратор")
+        raise HTTPException(403, "Карточку сотрудника меняет он сам, КД, ЗГД или администратор")
     before = dict(u.contacts or {})
-    u.contacts = {k: str(body.contacts.get(k, "") or "").strip()[:255] for k in CONTACT_FIELDS}
-    if body.wecom_user_id is not None:
-        u.wecom_user_id = body.wecom_user_id.strip() or None
-    audit(db, user.id, None, "user", u.id, "contacts", before, u.contacts)
+    new_contacts = {k: str(body.contacts.get(k, before.get(k, "")) or "").strip()[:255] for k in CONTACT_FIELDS}
+    wanted: dict[str, tuple[str, str]] = {k: (before.get(k, "") or "", v) for k, v in new_contacts.items() if (before.get(k, "") or "") != v}
+    if body.wecom_user_id is not None and (body.wecom_user_id.strip() or None) != u.wecom_user_id:
+        wanted["wecom_user_id"] = (u.wecom_user_id or "", body.wecom_user_id.strip())
+    if body.display_name is not None and body.display_name.strip() and body.display_name.strip() != u.display_name:
+        wanted["display_name"] = (u.display_name, body.display_name.strip()[:255])
+    applied, pending = {}, {}
+    for k, (old, new) in wanted.items():
+        if manage or not old:                 # администратор/ЗГД — сразу; пустое поле — сразу; иначе на подтверждение
+            applied[k] = [old, new]
+        else:
+            pending[k] = [old, new]
+    for k, (_, new) in ((k, v) for k, v in applied.items()):
+        if k == "display_name":
+            u.display_name = new
+        elif k == "wecom_user_id":
+            u.wecom_user_id = new or None
+        else:
+            u.contacts = {**(u.contacts or {}), k: new}
+    if pending:
+        cur = dict(u.pending_changes or {})
+        fields = {**(cur.get("fields") or {}), **pending}
+        u.pending_changes = {"fields": fields, "requested_at": date.today().isoformat(), "requested_by": user.id}
+        for admin_id in db.scalars(select(User.id).where(User.is_active.is_(True))).all():
+            adm = db.get(User, admin_id)
+            if adm and ({"admin", "gd"} & set(adm.roles or [])) and adm.id != user.id:
+                try:
+                    notify(db, None, adm.id, "user_change", None, f"{u.display_name}: запрос на изменение карточки ({', '.join(FIELD_TITLES.get(k, k) for k in pending)}) — подтвердите в «Настройки → Сотрудники»")
+                except Exception:  # noqa: BLE001
+                    pass
+    if applied:
+        audit(db, user.id, None, "user", u.id, "contacts", {k: v[0] for k, v in applied.items()}, {k: v[1] for k, v in applied.items()})
+    if pending:
+        audit(db, user.id, None, "user", u.id, "contacts_request", {k: v[0] for k, v in pending.items()}, {k: v[1] for k, v in pending.items()})
+    db.commit()
+    return {**_card(u, user), "applied": list(applied), "pending": list(pending)}
+
+
+class DecisionIn(BaseModel):
+    approve: bool
+    fields: Optional[list[str]] = None     # подтвердить/отклонить только часть полей; пусто — все
+    comment: str = ""
+
+
+@router.post("/{user_id}/pending/decide")
+def decide_pending(user_id: str, body: DecisionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Администратор / ЗГД подтверждает или отклоняет изменения карточки сотрудника."""
+    if not user.has(Role.GD, Role.ADMIN):
+        raise HTTPException(403, "Изменения карточки подтверждает администратор или ЗГД")
+    u = db.get(User, user_id)
+    if u is None:
+        raise HTTPException(404)
+    pend = dict((u.pending_changes or {}).get("fields") or {})
+    if not pend:
+        raise HTTPException(409, "Изменений, ожидающих подтверждения, нет")
+    keys = [k for k in (body.fields or list(pend)) if k in pend]
+    for k in keys:
+        old, new = pend.pop(k)
+        if body.approve:
+            if k == "display_name":
+                u.display_name = new
+            elif k == "wecom_user_id":
+                u.wecom_user_id = new or None
+            else:
+                u.contacts = {**(u.contacts or {}), k: new}
+    u.pending_changes = {**(u.pending_changes or {}), "fields": pend} if pend else {}
+    audit(db, user.id, None, "user", u.id, "contacts_approve" if body.approve else "contacts_reject", after={"fields": keys, "comment": body.comment})
+    try:
+        notify(db, None, u.id, "user_change", None, f"Изменения карточки ({', '.join(FIELD_TITLES.get(k, k) for k in keys)}) {'подтверждены' if body.approve else 'отклонены'}" + (f": {body.comment}" if body.comment else ""))
+    except Exception:  # noqa: BLE001
+        pass
     db.commit()
     return _card(u, user)
 
