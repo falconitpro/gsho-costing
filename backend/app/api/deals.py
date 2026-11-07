@@ -674,10 +674,55 @@ def mark_kp_sent(db: Session, deal: Deal, user: CurrentUser, recipients: list[st
                      subject=subject or f"КП по сделке {deal.number}", body=body_text or f"Отправлено через {sent_via}", user_id=user.id))
     complete_tasks(db, deal, block="kp")
     apply_transition(db, deal, tr, user.id)
+    schedule_status_check(db, deal, user.id, note="КП отправлено")
     # задачи 7, 8: история цен клиентам по отправленной версии КП; предложение занести оборудование в каталог
     from ..services.catalog_service import record_client_prices, propose_catalog_task
     record_client_prices(db, deal, user.id)
     propose_catalog_task(db, deal, user.id)
+
+
+def schedule_status_check(db: Session, deal: Deal, user_id: Optional[str], expected_on: Optional[date] = None, note: str = "") -> date:
+    """Ожидание результата: задача менеджеру «уточнить у клиента решение по КП» к дате ожидаемого решения
+    (или через N рабочих дней из настроек), прежняя задача ожидания закрывается."""
+    from ..core.workflow import add_business_days
+    from ..models import Task
+    from ..services import settings_service
+    from ..services.deal_service import notify
+    complete_tasks(db, deal, block="waiting")
+    days = int(settings_service.get(db, "waiting_check_days") or 5)
+    due = expected_on or add_business_days(date.today(), days)
+    deal.decision_expected_on = due
+    title = f"Уточнить у клиента решение по КП (ждём до {due.strftime('%d.%m')})"
+    db.add(Task(deal_id=deal.id, role=Role.MANAGER.value, assignee_id=deal.manager_id, title=title, block="waiting", due=due))
+    if deal.manager_id:
+        notify(db, deal, deal.manager_id, "waiting", None, f"{deal.number}: {title}" + (f" — {note}" if note else ""))
+    return due
+
+
+class StatusCheckIn(BaseModel):
+    note: str = ""                          # что сказал клиент
+    expected_on: Optional[date] = None      # когда ждём решение; пусто — через N рабочих дней по настройке
+
+
+@router.post("/{deal_id}/status-check")
+def status_check(deal_id: str, body: StatusCheckIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Менеджер уточнил статус у клиента: отметка «уточнил», заметка, следующая дата напоминания."""
+    deal = get_deal_or_404(db, deal_id, user)
+    if deal.status != DealStatus.KP_SENT:
+        raise HTTPException(409, "Ожидание результата — только после отправки КП")
+    if not (user.has(Role.CD, Role.GD) or deal.manager_id == user.id):
+        raise HTTPException(403, "Статус уточняет менеджер сделки, КД или ЗГД")
+    if body.expected_on and body.expected_on < date.today():
+        raise HTTPException(422, "Дата ожидаемого решения уже прошла")
+    deal.status_checked_on = date.today()
+    deal.status_check_note = body.note.strip()
+    due = schedule_status_check(db, deal, user.id, body.expected_on)
+    db.add(FeedEntry(deal_id=deal.id, kind="note", direction="in", counterparty=deal.client.name if deal.client else "",
+                     subject=f"Статус уточнён, решение ждём до {due.strftime('%d.%m.%Y')}", body=body.note.strip(), user_id=user.id))
+    audit(db, user.id, deal.id, "deal", deal.id, "status_check", None, {"note": body.note.strip(), "expected_on": due.isoformat()})
+    db.commit()
+    from ..services.execution_service import status_detail
+    return {"status_checked_on": deal.status_checked_on.isoformat(), "decision_expected_on": due.isoformat(), "status_detail": status_detail(deal)}
 
 
 class OutcomeIn(BaseModel):
@@ -700,6 +745,7 @@ def outcome_ep(deal_id: str, body: OutcomeIn, db: Session = Depends(get_db), use
         tr = wf_close(DealState(status=deal.status, service_flag=deal.service_flag), body.outcome, body.reason, date.today(), sla(db))
     except Exception as e:
         raise HTTPException(409, str(e))
+    complete_tasks(db, deal, block="waiting")   # ожидание результата закончено
     deal.outcome, deal.outcome_reason = body.outcome, body.reason
     if body.won_variant_id:
         deal.won_variant_id = body.won_variant_id

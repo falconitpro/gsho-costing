@@ -47,6 +47,7 @@ DEFAULTS: dict[str, Any] = {
     "logistics_deviation_pct": 15.0,
     "plan_fact_deviation_pct": 10.0,
     "sla_days": {"logistics": 1, "service": 2, "cd": 1, "fd": 1, "gd": 1, "manager_rework": 1},
+    "waiting_check_days": 5,   # ожидание результата после КП: через сколько рабочих дней напомнить менеджеру уточнить решение клиента
     "kp_fx_clause_pct": 5.0,
     "kp_validity_days": 30,
     # запасные части (ТЗ запчастей, раздел 6): порог маржи по себестоимости строки, минимум маржи КП, допуск КД

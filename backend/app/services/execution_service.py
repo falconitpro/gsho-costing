@@ -94,6 +94,9 @@ def status_detail(deal: Deal) -> str:
             done.setdefault("factory_signed", {"done": True})
         nxt = next((c for c in CONTRACT_STEPS if not (done.get(c["code"]) or {}).get("done")), None)
         return f"{title} · {nxt['title'].lower() if nxt else 'всё подписано — можно начинать исполнение'}"
+    if deal.status == DealStatus.KP_SENT:
+        exp = deal.decision_expected_on
+        return f"{title} · ожидание результата" + (f", решение клиента ждём до {exp.strftime('%d.%m')}" if exp else "")
     return title
 
 

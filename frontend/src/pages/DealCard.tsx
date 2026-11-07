@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import ChecksPanel from "../components/ChecksPanel";
 import { lbl, FEED_KIND } from "../labels";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
 import { DELIVERY_START, PRODUCTION_START, STATUS_TITLES, TERM_UNITS, can, type Deal, type Me, type Position } from "../types";
 import ApprovalScreen from "./ApprovalScreen";
@@ -14,6 +14,7 @@ import KpActions from "../components/KpActions";
 import KpRevisions from "../components/KpRevisions";
 import PlanFactTab from "../components/PlanFactTab";
 import OutcomePanel from "../components/OutcomePanel";
+import WaitingPanel from "../components/WaitingPanel";
 import ExecutionTab from "../components/ExecutionTab";
 import DocumentsTab, { REVIEW_BADGE } from "../components/DocumentsTab";
 import { ImagesBlock, LocalOptionsBlock, OffersBlock, RelatedDeals } from "../components/ImagesLocalOptions";
@@ -27,6 +28,7 @@ const POST_WIN = ["contract", "execution", "closed"];
 export default function DealCard({ me }: { me: Me }) {
   const { id } = useParams();
   const nav = useNavigate();
+  const wantTab = new URLSearchParams(useLocation().search).get("tab") as Tab | null;   // /deals/:id?tab=execution — из задач и уведомлений
   const [deal, setDeal] = useState<Deal | null>(null);
   const [tab, setTab] = useState<Tab>("main");
   const [err, setErr] = useState("");
@@ -145,7 +147,8 @@ export default function DealCard({ me }: { me: Me }) {
           <span>Сделка в архиве с {fmtDate(deal.archived_at)}{deal.archive_reason ? `: ${deal.archive_reason}` : ""}</span>
           {has("cd", "gd") && <button className="btn ghost" onClick={unarchive}>Вернуть из архива</button>}
         </div>)}
-      {err && <div className={"alert " + (err.startsWith("Сделка выиграна") || err.startsWith("Результат") || err.startsWith("Сделка возвращена") || err.startsWith("Сделка перенесена") ? "info" : "error")}>{err}</div>}
+      {err && <div className={"alert " + (err.startsWith("Сделка выиграна") || err.startsWith("Результат") || err.startsWith("Сделка возвращена") || err.startsWith("Сделка перенесена") || err.startsWith("Статус уточнён") ? "info" : "error")}>{err}</div>}
+      {phase === "sale" && <WaitingPanel deal={deal} me={me} onDone={(m) => { setErr(m); load(); }} />}
       <OutcomePanel deal={deal} me={me} onDone={(m) => { setErr(m); load(); if (m.startsWith("Сделка выиграна")) setTab("execution"); }} />
       <div style={{ margin: "6px 0" }}><KpActions dealId={deal.id} status={deal.status} canAct={isOwner || has("cd", "gd", "admin")} onDone={() => { load(); }} /></div>
       {["approved", "kp_sent"].includes(deal.status) && <KpRevisions dealId={deal.id} status={deal.status} onDone={() => { load(); }} />}
