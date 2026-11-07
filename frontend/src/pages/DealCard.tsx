@@ -123,7 +123,7 @@ export default function DealCard({ me }: { me: Me }) {
       <div className="row" style={{ justifyContent: "space-between" }}>
         <div>
           <h1 style={{ marginBottom: 2 }}>{deal.number} · {deal.client_name}{deal.parent_deal_id && <span className="badge" style={{ marginLeft: 6 }}>дубликат</span>}</h1>
-          <span className="badge accent">{deal.status_detail || STATUS_TITLES[deal.status]}</span> <span className="muted">срок КП {fmtDate(deal.kp_due)} · версия {deal.current_version_no}{deal.contract_number && ` · контракт ${deal.contract_number}`}</span>
+          <span className="badge accent">{deal.status_detail || STATUS_TITLES[deal.status]}</span> <span className="muted">срок КП {fmtDate(deal.kp_due)} · версия {deal.current_version_no}{deal.contract_number && ` · контракт ${deal.contract_number}`}{deal.factory_contract_number && ` · с заводом ${deal.factory_contract_number}`}</span>
           {deal.legal_review?.status && <> <span className={"badge " + (REVIEW_BADGE[deal.legal_review.status] || "")} title={deal.legal_review.comment || ""}>юрист: {{ in_review: "на проверке", ok: "замечаний нет", remarks: "есть замечания" }[deal.legal_review.status] || deal.legal_review.status}</span></>}
         </div>
         <div className="row">

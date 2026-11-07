@@ -25,6 +25,7 @@ class ContractIn(BaseModel):
     contract_number: Optional[str] = None
     contract_signed_at: Optional[date] = None
     factory_contract_signed_at: Optional[date] = None
+    factory_contract_number: Optional[str] = None
     won_variant_id: Optional[str] = None
 
 
@@ -52,7 +53,7 @@ def stages(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
         for d in db.scalars(select(Deal).where(Deal.request_group_id == deal.request_group_id, Deal.id != deal.id)).all():
             related.append({"id": d.id, "number": d.number, "status": d.status.value})
     return {"stages": rows, "status": deal.status.value, "contract_number": deal.contract_number, "contract_signed_at": deal.contract_signed_at,
-            "factory_contract_signed_at": deal.factory_contract_signed_at, "won_variant_id": deal.won_variant_id, "related": related,
+            "factory_contract_signed_at": deal.factory_contract_signed_at, "factory_contract_number": deal.factory_contract_number, "won_variant_id": deal.won_variant_id, "related": related,
             "contract_steps": ex.contract_steps(db, deal), "status_detail": ex.status_detail(deal)}
 
 
@@ -81,6 +82,7 @@ class ContractStepIn(BaseModel):
     on: Optional[date] = None
     comment: str = ""
     contract_number: Optional[str] = None       # для «Контракт подписан клиентом»
+    factory_contract_number: Optional[str] = None   # для «Контракт с заводом подписан»
 
 
 @router.post("/contract-step")
@@ -109,7 +111,10 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
                 raise HTTPException(422, "Укажите номер контракта")
             deal.contract_number, deal.contract_signed_at = number, on
         if body.code == "factory_signed":
-            deal.factory_contract_signed_at = on
+            fnum = (body.factory_contract_number or deal.factory_contract_number or "").strip()
+            if not fnum:
+                raise HTTPException(422, "Укажите номер контракта с заводом")
+            deal.factory_contract_number, deal.factory_contract_signed_at = fnum, on
         steps[body.code] = {"done": True, "on": on.isoformat(), "by": user.id, "comment": body.comment}
     else:
         steps.pop(body.code, None)
@@ -184,6 +189,7 @@ def set_actual(deal_id: str, stage_id: str, body: ActualIn, db: Session = Depend
     if ex.STAGE_DEFS[st.code]["kind"] in ("payment_in", "payment_out") and body.actual_on and body.actual_amount is None:
         raise HTTPException(422, "Укажите фактическую сумму платежа")
     ex.set_actual(db, deal, st, body.actual_on, body.actual_amount, body.note, user)
+    ex.push_history(st, "actual", body.actual_on, body.note or ("" if body.actual_on else "факт снят"), user.id)
     if deal.status == DealStatus.EXECUTION:
         ex.create_stage_tasks(db, deal, user.id)
     db.commit()
@@ -209,6 +215,7 @@ def refine(deal_id: str, stage_id: str, body: RefineIn, db: Session = Depends(ge
         raise HTTPException(409, "Этап уже выполнен — уточнять нечего")
     before = st.refined_on
     st.refined_on, st.refined_note = body.refined_on, body.note
+    ex.push_history(st, "factory" if st.code in ex.FACTORY_DATE_CODES else "refine", body.refined_on, body.note or ("" if body.refined_on else "уточнение снято"), user.id)
     audit(db, user.id, deal.id, "execution_stage", st.id, "refine", {"refined_on": str(before) if before else None},
           {"refined_on": str(body.refined_on) if body.refined_on else None, "note": body.note})
     db.flush()

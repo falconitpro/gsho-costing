@@ -179,7 +179,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
     for st in db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.actual_on.is_not(None),
                                                       ExecutionStage.code.in_(["client_advance", "lc_opened"]))).all():
         deal_actual["client_prepayment" if st.code == "client_advance" else "lc_opened"] = st.actual_on
-    return DealCalcInput(
+    inp = DealCalcInput(
         deal_no=deal.number, calc_date=calc_date, contract_date=deal.contract_signed_at or deal.kp_due or (calc_date + timedelta(days=14)),
         factory_contract_date=deal.factory_contract_signed_at, factory_contract_lag_days=int(s.get("factory_contract_lag_days") or 10),
         lc_opening_days=int(s.get("lc_opening_days") or 14), delivery_reserve_pct=float(s.get("delivery_reserve_pct") or 10.0),
@@ -191,6 +191,47 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
         external_commission_pct=float(s.get("external_commission_pct") or 0), manager_commission_pct=float(s.get("manager_commission_pct") or 0),
         cd_commission_pct=float(s.get("cd_commission_pct") or 0),
     )
+    if deal.execution_started:
+        apply_expected_events(db, deal, inp)
+    return inp
+
+
+def apply_expected_events(db: Session, deal: Deal, inp: DealCalcInput) -> None:
+    """Исполнение: уточнённые даты этапов (в т. ч. по данным завода) — ожидаемые события расчёта, поэтому от них пересчитываются
+    все даты: следующие этапы, платежи клиента и заводу, денежный поток и разрыв, прогноз курса. Окончательная приёмка позже
+    готовности сдвигает готовность к отгрузке."""
+    from ..calc.types import PaymentEvent
+    from .execution_service import STAGE_DEFS
+    stages = db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id)).all()
+    for st in stages:
+        if not st.refined_on or st.actual_on:
+            continue
+        ev = STAGE_DEFS.get(st.code, {}).get("event")
+        if not ev or ev == "production_start":
+            continue
+        try:
+            pe = PaymentEvent(ev)
+        except ValueError:
+            continue
+        if st.position_id:
+            for pi in inp.positions:
+                if pi.id == st.position_id and pe.value not in pi.actual_events:
+                    pi.actual_events[pe.value] = st.refined_on
+        elif st.batch_id:
+            for bi in inp.batches:
+                if bi.id == st.batch_id and pe.value not in bi.actual_events:
+                    bi.actual_events[pe.value] = st.refined_on
+        elif ev not in inp.deal_actual_events:
+            inp.deal_actual_events[ev] = st.refined_on
+    for st in stages:
+        acc = st.actual_on or st.refined_on if st.code == "factory_acceptance" else None
+        if not acc or not st.position_id:
+            continue
+        for pi in inp.positions:
+            if pi.id == st.position_id:
+                cur = pi.actual_events.get("readiness")
+                if cur is None or _date(cur) < acc:
+                    pi.actual_events["readiness"] = acc
 
 
 def run_calc(db: Session, deal: Deal, calc_date: date | None = None):

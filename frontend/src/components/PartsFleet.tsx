@@ -166,6 +166,8 @@ function MachineCard({ m, edit, act, onEdit, onKit }: { m: Machine; edit: boolea
           <div className="row"><button className="btn" disabled={!kit.name || !Number(kit.interval_hours)} onClick={saveKit}>Сохранить комплект</button><button className="btn ghost" onClick={() => setKit(null)}>отмена</button></div>
         </div>)}
 
+      <MachineDocs id={m.id} />
+
       <h3>Запчасти для этой машины</h3>
       {parts === null ? <button className="btn ghost" onClick={() => api.get<typeof parts>(`/api/parts/fleet/machines/${m.id}/parts`).then(setParts)}>показать применимые</button>
         : parts!.length === 0 ? <div className="muted">В каталоге нет запчастей с применимостью к этой модели — её задают в карточке запчасти.</div>
@@ -174,4 +176,24 @@ function MachineCard({ m, edit, act, onEdit, onKit }: { m: Machine; edit: boolea
       {(m.requests || []).length > 0 && <p className="muted" style={{ marginTop: 8 }}>Заявки по машине: {(m.requests || []).map((r) => `${r.number} (${fmtDate(r.created_at)})`).join(", ")}</p>}
     </div>
   );
+}
+
+type MDoc = { name: string; kind: string; kind_title: string; title: string; at: string | null; url: string; round_no?: number; language?: string; version?: string };
+/** Документы машины: из приёмки (паспорт, руководство, сертификаты, протоколы, акт), фото / видео осмотра и документы модели из каталога. */
+function MachineDocs({ id }: { id: string }) {
+  const [d, setD] = useState<{ documents: MDoc[]; media: MDoc[]; model_documents: MDoc[] } | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => { setD(null); api.get<typeof d>(`/api/parts/fleet/machines/${id}/documents`).then(setD).catch((e) => setErr((e as Error).message)); }, [id]);
+  if (!d) return err ? <div className="muted">{err}</div> : null;
+  const row = (x: MDoc, i: number) => (
+    <div key={i} style={{ fontSize: 13 }}>📄 <b>{x.kind_title}</b>{x.title && x.title !== x.kind_title && ` — ${x.title}`}: <a href={x.url} target="_blank" rel="noreferrer">{x.name}</a>
+      <span className="muted" style={{ fontSize: 11 }}>{x.language && ` · ${x.language.toUpperCase()}`}{x.version && ` · версия ${x.version}`}{x.at && ` · ${fmtDate(x.at)}`}</span></div>);
+  return (<>
+    <h3>Документы машины</h3>
+    {d.documents.length === 0 && d.model_documents.length === 0 && <div className="muted">Документов нет — их прикладывают при приёмке на заводе (сделка → «Приёмка на заводе»).</div>}
+    {d.documents.map(row)}
+    {d.model_documents.length > 0 && <><div className="muted" style={{ marginTop: 4, fontSize: 12 }}>Документы модели (каталог):</div>{d.model_documents.map(row)}</>}
+    {d.media.length > 0 && <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 4, fontSize: 12 }}>Фото / видео приёмки:
+      {d.media.map((x, i) => <a key={i} href={x.url} target="_blank" rel="noreferrer">{x.kind === "video" ? "🎬" : "📷"} {x.name}</a>)}</div>}
+  </>);
 }

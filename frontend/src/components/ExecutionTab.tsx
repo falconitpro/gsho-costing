@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { lbl, STATUS } from "../labels";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Deal, type Me, type Stage } from "../types";
 import ContractScans from "./ContractScans";
 
-type Resp = { stages: Stage[]; status: string; contract_number: string; contract_signed_at: string | null; factory_contract_signed_at: string | null; won_variant_id: string | null;
+type Resp = { stages: Stage[]; status: string; contract_number: string; contract_signed_at: string | null; factory_contract_signed_at: string | null; factory_contract_number?: string | null; won_variant_id: string | null;
   related: { id: string; number: string; status: string }[]; contract_steps: CStep[]; status_detail: string };
 type CStep = { code: string; title: string; roles: string[]; hint: string; state: "done" | "current" | "pending"; on: string | null; by: string; comment: string };
 const ROLE_T: Record<string, string> = { manager: "менеджер", logistician: "логист", service_head: "сервис", fd: "ФД", cd: "КД", gd: "ЗГД", purchasing: "закупки", lawyer: "юрист" };
@@ -13,12 +13,14 @@ const ROLE_T: Record<string, string> = { manager: "менеджер", logisticia
  *  платежи (ФД), изменение условий (повторная визация), закрытие (КД). Задача 6: этапы «заказать/установить опцию РФ». */
 export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me; reload: () => void }) {
   const [data, setData] = useState<Resp | null>(null);
-  const [form, setForm] = useState({ contract_number: deal.contract_number || "", contract_signed_at: deal.contract_signed_at || "", factory_contract_signed_at: deal.factory_contract_signed_at || "", won_variant_id: deal.won_variant_id || "" });
+  const [form, setForm] = useState({ contract_number: deal.contract_number || "", contract_signed_at: deal.contract_signed_at || "", factory_contract_signed_at: deal.factory_contract_signed_at || "", factory_contract_number: deal.factory_contract_number || "", won_variant_id: deal.won_variant_id || "" });
   const [actual, setActual] = useState<Record<string, { actual_on: string; actual_amount: string; note: string }>>({});
   const [reason, setReason] = useState("");
   const [refine, setRefine] = useState<Record<string, { on: string; note: string }>>({});
+  const [hist, setHist] = useState<Record<string, boolean>>({});
   const [err, setErr] = useState("");
-  const [step, setStep] = useState<Record<string, { on: string; comment: string; number: string }>>({});
+  const [step, setStep] = useState<Record<string, { on: string; comment: string; number: string; fnumber: string }>>({});
+  const [scan, setScan] = useState<Record<string, File | null>>({});
   const isMgr = me.roles.some((r) => r.code === "manager") && deal.manager_id === me.id;
   const isCdGd = me.roles.some((r) => r.code === "cd" || r.code === "gd");
   const load = () => api.get<Resp>(`/api/deals/${deal.id}/execution/stages`).then(setData).catch((e) => setErr(e.message));
@@ -30,8 +32,15 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
   for (const s of data.stages) { const k = s.batch ? `Партия: ${s.batch}` : s.position ? `Позиция: ${s.position}` : "Сделка"; (groups[k] ||= []).push(s); }
   const done = data.stages.filter((s) => s.done).length;
   const canStep = (c: CStep) => me.roles.some((r) => r.code === "gd" || (r.code !== "manager" && c.roles.includes(r.code))) || (isMgr && c.roles.includes("manager"));
-  const sv = (c: CStep) => step[c.code] || { on: new Date().toISOString().slice(0, 10), comment: "", number: form.contract_number };
-  const markStep = (c: CStep, done: boolean) => act(() => api.post(`/api/deals/${deal.id}/execution/contract-step`, { code: c.code, done, on: sv(c).on, comment: sv(c).comment, contract_number: sv(c).number || null }));
+  const sv = (c: CStep) => step[c.code] || { on: new Date().toISOString().slice(0, 10), comment: "", number: form.contract_number, fnumber: form.factory_contract_number };
+  const SCAN_KIND: Record<string, string> = { client_signed: "client", factory_signed: "factory" };
+  const markStep = (c: CStep, done: boolean) => act(async () => {
+    await api.post(`/api/deals/${deal.id}/execution/contract-step`, { code: c.code, done, on: sv(c).on, comment: sv(c).comment, contract_number: sv(c).number || null,
+      factory_contract_number: sv(c).fnumber || null });
+    const f = scan[c.code];
+    if (done && f && SCAN_KIND[c.code]) { await api.upload(`/api/deals/${deal.id}/contract-scans`, f, { kind: SCAN_KIND[c.code] }); setScan({ ...scan, [c.code]: null }); }
+  });
+  const needNo = (c: CStep, v: { number: string; fnumber: string }) => (c.code === "client_signed" && !v.number.trim()) || (c.code === "factory_signed" && !(v.fnumber || "").trim());
   const allSigned = data.contract_steps.find((c) => c.code === "client_signed")?.state === "done";
   return (
     <>
@@ -51,12 +60,15 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
                   <td><b>{c.title}</b><div className="muted" style={{ fontSize: 12 }}>{c.hint}</div></td>
                   <td style={{ fontSize: 12 }}>{c.roles.map((r) => ROLE_T[r] || r).join(", ")}</td>
                   <td>{c.state === "done" ? fmtDate(c.on) : editable ? <input type="date" value={v.on} onChange={(e) => setStep({ ...step, [c.code]: { ...v, on: e.target.value } })} /> : "—"}</td>
-                  <td style={{ fontSize: 12 }}>{c.state === "done" ? <>{c.by}{c.comment && <div className="muted">{c.comment}</div>}
+                  <td style={{ fontSize: 12 }}>{c.state === "done" ? <>{c.code === "client_signed" && data.contract_number && <div>№ {data.contract_number}</div>}{c.code === "factory_signed" && data.factory_contract_number && <div>№ {data.factory_contract_number}</div>}{c.by}{c.comment && <div className="muted">{c.comment}</div>}
                     {(c.code === "client_signed" || c.code === "factory_signed") && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} only={c.code === "client_signed" ? "client" : "factory"} />}</> : editable && <>
-                    {c.code === "client_signed" && <input placeholder="номер контракта" value={v.number} onChange={(e) => setStep({ ...step, [c.code]: { ...v, number: e.target.value } })} style={{ width: 150, marginRight: 4 }} />}
-                    <input placeholder="комментарий" value={v.comment} onChange={(e) => setStep({ ...step, [c.code]: { ...v, comment: e.target.value } })} style={{ width: 200 }} /></>}</td>
+                    {c.code === "client_signed" && <input placeholder="номер контракта *" value={v.number} onChange={(e) => setStep({ ...step, [c.code]: { ...v, number: e.target.value } })} style={{ width: 150, marginRight: 4 }} />}
+                    {c.code === "factory_signed" && <input placeholder="номер контракта с заводом *" value={v.fnumber || ""} onChange={(e) => setStep({ ...step, [c.code]: { ...v, fnumber: e.target.value } })} style={{ width: 190, marginRight: 4 }} />}
+                    <input placeholder="комментарий" value={v.comment} onChange={(e) => setStep({ ...step, [c.code]: { ...v, comment: e.target.value } })} style={{ width: 200 }} />
+                    {SCAN_KIND[c.code] && <div style={{ marginTop: 4 }}>скан: <input type="file" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.zip" style={{ fontSize: 11, maxWidth: 220 }}
+                      onChange={(e) => setScan({ ...scan, [c.code]: e.target.files?.[0] || null })} /></div>}</>}</td>
                   <td>{c.state === "done" ? (canStep(c) && <button className="btn ghost" onClick={() => markStep(c, false)}>снять отметку</button>)
-                    : editable && <button className={"btn " + (c.state === "current" ? "" : "secondary")} disabled={c.code === "client_signed" && !v.number.trim()} onClick={() => markStep(c, true)}>Выполнено</button>}</td>
+                    : editable && <button className={"btn " + (c.state === "current" ? "" : "secondary")} disabled={needNo(c, v)} title={needNo(c, v) ? "укажите номер контракта" : ""} onClick={() => markStep(c, true)}>Выполнено</button>}</td>
                 </tr>);
             })}</tbody>
           </table>
@@ -67,10 +79,21 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
       <div className="grid cols-2">
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Реквизиты контракта</h2>
+          {(() => { const showScans = ["won", "contract", "execution", "closed"].includes(deal.status); return <>
+          <h3 style={{ margin: "4px 0" }}>Договор с клиентом</h3>
           <div className="grid cols-2">
-            <label className="f">Номер контракта<input value={form.contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_number: e.target.value })} /></label>
-            <label className="f">Дата подписания с клиентом<input type="date" value={form.contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_signed_at: e.target.value })} /></label>
-            <label className="f">Дата подписания с заводом<input type="date" value={form.factory_contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, factory_contract_signed_at: e.target.value })} /></label>
+            <label className="f">Номер договора с клиентом<input value={form.contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_number: e.target.value })} /></label>
+            <label className="f">Дата договора с клиентом<input type="date" value={form.contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_signed_at: e.target.value })} /></label>
+          </div>
+          {showScans && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} only="client" />}
+          <h3 style={{ margin: "12px 0 4px" }}>Договор с заводом</h3>
+          <div className="grid cols-2">
+            <label className="f">Номер договора с заводом<input value={form.factory_contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, factory_contract_number: e.target.value })} /></label>
+            <label className="f">Дата договора с заводом<input type="date" value={form.factory_contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, factory_contract_signed_at: e.target.value })} /></label>
+          </div>
+          {showScans && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} only="factory" />}
+          </>; })()}
+          <div className="grid cols-2" style={{ marginTop: 8 }}>
             {deal.has_alternatives && <label className="f">Предложение, которое выбрал клиент
               <select value={form.won_variant_id} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, won_variant_id: e.target.value })}><option value="">—</option>{deal.variants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>}
           </div>
@@ -79,7 +102,6 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
               <button className="btn secondary" onClick={() => act(() => api.patch(`/api/deals/${deal.id}/execution/contract`, { ...form, contract_signed_at: form.contract_signed_at || null, factory_contract_signed_at: form.factory_contract_signed_at || null, won_variant_id: form.won_variant_id || null }))}>Сохранить реквизиты</button>
             </div>
           )}
-          {["won", "contract", "execution", "closed"].includes(deal.status) && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} />}
           {(deal.status === "contract" || deal.status === "execution") && (isMgr || isCdGd) && (
             <div className="row" style={{ marginTop: 10 }}>
               <input placeholder="что изменилось в условиях контракта относительно КП" value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: 360 }} />
@@ -104,40 +126,48 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
               <table style={{ marginTop: 8 }}><thead><tr><th>Ключевой срок</th><th>Базовый план</th><th>Прогноз / факт</th><th className="num">Отклонение</th></tr></thead>
                 <tbody>{key.map((s) => <tr key={s.id}><td>{s.title}</td><td>{fmtDate(s.baseline_on)}</td><td>{s.done ? <b>{fmtDate(s.actual_on)}</b> : fmtDate(s.refined_on || s.planned_on)}</td><td className="num"><Dev d={s.deviation_days} /></td></tr>)}</tbody></table>);
           })()}
-          <p className="muted">Базовый план фиксируется при начале исполнения и не меняется. Уточнённая дата (например, завод подтвердил готовность) пересчитывает прогноз следующих этапов; отклонение — от базового плана, «+» — позже. Фактическую дату вносят ответственные (логист — отгрузка, CMR, ДТ, доставка; сервис — ПНР; менеджер — подписание и готовность), платежи и аккредитив — ФД. Ввод факта пересчитывает плановые даты следующих этапов и платежей.</p>
+          <p className="muted">Базовый план фиксируется при начале исполнения и не меняется. Даты готовности, предварительной (онлайн) и окончательной приёмки вносятся по данным завода — каждое изменение хранится в истории и пересчитывает прогноз следующих этапов; окончательная приёмка позже готовности сдвигает отгрузку, а замечания приёмки со сроком устранения — ожидаемую дату приёмки; отклонение — от базового плана, «+» — позже. Фактическую дату вносят ответственные (логист — отгрузка, CMR, ДТ, доставка; сервис — ПНР; менеджер — подписание и готовность), платежи и аккредитив — ФД. Ввод факта пересчитывает плановые даты следующих этапов и платежей.</p>
         </div>
       </div>
       {Object.entries(groups).map(([g, stages]) => (
         <div className="card" key={g}>
           <h2 style={{ marginTop: 0 }}>{g}</h2>
           <table>
-            <thead><tr><th>Этап</th><th>Базовый план</th><th>Уточнено</th><th>Прогноз</th><th>Факт</th><th className="num">Отклонение</th>{can(me, "cost") && <th className="num">Сумма</th>}<th>Ответственный</th><th>Отметка</th></tr></thead>
+            <thead><tr><th>Этап</th><th>Базовый план</th><th>Уточнено / по данным завода</th><th>Прогноз</th><th>Факт</th><th className="num">Отклонение</th>{can(me, "cost") && <th className="num">Сумма</th>}<th>Ответственный</th><th>Отметка</th></tr></thead>
             <tbody>{stages.map((s) => {
               const a = actual[s.id] || { actual_on: s.actual_on || "", actual_amount: s.actual_amount != null ? String(s.actual_amount) : (s.amount != null ? String(s.amount) : ""), note: s.note || "" };
               return (
-                <tr key={s.id} style={{ background: s.done ? "#e6f5ec" : s.overdue ? "#fde7e7" : undefined }}>
-                  <td>{s.title}{s.note && <div className="muted" style={{ fontSize: 11 }}>{s.note}</div>}</td>
+                <Fragment key={s.id}>
+                <tr style={{ background: s.done ? "#e6f5ec" : s.overdue ? "#fde7e7" : undefined }}>
+                  <td>{s.title}{s.note && <div className="muted" style={{ fontSize: 11 }}>{s.note}</div>}
+                    {(s.history || []).length > 0 && <div><a href="#" style={{ fontSize: 11 }} onClick={(e) => { e.preventDefault(); setHist({ ...hist, [s.id]: !hist[s.id] }); }}>
+                      история дат ({s.history!.length}) {hist[s.id] ? "▴" : "▾"}</a></div>}</td>
                   <td>{fmtDate(s.baseline_on) || <span className="muted">—</span>}</td>
-                  <td>{s.refined_on ? <>{fmtDate(s.refined_on)}{s.refined_note && <div className="muted" style={{ fontSize: 11 }}>{s.refined_note}</div>}</> : <span className="muted">—</span>}
+                  <td>{s.refined_on ? <>{fmtDate(s.refined_on)}{s.factory_date && <span className="badge" style={{ marginLeft: 4, fontSize: 10 }}>завод</span>}{s.refined_note && <div className="muted" style={{ fontSize: 11 }}>{s.refined_note}</div>}</> : <span className="muted">—</span>}
                     {s.can_set && !s.done && deal.status !== "closed" && (() => { const r = refine[s.id] || { on: s.refined_on || "", note: s.refined_note || "" };
                       return <div className="row" style={{ marginTop: 2 }}>
                         <input type="date" value={r.on} style={{ width: 130 }} onChange={(e) => setRefine({ ...refine, [s.id]: { ...r, on: e.target.value } })} />
-                        <input placeholder="основание" value={r.note} style={{ width: 100 }} onChange={(e) => setRefine({ ...refine, [s.id]: { ...r, note: e.target.value } })} />
-                        <button className="btn ghost" style={{ padding: "2px 6px" }} onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/stages/${s.id}/refine`, { refined_on: r.on || null, note: r.note }))}>уточнить</button>
+                        <input placeholder={s.factory_date ? "основание (письмо завода…)" : "основание"} value={r.note} style={{ width: s.factory_date ? 150 : 100 }} onChange={(e) => setRefine({ ...refine, [s.id]: { ...r, note: e.target.value } })} />
+                        <button className="btn ghost" style={{ padding: "2px 6px" }} onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/stages/${s.id}/refine`, { refined_on: r.on || null, note: r.note }))}>{s.factory_date ? "дата завода" : "уточнить"}</button>
                       </div>; })()}</td>
                   <td>{s.done ? <span className="muted">—</span> : fmtDate(s.planned_on)}</td>
                   <td>{s.done ? <b>{fmtDate(s.actual_on)}</b> : s.overdue ? <span className="badge bad">просрочен</span> : <span className="muted">—</span>}</td>
                   <td className="num"><Dev d={s.deviation_days} /></td>
                   {can(me, "cost") && <td className="num">{s.amount != null ? `${fmtRub(s.amount)} ${s.currency}` : ""}{s.actual_amount != null && <div className="muted">факт {fmtRub(s.actual_amount)}</div>}</td>}
                   <td className="muted">{s.responsible_roles.map((r) => ROLE_T[r] || r).join(", ")}</td>
-                  <td>{s.can_set && deal.status !== "closed" ? (
+                  <td>{s.code === "factory_acceptance" ? <span className="muted" style={{ fontSize: 11 }}>факт — по решению приёмки всех машин (вкладка «Приёмка на заводе»)</span> : s.can_set && deal.status !== "closed" ? (
                     <div className="row">
                       <input type="date" value={a.actual_on} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, actual_on: e.target.value } })} />
                       {(s.kind === "payment_in" || s.kind === "payment_out") && <input type="number" placeholder="сумма" value={a.actual_amount} style={{ width: 120 }} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, actual_amount: e.target.value } })} />}
                       <input placeholder="примечание" value={a.note} style={{ width: 120 }} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, note: e.target.value } })} />
                       <button className="btn ghost" style={{ padding: "3px 8px" }} onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/stages/${s.id}/actual`, { actual_on: a.actual_on || null, actual_amount: a.actual_amount ? Number(a.actual_amount) : null, note: a.note }))}>{s.done ? "изменить" : "отметить"}</button>
                     </div>) : null}</td>
-                </tr>);
+                </tr>
+                {hist[s.id] && <tr><td colSpan={9} style={{ background: "#fafafa", fontSize: 12 }}>
+                  <table style={{ fontSize: 12 }}><thead><tr><th>Когда внесено</th><th>Вид</th><th>Дата</th><th>Основание</th><th>Кто</th></tr></thead>
+                    <tbody>{s.history!.map((h, i) => <tr key={i}><td>{fmtDate(h.at)} {h.at?.slice(11, 16)}</td><td>{h.kind_title}</td><td><b>{h.on ? fmtDate(h.on) : "снято"}</b></td><td>{h.note}</td><td>{h.by_name}</td></tr>)}</tbody></table>
+                </td></tr>}
+                </Fragment>);
             })}</tbody>
           </table>
         </div>

@@ -12,6 +12,62 @@ from typing import Any, Iterable, Mapping, Optional
 
 DECISIONS = {"accepted": "принята", "accepted_remarks": "принята с замечаниями", "rejected": "не принята"}
 RESULTS = {"ok": "соответствует", "fail": "не соответствует", "na": "не применимо"}
+FILE_KINDS = {"photo": "Фото", "video": "Видео испытаний", "passport": "Паспорт / формуляр машины", "manual": "Руководство по эксплуатации",
+              "parts_catalog": "Каталог запасных частей", "certificate": "Сертификат / декларация соответствия", "protocol": "Протокол испытаний",
+              "warranty": "Гарантийный талон", "doc": "Прочий документ"}
+TO_MODEL_KINDS = {"manual": "manual", "parts_catalog": "parts_catalog", "certificate": "certificate"}   # могут стать общими документами модели
+MODES = {"online": "онлайн-приёмка", "factory": "приёмка на заводе"}
+SNAPSHOT_FIELDS = ("round_no", "mode", "is_final", "inspected_on", "inspector", "factory_rep", "place", "checklist", "tests", "remarks",
+                   "decision", "decided_at", "decided_by", "comment", "act")
+
+
+def snapshot(unit: Mapping[str, Any]) -> dict:
+    """Снимок текущей приёмки машины для истории."""
+    out = {}
+    for k in SNAPSHOT_FIELDS:
+        v = unit.get(k)
+        out[k] = v.isoformat() if hasattr(v, "isoformat") else v
+    return out
+
+
+def _prev_marks(rows: list[dict], rounds: list[Mapping[str, Any]], key: str) -> list[dict]:
+    """Строки новой приёмки: результат сброшен; в каких предыдущих приёмках строка не принята (prev_fail) и прошлый результат."""
+    out = []
+    for r in rows:
+        fails, last = [], None
+        for rd in rounds:
+            m = next((x for x in rd.get(key) or [] if x.get("id") == r.get("id")), None)
+            if m is None:
+                continue
+            last = {"round_no": rd.get("round_no"), "result": m.get("result") or "", "comment": m.get("comment") or m.get("note") or ""}
+            if m.get("result") == "fail":
+                fails.append(rd.get("round_no"))
+        out.append({**{k: v for k, v in r.items() if k not in ("prev_fail", "prev")}, "result": "",
+                    **({"comment": ""} if key == "checklist" else {"note": "", "value": ""}), "prev_fail": fails, "prev": last})
+    return out
+
+
+def new_round(unit: Mapping[str, Any], mode: str, is_final: Optional[bool] = None) -> dict:
+    """Повторная приёмка: текущая уходит в историю; проверки и испытания — заново (с пометкой «не принято ранее»),
+    неустранённые замечания переносятся."""
+    if mode not in MODES:
+        raise ValueError("Вид приёмки: онлайн или на заводе")
+    rounds = [*(unit.get("rounds") or []), snapshot(unit)]
+    carried = [{**r, "from_round": r.get("from_round") or unit.get("round_no") or 1} for r in open_remarks(unit.get("remarks") or [])]
+    return {"rounds": rounds, "round_no": int(unit.get("round_no") or 1) + 1, "mode": mode,
+            "is_final": True if mode == "factory" else bool(is_final),
+            "checklist": _prev_marks(list(unit.get("checklist") or []), rounds, "checklist"),
+            "tests": _prev_marks(list(unit.get("tests") or []), rounds, "tests"), "remarks": carried,
+            "decision": "", "decided_at": None, "decided_by": None, "comment": "", "act": {}, "inspected_on": None}
+
+
+def online_accepted_on(unit: Mapping[str, Any]):
+    """Дата принятой онлайн-приёмки (текущей или из истории) — для этапа «Предварительная (онлайн) приёмка»."""
+    rows = [*(unit.get("rounds") or []), snapshot(unit)]
+    dates = [r.get("inspected_on") or str(r.get("decided_at") or "")[:10] for r in rows
+             if r.get("mode") == "online" and r.get("decision") in ("accepted", "accepted_remarks")]
+    dates = [d for d in dates if d]
+    return max(dates) if dates else None
 DOC_KINDS = {"manual": "Руководство по эксплуатации", "parts_catalog": "Каталог запасных частей", "drawing": "Чертежи", "hydraulic": "Гидравлическая схема",
              "electric": "Электрическая схема", "pneumatic": "Пневматическая схема", "scheme": "Прочие схемы", "certificate": "Сертификаты и декларации",
              "other": "Прочее"}
@@ -106,7 +162,11 @@ def render_act(path: str, *, deal_number: str, client: str, factory: str, model:
     st = doc.styles["Normal"]
     st.font.name, st.font.size = "Arial", Pt(10)
     act = unit.get("act") or {}
-    doc.add_heading(f"Акт приёмки машины на заводе № {act.get('number') or '—'}", level=1)
+    mode = unit.get("mode") or "factory"
+    title = "Акт онлайн-приёмки машины" if mode == "online" else "Акт приёмки машины на заводе"
+    doc.add_heading(f"{title} № {act.get('number') or '—'}", level=1)
+    if int(unit.get("round_no") or 1) > 1:
+        doc.add_paragraph(f"Приёмка № {unit.get('round_no')} (повторная). " + ("Окончательная." if unit.get("is_final") else "Предварительная."))
     doc.add_paragraph(f"Дата: {act.get('date') or unit.get('inspected_on') or '—'}. Место: {unit.get('place') or factory}.")
     doc.add_paragraph(f"Сделка {deal_number}, покупатель — {client}. Поставщик — {factory}.")
     t = doc.add_table(rows=0, cols=2)

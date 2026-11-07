@@ -406,6 +406,7 @@ class Deal(TimestampMixin, Base):
     contract_number: Mapped[str] = mapped_column(String(128), default="")
     contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
     factory_contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
+    factory_contract_number: Mapped[Optional[str]] = mapped_column(String(64))     # номер контракта с заводом
     contract_steps: Mapped[dict] = mapped_column(JSONType, default=dict)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)   # удалена КД/ЗГД (в корзине, можно восстановить)
     deleted_by: Mapped[Optional[str]] = mapped_column(String(36))
@@ -593,6 +594,7 @@ class ExecutionStage(TimestampMixin, Base):
     event: Mapped[str] = mapped_column(String(32), default="")                # событие расчёта, которое закрывает этап
     done_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     note: Mapped[str] = mapped_column(Text, default="")
+    date_history: Mapped[list[dict]] = mapped_column(JSONType, default=list)  # изменения дат: [{kind: factory|refine|actual|acceptance, on, note, by, at}]
 
 
 class Batch(TimestampMixin, Base):
@@ -1502,3 +1504,7 @@ class AcceptanceUnit(TimestampMixin, Base):
     act: Mapped[dict] = mapped_column(JSONType, default=dict)                        # {number, date, signed_factory_on, signed_ours_on, file: {path, name}}
     comment: Mapped[str] = mapped_column(Text, default="")
     machine_id: Mapped[Optional[str]] = mapped_column(String(36))                    # машина в парке (эксплуатация, сервис)
+    mode: Mapped[str] = mapped_column(String(16), default="factory")                 # текущая приёмка: online — онлайн | factory — на заводе
+    is_final: Mapped[bool] = mapped_column(Boolean, default=True)                    # приёмка окончательная (на заводе — всегда; онлайн — по отметке)
+    round_no: Mapped[int] = mapped_column(Integer, default=1)                        # номер текущей приёмки машины
+    rounds: Mapped[list[dict]] = mapped_column(JSONType, default=list)               # история предыдущих приёмок (полные снимки)

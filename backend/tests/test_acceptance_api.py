@@ -96,3 +96,46 @@ def test_acceptance_flow():
         assert ad.status_code == 200 and ad.content[:2] == b"PK"
         _ok(c.post(f"/api/deals/{d['id']}/acceptance/{u2['id']}/act/file", headers=H(MGR), files={"file": ("act.pdf", b"%PDF scan")}), 201)
         assert c.get(f"/api/deals/{d['id']}/acceptance/{u2['id']}/act/file", headers=H(MGR)).content == b"%PDF scan"
+        # повторная приёмка: онлайн, затем на заводе; история и пометка «не принято ранее»
+        assert c.post(f"/api/deals/{d['id']}/acceptance/{u2['id']}/rounds", headers=H(MGR), json={"mode": "space"}).status_code == 422
+        r2 = _ok(c.post(f"/api/deals/{d['id']}/acceptance/{u2['id']}/rounds", headers=H(MGR), json={"mode": "online"}))
+        assert r2["round_no"] == 2 and r2["mode"] == "online" and r2["is_final"] is False and r2["decision"] == ""
+        assert r2["history"][0]["round_no"] == 1 and r2["history"][0]["decision"] == "accepted_remarks" and r2["history"][0]["act_number"] == "A-1"
+        assert r2["history"][0]["fails"] == [cl2[0]["item"]] and r2["prev_fail_count"] == 1
+        first = next(x for x in r2["checklist"] if x["id"] == cl2[0]["id"])
+        assert first["prev_fail"] == [1] and first["result"] == "" and all(x["result"] == "" for x in r2["checklist"])
+        assert len(r2["remarks"]) == 1 and r2["remarks"][0]["from_round"] == 1                  # неустранённое замечание перенесено
+        db = SessionLocal()
+        assert position_accepted(db, p["id"]) is False                                         # идёт новая приёмка
+        db.close()
+        ok2 = [{**x, "result": "ok"} for x in r2["checklist"]]
+        rem = [{**r2["remarks"][0], "fixed_on": "2026-11-20", "fixed_note": "окрашено"}]
+        _ok(c.put(f"/api/deals/{d['id']}/acceptance/{u2['id']}", headers=H(MGR), json={"checklist": ok2, "tests": [{**x, "result": "ok"} for x in r2["tests"]], "remarks": rem}))
+        z = _ok(c.post(f"/api/deals/{d['id']}/acceptance/{u2['id']}/decision", headers=H(MGR), json={"decision": "accepted"}))
+        assert z["decision"] == "accepted"
+        db = SessionLocal()
+        assert position_accepted(db, p["id"]) is False                                         # онлайн — не окончательная
+        db.close()
+        assert c.put(f"/api/deals/{d['id']}/acceptance/{u2['id']}", headers=H(MGR), json={"is_final": True}).status_code == 409
+        r3 = _ok(c.post(f"/api/deals/{d['id']}/acceptance/{u2['id']}/rounds", headers=H(MGR), json={"mode": "factory"}))
+        assert r3["round_no"] == 3 and r3["is_final"] is True and [h["round_no"] for h in r3["history"]] == [2, 1]
+        assert next(x for x in r3["checklist"] if x["id"] == cl2[0]["id"])["prev_fail"] == [1]
+        _ok(c.put(f"/api/deals/{d['id']}/acceptance/{u2['id']}", headers=H(MGR), json={"checklist": [{**x, "result": "ok"} for x in r3["checklist"]],
+                                                                                      "tests": [{**x, "result": "ok"} for x in r3["tests"]]}))
+        _ok(c.post(f"/api/deals/{d['id']}/acceptance/{u2['id']}/decision", headers=H(MGR), json={"decision": "accepted"}))
+        db = SessionLocal()
+        assert position_accepted(db, p["id"]) is True
+        db.close()
+        # документы машины при приёмке → карточка машины в парке; руководство — общим документом модели
+        _ok(c.post(f"/api/deals/{d['id']}/acceptance/{u1['id']}/files", headers=H(MGR), files={"file": ("passport.pdf", b"%PDF passport")},
+                   data={"kind": "passport", "title": "Паспорт машины"}), 201)
+        _ok(c.post(f"/api/deals/{d['id']}/acceptance/{u1['id']}/files", headers=H(MGR), files={"file": ("ru-manual.pdf", b"%PDF manual")},
+                   data={"kind": "manual", "to_model": "true"}), 201)
+        ph = _ok(c.post(f"/api/deals/{d['id']}/acceptance/{u1['id']}/files", headers=H(MGR), files={"file": ("leak.jpg", b"jpg")},
+                        data={"kind": "photo", "item_id": u1["checklist"][0]["id"]}), 201)
+        assert ph["files"][-1]["item_id"] == u1["checklist"][0]["id"]
+        md = _ok(c.get(f"/api/parts/fleet/machines/{x['machine_id']}/documents", headers=H(MGR)))
+        assert {"passport", "manual"} <= {z["kind"] for z in md["documents"]} and any(z["name"] == "leak.jpg" for z in md["media"])
+        assert any(z["name"] == "ru-manual.pdf" for z in md["model_documents"])
+        pas = next(z for z in md["documents"] if z["kind"] == "passport")
+        assert c.get(pas["url"], headers=H(MGR)).content == b"%PDF passport"

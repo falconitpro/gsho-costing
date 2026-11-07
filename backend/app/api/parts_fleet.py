@@ -178,6 +178,65 @@ def machine(mid: str, db: Session = Depends(get_db), user: CurrentUser = Depends
     return _payload(db, _m_or_404(db, mid), True)
 
 
+def _machine_units(db: Session, m: ClientMachine) -> list:
+    from ..models import AcceptanceUnit
+    q = select(AcceptanceUnit).where(AcceptanceUnit.machine_id == m.id)
+    units = db.scalars(q).all()
+    if not units and m.deal_id and m.position_id:
+        units = db.scalars(select(AcceptanceUnit).where(AcceptanceUnit.deal_id == m.deal_id, AcceptanceUnit.position_id == m.position_id,
+                                                        AcceptanceUnit.unit_no == m.unit_no)).all()
+    return units
+
+
+@router.get("/machines/{mid}/documents")
+def machine_documents(mid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
+    """Документы машины: приложенные при приёмке (паспорт, руководство, сертификаты, протоколы, акт), фото / видео и документы модели."""
+    from ..models import ModelDocument, User
+    from ..services import acceptance_service as acs
+    m = _m_or_404(db, mid)
+    names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    docs, media = [], []
+    for u in _machine_units(db, m):
+        for i, f in enumerate(u.files or []):
+            row = {"name": f.get("name"), "kind": f.get("kind"), "kind_title": acs.FILE_KINDS.get(f.get("kind"), f.get("kind")), "title": f.get("title") or "",
+                   "at": f.get("at"), "by": names.get(f.get("by"), ""), "round_no": f.get("round_no") or 1,
+                   "url": f"/api/parts/fleet/machines/{m.id}/files/{u.id}/{i}"}
+            (media if f.get("kind") in ("photo", "video") else docs).append(row)
+        if (u.act or {}).get("file"):
+            docs.append({"name": u.act["file"].get("name"), "kind": "act", "kind_title": "Акт приёмки (скан)", "title": (u.act or {}).get("number") or "",
+                         "at": (u.act or {}).get("date"), "by": "", "round_no": u.round_no or 1, "url": f"/api/parts/fleet/machines/{m.id}/files/{u.id}/act"})
+    model_docs = []
+    if m.equipment_model_id:
+        for d in db.scalars(select(ModelDocument).where(ModelDocument.model_id == m.equipment_model_id, ModelDocument.active.is_(True))).all():
+            model_docs.append({"name": d.file_name, "kind": d.kind, "kind_title": acs.DOC_KINDS.get(d.kind, d.kind), "title": d.title, "language": d.language,
+                               "version": d.version, "at": d.uploaded_at.isoformat() if d.uploaded_at else None, "url": f"/api/catalog/documents/{d.id}"})
+    return {"documents": docs, "media": media, "model_documents": model_docs}
+
+
+@router.get("/machines/{mid}/files/{uid}/{i}")
+def machine_file(mid: str, uid: str, i: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
+    import os
+    import tempfile
+    from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
+    from .. import adapters
+    m = _m_or_404(db, mid)
+    u = next((x for x in _machine_units(db, m) if x.id == uid), None)
+    if u is None:
+        raise HTTPException(404)
+    if i == "act":
+        f = (u.act or {}).get("file")
+    else:
+        k = int(i) if i.isdigit() else -1
+        f = (u.files or [])[k] if 0 <= k < len(u.files or []) else None
+    if not f:
+        raise HTTPException(404)
+    fd, path = tempfile.mkstemp(suffix=os.path.splitext(f.get("name") or "")[1])
+    os.close(fd)
+    adapters.storage().download(f["path"], path)
+    return FileResponse(path, filename=f.get("name") or "file", content_disposition_type="inline", background=BackgroundTask(os.unlink, path))
+
+
 @router.put("/machines/{mid}")
 def update_machine(mid: str, body: MachineIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
     m = _m_or_404(db, mid)
