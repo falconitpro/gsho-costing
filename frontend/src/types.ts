@@ -114,7 +114,8 @@ export interface CalcResponse {
     positions: { id: string; model: string; factory_payments: PaymentLine[]; factory_payments_offer: PaymentLine[]; delivery_term: DeliveryTerm; production_term: ProductionTerm }[] };
   events?: Record<string, string>; kp_brand?: string; kp_images_mode?: string;
 }
-export interface Task { id: string; deal_id: string; deal_number: string; title: string; role: string; block: string; due: string; overdue: boolean; deal_status: string }
+export interface Task { id: string; deal_id: string; deal_number: string; title: string; role: string; block: string; due: string; overdue: boolean; deal_status: string;
+  days_left?: number; client_name?: string; site?: string; equipment?: string; hint?: string; tab?: string; can_close?: boolean }
 
 export interface Stage {
   id: string; code: string; title: string; planned_on: string | null; actual_on: string | null; amount?: number | null; currency: string; actual_amount?: number | null;

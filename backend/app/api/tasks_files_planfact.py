@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -37,9 +37,42 @@ def my_tasks(db: Session = Depends(get_db), user: CurrentUser = Depends(get_curr
         if t.assignee_id == user.id or (t.assignee_id is None and Role(t.role) in user.roles):
             deal = db.get(Deal, t.deal_id)
             d = serialize(t)
-            d.update({"deal_number": deal.number if deal else None, "deal_status": deal.status.value if deal else None, "overdue": overdue(t.due, today)})
+            poss = list(deal.positions) if deal else []
+            d.update({"deal_number": deal.number if deal else None, "deal_status": deal.status.value if deal else None, "overdue": overdue(t.due, today),
+                      "days_left": (t.due - today).days,
+                      "client_name": deal.client.name if deal and deal.client else "", "site": deal.site if deal else "",
+                      "equipment": "; ".join(f"{int(p.qty or 1)} × {p.designation}" for p in poss[:3]) + (f" … ещё {len(poss) - 3}" if len(poss) > 3 else ""),
+                      "hint": TASK_HINTS.get(t.block.split(":")[0], ""), "tab": TASK_TABS.get(t.block.split(":")[0], "main"),
+                      "can_close": t.assignee_id == user.id or user.has(Role.CD, Role.GD)})
             out.append(d)
     return out
+
+
+# что закрывает задачу и куда ведёт — по блоку
+TASK_HINTS = {"manager": "заполните данные сделки и отправьте на расчёт", "logistics": "внесите расчёт логистики в сделке", "service": "внесите расчёт сервиса",
+              "pricing": "назначьте цену и утвердите", "visa": "поставьте визу или верните на доработку", "gd": "поставьте визу ЗГД",
+              "kp": "сформируйте и отправьте КП клиенту", "contract": "отметьте подписание контракта", "stage": "внесите факт или дату этапа",
+              "local_option_quote": "запросите цену у поставщика опции", "waiting": "уточните у клиента решение по КП и отметьте результат"}
+TASK_TABS = {"manager": "main", "logistics": "logistics", "service": "service", "pricing": "pricing", "visa": "pricing", "gd": "pricing", "kp": "pricing",
+             "contract": "execution", "stage": "execution", "local_option_quote": "positions", "waiting": "main"}
+
+
+class TaskDoneIn(BaseModel):
+    comment: str = ""
+
+
+@router.post("/tasks/{task_id}/done")
+def task_done(task_id: str, body: TaskDoneIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Закрыть задачу вручную (исполнитель, КД, ЗГД) — например, «уточнить статус у клиента» или задача, сделанная вне системы."""
+    t = db.get(Task, task_id)
+    if t is None or t.done_at is not None:
+        raise HTTPException(404, "Задача не найдена или уже закрыта")
+    if not (t.assignee_id == user.id or (t.assignee_id is None and Role(t.role) in user.roles) or user.has(Role.CD, Role.GD)):
+        raise HTTPException(403, "Закрыть задачу может исполнитель, КД или ЗГД")
+    t.done_at = datetime.now(timezone.utc)
+    audit(db, user.id, t.deal_id, "task", t.id, "done", None, {"title": t.title, "comment": body.comment, "manual": True})
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/board")
