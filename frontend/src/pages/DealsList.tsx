@@ -7,7 +7,7 @@ import { can, STATUS_TITLES, type Deal, type Me } from "../types";
 import ColleaguesDeals from "../components/ColleaguesDeals";
 
 type Exec = { done: number; total: number; overdue: number; next: { title: string; on: string } | null; delay_days: number | null };
-type Row = Deal & { group?: string; parent_number?: string; related_count?: number; manager_name?: string; machines?: number; equipment?: string;
+type Row = Deal & { group?: string; parent_number?: string; related_count?: number; manager_name?: string; machines?: number; equipment?: string; equipment_lines?: { qty: number; name: string }[]; equipment_more?: number;
   price_rub?: number | null; price_amount?: number | null; price_currency?: string | null; exec?: Exec; factory_contract_number?: string | null };
 
 // Блоки экрана: в обработке (до результата), выигранные (контракт, исполнение, закрытые), проигранные и отменённые
@@ -27,13 +27,13 @@ const today = () => new Date().toISOString().slice(0, 10);
 const daysTo = (iso?: string | null) => (iso ? Math.round((new Date(iso.slice(0, 10)).getTime() - new Date(today()).getTime()) / 86400000) : null);
 const kpOverdue = (d: Row) => BLOCK_STATUSES.work.slice(0, 9).includes(d.status) && (daysTo(d.kp_due) ?? 1) < 0;
 
-type SortKey = "number" | "date" | "client" | "status" | "kp_due" | "priority" | "manager" | "price" | "next" | "progress";
+type SortKey = "number" | "date" | "client" | "status" | "kp_due" | "priority" | "manager" | "price" | "next" | "progress" | "machines";
 const sortVal = (d: Row, k: SortKey): string | number => {
   switch (k) {
     case "number": return d.number; case "date": return dealDate(d); case "client": return d.client_name || "";
     case "status": return BLOCK_STATUSES.work.concat(BLOCK_STATUSES.won, BLOCK_STATUSES.lost).indexOf(d.status);
     case "kp_due": return d.kp_due || "9999"; case "priority": return PRIO_ORDER[d.priority] ?? 1; case "manager": return d.manager_name || "";
-    case "price": return d.price_rub ?? -1; case "next": return d.exec?.next?.on || "9999"; case "progress": return d.exec ? d.exec.done / Math.max(d.exec.total, 1) : -1;
+    case "price": return d.price_rub ?? -1; case "machines": return d.machines ?? 0; case "next": return d.exec?.next?.on || "9999"; case "progress": return d.exec ? d.exec.done / Math.max(d.exec.total, 1) : -1;
   }
 };
 
@@ -150,7 +150,8 @@ export default function DealsList({ me }: { me: Me }) {
       {d.parent_number && <div className="muted" style={{ fontSize: 11 }}>дубль {d.parent_number}</div>}
       <div className="muted" style={{ fontSize: 11 }}>{fmtDate(dealDate(d))}</div></td>);
   const clientCell = (d: Row) => (<td style={{ minWidth: 160 }}><b>{d.client_name}</b>{d.site && <div className="muted" style={{ fontSize: 12 }}>{d.site}</div>}</td>);
-  const eqCell = (d: Row) => (<td style={{ minWidth: 180, fontSize: 13 }}>{d.equipment || <span className="muted">позиций нет</span>}</td>);
+  const eqCell = (d: Row) => (<td style={{ minWidth: 180, fontSize: 13 }}>{d.equipment_lines?.length ? <>{d.equipment_lines.map((l, i) => <div key={i} style={{ whiteSpace: "nowrap" }}>{l.name || <span className="muted">без наименования</span>}</div>)}{d.equipment_more ? <div className="muted" style={{ fontSize: 11 }}>… ещё {d.equipment_more}</div> : null}</> : <span className="muted">позиций нет</span>}</td>);
+  const qtyCell = (d: Row) => (<td className="num" style={{ fontSize: 13, whiteSpace: "nowrap" }}>{d.equipment_lines?.length ? <>{d.equipment_lines.map((l, i) => <div key={i}>{l.qty}</div>)}{(d.equipment_lines.length > 1 || d.equipment_more) ? <div style={{ borderTop: "1px solid var(--line)", fontWeight: 600 }}>{d.machines ?? 0}</div> : null}</> : <span className="muted">—</span>}</td>);
   useEffect(() => { api.get<typeof clients>("/api/refs/clients").then(setClients); }, []);
 
   const [docs, setDocs] = useState<{ file: File; category: string }[]>([]);   // файлы от клиента — хранятся в сделке
@@ -247,10 +248,10 @@ export default function DealsList({ me }: { me: Me }) {
       <div className="card" style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ minWidth: 900 }}>
           {block === "won" ? (
-            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th><th>Контракт</th>{fin && th("price", "Сумма")}
+            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th>{th("machines", "Кол-во", 70)}<th>Контракт</th>{fin && th("price", "Сумма")}
               {th("progress", "Исполнение", 130)}{th("next", "Ближайший этап")}{th("status", "Статус")}{th("manager", "Менеджер")}</tr></thead>
           ) : (
-            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th>{th("kp_due", "Срок КП", 120)}{th("priority", "Приоритет", 100)}
+            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th>{th("machines", "Кол-во", 70)}{th("kp_due", "Срок КП", 120)}{th("priority", "Приоритет", 100)}
               {th("status", "Статус")}{th("manager", "Менеджер")}{fin && block !== "work" && th("price", "Сумма")}<th>Версия</th></tr></thead>)}
           <tbody>
             {grouped(sorted).map((d) => {
@@ -258,7 +259,7 @@ export default function DealsList({ me }: { me: Me }) {
               const rowStyle = { ...(d.parent_number ? { background: "#fafafa" } : {}), ...(late ? { boxShadow: "inset 3px 0 0 var(--accent)" } : {}) };
               return block === "won" ? (
                 <tr key={d.id} style={rowStyle}>
-                  {numCell(d)}{clientCell(d)}{eqCell(d)}
+                  {numCell(d)}{clientCell(d)}{eqCell(d)}{qtyCell(d)}
                   <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{d.contract_number ? <>клиент № {d.contract_number}{d.contract_signed_at && <span className="muted"> от {fmtDate(d.contract_signed_at)}</span>}</> : <span className="muted">не подписан</span>}
                     <div>{d.factory_contract_number ? <>завод № {d.factory_contract_number}{d.factory_contract_signed_at && <span className="muted"> от {fmtDate(d.factory_contract_signed_at)}</span>}</> : <span className="muted">завод — нет</span>}</div></td>
                   {fin && <td>{money(d)}</td>}
@@ -268,12 +269,12 @@ export default function DealsList({ me }: { me: Me }) {
                   <td><StatusBadge d={d} /></td><td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>
                 </tr>) : (
                 <tr key={d.id} style={rowStyle}>
-                  {numCell(d)}{clientCell(d)}{eqCell(d)}<td><KpDue d={d} /></td><td><Prio p={d.priority} /></td>
+                  {numCell(d)}{clientCell(d)}{eqCell(d)}{qtyCell(d)}<td><KpDue d={d} /></td><td><Prio p={d.priority} /></td>
                   <td><StatusBadge d={d} /></td><td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>{fin && block !== "work" && <td>{money(d)}</td>}
                   <td className="muted">{d.current_version_no || ""}</td>
                 </tr>);
             })}
-            {sorted.length === 0 && <tr><td colSpan={9} className="muted" style={{ padding: 16 }}>{inBlock.length ? "Нет сделок по выбранным фильтрам" : block === "archive" ? "В архиве сделок нет" : "Сделок нет"}</td></tr>}
+            {sorted.length === 0 && <tr><td colSpan={10} className="muted" style={{ padding: 16 }}>{inBlock.length ? "Нет сделок по выбранным фильтрам" : block === "archive" ? "В архиве сделок нет" : "Сделок нет"}</td></tr>}
           </tbody>
         </table>
       </div>
