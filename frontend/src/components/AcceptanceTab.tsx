@@ -97,13 +97,13 @@ function UnitCard({ base, u, data, onSaved }: { base: string; u: Unit; data: Dat
   const prevBadge = (x: Prev) => (x.prev_fail && x.prev_fail.length > 0
     ? <span className="badge bad" style={{ marginLeft: 4, fontSize: 10 }} title={x.prev?.comment || ""}>не принято в приёмке № {x.prev_fail.join(", ")}</span>
     : x.prev?.result ? <span className="muted" style={{ fontSize: 10, marginLeft: 4 }}>ранее: {data.results[x.prev.result] || x.prev.result}</span> : null);
-  const prevStyle = (x: Prev) => (x.prev_fail && x.prev_fail.length > 0 ? { background: "#fff4e5", boxShadow: "inset 3px 0 0 #e8590c" } : undefined);
+  const prevStyle = (x: Prev) => (x.prev_fail && x.prev_fail.length > 0 ? { background: "#f4f4f4", boxShadow: "inset 3px 0 0 #ff3131" } : undefined);
   const newRound = (mode: string) => {
     if (!confirm(`Начать новую приёмку (${data.modes[mode]})? Текущая приёмка № ${u.round_no || 1} сохранится в истории; результаты проверок — заново, не принятые ранее пункты будут выделены.`)) return;
     run(() => api.post(`${url}/rounds`, { mode, is_final: mode === "factory" }), `Начата приёмка № ${(u.round_no || 1) + 1} — ${data.modes[mode]}`);
   };
   const res = (v: string, on: (x: string) => void) => (
-    <select value={v} disabled={!edit} onChange={(e) => on(e.target.value)} style={{ background: v === "fail" ? "#ffd9b3" : v === "ok" ? "#e3f6e8" : undefined }}>
+    <select value={v} disabled={!edit} onChange={(e) => on(e.target.value)} style={{ background: v === "fail" ? "#ffe3e3" : v === "ok" ? "#ededed" : undefined }}>
       <option value="">—</option>{Object.entries(data.results).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>);
   return (
     <div style={{ borderTop: "2px solid var(--line)", marginTop: 12, paddingTop: 8 }}>
@@ -230,7 +230,7 @@ function UnitCard({ base, u, data, onSaved }: { base: string; u: Unit; data: Dat
           <tbody>{u.history.map((h) => [
             <tr key={h.round_no}><td>{h.round_no}</td><td>{h.mode_title}{h.mode === "online" && !h.is_final ? " (предв.)" : ""}</td><td>{fmtDate(h.inspected_on || h.decided_at)}</td>
               <td>{h.inspector}</td><td>{h.decision ? <span className={`badge ${DEC_BADGE[h.decision] || ""}`}>{h.decision_title}</span> : "без решения"}{h.comment && <div className="muted">{h.comment}</div>}</td>
-              <td>{h.fails.length ? <span style={{ color: "#c92a2a" }}>{h.fails.length}</span> : "—"}</td><td>{h.open_remarks || "—"}</td><td>{h.act_number && `№ ${h.act_number}`}</td>
+              <td>{h.fails.length ? <span style={{ color: "#ff3131" }}>{h.fails.length}</span> : "—"}</td><td>{h.open_remarks || "—"}</td><td>{h.act_number && `№ ${h.act_number}`}</td>
               <td><a href="#" onClick={(e) => { e.preventDefault(); setShowHist(showHist === h.round_no ? null : h.round_no); }}>{showHist === h.round_no ? "свернуть" : "подробно"}</a></td></tr>,
             showHist === h.round_no && <tr key={"d" + h.round_no}><td colSpan={9} style={{ background: "#fafafa" }}>
               {h.fails.length > 0 && <div><b>Не соответствует:</b> {h.fails.join("; ")}</div>}

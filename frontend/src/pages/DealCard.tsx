@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import ChecksPanel from "../components/ChecksPanel";
+import { NowLine, POST_WIN_STATUSES, SaleSummary, StageStrip, dealPhase } from "../components/DealHeader";
 import { lbl, FEED_KIND } from "../labels";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
@@ -23,12 +24,19 @@ import { payText } from "../components/PaymentTermsEditor";
 
 type Tab = "acceptance" | "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "documents" | "catalog" | "feed" | "versions";
 const POST_WIN = ["contract", "execution", "closed"];
+type Phase = "sale" | "contract";
+const SALE_TABS: Tab[] = ["main", "positions", "offers", "logistics", "service", "pricing", "catalog"];
+const CONTRACT_TABS: Tab[] = ["execution", "acceptance", "planfact", "documents"];
 
 export default function DealCard({ me }: { me: Me }) {
   const { id } = useParams();
   const nav = useNavigate();
   const [deal, setDeal] = useState<Deal | null>(null);
-  const [tab, setTab] = useState<Tab>("main");
+  const [tab, setTabState] = useState<Tab>("main");
+  const [phase, setPhaseState] = useState<Phase>("sale");
+  // вкладка задаёт фазу: «Продажа» (до выигрыша) или «Контракт и исполнение» (после)
+  const setTab = (t: Tab) => { setTabState(t); if (SALE_TABS.includes(t)) setPhaseState("sale"); else if (CONTRACT_TABS.includes(t)) setPhaseState("contract"); };
+  const setPhase = (p: Phase) => { setPhaseState(p); setTabState(p === "sale" ? "main" : "execution"); };
   const [err, setErr] = useState("");
   const [rfqPreview, setRfqPreview] = useState<Record<string, unknown> | null>(null);
   const [rfqFile, setRfqFile] = useState<File | null>(null);
@@ -50,8 +58,11 @@ export default function DealCard({ me }: { me: Me }) {
   const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
   const isMgmt = has("cd", "fd", "gd");
 
-  const load = () => api.get<Deal>(`/api/deals/${id}`).then((d) => { setDeal(d); setWishes(d.client_payment_wishes || ""); }).catch((e) => setErr(e.message));
-  useEffect(() => { setDeal(null); setFeed([]); setVersions([]); setTab("main"); load(); }, [id, me.id]);
+  const load = () => api.get<Deal>(`/api/deals/${id}`).then((d) => {
+    setDeal(d); setWishes(d.client_payment_wishes || "");
+    if (!deal) { const p = dealPhase(d); setPhaseState(p); setTabState(p === "sale" ? "main" : "execution"); }   // первое открытие — фаза по статусу
+  }).catch((e) => setErr(e.message));
+  useEffect(() => { setDeal(null); setFeed([]); setVersions([]); load(); }, [id, me.id]);
   useEffect(() => {
     if (tab === "feed") api.get<typeof feed>(`/api/deals/${id}/feed`).then(setFeed);
     if (tab === "versions") api.get<typeof versions>(`/api/deals/${id}/versions`).then(setVersions);
@@ -120,13 +131,22 @@ export default function DealCard({ me }: { me: Me }) {
 
   return (
     <>
-      <div className="row" style={{ justifyContent: "space-between" }}>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
-          <h1 style={{ marginBottom: 2 }}>{deal.number} · {deal.client_name}{deal.parent_deal_id && <span className="badge" style={{ marginLeft: 6 }}>дубликат</span>}</h1>
-          <span className="badge accent">{deal.status_detail || STATUS_TITLES[deal.status]}</span> <span className="muted">срок КП {fmtDate(deal.kp_due)} · версия {deal.current_version_no}{deal.contract_number && ` · контракт ${deal.contract_number}`}{deal.factory_contract_number && ` · с заводом ${deal.factory_contract_number}`}</span>
-          {deal.legal_review?.status && <> <span className={"badge " + (REVIEW_BADGE[deal.legal_review.status] || "")} title={deal.legal_review.comment || ""}>юрист: {{ in_review: "на проверке", ok: "замечаний нет", remarks: "есть замечания" }[deal.legal_review.status] || deal.legal_review.status}</span></>}
+          <div className="row" style={{ gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+            <h1 style={{ margin: 0 }}>{deal.number}</h1>
+            <span style={{ fontSize: 15 }}>{deal.client_name}{deal.site && <span className="muted"> · {deal.site}</span>}</span>
+            <span className="badge accent">{deal.status_detail || STATUS_TITLES[deal.status]}</span>
+            {deal.parent_deal_id && <span className="badge">дубликат</span>}
+            {deal.legal_review?.status && <span className={"badge " + (REVIEW_BADGE[deal.legal_review.status] || "")} title={deal.legal_review.comment || ""}>юрист: {{ in_review: "на проверке", ok: "замечаний нет", remarks: "есть замечания" }[deal.legal_review.status] || deal.legal_review.status}</span>}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+            {(deal.positions || []).slice(0, 3).map((p) => `${p.qty} × ${designation(p)}`).join(" · ")}{(deal.positions || []).length > 3 && ` · ещё ${deal.positions.length - 3}`}
+            {!POST_WIN_STATUSES.includes(deal.status) && <> · срок КП {fmtDate(deal.kp_due)}</>} · версия {deal.current_version_no}
+            {deal.contract_number && ` · контракт ${deal.contract_number}`}{deal.factory_contract_number && ` · с заводом ${deal.factory_contract_number}`}
+          </div>
         </div>
-        <div className="row">
+        <div className="row" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
           {(editable || has("cd", "gd")) && ["draft", "rework"].includes(deal.status) && (
             <button className="btn" onClick={send} disabled={(deal.checks || []).length > 0 && !has("cd", "gd")} title={(deal.checks || []).join("\n")}>
               Отправить на расчёт{(deal.checks || []).length > 0 && has("cd", "gd") ? " (не всё заполнено)" : ""}</button>
@@ -138,7 +158,20 @@ export default function DealCard({ me }: { me: Me }) {
           {has("cd", "gd") && !deal.archived_at && (has("gd") || !["contract", "execution", "closed"].includes(deal.status)) && (
             <button className="btn secondary" onClick={removeOrArchive} title={deal.status === "draft" ? "удалить черновик сделки (КД, ЗГД)" : "удалить можно только черновик — сделка в другом статусе переносится в архив"}>
               {deal.status === "draft" ? "Удалить сделку" : "В архив"}</button>)}
+          <div className="row" style={{ gap: 8, marginLeft: 6 }}>
+            <a href="#" style={{ fontSize: 12, fontWeight: tab === "feed" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("feed"); }}>Лента</a>
+            <a href="#" style={{ fontSize: 12, fontWeight: tab === "versions" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("versions"); }}>Версии и файлы</a>
+            {phase === "sale" && can(me, "legal_docs") && <a href="#" style={{ fontSize: 12, fontWeight: tab === "documents" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("documents"); }}>Документы</a>}
+          </div>
         </div>
+      </div>
+      <div style={{ display: "grid", gap: 8, margin: "8px 0" }}>
+        <StageStrip deal={deal} now={deal.now} />
+        <NowLine now={deal.now} onGo={(block) => {
+          if (block.startsWith("stage:")) setTab("execution");
+          else if (block === "logistics") setTab("logistics"); else if (block === "service") setTab("service");
+          else if (["pricing", "visa", "gd"].includes(block)) setTab("pricing"); else if (block === "kp") setTab("pricing");
+          else if (block === "contract") setTab("execution"); else setTab("main"); }} />
       </div>
       {deal.archived_at && (
         <div className="alert warn row" style={{ justifyContent: "space-between" }}>
@@ -147,26 +180,39 @@ export default function DealCard({ me }: { me: Me }) {
         </div>)}
       {err && <div className={"alert " + (err.startsWith("Сделка выиграна") || err.startsWith("Результат") || err.startsWith("Сделка возвращена") || err.startsWith("Сделка перенесена") ? "info" : "error")}>{err}</div>}
       <OutcomePanel deal={deal} me={me} onDone={(m) => { setErr(m); load(); if (m.startsWith("Сделка выиграна")) setTab("execution"); }} />
-      <div style={{ margin: "6px 0" }}><KpActions dealId={deal.id} status={deal.status} canAct={isOwner || has("cd", "gd", "admin")} onDone={() => { load(); }} /></div>
+      {phase === "sale" && <div style={{ margin: "6px 0" }}><KpActions dealId={deal.id} status={deal.status} canAct={isOwner || has("cd", "gd", "admin")} onDone={() => { load(); }} /></div>}
       {["approved", "kp_sent"].includes(deal.status) && <KpRevisions dealId={deal.id} status={deal.status} onDone={() => { load(); }} />}
       {(editable || has("cd", "gd")) && ["draft", "rework"].includes(deal.status) && (deal.check_items || []).length > 0 &&
         <ChecksPanel items={deal.check_items!} onGo={(it) => { setTab(it.tab as Tab); if (it.position_id) openPos(it.position_id); }} />}
       <RelatedDeals dealId={deal.id} me={me} />
 
+      {(POST_WIN_STATUSES.includes(deal.status)) && (
+        <div className="row" style={{ marginTop: 10, gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", background: "#e1e4e8", borderRadius: 8, padding: 3 }}>
+            {(["sale", "contract"] as Phase[]).map((p) => (
+              <button key={p} onClick={() => setPhase(p)} style={{ border: 0, cursor: "pointer", padding: "6px 16px", borderRadius: 6, fontSize: 13,
+                background: phase === p ? "#fff" : "transparent", color: phase === p ? "inherit" : "var(--muted)", fontWeight: phase === p ? 700 : 400, boxShadow: phase === p ? "0 1px 2px rgba(0,0,0,.08)" : "none" }}>
+                {p === "sale" ? "Продажа" : "Контракт и исполнение"}</button>))}
+          </div>
+          {phase === "contract" && <SaleSummary now={deal.now} />}
+          {phase === "sale" && <span className="muted" style={{ fontSize: 12 }}>фаза продажи закрыта — данные только для чтения</span>}
+        </div>)}
       <div className="tabs">
-        <button className={tab === "main" ? "active" : ""} onClick={() => setTab("main")}>Шапка и условия</button>
-        <button className={tab === "positions" ? "active" : ""} onClick={() => setTab("positions")}>Позиции, технические характеристики, файлы</button>
-        <button className={tab === "offers" ? "active" : ""} onClick={() => setTab("offers")}>Заводы и ответы</button>
-        {has("logistician", "cd", "fd", "gd") && <button className={tab === "logistics" ? "active" : ""} onClick={() => setTab("logistics")}>Логистика и таможня</button>}
-        {deal.service_flag && has("service_head", "cd", "fd", "gd") && <button className={tab === "service" ? "active" : ""} onClick={() => setTab("service")}>Сервис</button>}
-        {isMgmt && <button className={tab === "pricing" ? "active" : ""} onClick={() => setTab("pricing")}>Расчёт и утверждение</button>}
-        {POST_WIN.includes(deal.status) && <button className={tab === "execution" ? "active" : ""} onClick={() => setTab("execution")}>Контракт и исполнение</button>}
-        {["contract", "execution", "closed"].includes(deal.status) && has("manager", "service_head", "cd", "gd", "fd", "logistician") && <button className={tab === "acceptance" ? "active" : ""} onClick={() => setTab("acceptance")}>Приёмка на заводе</button>}
-        {POST_WIN.includes(deal.status) && <button className={tab === "planfact" ? "active" : ""} onClick={() => setTab("planfact")}>План/факт</button>}
-        {["kp_sent", ...POST_WIN, "lost"].includes(deal.status) && (isOwner || has("cd")) && <button className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>В каталог</button>}
-        {can(me, "legal_docs") && <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>Документы клиента и юридические</button>}
-        <button className={tab === "feed" ? "active" : ""} onClick={() => setTab("feed")}>Лента</button>
-        <button className={tab === "versions" ? "active" : ""} onClick={() => setTab("versions")}>Версии и файлы</button>
+        {phase === "sale" && <>
+          <button className={tab === "main" ? "active" : ""} onClick={() => setTab("main")}>Шапка и условия</button>
+          <button className={tab === "positions" ? "active" : ""} onClick={() => setTab("positions")}>Позиции и характеристики</button>
+          <button className={tab === "offers" ? "active" : ""} onClick={() => setTab("offers")}>Заводы и ответы</button>
+          {has("logistician", "cd", "fd", "gd") && <button className={tab === "logistics" ? "active" : ""} onClick={() => setTab("logistics")}>Логистика и таможня</button>}
+          {deal.service_flag && has("service_head", "cd", "fd", "gd") && <button className={tab === "service" ? "active" : ""} onClick={() => setTab("service")}>Сервис</button>}
+          {isMgmt && <button className={tab === "pricing" ? "active" : ""} onClick={() => setTab("pricing")}>Расчёт и утверждение</button>}
+          {["kp_sent", ...POST_WIN_STATUSES, "lost"].includes(deal.status) && (isOwner || has("cd")) && <button className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>В каталог</button>}
+        </>}
+        {phase === "contract" && <>
+          <button className={tab === "execution" ? "active" : ""} onClick={() => setTab("execution")}>Контракт, этапы и даты</button>
+          {["contract", "execution", "closed"].includes(deal.status) && has("manager", "service_head", "cd", "gd", "fd", "logistician") && <button className={tab === "acceptance" ? "active" : ""} onClick={() => setTab("acceptance")}>Приёмка машин</button>}
+          <button className={tab === "planfact" ? "active" : ""} onClick={() => setTab("planfact")}>Платежи и план/факт</button>
+          {can(me, "legal_docs") && <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>Документы</button>}
+        </>}
       </div>
 
       {tab === "main" && (
@@ -349,7 +395,7 @@ function RfqPreview({ data }: { data: Record<string, unknown> }) {
       {errors.map((e, i) => <div key={i} className={"alert " + (e.severity === "error" ? "error" : "warn")}>{e.message}</div>)}
       <table><thead><tr><th>Код</th><th>Параметр</th><th>Значение</th><th>Ед.</th><th>Для логиста</th></tr></thead>
         <tbody>{Object.entries(fields).map(([code, f]) => (
-          <tr key={code} style={{ background: missing.includes(code) ? "#fde7e7" : undefined }}><td>{code}</td><td>{f.label_ru}</td><td>{f.value == null ? <span className="badge bad">пусто</span> : String(f.value)}</td><td>{f.unit}</td><td>{f.is_l ? "да" : ""}</td></tr>))}</tbody></table>
+          <tr key={code} style={{ background: missing.includes(code) ? "#ffe3e3" : undefined }}><td>{code}</td><td>{f.label_ru}</td><td>{f.value == null ? <span className="badge bad">пусто</span> : String(f.value)}</td><td>{f.unit}</td><td>{f.is_l ? "да" : ""}</td></tr>))}</tbody></table>
     </div>
   );
 }

@@ -206,7 +206,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
                   {open[no] && fs.map((f) => {
                     const req = schema.required.includes(f.code), empty = !vals[f.code];
                     return (
-                      <tr key={f.code} style={{ background: empty && req ? "#fde7e7" : empty ? "#fff6d6" : undefined }} title={f.name_zh}>
+                      <tr key={f.code} style={{ background: empty && req ? "#ffe3e3" : empty ? "#f4f4f4" : undefined }} title={f.name_zh}>
                         <td>{f.code}</td>
                         <td>{no === 12 && f.code !== "12.6"
                           ? <input style={{ width: "100%" }} placeholder="наименование опции" value={optNames[f.code] || ""} onChange={(e) => setOptNames({ ...optNames, [f.code]: e.target.value })} />

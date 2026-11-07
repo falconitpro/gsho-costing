@@ -199,7 +199,7 @@ function CompareTable({ ids, onClose }: { ids: string[]; onClose: () => void }) 
         <table style={{ fontSize: 12 }}>
           <thead><tr><th>Параметр</th><th>Ед.</th>{list.map((e) => <th key={e.id} style={{ minWidth: 140 }}>{e.model ? `${e.model.trademark ? e.model.trademark + " " : ""}${e.model.model}` : ""}<div className="muted" style={{ fontWeight: 400 }}>{e.name}{e.model?.brand_name ? ` · ${e.model.brand_name}` : ""}</div></th>)}</tr></thead>
           <tbody>{shown.map((r) => { const vs = list.map((e) => val(e, r.key)); const diff = new Set(vs).size > 1; return (
-            <tr key={r.key} style={{ background: diff ? "#fff6d6" : undefined }}><td>{r.name}</td><td className="muted">{r.unit}</td>{vs.map((v, i) => <td key={i}>{v || <span className="muted">—</span>}</td>)}</tr>); })}</tbody>
+            <tr key={r.key} style={{ background: diff ? "#f4f4f4" : undefined }}><td>{r.name}</td><td className="muted">{r.unit}</td>{vs.map((v, i) => <td key={i}>{v || <span className="muted">—</span>}</td>)}</tr>); })}</tbody>
         </table>
       </div>
       <div className="muted" style={{ fontSize: 11 }}>Жёлтым — параметры, которые различаются.</div>

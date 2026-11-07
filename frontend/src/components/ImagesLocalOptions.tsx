@@ -135,7 +135,7 @@ export function OffersBlock({ dealId, position, me, onChanged }: { dealId: strin
   const load = () => api.get<Cmp>(`/api/deals/${dealId}/offers/compare?position_id=${position.id}`).then(setCmp).catch(() => setCmp(null));
   useEffect(() => { load(); }, [position.id]);
   if (!cmp || cmp.offers.length === 0) return <div className="muted">Запросов заводам по этой позиции ещё нет — отправьте запрос из таблицы технических характеристик (можно нескольким заводам).</div>;
-  const color: Record<string, string> = { match: "#e6f5ec", mismatch: "#fde7e7", empty: "#fff6d6", unknown: "" };
+  const color: Record<string, string> = { match: "#ededed", mismatch: "#ffe3e3", empty: "#f4f4f4", unknown: "" };
   async function select() {
     try {
       const r = await api.post<{ created_deals: { number: string }[] }>(`/api/deals/${dealId}/offers/select`, { offer_ids: [...sel], copy_calcs: true });

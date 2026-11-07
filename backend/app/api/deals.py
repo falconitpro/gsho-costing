@@ -18,7 +18,7 @@ from ..core.auth import CurrentUser, get_current_user, require_roles
 from ..core.roles import Role, filter_payload
 from ..core.workflow import DealState, DealStatus, close as wf_close, kp_sent as wf_kp_sent, manager_check_items, manager_checks, send_to_calc
 from ..db import get_db
-from ..models import Attachment, Client, Deal, DealVersion, EquipmentModel, Factory, FactoryPriceHistory, FeedEntry, Position, RfqImport, Variant
+from ..models import Attachment, AuditLog, Client, Deal, DealVersion, EquipmentModel, Factory, FactoryPriceHistory, FeedEntry, Position, RfqImport, Variant
 from ..services import settings_service
 from ..services.deal_service import apply_transition, audit, complete_tasks, ensure_folders, next_number, sla
 from ..services.rfq_import import parse_rfq, price_reference
@@ -196,8 +196,59 @@ def create_deal(body: DealCreate, db: Session = Depends(get_db), user: CurrentUs
 def get_deal(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
     dd = _deal_dict(deal)
-    extra: dict[str, Any] = {"checks": manager_checks(dd), "check_items": manager_check_items(dd)}
+    extra: dict[str, Any] = {"checks": manager_checks(dd), "check_items": manager_check_items(dd), "now": _now_block(db, deal, user)}
     return deal_payload(deal, user, extra)
+
+
+def _now_block(db: Session, deal: Deal, user: CurrentUser) -> dict:
+    """Строка «Сейчас» в шапке карточки: ближайшая открытая задача (кто, срок), просроченные этапы исполнения, итог продажи после выигрыша."""
+    from datetime import date as _date
+    from ..core.workflow import role_title
+    from ..models import ExecutionStage, Task, User
+    from ..services.execution_service import won_variant
+    today = _date.today()
+    names = {}
+    def name(uid):
+        if uid and uid not in names:
+            u = db.get(User, uid)
+            names[uid] = u.display_name if u else ""
+        return names.get(uid, "")
+    tasks = db.scalars(select(Task).where(Task.deal_id == deal.id, Task.done_at.is_(None)).order_by(Task.due)).all()
+    t = tasks[0] if tasks else None
+    out: dict[str, Any] = {"task": {"title": t.title, "who": name(t.assignee_id) or role_title(t.role), "due": t.due.isoformat(), "overdue_days": max((today - t.due).days, 0),
+                                    "block": t.block} if t else None,
+                           "open_tasks": len(tasks)}
+    if deal.status in (DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED):
+        sts = db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id)).all()
+        late = [s for s in sts if not s.actual_on and (s.refined_on or s.planned_on) and (s.refined_on or s.planned_on) < today]
+        done_codes = {s.code for s in sts if s.actual_on}
+        if deal.status == DealStatus.CLOSED:
+            phase = "closed"
+        elif {"shipment", "border", "delivery"} & done_codes:
+            phase = "delivery"
+        elif "factory_acceptance" in done_codes:
+            phase = "shipment"
+        elif "readiness" in done_codes or "factory_preacceptance" in done_codes:
+            phase = "acceptance"
+        elif deal.status == DealStatus.EXECUTION:
+            phase = "production"
+        else:
+            phase = "contract"
+        out["exec"] = {"phase": phase, "done": sum(1 for s in sts if s.actual_on), "total": len(sts), "overdue": [{"title": s.title, "days": (today - (s.refined_on or s.planned_on)).days} for s in
+                                                                                                   sorted(late, key=lambda s: s.refined_on or s.planned_on)[:3]]}
+        ver = db.get(DealVersion, deal.approved_version_id) if deal.approved_version_id else None
+        v = won_variant(deal) if deal.variants else None
+        res = ((ver.calc_result or {}).get("variants", {}).get(v.id, {}) if (ver and v) else {}).get("base", {})
+        won_log = db.scalar(select(AuditLog).where(AuditLog.deal_id == deal.id, AuditLog.entity == "deal", AuditLog.action == "status",
+                                                   AuditLog.after["status"].as_string() == "won").order_by(AuditLog.at.desc()).limit(1))
+        out["sale"] = {"won_on": won_log.at.date().isoformat() if won_log and won_log.at else None,
+                       "price_rub": v.price_rub if v else None, "price_amount": v.price_amount if v else None, "price_currency": v.price_currency if v else None,
+                       "margin_pct": res.get("margin_pct"), "approved_by": name(ver.created_by) if ver else "", "kp_version": ver.version_no if ver else None}
+        if not user.can("price"):
+            out["sale"].update(price_rub=None, price_amount=None)
+        if not user.can("cost"):
+            out["sale"]["margin_pct"] = None
+    return out
 
 
 def _deal_dict(deal: Deal) -> dict:

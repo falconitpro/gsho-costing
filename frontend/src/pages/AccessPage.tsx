@@ -20,7 +20,7 @@ export default function AccessPage({ me }: { me: Me }) {
   const load = () => api.get<Matrix>("/api/admin/access").then(setM).catch((e) => setMsg(e.message));
   useEffect(() => { load(); }, []);
   if (!m) return <div className="muted">{msg || "Загрузка…"}</div>;
-  const colors = ["#fde7e7", "#fff6d6", "#e6f5ec"];
+  const colors = ["#ffe3e3", "#f4f4f4", "#ededed"];
   async function setLevel(role: string, group: string, level: number) {
     try { await api.put(`/api/admin/access/${role}/${group}`, { level }); setMsg(""); load(); } catch (e) { setMsg((e as Error).message); }
   }

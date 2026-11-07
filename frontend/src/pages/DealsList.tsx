@@ -17,14 +17,15 @@ const BLOCK_STATUSES: Record<Exclude<Block, "archive">, string[]> = {
 };
 const blockOf = (st: string): Exclude<Block, "archive"> => (BLOCK_STATUSES.won.includes(st) ? "won" : BLOCK_STATUSES.lost.includes(st) ? "lost" : "work");
 // цвет статуса по этапу воронки
+// фирменная палитра: красный акцент, чёрный, серые — без зелёного и синего. Чем дальше по воронке, тем темнее; после выигрыша — красный.
 const ST_COLOR: Record<string, [string, string]> = {
-  draft: ["#f1f3f5", "#495057"], logistics_calc: ["#e7f1ff", "#1c5fb8"], service_calc: ["#e7f1ff", "#1c5fb8"], calc_ready: ["#f3ecff", "#6741d9"],
-  cd_approval: ["#f3ecff", "#6741d9"], fd_visa: ["#f3ecff", "#6741d9"], gd_visa: ["#f3ecff", "#6741d9"], rework: ["#fff1e0", "#c25e00"],
-  approved: ["#e3faf6", "#0b7a6b"], kp_sent: ["#e6f5ec", "#2b8a3e"], won: ["#fff0f0", "#d62828"], contract: ["#fff0f0", "#d62828"],
-  execution: ["#e7f1ff", "#1c5fb8"], closed: ["#eef1ee", "#5c6b5c"], lost: ["#fde7e7", "#b02a2a"], cancelled: ["#f1f3f5", "#868e96"],
+  draft: ["#f1f1f1", "#6b6b6b"], logistics_calc: ["#e6e6e6", "#4a4a4a"], service_calc: ["#e6e6e6", "#4a4a4a"], calc_ready: ["#d9d9d9", "#333"],
+  cd_approval: ["#d9d9d9", "#333"], fd_visa: ["#d9d9d9", "#333"], gd_visa: ["#d9d9d9", "#333"], rework: ["#fff0f0", "#c22"],
+  approved: ["#cfcfcf", "#222"], kp_sent: ["#000", "#fff"], won: ["#ff3131", "#fff"], contract: ["#ffd6d6", "#b00000"],
+  execution: ["#fff0f0", "#c22"], closed: ["#000", "#fff"], lost: ["#fff", "#c22"], cancelled: ["#f1f1f1", "#9a9a9a"],
 };
 const PRIO_ORDER: Record<string, number> = { low: 0, normal: 1, medium: 1, high: 2, urgent: 3, critical: 3 };
-const PRIO_COLOR: Record<number, string> = { 0: "#adb5bd", 1: "#4dabf7", 2: "#f59f00", 3: "#e03131" };
+const PRIO_COLOR: Record<number, string> = { 0: "#cfcfcf", 1: "#8a8a8a", 2: "#000", 3: "#ff3131" };
 const dealDate = (d: Row) => (d.requested_at || d.created_at || "") as string;
 const today = () => new Date().toISOString().slice(0, 10);
 const daysTo = (iso?: string | null) => (iso ? Math.round((new Date(iso.slice(0, 10)).getTime() - new Date(today()).getTime()) / 86400000) : null);
@@ -76,8 +77,8 @@ function Progress({ e }: { e?: Exec }) {
   if (!e || !e.total) return <span className="muted">—</span>;
   const pct = Math.round((e.done / e.total) * 100);
   return (<div style={{ minWidth: 110 }}>
-    <div style={{ height: 6, background: "#eee", borderRadius: 3, overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: e.overdue ? "#f08c00" : "#2b8a3e" }} /></div>
-    <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{e.done} из {e.total} этапов{e.overdue ? <span style={{ color: "var(--bad)" }}> · просрочено {e.overdue}</span> : ""}</div>
+    <div style={{ height: 6, background: "#eee", borderRadius: 3, overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: e.overdue ? "var(--accent)" : "var(--ink)" }} /></div>
+    <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{e.done} из {e.total} этапов{e.overdue ? <span style={{ color: "var(--accent)" }}> · просрочено {e.overdue}</span> : ""}</div>
   </div>);
 }
 const money = (d: Row) => (d.price_rub == null ? <span className="muted">—</span> : d.price_currency && d.price_currency !== "RUB" && d.price_amount != null
@@ -242,7 +243,7 @@ export default function DealsList({ me }: { me: Me }) {
         <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
           {kpis.map(([t, v, c]) => (
             <div key={String(t)} style={{ flex: "1 1 130px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", background: "#fff" }}>
-              <div style={{ fontSize: 20, fontWeight: 700, color: c === "bad" && Number(v) > 0 ? "var(--bad)" : c === "warn" && Number(v) > 0 ? "#c25e00" : c === "ok" ? "var(--ok)" : undefined }}>{v}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: (c === "bad" || c === "warn") && Number(v) > 0 ? "var(--accent)" : undefined }}>{v}</div>
               <div className="muted" style={{ fontSize: 12 }}>{t}</div></div>))}
         </div>
       </div>
@@ -257,15 +258,15 @@ export default function DealsList({ me }: { me: Me }) {
           <tbody>
             {grouped(sorted).map((d) => {
               const late = kpOverdue(d) || (d.exec?.overdue || 0) > 0;
-              const rowStyle = { ...(d.parent_number ? { background: "#fafafa" } : {}), ...(late ? { boxShadow: "inset 3px 0 0 var(--bad)" } : {}) };
+              const rowStyle = { ...(d.parent_number ? { background: "#fafafa" } : {}), ...(late ? { boxShadow: "inset 3px 0 0 var(--accent)" } : {}) };
               return block === "won" ? (
                 <tr key={d.id} style={rowStyle}>
                   {numCell(d)}{clientCell(d)}{eqCell(d)}
                   <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{d.contract_number ? <>клиент № {d.contract_number}{d.contract_signed_at && <span className="muted"> от {fmtDate(d.contract_signed_at)}</span>}</> : <span className="muted">не подписан</span>}
                     <div>{d.factory_contract_number ? <>завод № {d.factory_contract_number}{d.factory_contract_signed_at && <span className="muted"> от {fmtDate(d.factory_contract_signed_at)}</span>}</> : <span className="muted">завод — нет</span>}</div></td>
                   {fin && <td>{money(d)}</td>}
-                  <td><Progress e={d.exec} />{d.exec?.delay_days ? <div style={{ fontSize: 11, color: d.exec.delay_days > 0 ? "var(--bad)" : "var(--ok)" }}>{d.exec.delay_days > 0 ? `+${d.exec.delay_days}` : d.exec.delay_days} дн. к плану</div> : null}</td>
-                  <td style={{ fontSize: 13, minWidth: 160 }}>{d.exec?.next ? <>{d.exec.next.title}<div style={{ fontSize: 12, color: (daysTo(d.exec.next.on) ?? 1) < 0 ? "var(--bad)" : "var(--muted)" }}>
+                  <td><Progress e={d.exec} />{d.exec?.delay_days ? <div style={{ fontSize: 11, color: d.exec.delay_days > 0 ? "var(--accent)" : "var(--muted)" }}>{d.exec.delay_days > 0 ? `+${d.exec.delay_days}` : d.exec.delay_days} дн. к плану</div> : null}</td>
+                  <td style={{ fontSize: 13, minWidth: 160 }}>{d.exec?.next ? <>{d.exec.next.title}<div style={{ fontSize: 12, color: (daysTo(d.exec.next.on) ?? 1) < 0 ? "var(--accent)" : "var(--muted)" }}>
                     {fmtDate(d.exec.next.on)}{(daysTo(d.exec.next.on) ?? 1) < 0 ? ` · просрочен ${-(daysTo(d.exec.next.on) || 0)} дн.` : ""}</div></> : <span className="muted">—</span>}</td>
                   <td><StatusBadge d={d} /></td><td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>
                 </tr>) : (
