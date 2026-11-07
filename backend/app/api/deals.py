@@ -122,10 +122,43 @@ def list_deals(status: Optional[str] = None, archived: bool = False, db: Session
     for d in deals:
         if d.parent_deal_id:
             children[d.parent_deal_id] = children.get(d.parent_deal_id, 0) + 1
+    from datetime import date as _date
+    from ..models import ExecutionStage, User
+    from ..services.execution_service import won_variant
+    users = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    post_win = [d.id for d in deals if d.status in (DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED)]
+    stages: dict[str, list] = {}
+    if post_win:
+        for st in db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id.in_(post_win))).all():
+            stages.setdefault(st.deal_id, []).append(st)
+    today = _date.today()
+    hide_price_statuses = {DealStatus.DRAFT, DealStatus.LOGISTICS_CALC, DealStatus.SERVICE_CALC, DealStatus.CALC_READY, DealStatus.CD_APPROVAL,
+                           DealStatus.FD_VISA, DealStatus.GD_VISA, DealStatus.REWORK}
+    mgr_only = user.has(Role.MANAGER) and not user.has(Role.CD, Role.FD, Role.GD)
     for d in deals:
         row = serialize(d, exclude={"client_payments", "bank_guarantee", "operating_conditions", "scenario_override"})
         row["client_name"] = d.client.name if d.client else None
         row["status_detail"] = status_detail(d)
+        row["manager_name"] = users.get(d.manager_id, "")
+        # оборудование: «2 × Самосвал XDR80T; 1 × Погрузчик …»
+        poss = list(d.positions or [])
+        row["machines"] = sum(int(p.qty or 0) for p in poss)
+        row["equipment"] = "; ".join(f"{int(p.qty or 1)} × {' '.join(x for x in (p.machine_type or '', p.trademark or '', p.model or '') if x).strip()}" for p in poss[:4]) \
+            + (f" … ещё {len(poss) - 4}" if len(poss) > 4 else "")
+        v = won_variant(d) if d.variants else None
+        if v is not None and v.price_rub is not None and not (mgr_only and d.status in hide_price_statuses):
+            row["price_rub"] = v.price_rub
+            row["price_amount"] = v.price_amount
+            row["price_currency"] = v.price_currency
+        sts = stages.get(d.id) or []
+        if sts:
+            open_ = sorted((s for s in sts if not s.actual_on and (s.refined_on or s.planned_on)), key=lambda s: (s.refined_on or s.planned_on, s.sort))
+            nxt = open_[0] if open_ else None
+            row["exec"] = {"done": sum(1 for s in sts if s.actual_on), "total": len(sts),
+                           "overdue": sum(1 for s in open_ if (s.refined_on or s.planned_on) < today),
+                           "next": {"title": nxt.title, "on": (nxt.refined_on or nxt.planned_on).isoformat()} if nxt else None,
+                           "delay_days": max([((s.actual_on or s.refined_on or s.planned_on) - s.baseline_on).days for s in sts
+                                              if s.baseline_on and (s.actual_on or s.refined_on or s.planned_on)], default=None)}
         # задача 9: группировка связанных заявок в списке
         row["group"] = d.parent_deal_id or d.id
         row["parent_number"] = numbers.get(d.parent_deal_id, "") if d.parent_deal_id else ""

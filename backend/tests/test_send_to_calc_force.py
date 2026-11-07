@@ -38,3 +38,5 @@ def test_force_send():
         assert r.status_code == 422 and r.json()["detail"]["can_force"] is False
         r = c.post(f"/api/deals/{d['id']}/send-to-calc", headers=H(CD), json={"force": True, "comment": "цену уточняем"})
         assert r.status_code == 200 and r.json()["status"] == "logistics_calc"
+        row = next(x for x in c.get("/api/deals", headers=H(CD)).json() if x["id"] == d["id"])   # список сделок: менеджер, оборудование
+        assert row["manager_name"] and "FORCE-1" in row["equipment"] and row["machines"] >= 1
