@@ -79,6 +79,7 @@ class KpData:
     images: dict[str, list[tuple[str, str]]] = field(default_factory=dict)   # задача 10: позиция → [(путь, подпись)]
     brand_company: bool = False                                # задача 9: подача под брендом компании (без названия завода)
     forbidden_words: list[str] = field(default_factory=list)   # названия заводов, которых не должно быть в КП под брендом компании
+    currency: str = "RUB"                                # валюта цен в КП (цена клиенту назначена в валюте)
 
 
 def _set_cell_bg(cell, hex_color: str) -> None:
@@ -158,7 +159,7 @@ def build_kp(data: KpData, path: str) -> str:
         ["Комплектация и опции"] + [v.configuration for v in data.variants],
         ["Базис поставки"] + [v.basis for v in data.variants],
         ["Срок поставки"] + [v.delivery_term_text or f"{v.delivery_days} дн." for v in data.variants],
-        ["Цена за единицу, RUB без НДС"] + [f"{v.unit_price_rub:,.0f}".replace(",", " ") for v in data.variants],
+        [f"Цена за единицу, {data.currency} без НДС"] + [f"{v.unit_price_rub:,.0f}".replace(",", " ") for v in data.variants],
         ["Условия оплаты"] + [v.payment_terms for v in data.variants],
         ["Гарантия"] + [v.warranty for v in data.variants],
     ]
@@ -166,7 +167,7 @@ def build_kp(data: KpData, path: str) -> str:
         rows.append(["Сервис до наработки"] + [v.service_line or "—" for v in data.variants])
     money = lambda x: f"{x:,.0f}".replace(",", " ")   # noqa: E731
     if any(v.extra_lines or v.adjustments for v in data.variants):
-        rows.append(["Стоимость оборудования, RUB без НДС"] + [money(v.base_total_rub if v.base_total_rub is not None else v.total_rub) for v in data.variants])
+        rows.append([f"Стоимость оборудования, {data.currency} без НДС"] + [money(v.base_total_rub if v.base_total_rub is not None else v.total_rub) for v in data.variants])
         names = list(dict.fromkeys(n for v in data.variants for n, _ in v.extra_lines))
         for n in names:
             vals = []
@@ -178,8 +179,8 @@ def build_kp(data: KpData, path: str) -> str:
         for lbl in labels:
             vals = [next((("−" if a < 0 else "+") + money(abs(a)) for ll, a in v.adjustments if ll == lbl), "—") for v in data.variants]
             rows.append([lbl] + vals)
-    rows.append(["Итого, RUB без НДС"] + [f"{v.total_rub:,.0f}".replace(",", " ") for v in data.variants])
-    rows.append([f"Итого, RUB с НДС {data.variants[0].vat_pct:.0f} %"] +
+    rows.append([f"Итого, {data.currency} без НДС"] + [f"{v.total_rub:,.0f}".replace(",", " ") for v in data.variants])
+    rows.append([f"Итого, {data.currency} с НДС {data.variants[0].vat_pct:.0f} %"] +
                 [f"{v.total_rub * (1 + v.vat_pct / 100):,.0f}".replace(",", " ") for v in data.variants])
     _table(doc, header, rows, accent_last_row=True)
 
@@ -210,8 +211,11 @@ def build_kp(data: KpData, path: str) -> str:
 
     _heading(doc, "Условия оплаты и гарантии")
     doc.add_paragraph(data.payment_and_warranty)
-    doc.add_paragraph(f"Цена действительна до {data.valid_until}. При изменении курса ЦБ РФ более чем на ±{data.fx_clause_pct:g} % "
-                      f"относительно курса на дату предложения цена подлежит пересмотру.")
+    if data.currency == "RUB":
+        doc.add_paragraph(f"Цена действительна до {data.valid_until}. При изменении курса ЦБ РФ более чем на ±{data.fx_clause_pct:g} % "
+                          f"относительно курса на дату предложения цена подлежит пересмотру.")
+    else:
+        doc.add_paragraph(f"Цена действительна до {data.valid_until}. Цены указаны в {data.currency} без НДС.")
 
     _heading(doc, "Подписи и реквизиты")
     doc.add_paragraph(data.signatures)

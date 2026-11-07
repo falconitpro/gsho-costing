@@ -72,3 +72,13 @@ def test_kp_with_png_keeps_its_own_path(tmp_path):
     out = build_kp(d, str(tmp_path / "kp.docx"))
     assert out.endswith("kp.docx")
     assert png.read_bytes()[:4] == b"\x89PNG"
+
+
+def test_kp_in_currency(tmp_path):
+    d = _data()
+    d.currency = "CNY"
+    doc = Document(build_kp(d, str(tmp_path / "kp_cny.docx")))
+    cells = [c.text for t in doc.tables for r in t.rows for c in r.cells]
+    text = "\n".join(x.text for x in doc.paragraphs)
+    assert "Итого, CNY без НДС" in cells and "Цена за единицу, CNY без НДС" in cells and not any("RUB" in c for c in cells)
+    assert "Цены указаны в CNY" in text and "±5 %" not in text

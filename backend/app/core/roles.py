@@ -56,7 +56,7 @@ COST_FIELDS = {
     "logistics", "service_calc", "history_checks", "overhead_pct_override", "overhead_override_comment",
     "avg_margin_pct", "sum_margin_rub", "guarantee_cost_rub",
 }
-PRICE_FIELDS = {"price_rub", "price_per_unit_rub", "price_with_vat_rub"}
+PRICE_FIELDS = {"price_rub", "price_per_unit_rub", "price_with_vat_rub", "price_amount", "price_fx_rate"}
 LOGISTICS_INPUT_FIELDS = {"logistics", "batches"}
 SERVICE_INPUT_FIELDS = {"service_calc", "service"}
 FINANCE_FIELDS = {"cash_gap", "cashflow", "finance_breakdown", "fx_components", "sensitivity"}

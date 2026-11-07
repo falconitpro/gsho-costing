@@ -68,6 +68,7 @@ export interface Position {
 export interface Variant {
   id: string; name: string; position_ids: string[]; price_rub?: number | null; service_in_kp: boolean; client_payments: PaymentLine[];
   overhead_pct_override?: number | null; is_default?: boolean; in_kp?: boolean;
+  price_currency?: string | null; price_amount?: number | null; price_fx_rate?: number | null;
 }
 export interface PaymentLine { no: number; share_pct?: number; amount?: number; event: string; offset_days: number; offset_kind?: string; via?: string; guarantee?: string; guarantee_pct?: number; guarantee_months?: number }
 export interface Batch { id: string; name: string; route: string; transport_units: number; transit_days: number; customs_days: number; rf_delivery_days?: number; border_planned?: string | null; border_actual?: string | null; allocation: string; items: Record<string, unknown> }
