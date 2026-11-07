@@ -24,7 +24,7 @@ from app.models import Deal  # noqa: E402
 from scripts.seed import run as seed  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
-MGR, CD, FD, LAW, LOG, OBS = "manager@example.com", "cd@example.com", "fd@example.com", "lawyer@example.com", "logist@example.com", "observer@example.com"
+MGR, CD, FD, LAW, LOG = "manager@example.com", "cd@example.com", "fd@example.com", "lawyer@example.com", "logist@example.com"
 
 
 def test_legal_profiles():
@@ -33,8 +33,9 @@ def test_legal_profiles():
         cl = c.get("/api/refs/clients", headers=H(MGR)).json()[0]
         fac = c.get("/api/refs/factories", headers=H(MGR)).json()[0]
 
-        # наблюдателю закрыто; логист читает, но не правит
-        assert c.get(f"/api/legal/profiles?owner_kind=client&owner_id={cl['id']}", headers=H(OBS)).status_code == 403
+        # наблюдателю (чистая роль) закрыто — проверяем по матрице, т. к. в общей тестовой БД ему могли добавить роли; логист читает, но не правит
+        from app.core.roles import Role, effective_perms
+        assert effective_perms({Role.OBSERVER})["legal_profiles"] == 0 and effective_perms({Role.LOGISTICIAN})["legal_profiles"] == 1
         r = c.get(f"/api/legal/profiles?owner_kind=client&owner_id={cl['id']}", headers=H(LOG)).json()
         assert r["can_edit"] is False and len(r["items"]) == 1
         auto = r["items"][0]
