@@ -204,7 +204,8 @@ def _now_block(db: Session, deal: Deal, user: CurrentUser) -> dict:
     """Строка «Сейчас» в шапке карточки: ближайшая открытая задача (кто, срок), просроченные этапы исполнения, итог продажи после выигрыша."""
     from datetime import date as _date
     from ..core.workflow import role_title
-    from ..models import DealVersion, ExecutionStage, Task, User
+    from ..models import ExecutionStage, Task, User
+    from ..services.execution_service import won_variant
     today = _date.today()
     names = {}
     def name(uid):
