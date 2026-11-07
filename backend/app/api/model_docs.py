@@ -209,3 +209,188 @@ def put_zip(deal_id: str, pos_id: str, body: ZipIn, db: Session = Depends(get_db
     audit(db, user.id, deal_id, "position", pos.id, "zip", {"items": before}, {"items": len(items)})
     db.commit()
     return {"items": pos.zip_items, "kinds": ZIP_KINDS}
+
+
+# ------------------------------------------------------------------ ЗИП: Excel (шаблон, загрузка, выгрузка на N часов)
+
+ZIP_COLUMNS = [("kind", "Вид (поставка / ТО)"), ("assembly", "Узел / система"), ("article", "Артикул"), ("name", "Наименование"), ("unit", "Ед."),
+               ("qty", "Кол-во на 1 замену"), ("price", "Цена"), ("currency", "Валюта"), ("interval_hours", "Периодичность замены, м·ч"),
+               ("lead_days", "Срок поставки, дн"), ("comment", "Комментарий")]
+_KIND_WORDS = {"supply": ("supply", "поставка", "в комплекте", "комплект"), "to": ("to", "то", "зип на то", "обслуживание")}
+
+
+def _zip_kind(v) -> Optional[str]:
+    s = str(v or "").strip().lower()
+    if not s:
+        return "supply"
+    for k, words in _KIND_WORDS.items():
+        if any(s.startswith(w) or w in s for w in words):
+            return k
+    return None
+
+
+def _num(v) -> Optional[float]:
+    if v is None or v == "":
+        return None
+    try:
+        return float(str(v).replace(",", ".").replace(" ", ""))
+    except ValueError:
+        raise ValueError(f"не число: {v}")
+
+
+def _zip_workbook(rows: list[dict], title: str, hours: Optional[float] = None):
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ЗИП"
+    heads = [t for _, t in ZIP_COLUMNS] + (["Замен за период", "Кол-во на период", "Сумма"] if hours is not None else [])
+    ws.append([title])
+    ws["A1"].font = Font(bold=True, size=12)
+    ws.append(heads)
+    for c in ws[2]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="FF3131")
+        c.alignment = Alignment(wrap_text=True, vertical="center")
+    for r in rows:
+        line = [ZIP_KINDS.get(r.get("kind", "supply"), "в комплекте поставки"), r.get("assembly", ""), r.get("article", ""), r.get("name", ""), r.get("unit", "шт"),
+                r.get("qty"), r.get("price"), r.get("currency", "CNY"), r.get("interval_hours"), r.get("lead_days"), r.get("comment", "")]
+        if hours is not None:
+            line += [r.get("replacements"), r.get("qty_period"), r.get("amount")]
+        ws.append(line)
+    for i, w in enumerate([22, 18, 14, 36, 6, 14, 12, 8, 14, 12, 28, 12, 14, 14], start=1):
+        ws.column_dimensions[ws.cell(row=2, column=i).column_letter].width = w
+    ws.freeze_panes = "A3"
+    return wb
+
+
+def _send_wb(wb, name: str):
+    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    wb.save(path)
+    return file_response(path, name, inline=False, background=BackgroundTask(os.unlink, path))
+
+
+@router.get("/deals/{deal_id}/positions/{pos_id}/zip/template.xlsx")
+def zip_template(deal_id: str, pos_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Шаблон Excel для загрузки ЗИП: заголовки + пример строк (текущий ЗИП позиции, если есть)."""
+    pos = _pos(db, deal_id, pos_id, user)
+    rows = pos.zip_items or [{"kind": "supply", "assembly": "Гидросистема", "article": "HF-1001", "name": "Фильтр гидравлический", "unit": "шт", "qty": 1, "price": 350, "currency": "CNY", "comment": "пример"},
+                             {"kind": "to", "assembly": "Двигатель", "article": "OF-2201", "name": "Фильтр масляный", "unit": "шт", "qty": 2, "price": 120, "currency": "CNY", "interval_hours": 500, "lead_days": 30, "comment": "пример"}]
+    return _send_wb(_zip_workbook(rows, f"ЗИП — {pos.model}"), f"zip_{pos.model}.xlsx".replace("/", "-"))
+
+
+def parse_zip_xlsx(path: str) -> tuple[list[dict], list[str]]:
+    """Читает лист ЗИП: ищет строку заголовков по словам «Артикул»/«Наименование», дальше строки до пустой. Возвращает (items, errors)."""
+    from openpyxl import load_workbook
+    wb = load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    items, errors = [], []
+    col: dict[str, int] = {}
+    heads_by_word = {"вид": "kind", "узел": "assembly", "артикул": "article", "наимен": "name", "ед": "unit", "кол": "qty", "цена": "price", "валют": "currency",
+                     "период": "interval_hours", "замен": "interval_hours", "м·ч": "interval_hours", "срок": "lead_days", "коммент": "comment"}
+    for row in ws.iter_rows(values_only=True):
+        vals = ["" if v is None else str(v).strip() for v in row]
+        if not col:
+            low = [v.lower() for v in vals]
+            if any("артикул" in v for v in low) and any("наимен" in v for v in low):
+                for i, v in enumerate(low):
+                    for word, key in heads_by_word.items():
+                        if word in v and key not in col:
+                            col[key] = i
+                            break
+            continue
+        if not any(vals):
+            if items:
+                break
+            continue
+        g = lambda k: (row[col[k]] if k in col and col[k] < len(row) else None)   # noqa: E731
+        try:
+            kind = _zip_kind(g("kind"))
+            if kind is None:
+                raise ValueError(f"вид ЗИП не распознан: «{g('kind')}» (нужно «поставка» или «ТО»)")
+            it = {"kind": kind, "assembly": str(g("assembly") or "").strip(), "article": str(g("article") or "").strip(), "name": str(g("name") or "").strip(),
+                  "unit": str(g("unit") or "шт").strip() or "шт", "qty": _num(g("qty")) or 1, "price": _num(g("price")), "currency": (str(g("currency") or "CNY").strip().upper()[:3]) or "CNY",
+                  "interval_hours": _num(g("interval_hours")), "lead_days": int(_num(g("lead_days")) or 0) or None, "comment": str(g("comment") or "").strip()}
+            if not (it["article"] or it["name"]):
+                continue
+            if it["kind"] == "to" and not it["interval_hours"]:
+                errors.append(f"строка «{it['article'] or it['name']}»: для ЗИП на ТО нужна периодичность замены, м·ч")
+            items.append(it)
+        except ValueError as e:
+            errors.append(f"строка «{vals[col.get('article', 0)] if vals else ''}»: {e}")
+    if not col:
+        errors.insert(0, "не найдена строка заголовков (нужны колонки «Артикул» и «Наименование») — скачайте шаблон")
+    return items, errors
+
+
+@router.post("/deals/{deal_id}/positions/{pos_id}/zip/import")
+def zip_import(deal_id: str, pos_id: str, file: UploadFile = File(...), mode: str = Form("preview"), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Загрузка ЗИП из Excel. mode=preview — только разбор и ошибки; replace — заменить ЗИП позиции; append — добавить к текущему."""
+    if not user.has(Role.MANAGER, Role.SERVICE_HEAD, Role.CD, Role.GD):
+        raise HTTPException(403, "ЗИП ведут менеджер, сервис, КД и ЗГД")
+    if mode not in ("preview", "replace", "append"):
+        raise HTTPException(422, "mode: preview | replace | append")
+    pos = _pos(db, deal_id, pos_id, user)
+    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    try:
+        with open(path, "wb") as f:
+            f.write(file.file.read())
+        try:
+            items, errors = parse_zip_xlsx(path)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(422, f"файл не читается как Excel: {e}")
+    finally:
+        os.unlink(path)
+    if mode == "preview":
+        return {"items": items, "errors": errors, "current": len(pos.zip_items or [])}
+    if errors:
+        raise HTTPException(422, "в файле есть ошибки — исправьте и загрузите снова: " + "; ".join(errors[:5]))
+    before = len(pos.zip_items or [])
+    pos.zip_items = (list(pos.zip_items or []) if mode == "append" else []) + items
+    audit(db, user.id, deal_id, "position", pos.id, "zip_import", {"items": before}, {"items": len(pos.zip_items), "mode": mode, "file": file.filename})
+    db.commit()
+    return {"items": pos.zip_items, "kinds": ZIP_KINDS, "errors": []}
+
+
+def zip_for_hours(items: list[dict], hours: float) -> tuple[list[dict], dict]:
+    """ЗИП на заданную наработку: для «ЗИП на ТО» число замен = floor(hours / interval); «в комплекте поставки» — как есть (1 раз)."""
+    import math
+    rows, total = [], {}
+    for z in items:
+        z = dict(z)
+        if z.get("kind") == "to":
+            iv = float(z.get("interval_hours") or 0)
+            n = int(math.floor(hours / iv)) if iv > 0 else 0
+        else:
+            n = 1
+        qty = float(z.get("qty") or 0) * n
+        amount = round(qty * float(z["price"]), 2) if z.get("price") not in (None, "") else None
+        z.update(replacements=n, qty_period=qty, amount=amount)
+        if n <= 0:
+            continue
+        if amount is not None:
+            total[z.get("currency", "CNY")] = round(total.get(z.get("currency", "CNY"), 0) + amount, 2)
+        rows.append(z)
+    return rows, total
+
+
+@router.get("/deals/{deal_id}/positions/{pos_id}/zip/for-hours")
+def zip_hours_json(deal_id: str, pos_id: str, hours: float = 2000, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    pos = _pos(db, deal_id, pos_id, user)
+    rows, total = zip_for_hours(pos.zip_items or [], hours)
+    return {"hours": hours, "items": rows, "totals": total}
+
+
+@router.get("/deals/{deal_id}/positions/{pos_id}/zip/for-hours.xlsx")
+def zip_hours_xlsx(deal_id: str, pos_id: str, hours: float = 2000, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Перечень ЗИП на заданное число моточасов — Excel для клиента/завода."""
+    pos = _pos(db, deal_id, pos_id, user)
+    rows, total = zip_for_hours(pos.zip_items or [], hours)
+    wb = _zip_workbook(rows, f"ЗИП на {hours:g} м·ч — {pos.model}", hours=hours)
+    ws = wb.active
+    for cur, amt in total.items():
+        ws.append([])
+        ws.append(["Итого", "", "", "", "", "", "", cur, "", "", "", "", "", amt])
+    return _send_wb(wb, f"zip_{hours:g}h_{pos.model}.xlsx".replace("/", "-"))
