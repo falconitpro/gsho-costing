@@ -7,7 +7,9 @@ import { reqSummary, type ReqSet } from "./ClientRequisites";
 
 type Resp = { stages: Stage[]; status: string; contract_number: string; contract_signed_at: string | null; factory_contract_signed_at: string | null; factory_contract_number?: string | null; won_variant_id: string | null;
   related: { id: string; number: string; status: string }[]; contract_steps: CStep[]; status_detail: string;
+  client_locked?: boolean; factory_locked?: boolean; can_amend?: boolean; contract_history?: Amend[];
   client_requisites_id?: string | null; client_requisites?: Partial<ReqSet>; client_requisites_options?: { id: string; title: string; is_default: boolean; legal_name: string; inn: string; kpp: string }[] };
+type Amend = { side: "client" | "factory"; action: "amended" | "unsigned"; old_number: string; old_date: string; number: string; date: string; reason: string; by_name: string; at: string };
 type CStep = { code: string; title: string; roles: string[]; hint: string; state: "done" | "current" | "pending"; on: string | null; by: string; comment: string };
 const ROLE_T: Record<string, string> = { manager: "менеджер", logistician: "логист", service_head: "сервис", fd: "ФД", cd: "КД", gd: "ЗГД", purchasing: "закупки", lawyer: "юрист" };
 
@@ -23,6 +25,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
   const [err, setErr] = useState("");
   const [step, setStep] = useState<Record<string, { on: string; comment: string; number: string; fnumber: string }>>({});
   const [scan, setScan] = useState<Record<string, File | null>>({});
+  const [amend, setAmend] = useState<{ side: "client" | "factory"; number: string; signed_at: string; reason: string } | null>(null);
   const isMgr = me.roles.some((r) => r.code === "manager") && deal.manager_id === me.id;
   const isCdGd = me.roles.some((r) => r.code === "cd" || r.code === "gd");
   const load = () => api.get<Resp>(`/api/deals/${deal.id}/execution/stages`).then(setData).catch((e) => setErr(e.message));
@@ -44,6 +47,43 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
   });
   const needNo = (c: CStep, v: { number: string; fnumber: string }) => (c.code === "client_signed" && !v.number.trim()) || (c.code === "factory_signed" && !(v.fnumber || "").trim());
   const allSigned = data.contract_steps.find((c) => c.code === "client_signed")?.state === "done";
+  const SIDE_T = { client: "с клиентом", factory: "с заводом" } as const;
+  const lockLine = (side: "client" | "factory") => {
+    const locked = side === "client" ? data.client_locked : data.factory_locked;
+    const hist = (data.contract_history || []).filter((h) => h.side === side);
+    if (!locked && hist.length === 0) return null;
+    const cur = side === "client" ? { number: data.contract_number || "", on: String(data.contract_signed_at || "") } : { number: data.factory_contract_number || "", on: String(data.factory_contract_signed_at || "") };
+    return (
+      <div style={{ marginTop: 6 }}>
+        {locked && <div className="row" style={{ gap: 8, flexWrap: "wrap", fontSize: 12, background: "var(--done-bg)", borderRadius: 6, padding: "5px 10px" }}>
+          <span>🔒 <b>Договор {SIDE_T[side]} подписан</b> — номер и дата зафиксированы.</span>
+          {data.can_amend ? <button className="btn ghost" style={{ padding: "2px 10px", fontSize: 12, marginLeft: "auto" }} onClick={() => setAmend({ side, number: cur.number, signed_at: cur.on.slice(0, 10), reason: "" })}>Изменить подписанный договор</button>
+            : <span className="muted">Исправить может ЗГД или КД.</span>}
+        </div>}
+        {amend && amend.side === side && (
+          <div style={{ border: "1px solid var(--warn)", background: "var(--warn-bg)", borderRadius: 6, padding: 10, marginTop: 6 }}>
+            <b style={{ fontSize: 13 }}>Изменение подписанного договора {SIDE_T[side]}</b>
+            <div className="grid cols-3" style={{ marginTop: 6 }}>
+              <label className="f">Номер договора<input value={amend.number} onChange={(e) => setAmend({ ...amend, number: e.target.value })} /></label>
+              <label className="f">Дата подписания<input type="date" value={amend.signed_at} onChange={(e) => setAmend({ ...amend, signed_at: e.target.value })} /></label>
+              <label className="f">Причина изменения *<input value={amend.reason} placeholder="напр. доп. соглашение № 1 от …, опечатка в номере" onChange={(e) => setAmend({ ...amend, reason: e.target.value })} /></label>
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Изменение даты пересчитает связанные этапы и платежи. Прежние номер и дата сохранятся в истории.</div>
+            <div className="row" style={{ marginTop: 6, gap: 6 }}>
+              <button className="btn" disabled={!amend.number.trim() || !amend.signed_at || amend.reason.trim().length < 3}
+                onClick={() => act(async () => { await api.post(`/api/deals/${deal.id}/execution/contract-amend`, amend);
+                  setForm((f) => side === "client" ? { ...f, contract_number: amend.number.trim(), contract_signed_at: amend.signed_at } : { ...f, factory_contract_number: amend.number.trim(), factory_contract_signed_at: amend.signed_at }); setAmend(null); })}>Сохранить изменение</button>
+              <button className="btn ghost" onClick={() => setAmend(null)}>Отмена</button></div>
+          </div>)}
+        {hist.length > 0 && (
+          <details style={{ marginTop: 4, fontSize: 12 }}><summary className="muted" style={{ cursor: "pointer" }}>История изменений · {hist.length}</summary>
+            <table style={{ fontSize: 12, marginTop: 4 }}><thead><tr><th>Когда</th><th>Кто</th><th>Было</th><th>Стало</th><th>Причина</th></tr></thead>
+              <tbody>{hist.map((h, i) => <tr key={i}><td style={{ whiteSpace: "nowrap" }}>{fmtDate(h.at)}</td><td>{h.by_name}</td>
+                <td>№ {h.old_number || "—"} от {h.old_date ? fmtDate(h.old_date) : "—"}</td>
+                <td>{h.action === "unsigned" ? <span style={{ color: "var(--warn)" }}>отметка о подписании снята</span> : <>№ {h.number} от {fmtDate(h.date)}</>}</td><td>{h.reason}</td></tr>)}</tbody></table>
+          </details>)}
+      </div>);
+  };
   return (
     <>
       {err && <div className="alert error">{err}</div>}
@@ -69,7 +109,8 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
                     <input placeholder="комментарий" value={v.comment} onChange={(e) => setStep({ ...step, [c.code]: { ...v, comment: e.target.value } })} style={{ width: 200 }} />
                     {SCAN_KIND[c.code] && <div style={{ marginTop: 4 }}>скан: <input type="file" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.zip" style={{ fontSize: 11, maxWidth: 220 }}
                       onChange={(e) => setScan({ ...scan, [c.code]: e.target.files?.[0] || null })} /></div>}</>}</td>
-                  <td>{c.state === "done" ? (canStep(c) && <button className="btn ghost" onClick={() => markStep(c, false)}>снять отметку</button>)
+                  <td>{c.state === "done" ? (SCAN_KIND[c.code] ? (data.can_amend && <button className="btn ghost" title="только ЗГД или КД, с указанием причины" onClick={() => { const r = prompt("Причина снятия отметки о подписании договора"); if (r && r.trim().length >= 3) act(() => api.post(`/api/deals/${deal.id}/execution/contract-step`, { code: c.code, done: false, comment: r.trim() })); }}>снять отметку</button>)
+                      : canStep(c) && <button className="btn ghost" onClick={() => markStep(c, false)}>снять отметку</button>)
                     : editable && <button className={"btn " + (c.state === "current" ? "" : "secondary")} disabled={needNo(c, v)} title={needNo(c, v) ? "укажите номер контракта" : ""} onClick={() => markStep(c, true)}>Выполнено</button>}</td>
                 </tr>);
             })}</tbody>
@@ -84,9 +125,10 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
           {(() => { const showScans = ["won", "contract", "execution", "closed"].includes(deal.status); return <>
           <h3 style={{ margin: "4px 0" }}>Договор с клиентом</h3>
           <div className="grid cols-2">
-            <label className="f">Номер договора с клиентом<input value={form.contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_number: e.target.value })} /></label>
-            <label className="f">Дата договора с клиентом<input type="date" value={form.contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_signed_at: e.target.value })} /></label>
+            <label className="f">Номер договора с клиентом<input value={form.contract_number} disabled={!(isMgr || isCdGd) || !!data.client_locked} onChange={(e) => setForm({ ...form, contract_number: e.target.value })} /></label>
+            <label className="f">Дата договора с клиентом<input type="date" value={form.contract_signed_at || ""} disabled={!(isMgr || isCdGd) || !!data.client_locked} onChange={(e) => setForm({ ...form, contract_signed_at: e.target.value })} /></label>
           </div>
+          {lockLine("client")}
           {(() => {
             const opts = data.client_requisites_options || [];
             const curId = form.client_requisites_id || data.client_requisites_id || opts.find((o) => o.is_default)?.id || "";
@@ -103,9 +145,10 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
           {showScans && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} only="client" />}
           <h3 style={{ margin: "12px 0 4px" }}>Договор с заводом</h3>
           <div className="grid cols-2">
-            <label className="f">Номер договора с заводом<input value={form.factory_contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, factory_contract_number: e.target.value })} /></label>
-            <label className="f">Дата договора с заводом<input type="date" value={form.factory_contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, factory_contract_signed_at: e.target.value })} /></label>
+            <label className="f">Номер договора с заводом<input value={form.factory_contract_number} disabled={!(isMgr || isCdGd) || !!data.factory_locked} onChange={(e) => setForm({ ...form, factory_contract_number: e.target.value })} /></label>
+            <label className="f">Дата договора с заводом<input type="date" value={form.factory_contract_signed_at || ""} disabled={!(isMgr || isCdGd) || !!data.factory_locked} onChange={(e) => setForm({ ...form, factory_contract_signed_at: e.target.value })} /></label>
           </div>
+          {lockLine("factory")}
           {showScans && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} only="factory" />}
           </>; })()}
           <div className="grid cols-2" style={{ marginTop: 8 }}>

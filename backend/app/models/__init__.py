@@ -419,6 +419,8 @@ class Deal(TimestampMixin, Base):
     factory_contract_number: Mapped[Optional[str]] = mapped_column(String(64))     # номер контракта с заводом
     client_requisites_id: Mapped[Optional[str]] = mapped_column(String(36))        # выбранный набор реквизитов клиента
     client_requisites: Mapped[dict] = mapped_column(JSONType, default=dict)        # снимок реквизитов на момент договора
+    # изменения номера/даты подписанных договоров (только ЗГД или КД): [{side, old_number, old_date, number, date, reason, by, at}]
+    contract_history: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     contract_steps: Mapped[dict] = mapped_column(JSONType, default=dict)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)   # удалена КД/ЗГД (в корзине, можно восстановить)
     deleted_by: Mapped[Optional[str]] = mapped_column(String(36))

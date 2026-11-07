@@ -60,6 +60,8 @@ def stages(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
             "factory_contract_signed_at": deal.factory_contract_signed_at, "factory_contract_number": deal.factory_contract_number, "won_variant_id": deal.won_variant_id, "related": related,
             "contract_steps": ex.contract_steps(db, deal), "status_detail": ex.status_detail(deal),
             "client_requisites_id": deal.client_requisites_id, "client_requisites": deal.client_requisites or {},
+            "client_locked": ex.client_signed(deal), "factory_locked": ex.factory_signed(deal), "can_amend": user.has(Role.GD, Role.CD),
+            "contract_history": _history(db, deal),
             "client_requisites_options": [{"id": o["id"], "title": o["title"], "is_default": o.get("is_default", False), "legal_name": o.get("legal_name", ""), "inn": o.get("inn", ""), "kpp": o.get("kpp", "")} for o in options]}
 
 
@@ -71,7 +73,15 @@ def contract(deal_id: str, body: ContractIn, db: Session = Depends(get_db), user
     if not (user.has(Role.GD) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id)) or user.has(Role.CD)):
         raise HTTPException(403, "Реквизиты контракта вносит менеджер сделки")
     before = {k: getattr(deal, k) for k in ContractIn.model_fields}
-    for k, v in body.model_dump(exclude_none=True).items():
+    changes = body.model_dump(exclude_none=True)
+    for side, fields in ex.LOCKED_FIELDS.items():
+        if (ex.client_signed(deal) if side == "client" else ex.factory_signed(deal)):
+            for k in fields:
+                if k in changes and (str(changes[k] or "").strip() != str(getattr(deal, k) or "").strip()):
+                    raise HTTPException(409, f"Договор {'с клиентом' if side == 'client' else 'с заводом'} подписан — номер и дату меняет только ЗГД или КД "
+                                             "кнопкой «Изменить подписанный договор» с указанием причины")
+                changes.pop(k, None)
+    for k, v in changes.items():
         setattr(deal, k, v)
     if body.client_requisites_id is not None:
         # снимок выбранного набора реквизитов — договор не меняется, если карточку клиента потом поправят
@@ -89,6 +99,60 @@ def contract(deal_id: str, body: ContractIn, db: Session = Depends(get_db), user
     db.commit()
     db.refresh(deal)
     return deal_payload(deal, user)
+
+
+def _history(db: Session, deal: Deal) -> list[dict]:
+    from ..models import User
+    names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    return [{**h, "by_name": names.get(h.get("by"), "")} for h in reversed(deal.contract_history or [])]
+
+
+class AmendIn(BaseModel):
+    side: str                         # client | factory
+    number: str
+    signed_at: date
+    reason: str
+
+
+@router.post("/contract-amend")
+def contract_amend(deal_id: str, body: AmendIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Исправление номера или даты подписанного договора — только ЗГД или КД, с причиной; история изменений хранится в сделке."""
+    from ..models import FeedEntry
+    deal = get_deal_or_404(db, deal_id, user)
+    _stage_deal(deal)
+    if not user.has(Role.GD, Role.CD):
+        raise HTTPException(403, "Номер и дату подписанного договора меняет только ЗГД или КД")
+    if body.side not in ex.LOCKED_FIELDS:
+        raise HTTPException(422, "side: client | factory")
+    if not (ex.client_signed(deal) if body.side == "client" else ex.factory_signed(deal)):
+        raise HTTPException(409, "Договор ещё не подписан — номер и дату вносит менеджер в реквизитах контракта")
+    number, reason = body.number.strip(), body.reason.strip()
+    if not number:
+        raise HTTPException(422, "Укажите номер договора")
+    if len(reason) < 3:
+        raise HTTPException(422, "Укажите причину изменения")
+    num_f, date_f = ex.LOCKED_FIELDS[body.side]
+    old_number, old_date = getattr(deal, num_f) or "", getattr(deal, date_f)
+    if old_number == number and old_date == body.signed_at:
+        raise HTTPException(422, "Номер и дата не изменились")
+    setattr(deal, num_f, number)
+    setattr(deal, date_f, body.signed_at)
+    code = "client_signed" if body.side == "client" else "factory_signed"
+    steps = dict(deal.contract_steps or {})
+    if code in steps:
+        steps[code] = {**steps[code], "on": body.signed_at.isoformat()}
+        deal.contract_steps = steps
+    rec = {"side": body.side, "action": "amended", "old_number": old_number, "old_date": str(old_date or ""), "number": number,
+           "date": body.signed_at.isoformat(), "reason": reason, "by": user.id, "at": datetime.now(timezone.utc).isoformat()}
+    deal.contract_history = list(deal.contract_history or []) + [rec]
+    who = "с клиентом" if body.side == "client" else "с заводом"
+    audit(db, user.id, deal.id, "deal", deal.id, "contract_amend", {"number": old_number, "date": str(old_date or "")}, {"number": number, "date": body.signed_at.isoformat(), "reason": reason, "side": body.side})
+    db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"Изменён подписанный договор {who}: № {old_number} от {old_date:%d.%m.%Y} → № {number} от {body.signed_at:%d.%m.%Y}" if old_date
+                     else f"Изменён подписанный договор {who}: № {number} от {body.signed_at:%d.%m.%Y}", body=reason, user_id=user.id))
+    ex.rebuild_stages(db, deal)      # от дат подписания считаются аванс, срок производства и т. д.
+    db.commit()
+    db.refresh(deal)
+    return {"deal": deal_payload(deal, user), "contract_history": _history(db, deal)}
 
 
 class ContractStepIn(BaseModel):
@@ -119,6 +183,14 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
         raise HTTPException(403, f"Подэтап «{step['title']}» отмечают: {', '.join(role_title(r) for r in step['roles'])}")
     on = body.on or date.today()
     steps = dict(deal.contract_steps or {})
+    signed = {"client_signed": ex.client_signed(deal), "factory_signed": ex.factory_signed(deal)}
+    if body.code in signed and signed[body.code]:
+        if body.done and (steps.get(body.code) or {}).get("done"):
+            raise HTTPException(409, "Договор уже подписан — номер и дату меняет ЗГД или КД кнопкой «Изменить подписанный договор»")
+        if not body.done and not user.has(_R.GD, _R.CD):
+            raise HTTPException(403, "Снять отметку о подписании договора может только ЗГД или КД")
+        if not body.done and len(body.comment.strip()) < 3:
+            raise HTTPException(422, "Укажите причину снятия отметки о подписании")
     if body.done:
         if body.code == "client_signed":
             number = (body.contract_number or deal.contract_number or "").strip()
@@ -133,6 +205,12 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
         steps[body.code] = {"done": True, "on": on.isoformat(), "by": user.id, "comment": body.comment}
     else:
         steps.pop(body.code, None)
+        if body.code in signed and signed[body.code]:
+            side = "client" if body.code == "client_signed" else "factory"
+            num_f, date_f = ex.LOCKED_FIELDS[side]
+            deal.contract_history = list(deal.contract_history or []) + [{
+                "side": side, "action": "unsigned", "old_number": getattr(deal, num_f) or "", "old_date": str(getattr(deal, date_f) or ""),
+                "number": getattr(deal, num_f) or "", "date": "", "reason": body.comment.strip(), "by": user.id, "at": datetime.now(timezone.utc).isoformat()}]
         if body.code == "client_signed":
             deal.contract_signed_at = None
         if body.code == "factory_signed":
