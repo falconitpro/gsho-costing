@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/deals/{deal_id}", tags=["documents"])
 CLIENT_CATEGORIES = {"tender": "Тендерная документация", "contract_form": "Типовая форма договора клиента", "client_spec": "Техническое задание клиента",
                      "client_other": "Прочие файлы клиента"}
 LEGAL_CATEGORIES = {"disagreements": "Протокол разногласий", "legal_opinion": "Заключение юриста", "contract_draft": "Проект договора (редакция юриста)",
-                    "contract_signed": "Подписанный договор"}
+                    "contract_signed": "Подписанный договор", "factory_contract_signed": "Подписанный контракт с заводом"}
 CATEGORIES = {**CLIENT_CATEGORIES, **LEGAL_CATEGORIES}
 REVIEW_TITLES = {"in_review": "на проверке у юриста", "ok": "проверено, замечаний нет", "remarks": "есть замечания (протокол разногласий)"}
 NEEDS_LAWYER = {"tender", "contract_form"}
@@ -60,24 +60,7 @@ def _review(db: Session, deal: Deal) -> dict:
     return r
 
 
-@router.get("/documents")
-def documents(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    deal = get_deal_or_404(db, deal_id, user)
-    if not user.can("legal_docs"):
-        raise HTTPException(403, "Документы сделки закрыты для роли")
-    return {"documents": _rows(db, deal), "client_categories": CLIENT_CATEGORIES, "legal_categories": LEGAL_CATEGORIES, "review": _review(db, deal),
-            "can_upload_client": _can_upload(user, deal, "tender"), "can_upload_legal": _can_upload(user, deal, "disagreements"),
-            "can_review": user.has(Role.LAWYER, Role.CD, Role.GD)}
-
-
-@router.post("/documents", status_code=201)
-async def upload_document(deal_id: str, file: UploadFile = File(...), category: str = Form("client_other"), comment: str = Form(""),
-                          db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    deal = get_deal_or_404(db, deal_id, user)
-    if category not in CATEGORIES:
-        raise HTTPException(422, "Неизвестный вид документа")
-    if not _can_upload(user, deal, category):
-        raise HTTPException(403, "Файлы клиента загружают менеджер сделки, КД, ЗГД, юрист; юридические документы — юрист, КД, ЗГД")
+def _save(db: Session, deal: Deal, user: CurrentUser, file: UploadFile, category: str, comment: str) -> Attachment:
     d = tempfile.mkdtemp()
     name = os.path.basename(file.filename or "document")
     path = os.path.join(d, name)
@@ -104,6 +87,28 @@ async def upload_document(deal_id: str, file: UploadFile = File(...), category: 
         notify(db, deal, deal.manager_id, "legal_doc", None, f"{deal.number}: юрист загрузил «{CATEGORIES[category]}» — {name}")
     db.flush()
     audit(db, user.id, deal.id, "deal_doc", att.id, "upload", after={"category": CATEGORIES[category], "file": name, "comment": comment})
+    return att
+
+
+@router.get("/documents")
+def documents(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    deal = get_deal_or_404(db, deal_id, user)
+    if not user.can("legal_docs"):
+        raise HTTPException(403, "Документы сделки закрыты для роли")
+    return {"documents": _rows(db, deal), "client_categories": CLIENT_CATEGORIES, "legal_categories": LEGAL_CATEGORIES, "review": _review(db, deal),
+            "can_upload_client": _can_upload(user, deal, "tender"), "can_upload_legal": _can_upload(user, deal, "disagreements"),
+            "can_review": user.has(Role.LAWYER, Role.CD, Role.GD)}
+
+
+@router.post("/documents", status_code=201)
+async def upload_document(deal_id: str, file: UploadFile = File(...), category: str = Form("client_other"), comment: str = Form(""),
+                          db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    deal = get_deal_or_404(db, deal_id, user)
+    if category not in CATEGORIES:
+        raise HTTPException(422, "Неизвестный вид документа")
+    if not _can_upload(user, deal, category):
+        raise HTTPException(403, "Файлы клиента загружают менеджер сделки, КД, ЗГД, юрист; юридические документы — юрист, КД, ЗГД")
+    _save(db, deal, user, file, category, comment)
     db.commit()
     return {"documents": _rows(db, deal), "review": _review(db, deal)}
 
@@ -152,3 +157,51 @@ def legal_review(deal_id: str, body: ReviewIn, db: Session = Depends(get_db), us
     audit(db, user.id, deal.id, "deal", deal.id, "legal_review", before, deal.legal_review, body.comment)
     db.commit()
     return {"review": _review(db, deal)}
+
+
+# ------------------------------------------------------------------ сканы подписанных контрактов (с клиентом и с заводом)
+
+SCAN_KINDS = {"client": ("contract_signed", "client_signed", "Скан контракта с клиентом"),
+              "factory": ("factory_contract_signed", "factory_signed", "Скан контракта с заводом")}
+
+
+def _signed(deal: Deal, kind: str) -> bool:
+    steps = deal.contract_steps or {}
+    if kind == "client":
+        return bool((steps.get("client_signed") or {}).get("done") or deal.contract_signed_at)
+    return bool((steps.get("factory_signed") or {}).get("done") or deal.factory_contract_signed_at)
+
+
+def _can_scan(user: CurrentUser, deal: Deal) -> bool:
+    return user.has(Role.GD, Role.CD, Role.LAWYER) or (user.has(Role.MANAGER) and deal.manager_id == user.id)
+
+
+def _scans(db: Session, deal: Deal, user: CurrentUser) -> dict:
+    rows = _rows(db, deal)
+    out = {}
+    for k, (cat, _, title) in SCAN_KINDS.items():
+        out[k] = {"title": title, "signed": _signed(deal, k), "files": [r for r in rows if r["category"] == cat]}
+    out["can_upload"] = _can_scan(user, deal)
+    return out
+
+
+@router.get("/contract-scans")
+def contract_scans(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    deal = get_deal_or_404(db, deal_id, user)
+    return _scans(db, deal, user)
+
+
+@router.post("/contract-scans", status_code=201)
+async def upload_contract_scan(deal_id: str, file: UploadFile = File(...), kind: str = Form("client"), comment: str = Form(""),
+                               db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Скан подписанного контракта — после отметки «подписан клиентом» / «подписан с заводом»; хранится в документах сделки."""
+    deal = get_deal_or_404(db, deal_id, user)
+    if kind not in SCAN_KINDS:
+        raise HTTPException(422, "Вид скана: контракт с клиентом или с заводом")
+    if not _can_scan(user, deal):
+        raise HTTPException(403, "Скан контракта загружают менеджер сделки, КД, ЗГД, юрист")
+    if not _signed(deal, kind):
+        raise HTTPException(409, "Сначала отметьте подписание контракта " + ("с клиентом" if kind == "client" else "с заводом"))
+    _save(db, deal, user, file, SCAN_KINDS[kind][0], comment)
+    db.commit()
+    return _scans(db, deal, user)
