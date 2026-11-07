@@ -25,9 +25,10 @@ H = lambda email: {"X-Dev-User": email}   # noqa: E731
 MGR, CD, LAW, LOG = "manager@example.com", "cd@example.com", "lawyer@example.com", "logist@example.com"
 
 
-def _docx(paragraphs: list[str], loop_row: list[str] | None = None) -> bytes:
+def _docx(paragraphs: list[str], loop_row: list[str] | None = None, header: bool = True) -> bytes:
     d = Document()
-    d.sections[0].header.paragraphs[0].text = "Договор № {{contract.number}}"
+    if header:
+        d.sections[0].header.paragraphs[0].text = "Договор № {{contract.number}}"
     for t in paragraphs:
         d.add_paragraph(t)
     if loop_row:
@@ -48,7 +49,7 @@ def test_templates_library_and_company_card():
                      ["{{#items}}{{n}}", "{{name}} {{model}}", "{{qty}} {{unit}}", "{{amount}}"])
         # загружает юрист; логист — нет; файл без плейсхолдеров — не шаблон
         assert c.post("/api/legal/templates", headers=H(LOG), data={"kind": "purchase_contract_cn"}, files={"file": ("t.docx", good)}).status_code == 403
-        assert c.post("/api/legal/templates", headers=H(LAW), data={"kind": "purchase_contract_cn"}, files={"file": ("plain.docx", _docx(["просто текст"]))}).status_code == 422
+        assert c.post("/api/legal/templates", headers=H(LAW), data={"kind": "purchase_contract_cn"}, files={"file": ("plain.docx", _docx(["просто текст"], header=False))}).status_code == 422
         assert c.post("/api/legal/templates", headers=H(LAW), data={"kind": "purchase_contract_cn"}, files={"file": ("t.txt", b"x")}).status_code == 422
         r = c.post("/api/legal/templates", headers=H(LAW), data={"kind": "purchase_contract_cn", "title": "Договор КНР"}, files={"file": ("contract_cn.docx", good)})
         assert r.status_code == 201, r.text
@@ -70,7 +71,7 @@ def test_templates_library_and_company_card():
         assert c.put(f"/api/legal/templates/{t['id']}", headers=H(LAW), json={"is_active": True}).json()["is_active"]
         assert not c.get("/api/legal/templates", headers=H(MGR)).json()["items"][0]["is_active"] or True
         # пример (не шаблон): любой DOCX без плейсхолдеров, тест-рендер недоступен
-        ex = c.post("/api/legal/templates", headers=H(LAW), data={"kind": "example_client_contract"}, files={"file": ("client.docx", _docx(["Договор заказчика, п. 4.2 …"]))}).json()
+        ex = c.post("/api/legal/templates", headers=H(LAW), data={"kind": "example_client_contract"}, files={"file": ("client.docx", _docx(["Договор заказчика, п. 4.2 …"], header=False))}).json()
         assert ex["is_example"] and c.get(f"/api/legal/templates/{ex['id']}/test-check", headers=H(LAW)).status_code == 422
         assert c.get(f"/api/legal/templates/{ex['id']}/file", headers=H(MGR)).status_code == 200
 
