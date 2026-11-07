@@ -69,7 +69,7 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
   useEffect(() => { try { localStorage.setItem("clients_seg", seg); } catch { /* приватный режим */ } }, [seg]);
   const [mgr, setMgr] = useState("");
   const [sort, setSort] = useState<{ k: SortKey; d: 1 | -1 }>({ k: "last", d: -1 });
-  const [showNew, setShowNew] = useState(false);
+  const [showNew, setShowNew] = useState(new URLSearchParams(window.location.search).get("new") === "1");   // с рабочего места: сразу открыть форму
   const load = () => api.get<Client[]>(`/api/refs/clients?stats=1${showArchived ? "&include_archived=1" : ""}`).then(setClients);
   useEffect(() => { load(); }, [showArchived]);
   async function create() {

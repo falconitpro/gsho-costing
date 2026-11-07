@@ -5,6 +5,7 @@ import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-do
 import { api, getDevUser, setDevUser } from "./api";
 import type { Me } from "./types";
 import DealsList from "./pages/DealsList";
+import WorkplacePage from "./pages/WorkplacePage";
 import DealCard from "./pages/DealCard";
 import TasksPage from "./pages/TasksPage";
 import SummaryPage from "./pages/SummaryPage";
@@ -45,7 +46,7 @@ export default function App() {
     <BrowserRouter>
       <header className="top">
         <div className="top-row">
-          <NavLink to="/deals" className="brand">
+          <NavLink to="/" className="brand">
             <img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" />
             <span>Себестоимость ГШО</span>
           </NavLink>
@@ -72,6 +73,7 @@ export default function App() {
         </div>
         {me && (
           <nav>
+            <NavLink to="/" end>Рабочее место</NavLink>
             <NavLink to="/deals">Сделки</NavLink>
             <NavLink to="/tasks">Мои задачи</NavLink>
             {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
@@ -90,7 +92,7 @@ export default function App() {
         {!me && err && <div className="alert info">{devUsers.length ? "Выберите пользователя в шапке (dev-режим)." : "Требуется вход."}</div>}
         {me && (
           <Routes>
-            <Route path="/" element={<Navigate to="/deals" />} />
+            <Route path="/" element={<WorkplacePage me={me} />} />
             <Route path="/deals" element={<DealsList me={me} />} />
             <Route path="/deals/:id" element={<DealCard me={me} />} />
             <Route path="/tasks" element={<TasksPage />} />

@@ -89,7 +89,7 @@ const save = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.str
 export default function DealsList({ me }: { me: Me }) {
   const [deals, setDeals] = useState<Row[]>([]);
   const [clients, setClients] = useState<{ id: string; name: string; sites: { name: string }[] }[]>([]);
-  const [showNew, setShowNew] = useState(false);
+  const [showNew, setShowNew] = useState(new URLSearchParams(window.location.search).get("new") === "1");   // с рабочего места: сразу открыть форму
   const [form, setForm] = useState({ client_id: "", contact: "", kp_due: "", priority: "normal", service_flag: false, target_hours: "" });
   const [err, setErr] = useState("");
   const nav = useNavigate();

@@ -47,7 +47,8 @@ DEFAULTS: dict[str, Any] = {
     "logistics_deviation_pct": 15.0,
     "plan_fact_deviation_pct": 10.0,
     "sla_days": {"logistics": 1, "service": 2, "cd": 1, "fd": 1, "gd": 1, "manager_rework": 1},
-    "legal_ai": {"provider": "yandexgpt", "model": ""},   # юридический блок: ИИ-провайдер анализа договоров (меняет ЗГД)
+    "legal_ai": {"provider": "yandexgpt", "model": ""},
+    "workplace_blocks": {},   # рабочее место: обязательные блоки по ролям {role: [codes]} — задаёт ЗГД
     "waiting_check_days": 5,   # ожидание результата после КП: через сколько рабочих дней напомнить менеджеру уточнить решение клиента
     "kp_fx_clause_pct": 5.0,
     "kp_validity_days": 30,
@@ -269,6 +270,8 @@ META: dict[str, dict] = {
                                 "help": "Больше — логист обязан написать комментарий."},
     "plan_fact_deviation_pct": {"group": "Контроль отклонений", "title": "Допустимое отклонение план/факт", "unit": "%", "type": "number"},
     # Сроки
+    "workplace_blocks": {"group": "Рабочее место", "title": "Обязательные блоки главной страницы по ролям", "type": "json",
+                         "help": "Задаёт ЗГД на главной странице («Настроить блоки»); закреплённые блоки сотрудник скрыть не может."},
     "legal_ai": {"group": "Юридический блок", "title": "ИИ-анализ договоров: провайдер и модель", "type": "json",
                  "help": "Меняется ЗГД в «Юридический блок → Правила». Ключи — только в backend/.env."},
     "waiting_check_days": {"group": "Сроки и календарь", "title": "Напоминание уточнить решение клиента после КП", "unit": "раб. дн.", "type": "number",
