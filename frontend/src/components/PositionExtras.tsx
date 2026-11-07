@@ -22,15 +22,48 @@ export function ZipBlock({ dealId, positionId, canEdit }: { dealId: string; posi
       setMsg("ЗИП сохранён"); load();
     } catch (e) { setMsg((e as Error).message); }
   }
+  // Excel: шаблон, загрузка с предпросмотром, выгрузка перечня на заданную наработку
+  const [preview, setPreview] = useState<{ items: Zip[]; errors: string[]; current: number; file: File } | null>(null);
+  const [hours, setHours] = useState("2000");
+  const [forHours, setForHours] = useState<{ items: (Zip & { replacements: number; qty_period: number; amount: number | null })[]; totals: Record<string, number> } | null>(null);
+  async function pick(file: File | null) {
+    if (!file) return;
+    try { const r = await api.upload<{ items: Zip[]; errors: string[]; current: number }>(`${base}/import`, file, { mode: "preview" }); setPreview({ ...r, file }); setMsg(""); }
+    catch (e) { setMsg((e as Error).message); }
+  }
+  async function applyImport(mode: "replace" | "append") {
+    if (!preview) return;
+    try { await api.upload(`${base}/import`, preview.file, { mode }); setPreview(null); setMsg(`Загружено из Excel: ${preview.items.length} строк (${mode === "replace" ? "заменили" : "добавили"})`); load(); }
+    catch (e) { setMsg((e as Error).message); }
+  }
+  const showHours = () => api.get<typeof forHours>(`${base}/for-hours?hours=${num(hours) || 0}`).then(setForHours).catch((e) => setMsg((e as Error).message));
   const inp = (i: number, k: keyof Zip, w: number, ph = "") => (
     <input style={{ width: w, minWidth: 0 }} placeholder={ph} disabled={!canEdit} value={String(rows[i][k] ?? "")} onChange={(e) => set(i, { [k]: e.target.value } as Partial<Zip>)} />);
   return (
     <div>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h3 style={{ margin: "4px 0" }}>ЗИП</h3>
-        {canEdit && <div className="row"><button className="btn add" onClick={() => { setRows([...rows, { ...EMPTY_ZIP }]); setDirty(true); }}>Строка</button>
-          <button className="btn" disabled={!dirty} onClick={save}>Сохранить ЗИП</button></div>}
+        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+          <a className="btn ghost" style={{ padding: "4px 10px", fontSize: 12 }} href={`${base}/template.xlsx`} title="шаблон Excel с нужными колонками (и текущим ЗИП, если он есть)">Шаблон Excel</a>
+          {canEdit && <label className="btn ghost" style={{ padding: "4px 10px", fontSize: 12, cursor: "pointer" }}>Загрузить из Excel
+            <input type="file" accept=".xlsx" style={{ display: "none" }} onChange={(e) => { pick(e.target.files?.[0] || null); e.target.value = ""; }} /></label>}
+          {canEdit && <><button className="btn add" onClick={() => { setRows([...rows, { ...EMPTY_ZIP }]); setDirty(true); }}>Строка</button>
+            <button className="btn" disabled={!dirty} onClick={save}>Сохранить ЗИП</button></>}
+        </div>
       </div>
+      {preview && (
+        <div className="card" style={{ margin: "6px 0", borderLeft: "4px solid var(--info)" }}>
+          <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+            <b>Из файла {preview.file.name}: {preview.items.length} строк{preview.current ? ` · сейчас в ЗИП ${preview.current}` : ""}</b>
+            <div className="row" style={{ gap: 6 }}>
+              <button className="btn" disabled={preview.errors.length > 0} onClick={() => applyImport("replace")}>Заменить ЗИП</button>
+              <button className="btn secondary" disabled={preview.errors.length > 0} onClick={() => applyImport("append")}>Добавить к текущему</button>
+              <button className="btn ghost" onClick={() => setPreview(null)}>Отмена</button></div>
+          </div>
+          {preview.errors.length > 0 && <div className="alert error" style={{ fontSize: 12 }}>{preview.errors.map((e, i) => <div key={i}>{e}</div>)}</div>}
+          <table style={{ fontSize: 12, marginTop: 6 }}><thead><tr><th>Вид</th><th>Узел</th><th>Артикул</th><th>Наименование</th><th>Ед.</th><th className="num">Кол-во</th><th className="num">Цена</th><th>Валюта</th><th className="num">Замена, м·ч</th><th className="num">Срок, дн</th><th>Комментарий</th></tr></thead>
+            <tbody>{preview.items.map((r, i) => <tr key={i}><td>{r.kind === "to" ? "ЗИП на ТО" : "в комплекте"}</td><td>{r.assembly}</td><td>{r.article}</td><td>{r.name}</td><td>{r.unit}</td><td className="num">{r.qty}</td><td className="num">{r.price ?? "—"}</td><td>{r.currency}</td><td className="num">{r.interval_hours ?? "—"}</td><td className="num">{r.lead_days ?? "—"}</td><td>{r.comment}</td></tr>)}</tbody></table>
+        </div>)}
       {msg && <div className="muted" style={{ fontSize: 12 }}>{msg}</div>}
       {rows.length === 0 ? <div className="muted">ЗИП не задан{canEdit ? " — добавьте строки: что входит в комплект поставки и что нужно на ТО" : ""}.</div> : (
         <div style={{ overflowX: "auto" }}>
@@ -47,6 +80,20 @@ export function ZipBlock({ dealId, positionId, canEdit }: { dealId: string; posi
                 {canEdit && <td><button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => { setRows(rows.filter((_, j) => j !== i)); setDirty(true); }}>×</button></td>}
               </tr>))}</tbody>
           </table>
+        </div>)}
+      {rows.some((r) => r.kind === "to") && (
+        <div style={{ marginTop: 8, borderTop: "1px solid var(--line)", paddingTop: 6 }}>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center", fontSize: 13 }}>
+            <b>Перечень ЗИП на наработку</b>
+            <input style={{ width: 80 }} value={hours} onChange={(e) => setHours(e.target.value)} /> м·ч
+            <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 12 }} onClick={showHours}>Показать</button>
+            <a className="btn ghost" style={{ padding: "4px 10px", fontSize: 12 }} href={`${base}/for-hours.xlsx?hours=${num(hours) || 0}`}>Выгрузить Excel</a>
+            <span className="muted" style={{ fontSize: 11 }}>число замен = наработка ÷ периодичность (целое вниз); комплект поставки — один раз</span>
+          </div>
+          {forHours && (forHours.items.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>На {hours} м·ч замен не требуется.</div> : (
+            <table style={{ fontSize: 12, marginTop: 6 }}><thead><tr><th>Вид</th><th>Артикул</th><th>Наименование</th><th className="num">Замен</th><th className="num">Кол-во на период</th><th className="num">Сумма</th><th>Валюта</th></tr></thead>
+              <tbody>{forHours.items.map((r, i) => <tr key={i}><td>{r.kind === "to" ? "ЗИП на ТО" : "в комплекте"}</td><td>{r.article}</td><td>{r.name}</td><td className="num">{r.replacements}</td><td className="num">{r.qty_period} {r.unit}</td><td className="num">{r.amount ?? "—"}</td><td>{r.currency}</td></tr>)}
+                {Object.entries(forHours.totals).map(([c, v]) => <tr key={c} className="total"><td colSpan={5}>Итого</td><td className="num">{v}</td><td>{c}</td></tr>)}</tbody></table>))}
         </div>)}
       <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>«В комплекте поставки» попадает в чек-лист приёмки на заводе; «ЗИП на ТО» с периодичностью замены — в ТО-комплекты парка машин.</div>
     </div>
