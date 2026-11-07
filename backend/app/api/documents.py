@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import uuid
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -68,7 +69,10 @@ def _save(db: Session, deal: Deal, user: CurrentUser, file: UploadFile, category
         shutil.copyfileobj(file.file, f)
     try:
         ensure_folders(db, deal)
-        stored = adapters.storage().upload(path, deal.storage_folder, "08_legal", f"{CATEGORIES[category]} — {name}".replace("/", "-"))
+        # уникальный суффикс: повторная загрузка файла с тем же именем не перезаписывает предыдущий (история документов сохраняется)
+        stem, ext = os.path.splitext(name)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        stored = adapters.storage().upload(path, deal.storage_folder, "08_legal", f"{CATEGORIES[category]} — {stem} [{stamp}-{uuid.uuid4().hex[:6]}]{ext}".replace("/", "-"))
     except Exception as e:
         raise HTTPException(502, f"Хранилище недоступно: {e}")
     finally:

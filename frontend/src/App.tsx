@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import FloatingScrollbar from "./components/FloatingScrollbar";
+import NotificationBell from "./components/NotificationBell";
 import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { api, getDevUser, setDevUser } from "./api";
 import type { Me } from "./types";
@@ -62,6 +63,7 @@ export default function App() {
                 </select>
               </label>
             )}
+            {me && <NotificationBell />}
             {me && (
               <div className="me" title={`${me.display_name} — ${me.roles.map((r) => r.title).join(", ")}`}>
                 <span className="avatar">{me.display_name.replace(/\(.*\)/, "").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()}</span>

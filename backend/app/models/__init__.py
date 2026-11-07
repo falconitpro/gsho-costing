@@ -806,6 +806,7 @@ class NotificationLog(Base):
     status: Mapped[str] = mapped_column(String(16), default="queued")   # queued | sent | failed | read
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     error: Mapped[str] = mapped_column(Text, default="")
+    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))   # канал «в системе»: когда прочитано
 
 
 class ImportMapping(TimestampMixin, Base):

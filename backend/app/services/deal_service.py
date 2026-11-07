@@ -101,7 +101,9 @@ def notify(db: Session, deal: Deal | None, user_id: str | None, event: str, chan
             elif ch == "email" and user:
                 from ..adapters.mail import OutgoingMail
                 to = [a for a in (user.email, contacts.get("extra_email")) if a]
-                adapters.mail().send(OutgoingMail(to=to, subject=text, body_html=f"<p>{text}</p>"))
+                base = (get_settings().cors_origins or [""])[0].rstrip("/")
+                link = f'<p><a href="{base}/deals/{deal.id}">Открыть сделку {deal.number}</a></p>' if deal and base else ""
+                adapters.mail().send(OutgoingMail(to=to, subject=f"[ГШО] {text[:120]}", body_html=f"<p>{text}</p>{link}"))
                 row.status = "sent" if get_settings().mail_provider != "console" else "queued"
                 if row.status == "queued":
                     row.error = "почта не подключена"

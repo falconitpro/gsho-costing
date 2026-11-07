@@ -85,6 +85,11 @@ class LocalStorage(StorageAdapter):
         dest_dir = self.root / folder / DEAL_SUBFOLDERS[subfolder_key]
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / file_name
+        n = 1
+        while dest.exists():   # файл с таким именем уже есть — не перезаписываем: прежняя запись в базе должна открывать прежний файл
+            n += 1
+            stem, ext = os.path.splitext(file_name)
+            dest = dest_dir / f"{stem} ({n}){ext}"
         shutil.copyfile(local_path, dest)
         rel = str(dest.relative_to(self.root))
         return StoredFile(path=rel, url=self.link(rel), sha256=sha256_file(str(dest)), size=os.path.getsize(dest))
