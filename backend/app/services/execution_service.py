@@ -63,6 +63,20 @@ CONTRACT_STEPS: list[dict[str, Any]] = [
 CONTRACT_STEP_TITLES = {c["code"]: c["title"] for c in CONTRACT_STEPS}
 
 
+def client_signed(deal: Deal) -> bool:
+    """Договор с клиентом подписан: отмечен подэтап или внесены номер и дата подписания."""
+    return bool((deal.contract_steps or {}).get("client_signed", {}).get("done") or (deal.contract_number and deal.contract_signed_at))
+
+
+def factory_signed(deal: Deal) -> bool:
+    """Договор с заводом подписан: отмечен подэтап или внесена дата подписания."""
+    return bool((deal.contract_steps or {}).get("factory_signed", {}).get("done") or deal.factory_contract_signed_at)
+
+
+# после подписания номер и дата договора не меняются; исправить может только ЗГД или КД отдельным действием с причиной
+LOCKED_FIELDS = {"client": ("contract_number", "contract_signed_at"), "factory": ("factory_contract_number", "factory_contract_signed_at")}
+
+
 def contract_steps(db: Session, deal: Deal) -> list[dict[str, Any]]:
     """Подэтапы заключения контракта с состоянием: выполнен / текущий / ожидает."""
     from ..models import User
