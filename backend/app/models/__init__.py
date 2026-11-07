@@ -983,6 +983,36 @@ class LegalPackage(TimestampMixin, Base):
     superseded_by: Mapped[Optional[str]] = mapped_column(String(36))
 
 
+class PowerOfAttorney(TimestampMixin, Base):
+    """Доверенность от компании группы (юридический блок): конструктор, реестр, печать, копии, статусы, отзыв.
+    Персональные данные представителя (паспорт) видят только юрист, ЗГД, ФД и администратор."""
+    __tablename__ = "powers_of_attorney"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    entity_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id"), index=True)       # доверитель — компания группы
+    profile_id: Mapped[Optional[str]] = mapped_column(String(36))                             # юридический профиль доверителя (снимок в principal)
+    number: Mapped[str] = mapped_column(String(64), default="")                               # присваивается при оформлении: Д-<код>-<год>-<NNN>
+    seq: Mapped[Optional[int]] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16), default="special")                          # general | special | single
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)              # draft | active | expired | revoked | cancelled
+    issued_on: Mapped[Optional[date]] = mapped_column(Date)
+    valid_to: Mapped[Optional[date]] = mapped_column(Date)
+    place: Mapped[str] = mapped_column(String(255), default="")
+    principal: Mapped[dict] = mapped_column(JSONType, default=dict)                           # снимок доверителя: name, inn, kpp, ogrn, address, signatory, signatory_position, signatory_basis
+    attorney_user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))           # представитель — сотрудник (если из списка)
+    attorney: Mapped[dict] = mapped_column(JSONType, default=dict)                            # full_name, position, birth_date, birth_place, passport {series, number, issued_by, issued_on, code}, address, phone, email
+    powers: Mapped[list[dict]] = mapped_column(JSONType, default=list)                        # [{code, text}] — из каталога или свои
+    limits: Mapped[dict] = mapped_column(JSONType, default=dict)                              # amount_limit, currency, counterparties (текст/список), territory, substitution (bool), extra
+    documents_text: Mapped[str] = mapped_column(Text, default="")                             # итоговый текст (для шаблона и поиска)
+    files: Mapped[list[dict]] = mapped_column(JSONType, default=list)                         # [{id, kind: draft|issued|signed_scan|revocation|other, name, size, uploaded_by, uploaded_at}]
+    history: Mapped[list[dict]] = mapped_column(JSONType, default=list)                       # [{at, by, action, comment}]
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    revoke_reason: Mapped[str] = mapped_column(Text, default="")
+    notified: Mapped[list[str]] = mapped_column(JSONType, default=list)                       # отправленные напоминания: expiring_30, expiring_7, expired
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
 class SupplyRoute(TimestampMixin, Base):
     """Маршрут поставки: цепочка продаж от поставщика до компании, продающей клиенту."""
     __tablename__ = "supply_routes"
