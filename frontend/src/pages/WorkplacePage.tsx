@@ -53,9 +53,9 @@ export default function WorkplacePage({ me }: { me: Me }) {
     switch (code) {
       case "focus": return d.focus && (
         <div key={code} className="wp-card wp-focus" style={{ borderColor: TONE_DOT[d.focus.tone] || "#141413" }}>
-          <div className="wp-h" style={{ color: "#a1a1aa" }}>Главное сейчас</div>
+          <div className="wp-h" style={{ color: "var(--accent)" }}>Главное сейчас</div>
           <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.2, marginTop: 6 }}>{d.focus.title}</div>
-          <div style={{ color: "#d4d4d8", marginTop: 6 }}>{d.focus.text}</div>
+          <div style={{ color: "var(--muted)", marginTop: 6 }}>{d.focus.text}</div>
           <div className="row" style={{ marginTop: 14, gap: 8 }}><button className="btn" onClick={() => nav(d.focus!.url)}>{d.focus.action}</button></div>
         </div>);
       case "today": return (
@@ -116,13 +116,13 @@ export default function WorkplacePage({ me }: { me: Me }) {
       case "funnel": { const mx = Math.max(1, ...d.funnel.map((f) => f.count)); return (
         <div key={code} className="wp-card">
           <div className="wp-head"><h2>Воронка квартала</h2><span className="muted" style={{ fontSize: 12 }}>{d.user.role === "manager" ? "по моим сделкам" : "по всем сделкам"}</span></div>
-          <div className="wp-funnel">{d.funnel.map((f) => <div key={f.code}><b>{f.count}</b><div className="bar" style={{ height: `${Math.max(6, Math.round(80 * f.count / mx))}px`, background: f.code === "won" ? "#15803d" : f.code === "approval" ? "#ff3131" : "#52525b" }} /><small>{f.title}</small></div>)}</div>
+          <div className="wp-funnel">{d.funnel.map((f) => <div key={f.code}><b>{f.count}</b><div className="bar" style={{ height: `${Math.max(6, Math.round(80 * f.count / mx))}px`, background: f.code === "won" ? "#86efac" : f.code === "approval" ? "#fdba74" : "#d4d4d8" }} /><small>{f.title}</small></div>)}</div>
         </div>); }
       case "team": return d.team.length > 0 ? (
         <div key={code} className="wp-card">
           <div className="wp-head"><h2>Команда · нагрузка</h2></div>
           <div className="wp-list" style={{ gap: 6 }}>{d.team.map((t) => (
-            <div key={t.name} className="wp-team"><span>{t.name}</span><div className="track"><div style={{ width: `${Math.round(t.share * 100)}%`, background: t.overdue ? "#ff3131" : "#141413" }} /></div><small className="muted">{t.open + t.exec} сд.{t.overdue ? ` · ${t.overdue} проср.` : ""}</small></div>))}</div>
+            <div key={t.name} className="wp-team"><span>{t.name}</span><div className="track"><div style={{ width: `${Math.round(t.share * 100)}%`, background: t.overdue ? "#fca5a5" : "#a1a1aa" }} /></div><small className="muted">{t.open + t.exec} сд.{t.overdue ? ` · ${t.overdue} проср.` : ""}</small></div>))}</div>
         </div>) : null;
       case "notifications": return (
         <div key={code} className="wp-card">
@@ -150,9 +150,9 @@ export default function WorkplacePage({ me }: { me: Me }) {
         </div>);
       case "quick": return (
         <div key={code} className="wp-card wp-dark">
-          <div className="wp-head"><h2 style={{ color: "#fff" }}>Быстрые действия</h2></div>
+          <div className="wp-head"><h2>Быстрые действия</h2></div>
           <div className="wp-grid2">{d.quick.map((q) => <button key={q.url} className="wp-qa" onClick={() => nav(q.url)}>{q.title}</button>)}</div>
-          {Object.keys(d.fx).length > 0 && <div style={{ fontSize: 12, color: "#a1a1aa", marginTop: 12 }}>Курс ЦБ: {Object.entries(d.fx).map(([k, v]) => `${k} ${v.rate.toLocaleString("ru-RU")}`).join(" · ")}</div>}
+          {Object.keys(d.fx).length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 12 }}>Курс ЦБ: {Object.entries(d.fx).map(([k, v]) => `${k} ${v.rate.toLocaleString("ru-RU")}`).join(" · ")}</div>}
         </div>);
       default: return null;
     }
