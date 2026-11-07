@@ -36,7 +36,7 @@ const showVal = (v: unknown): string => {
 const KINDS: Record<string, string> = { gsho: "ГШО", parts: "Запасные части" };
 
 /** Справочник поставщиков (ГШО и запасных частей): реквизиты, контакты по направлениям (заявки, логистика, финансы, сервис…), WeChat / WeCom / почта, история цен. */
-export default function FactoriesPage({ me }: { me: Me }) {
+export default function FactoriesPage({ me, embedded = false }: { me: Me; embedded?: boolean }) {
   const [list, setList] = useState<Factory[]>([]);
   const [roles, setRoles] = useState<Record<string, string>>({});
   const [q, setQ] = useState("");
@@ -94,8 +94,8 @@ export default function FactoriesPage({ me }: { me: Me }) {
   return (
     <>
       <div className="page-head">
-        <h1>Поставщики</h1>
-        <div className="row" style={{ marginLeft: 12 }}>{([["gsho", "ГШО"], ["parts", "Запасные части"], ["", "Все"]] as const).map(([k, t]) => (
+        {!embedded && <h1>Поставщики</h1>}
+        <div className="row" style={{ marginLeft: embedded ? 0 : 12 }}>{([["gsho", "ГШО"], ["parts", "Запасные части"], ["", "Все"]] as const).map(([k, t]) => (
           <button key={k} className={`btn ${kind === k ? "" : "ghost"}`} onClick={() => setKind(k)}>{t} <span className="muted">({list.filter((f) => !k || (f.supplies || ["gsho"]).includes(k)).length})</span></button>))}
           {list.some(waiting) && <button className={`btn ${kind === "approval" ? "" : "ghost"}`} onClick={() => setKind("approval")}>На утверждении <span className="badge bad">{list.filter(waiting).length}</span></button>}</div>
         <div className="push">{editor && <button className="btn add" onClick={() => { setCur({ ...EMPTY, supplies: [kind || "gsho"], contacts: [{ ...EMPTY_CONTACT, roles: ["rfq"], primary: true }] }); setPrices([]); setMsg(""); }}>Добавить поставщика</button>}</div>

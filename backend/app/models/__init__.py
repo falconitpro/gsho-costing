@@ -105,6 +105,9 @@ class Client(TimestampMixin, Base):
     registry_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     manager_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     default_payment_scheme_id: Mapped[Optional[str]] = mapped_column(ForeignKey("payment_schemes.id"))
+    # наборы реквизитов для договоров (юрлицо/филиал, банк, адреса, подписант): [{id, title, is_default, legal_name, inn, kpp, ogrn,
+    #   legal_address, postal_address, bank_name, bik, account, corr_account, signatory_name, signatory_position, signatory_basis, phone, email, comment}]
+    requisites: Mapped[list[dict]] = mapped_column(JSONType, default=list)
 
 
 def designation(trademark: Optional[str], model: Optional[str]) -> str:
@@ -414,6 +417,8 @@ class Deal(TimestampMixin, Base):
     contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
     factory_contract_signed_at: Mapped[Optional[date]] = mapped_column(Date)
     factory_contract_number: Mapped[Optional[str]] = mapped_column(String(64))     # номер контракта с заводом
+    client_requisites_id: Mapped[Optional[str]] = mapped_column(String(36))        # выбранный набор реквизитов клиента
+    client_requisites: Mapped[dict] = mapped_column(JSONType, default=dict)        # снимок реквизитов на момент договора
     contract_steps: Mapped[dict] = mapped_column(JSONType, default=dict)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)   # удалена КД/ЗГД (в корзине, можно восстановить)
     deleted_by: Mapped[Optional[str]] = mapped_column(String(36))

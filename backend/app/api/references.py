@@ -67,12 +67,139 @@ def client_lookup(inn: str, db: Session = Depends(get_db), user: CurrentUser = D
     found = _registry_lookup(db, inn, user)
     return {"inn": inn, "existing_client_id": existing.id if existing else None, "results": found}
 
+WON_STATUSES = (DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED)
+OPEN_STATUSES = (DealStatus.DRAFT, DealStatus.LOGISTICS_CALC, DealStatus.SERVICE_CALC, DealStatus.CALC_READY, DealStatus.CD_APPROVAL, DealStatus.FD_VISA,
+                 DealStatus.GD_VISA, DealStatus.REWORK, DealStatus.APPROVED, DealStatus.KP_SENT)
+
+
+def _client_stats(db: Session, user: CurrentUser) -> dict[str, dict]:
+    """Аналитика по клиентам для списка контрагентов: сделки всего / в работе / выиграно / проиграно, последняя активность,
+    менеджер последней сделки, сумма выигранных (только finance_analytics)."""
+    from ..models import User
+    fin = user.can("finance_analytics")
+    users = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    out: dict[str, dict] = {}
+    deals = db.scalars(select(Deal).where(Deal.deleted_at.is_(None)).order_by(Deal.created_at)).all()
+    for d in deals:
+        st = out.setdefault(d.client_id, {"deals": 0, "open": 0, "won": 0, "lost": 0, "last_on": None, "last_number": "", "last_status": "", "manager": "", "sum_won_rub": 0.0})
+        st["deals"] += 1
+        won = d.outcome == "won" or d.status in WON_STATUSES
+        if won:
+            st["won"] += 1
+        elif d.status in OPEN_STATUSES:
+            st["open"] += 1
+        elif d.status == DealStatus.LOST or d.outcome == "lost":
+            st["lost"] += 1
+        on = (d.updated_at or d.created_at)
+        if on and (st["last_on"] is None or on > st["last_on"]):
+            st["last_on"], st["last_number"], st["last_status"], st["manager"] = on, d.number, d.status.value, users.get(d.manager_id, "")
+        if fin and won and d.approved_version_id:
+            ver = db.get(DealVersion, d.approved_version_id)
+            vid = d.won_variant_id or next(iter(ver.calc_result.get("variants", {})), None) if ver else None
+            if ver and vid and vid in ver.calc_result.get("variants", {}):
+                st["sum_won_rub"] += ver.calc_result["variants"][vid]["base"].get("price_rub") or 0
+    for st in out.values():
+        st["last_on"] = st["last_on"].isoformat() if st["last_on"] else None
+        st["sum_won_rub"] = round(st["sum_won_rub"], 2) if fin else None
+    return out
+
+
 @router.get("/clients")
-def clients(q: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+def clients(q: str = "", stats: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     stmt = select(Client).order_by(Client.name)
     if q:
         stmt = stmt.where(or_(Client.name.ilike(f"%{q}%"), Client.inn.like(f"{q}%")))
-    return [serialize(c) for c in db.scalars(stmt).all()]
+    rows = [serialize(c) for c in db.scalars(stmt).all()]
+    if stats:
+        st = _client_stats(db, user)
+        empty = {"deals": 0, "open": 0, "won": 0, "lost": 0, "last_on": None, "last_number": "", "last_status": "", "manager": "", "sum_won_rub": None}
+        for r in rows:
+            r["stats"] = st.get(r["id"], empty)
+            r["requisites_count"] = len(r.get("requisites") or [])
+    return rows
+
+
+# ------------------------------------------------------------------ наборы реквизитов клиента (для договоров)
+
+REQ_FIELDS = ("title", "legal_name", "short_name", "inn", "kpp", "ogrn", "legal_address", "postal_address", "bank_name", "bik", "account", "corr_account",
+              "signatory_name", "signatory_position", "signatory_basis", "phone", "email", "comment")
+
+
+class RequisitesSet(BaseModel):
+    id: Optional[str] = None
+    title: str = ""
+    is_default: bool = False
+    legal_name: str = ""
+    short_name: str = ""
+    inn: str = ""
+    kpp: str = ""
+    ogrn: str = ""
+    legal_address: str = ""
+    postal_address: str = ""
+    bank_name: str = ""
+    bik: str = ""
+    account: str = ""
+    corr_account: str = ""
+    signatory_name: str = ""
+    signatory_position: str = ""
+    signatory_basis: str = ""
+    phone: str = ""
+    email: str = ""
+    comment: str = ""
+
+
+class RequisitesIn(BaseModel):
+    items: list[RequisitesSet]
+
+
+def requisites_from_card(c: Client) -> dict:
+    """Набор реквизитов «по карточке»: из ЕГРЮЛ/ЕГРИП (без банка и подписанта)."""
+    return {"id": "card", "title": "Из карточки (ЕГРЮЛ)", "is_default": False, "legal_name": c.full_name or c.name, "short_name": c.name, "inn": c.inn, "kpp": c.kpp or "",
+            "ogrn": c.ogrn or "", "legal_address": c.address or "", "postal_address": "", "bank_name": "", "bik": "", "account": "", "corr_account": "",
+            "signatory_name": c.director or "", "signatory_position": "Генеральный директор" if c.director else "", "signatory_basis": "Устава" if c.director else "",
+            "phone": "", "email": "", "comment": ""}
+
+
+def client_requisites_options(c: Client) -> list[dict]:
+    """Все варианты реквизитов клиента для выбора в договор: сохранённые наборы + «из карточки»."""
+    return list(c.requisites or []) + [requisites_from_card(c)]
+
+
+@router.get("/clients/{client_id}/requisites")
+def get_requisites(client_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    c = db.get(Client, client_id)
+    if c is None:
+        raise HTTPException(404)
+    return {"items": c.requisites or [], "from_card": requisites_from_card(c)}
+
+
+@router.put("/clients/{client_id}/requisites")
+def put_requisites(client_id: str, body: RequisitesIn, db: Session = Depends(get_db),
+                   user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN, Role.LAWYER))):
+    """Наборы реквизитов клиента: несколько юрлиц/филиалов, банков и подписантов; один — по умолчанию."""
+    import uuid
+    c = db.get(Client, client_id)
+    if c is None:
+        raise HTTPException(404)
+    items = []
+    for r in body.items:
+        if not (r.title.strip() or r.legal_name.strip()):
+            continue
+        d = r.model_dump()
+        d["id"] = d["id"] or uuid.uuid4().hex
+        d["title"] = d["title"].strip() or d["legal_name"].strip()
+        for k in REQ_FIELDS:
+            d[k] = (d.get(k) or "").strip()
+        items.append(d)
+    if items and not any(x["is_default"] for x in items):
+        items[0]["is_default"] = True
+    if sum(1 for x in items if x["is_default"]) > 1:
+        raise HTTPException(422, "По умолчанию может быть только один набор реквизитов")
+    before = len(c.requisites or [])
+    c.requisites = items
+    audit(db, user.id, None, "client", c.id, "requisites", {"items": before}, {"items": len(items)})
+    db.commit()
+    return {"items": c.requisites, "from_card": requisites_from_card(c)}
 
 
 @router.post("/clients", status_code=201)

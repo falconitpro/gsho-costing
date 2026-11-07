@@ -2,12 +2,17 @@ import { Fragment, useEffect, useState } from "react";
 import { lbl, OUTCOME } from "../labels";
 import { UndoButton, useUndoHistory } from "../undo";
 import { api, ApiError, fmtDate, fmtPct, fmtRub } from "../api";
+import { STATUS_TITLES } from "../types";
+import { toneOf } from "../colors";
+import ClientRequisites from "../components/ClientRequisites";
 import type { Me } from "../types";
 import { payText } from "../components/PaymentTermsEditor";
 import type { PaymentLine } from "../types";
 
+type Stats = { deals: number; open: number; won: number; lost: number; last_on: string | null; last_number: string; last_status: string; manager: string; sum_won_rub: number | null };
 type Client = { id: string; name: string; inn: string; address: string; sites: { name: string }[]; contacts: { name: string; email?: string }[];
-  full_name?: string; kpp?: string; ogrn?: string; director?: string; legal_status?: string; okved?: string; registry_checked_at?: string | null };
+  full_name?: string; kpp?: string; ogrn?: string; director?: string; legal_status?: string; okved?: string; registry_checked_at?: string | null; stats?: Stats; requisites_count?: number };
+type SortKey = "name" | "deals" | "open" | "won" | "sum" | "last";
 type Found = { inn: string; name: string; full_name: string; kpp: string; ogrn: string; address: string; director: string; status: string; okved: string;
   registered_on: string | null; kind: string; source: string; raw: Record<string, unknown> };
 const STATUS_RU: Record<string, string> = { ACTIVE: "действующая", LIQUIDATING: "ликвидируется", LIQUIDATED: "ликвидирована", BANKRUPT: "банкротство", REORGANIZING: "реорганизация" };
@@ -31,7 +36,7 @@ function verDiff(newer: KpVer, older?: KpVer): string[] {
   return out;
 }
 
-export default function ClientsPage({ me }: { me: Me }) {
+export default function ClientsPage({ me, embedded = false }: { me: Me; embedded?: boolean }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [card, setCard] = useState<Card | null>(null);
   const EMPTY_FORM = { name: "", inn: "", address: "", full_name: "", kpp: "", ogrn: "", director: "", legal_status: "", okved: "", registry: {} as Record<string, unknown> };
@@ -46,7 +51,13 @@ export default function ClientsPage({ me }: { me: Me }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState({ model: "", outcome: "", factory: "", from: "", to: "" });
   const canCreate = me.roles.some((r) => ["manager", "cd", "gd", "admin"].includes(r.code));
-  const load = () => api.get<Client[]>("/api/refs/clients").then(setClients);
+  const canReq = me.roles.some((r) => ["manager", "cd", "gd", "admin", "lawyer"].includes(r.code));
+  const [q, setQ] = useState("");
+  const [view, setView] = useState<"all" | "open" | "won" | "none">("all");
+  const [mgr, setMgr] = useState("");
+  const [sort, setSort] = useState<{ k: SortKey; d: 1 | -1 }>({ k: "last", d: -1 });
+  const [showNew, setShowNew] = useState(false);
+  const load = () => api.get<Client[]>("/api/refs/clients?stats=1").then(setClients);
   useEffect(() => { load(); }, []);
   async function create() {
     try { const c = await api.post<Client>("/api/refs/clients", form); setForm(EMPTY_FORM); setFound(null); setLookupMsg(""); setErr(""); load(); api.get<Card>(`/api/refs/clients/${c.id}`).then(setCard); }
@@ -79,10 +90,50 @@ export default function ClientsPage({ me }: { me: Me }) {
     setLookupMsg(`${kind === "branch" ? "Подставлен филиал" : "Подставлена головная организация"}: ${f.name}${f.status && f.status !== "ACTIVE" ? ` — внимание: организация ${STATUS_RU[f.status] || f.status}` : ""}. Проверьте и нажмите «Добавить».`);
   }
   return (
-    <div className="grid cols-2">
+    <div className="grid" style={{ gridTemplateColumns: card ? "minmax(0, 2fr) minmax(0, 3fr)" : "1fr" }}>
       <div>
-        <h1>Клиенты</h1>
-        {canCreate && (
+        {!embedded && <h1>Клиенты</h1>}
+        {(() => {
+          const fin = clients.some((c) => c.stats?.sum_won_rub != null);
+          const st = (c: Client): Stats => c.stats || { deals: 0, open: 0, won: 0, lost: 0, last_on: null, last_number: "", last_status: "", manager: "", sum_won_rub: null };
+          const managers = [...new Set(clients.map((c) => st(c).manager).filter(Boolean))].sort();
+          const shown = clients.filter((c) => (!q || `${c.name} ${c.inn} ${c.full_name || ""}`.toLowerCase().includes(q.toLowerCase()))
+            && (view === "all" || (view === "open" ? st(c).open > 0 : view === "won" ? st(c).won > 0 : st(c).deals === 0)) && (!mgr || st(c).manager === mgr))
+            .sort((a, b) => { const A = st(a), B = st(b); const v = sort.k === "name" ? a.name.localeCompare(b.name, "ru") : sort.k === "deals" ? A.deals - B.deals : sort.k === "open" ? A.open - B.open
+              : sort.k === "won" ? A.won - B.won : sort.k === "sum" ? (A.sum_won_rub || 0) - (B.sum_won_rub || 0) : String(A.last_on || "").localeCompare(String(B.last_on || "")); return v * sort.d; });
+          const th = (k: SortKey, t: string, num = false) => <th className={num ? "num" : undefined} style={{ cursor: "pointer", whiteSpace: "nowrap" }} onClick={() => setSort({ k, d: sort.k === k ? (sort.d === 1 ? -1 : 1) : (k === "name" ? 1 : -1) })}>{t}{sort.k === k ? (sort.d === 1 ? " ↑" : " ↓") : ""}</th>;
+          const kpis: [string, string | number][] = [["клиентов", clients.length], ["с открытыми сделками", clients.filter((c) => st(c).open > 0).length], ["выигравших", clients.filter((c) => st(c).won > 0).length],
+            ["без сделок", clients.filter((c) => st(c).deals === 0).length], ...(fin ? [["сумма выигранных, RUB", fmtRub(clients.reduce((a, c) => a + (st(c).sum_won_rub || 0), 0))] as [string, string]] : [])];
+          return (
+            <div className="card">
+              <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+                <input placeholder="🔍 название, ИНН" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: "1 1 220px" }} />
+                <select value={mgr} onChange={(e) => setMgr(e.target.value)}><option value="">все менеджеры</option>{managers.map((m) => <option key={m}>{m}</option>)}</select>
+                <div className="row" style={{ gap: 2 }}>{([["all", "все"], ["open", "с открытыми"], ["won", "выигравшие"], ["none", "без сделок"]] as const).map(([k, t]) => (
+                  <button key={k} onClick={() => setView(k)} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "6px 10px", fontWeight: view === k ? 700 : 500, borderBottom: view === k ? "2px solid var(--accent)" : "2px solid transparent", fontFamily: "inherit", fontSize: 13 }}>{t}</button>))}</div>
+                {canCreate && <button className="btn add" style={{ marginLeft: "auto" }} onClick={() => setShowNew(!showNew)}>{showNew ? "скрыть форму" : "Новый клиент"}</button>}
+              </div>
+              <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
+                {kpis.map(([t, v]) => <div key={t} style={{ flex: "1 1 120px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", background: "#fff" }}><div style={{ fontSize: 20, fontWeight: 700 }}>{v}</div><div className="muted" style={{ fontSize: 12 }}>{t}</div></div>)}
+              </div>
+              <div style={{ overflowX: "auto", marginTop: 10 }}>
+                <table style={{ fontSize: 13 }}>
+                  <thead><tr>{th("name", "Клиент")}{th("deals", "Сделок", true)}{th("open", "В работе", true)}{th("won", "Выиграно", true)}{fin && th("sum", "Сумма выигранных, RUB", true)}{th("last", "Последняя сделка")}<th>Менеджер</th><th title="наборов реквизитов для договоров">Реквизиты</th></tr></thead>
+                  <tbody>{shown.map((c) => { const x = st(c); return (
+                    <tr key={c.id} style={{ cursor: "pointer", background: card?.id === c.id ? "var(--accent-soft)" : undefined }} onClick={() => api.get<Card>(`/api/refs/clients/${c.id}`).then(setCard)}>
+                      <td><b>{c.name}</b><div className="muted" style={{ fontSize: 11 }}>ИНН {c.inn}{c.legal_status && c.legal_status !== "ACTIVE" && <span className="badge bad" style={{ marginLeft: 6 }}>{STATUS_RU[c.legal_status] || c.legal_status}</span>}</div></td>
+                      <td className="num">{x.deals || <span className="muted">—</span>}</td><td className="num">{x.open ? <span className="badge info">{x.open}</span> : <span className="muted">—</span>}</td>
+                      <td className="num">{x.won ? <span className="badge ok">{x.won}</span> : <span className="muted">—</span>}{x.lost > 0 && <span className="muted" style={{ fontSize: 11 }}> / {x.lost} пр.</span>}</td>
+                      {fin && <td className="num">{x.sum_won_rub ? fmtRub(x.sum_won_rub) : <span className="muted">—</span>}</td>}
+                      <td style={{ whiteSpace: "nowrap" }}>{x.last_number ? <>{x.last_number} <span className="badge" style={{ background: toneOf(x.last_status)[0], color: toneOf(x.last_status)[1], fontSize: 11 }}>{STATUS_TITLES[x.last_status] || x.last_status}</span><div className="muted" style={{ fontSize: 11 }}>{fmtDate(x.last_on)}</div></> : <span className="muted">—</span>}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{x.manager || <span className="muted">—</span>}</td>
+                      <td className="num">{c.requisites_count ? c.requisites_count : <span className="badge warn" title="нет наборов реквизитов для договоров">нет</span>}</td></tr>); })}
+                    {shown.length === 0 && <tr><td colSpan={8} className="muted">Не найдено</td></tr>}</tbody>
+                </table>
+              </div>
+            </div>);
+        })()}
+        {canCreate && showNew && (
           <div className="card">
             <b>Новый клиент</b> <span className="muted">— введите ИНН и нажмите «Найти»: наименование, КПП, ОГРН, адрес и руководитель подтянутся из ЕГРЮЛ/ЕГРИП</span>
             <div className="row" style={{ marginTop: 6 }}>
@@ -117,12 +168,6 @@ export default function ClientsPage({ me }: { me: Me }) {
             </div>
           </div>
         )}
-        <div className="card">
-          <table><thead><tr><th>Наименование</th><th>ИНН</th></tr></thead>
-            <tbody>{clients.map((c) => (
-              <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => api.get<Card>(`/api/refs/clients/${c.id}`).then(setCard)}>
-                <td>{c.name}</td><td>{c.inn}</td></tr>))}</tbody></table>
-        </div>
       </div>
       <div>
         {card && (
@@ -177,6 +222,7 @@ export default function ClientsPage({ me }: { me: Me }) {
             ) : <p className="muted">История КП и цен клиентам доступна КД и ЗГД (настраивается в уровнях доступа).</p>}
           </div>
         )}
+        {card && <ClientRequisites clientId={card.id} canEdit={canReq} />}
       </div>
     </div>
   );

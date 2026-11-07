@@ -13,7 +13,7 @@ from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
 from ..core.workflow import DealState, DealStatus, close_execution, contract_terms_changed, role_title, start_execution
 from ..db import get_db
-from ..models import Approval, Deal, ExecutionStage
+from ..models import Approval, Client, Deal, ExecutionStage
 from ..services import execution_service as ex
 from ..services.deal_service import apply_transition, audit, complete_tasks, create_version, sla
 from .common import deal_payload, get_deal_or_404
@@ -27,6 +27,7 @@ class ContractIn(BaseModel):
     factory_contract_signed_at: Optional[date] = None
     factory_contract_number: Optional[str] = None
     won_variant_id: Optional[str] = None
+    client_requisites_id: Optional[str] = None      # набор реквизитов клиента из карточки клиента (или "card" — из ЕГРЮЛ)
 
 
 def _stage_deal(deal: Deal) -> None:
@@ -52,9 +53,14 @@ def stages(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     if deal.request_group_id:
         for d in db.scalars(select(Deal).where(Deal.request_group_id == deal.request_group_id, Deal.id != deal.id)).all():
             related.append({"id": d.id, "number": d.number, "status": d.status.value})
+    from .references import client_requisites_options
+    client = db.get(Client, deal.client_id)
+    options = client_requisites_options(client) if client else []
     return {"stages": rows, "status": deal.status.value, "contract_number": deal.contract_number, "contract_signed_at": deal.contract_signed_at,
             "factory_contract_signed_at": deal.factory_contract_signed_at, "factory_contract_number": deal.factory_contract_number, "won_variant_id": deal.won_variant_id, "related": related,
-            "contract_steps": ex.contract_steps(db, deal), "status_detail": ex.status_detail(deal)}
+            "contract_steps": ex.contract_steps(db, deal), "status_detail": ex.status_detail(deal),
+            "client_requisites_id": deal.client_requisites_id, "client_requisites": deal.client_requisites or {},
+            "client_requisites_options": [{"id": o["id"], "title": o["title"], "is_default": o.get("is_default", False), "legal_name": o.get("legal_name", ""), "inn": o.get("inn", ""), "kpp": o.get("kpp", "")} for o in options]}
 
 
 @router.patch("/contract")
@@ -67,6 +73,15 @@ def contract(deal_id: str, body: ContractIn, db: Session = Depends(get_db), user
     before = {k: getattr(deal, k) for k in ContractIn.model_fields}
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(deal, k, v)
+    if body.client_requisites_id is not None:
+        # снимок выбранного набора реквизитов — договор не меняется, если карточку клиента потом поправят
+        from .references import client_requisites_options
+        client = db.get(Client, deal.client_id)
+        chosen = next((o for o in client_requisites_options(client) if o["id"] == body.client_requisites_id), None) if client and body.client_requisites_id else None
+        if body.client_requisites_id and chosen is None:
+            raise HTTPException(422, "Набор реквизитов клиента не найден")
+        deal.client_requisites_id = body.client_requisites_id or None
+        deal.client_requisites = chosen or {}
     if body.won_variant_id and not any(v.id == body.won_variant_id for v in deal.variants):
         raise HTTPException(422, "Предложение не найдено")
     audit(db, user.id, deal.id, "deal", deal.id, "contract", {k: str(v) for k, v in before.items()}, body.model_dump(mode="json", exclude_none=True))
