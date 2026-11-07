@@ -147,9 +147,30 @@ def test_purchase_package_flow():
             db.get(Deal, d["id"]).factory_contract_signed_at = date(2026, 11, 20)
             db.commit()
         assert c.post(f"/api/legal/packages/{pkg2['id']}/status", headers=H(MGR), json={"status": "signed"}).json()["status"] == "signed"
-        # реестр пакетов
-        reg = c.get("/api/legal/packages?kind=purchase", headers=H(CD)).json()["items"]
-        assert any(p["id"] == pkg2["id"] and p["deal_number"] == d["number"] for p in reg)
+        # реестр пакетов: сводка и фильтры
+        reg = c.get("/api/legal/packages?kind=purchase", headers=H(CD)).json()
+        assert any(p["id"] == pkg2["id"] and p["deal_number"] == d["number"] and p["deal_status"] for p in reg["items"]) and reg["summary"]["signed"] >= 1
+        # сквозная проверка файлов (этап 6): отчёт в пакете — файлы открываются, тегов нет, итог спецификации = сумме договора
+        det = c.get(f"/api/legal/packages/{pkg2['id']}", headers=H(MGR)).json()
+        docs_rep = det["checks"]["documents"]
+        assert docs_rep["ok"] and docs_rep["files"]["spec_equipment"]["total_found"] == 5200000.0 and docs_rep["files"]["purchase_contract"]["leftovers"] == []
+        for f in det["files"]:
+            content = c.get(f"/api/legal/packages/{pkg2['id']}/files/{f['kind']}", headers=H(MGR)).content
+            doc = Document(io.BytesIO(content))                                   # реально открывается
+            txt = _text(content)
+            assert "{{" not in txt and "}}" not in txt, f["kind"]                 # нет служебных тегов
+            assert len(txt) > 200
+            if f["kind"] == "spec_equipment":
+                assert len(doc.tables) >= 1 and all(len(r.cells) == len(doc.tables[0].rows[0].cells) for r in doc.tables[0].rows)   # таблица не разрушена
+        # подписанный скан: только к утверждённому/подписанному пакету, роли; хранится отдельно (категория подписанного контракта)
+        assert c.post(f"/api/legal/packages/{pkg['id']}/signed-scan", headers=H(MGR), files={"file": ("scan.pdf", b"%PDF-1.4 signed")}).status_code == 409   # пакет v1 заменён
+        assert c.post(f"/api/legal/packages/{pkg2['id']}/signed-scan", headers=H(LOG), files={"file": ("scan.pdf", b"%PDF-1.4 signed")}).status_code == 403
+        assert c.post(f"/api/legal/packages/{pkg2['id']}/signed-scan", headers=H(MGR), files={"file": ("scan.exe", b"x")}).status_code == 422
+        p2 = c.post(f"/api/legal/packages/{pkg2['id']}/signed-scan", headers=H(MGR), files={"file": ("contract_signed.pdf", b"%PDF-1.4 signed")}).json()
+        assert any(f["kind"] == "signed_scan" for f in p2["files"])
+        assert c.get(f"/api/legal/packages/{pkg2['id']}/files/signed_scan", headers=H(MGR)).content == b"%PDF-1.4 signed"
+        docs = c.get(f"/api/deals/{d['id']}/documents", headers=H(MGR)).json()["documents"]
+        assert any(x["category"] == "factory_contract_signed" and x["file_name"] == "contract_signed.pdf" for x in docs)
         # второй поставщик — отдельный пакет (USD), без подтверждённого ЗИП — ошибка
         pv2 = c.post(f"{base}/purchase/preview", headers=H(MGR), json={"factory_id": f2["id"]}).json()
         assert len(pv2["context"]["items"]) == 1 and pv2["context"]["contract"]["currency"] == "USD" and not pv2["checks"]["ok"]
