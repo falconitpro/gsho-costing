@@ -11,7 +11,7 @@ import type { PaymentLine } from "../types";
 
 type PartsStats = { requests: number; open: number; done: number; last_on: string | null; last_number: string; sum_rub: number | null };
 type Stats = { deals: number; open: number; won: number; lost: number; last_on: string | null; last_number: string; last_status: string; manager: string; sum_won_rub: number | null; parts?: PartsStats };
-type Client = { id: string; name: string; inn: string; address: string; sites: { name: string }[]; contacts: { name: string; email?: string }[];
+type Client = { id: string; name: string; inn: string; is_active?: boolean; address: string; sites: { name: string }[]; contacts: { name: string; email?: string }[];
   full_name?: string; kpp?: string; ogrn?: string; director?: string; legal_status?: string; okved?: string; registry_checked_at?: string | null; stats?: Stats; requisites_count?: number };
 type SortKey = "name" | "deals" | "open" | "won" | "sum" | "last" | "preq" | "popen" | "psum" | "plast";
 const NO_PARTS: PartsStats = { requests: 0, open: 0, done: 0, last_on: null, last_number: "", sum_rub: null };
@@ -41,6 +41,7 @@ function verDiff(newer: KpVer, older?: KpVer): string[] {
 export default function ClientsPage({ me, embedded = false }: { me: Me; embedded?: boolean }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [card, setCard] = useState<Card | null>(null);
+  useEffect(() => { setConfirmDel(false); }, [card?.id]);
   const EMPTY_FORM = { name: "", inn: "", address: "", full_name: "", kpp: "", ogrn: "", director: "", legal_status: "", okved: "", registry: {} as Record<string, unknown> };
   const [form, setForm] = useState(EMPTY_FORM);
   const history = useUndoHistory({ form }, (st) => setForm(st.form));
@@ -53,6 +54,15 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState({ model: "", outcome: "", factory: "", from: "", to: "" });
   const canCreate = me.roles.some((r) => ["manager", "cd", "gd", "admin"].includes(r.code));
+  const canDelete = me.roles.some((r) => ["gd", "cd", "fd"].includes(r.code));
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  async function removeClient() {
+    if (!card) return;
+    if (!confirmDel) { setConfirmDel(true); setErr("Нажмите «Подтвердить удаление» ещё раз. Если по клиенту есть сделки или заявки, он будет перенесён в архив."); return; }
+    setConfirmDel(false);
+    try { const r = await api.del<{ message: string }>(`/api/refs/clients/${card.id}`); setErr(r.message); setCard(null); load(); } catch (e) { setErr((e as Error).message); }
+  }
   const [q, setQ] = useState("");
   const [view, setView] = useState<"all" | "open" | "won" | "none">("all");
   const [seg, setSeg] = useState<"all" | "gsho" | "parts">(() => { try { return (localStorage.getItem("clients_seg") as "all" | "gsho" | "parts") || "all"; } catch { return "all"; } });
@@ -60,8 +70,8 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
   const [mgr, setMgr] = useState("");
   const [sort, setSort] = useState<{ k: SortKey; d: 1 | -1 }>({ k: "last", d: -1 });
   const [showNew, setShowNew] = useState(false);
-  const load = () => api.get<Client[]>("/api/refs/clients?stats=1").then(setClients);
-  useEffect(() => { load(); }, []);
+  const load = () => api.get<Client[]>(`/api/refs/clients?stats=1${showArchived ? "&include_archived=1" : ""}`).then(setClients);
+  useEffect(() => { load(); }, [showArchived]);
   async function create() {
     try { const c = await api.post<Client>("/api/refs/clients", form); setForm(EMPTY_FORM); setFound(null); setLookupMsg(""); setErr(""); load(); api.get<Card>(`/api/refs/clients/${c.id}`).then(setCard); }
     catch (e) { setErr((e as Error).message); }
@@ -127,6 +137,7 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
                 <select value={mgr} onChange={(e) => setMgr(e.target.value)}><option value="">все менеджеры</option>{managers.map((m) => <option key={m}>{m}</option>)}</select>
                 <div className="row" style={{ gap: 2 }}>{([["all", "все"], ["open", "с открытыми"], ["won", "выигравшие"], ["none", "без сделок"]] as const).map(([k, t]) => (
                   <button key={k} onClick={() => setView(k)} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "6px 10px", fontWeight: view === k ? 700 : 500, borderBottom: view === k ? "2px solid var(--accent)" : "2px solid transparent", fontFamily: "inherit", fontSize: 13 }}>{t}</button>))}</div>
+                {canDelete && <label className="row muted" style={{ fontSize: 12, gap: 4 }}><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> архив</label>}
                 {canCreate && <button className="btn add" style={{ marginLeft: "auto" }} onClick={() => setShowNew(!showNew)}>{showNew ? "скрыть форму" : "Новый клиент"}</button>}
               </div>
               <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
@@ -140,7 +151,7 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
                     {!card && <th>Менеджер</th>}{!card && <th title="юридический профиль и реквизиты для договоров">Юр. профиль</th>}</tr></thead>
                   <tbody>{shown.map((c) => { const x = st(c); const p = pt(c); return (
                     <tr key={c.id} style={{ cursor: "pointer", background: card?.id === c.id ? "var(--accent-soft)" : undefined }} onClick={() => api.get<Card>(`/api/refs/clients/${c.id}`).then(setCard)}>
-                      <td><b>{c.name}</b><div className="muted" style={{ fontSize: 11 }}>ИНН {c.inn}{c.legal_status && c.legal_status !== "ACTIVE" && <span className="badge bad" style={{ marginLeft: 6 }}>{STATUS_RU[c.legal_status] || c.legal_status}</span>}</div></td>
+                      <td style={{ opacity: c.is_active === false ? .55 : 1 }}><b>{c.name}</b>{c.is_active === false && <span className="badge" style={{ marginLeft: 6 }}>архив</span>}<div className="muted" style={{ fontSize: 11 }}>ИНН {c.inn}{c.legal_status && c.legal_status !== "ACTIVE" && <span className="badge bad" style={{ marginLeft: 6 }}>{STATUS_RU[c.legal_status] || c.legal_status}</span>}</div></td>
                       {showG && <>
                         <td className="num">{x.deals || <span className="muted">—</span>}</td><td className="num">{x.open ? <span className="badge info">{x.open}</span> : <span className="muted">—</span>}</td>
                         <td className="num">{x.won ? <span className="badge ok">{x.won}</span> : <span className="muted">—</span>}{x.lost > 0 && <span className="muted" style={{ fontSize: 11 }}> / {x.lost} пр.</span>}</td>
@@ -196,7 +207,13 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
       <div>
         {card && (
           <div className="card">
-            <h2>{card.name}</h2>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+              <h2 style={{ margin: 0 }}>{card.name}{card.is_active === false && <span className="badge" style={{ marginLeft: 8, fontSize: 12 }}>в архиве</span>}</h2>
+              {canDelete && (card.is_active === false
+                ? <button className="btn ghost" onClick={() => api.post(`/api/refs/clients/${card.id}/restore`).then(() => { setErr("Клиент возвращён из архива"); load(); api.get<Card>(`/api/refs/clients/${card.id}`).then(setCard); }).catch((e) => setErr((e as Error).message))}>Вернуть из архива</button>
+                : <button className="btn ghost" style={{ color: "var(--bad)" }} title="ФД, КД, ЗГД; если по клиенту есть сделки или заявки — переносится в архив" onClick={removeClient}>{confirmDel ? "Подтвердить удаление" : "Удалить клиента"}</button>)}
+            </div>
+            {err && <div className="alert info" style={{ marginTop: 6 }}>{err}</div>}
             <table style={{ marginBottom: 8 }}><tbody>
               {card.full_name && <tr><td className="muted">Полное наименование</td><td>{card.full_name}</td></tr>}
               <tr><td className="muted">ИНН / КПП</td><td>{card.inn}{card.kpp ? ` / ${card.kpp}` : ""}</td></tr>

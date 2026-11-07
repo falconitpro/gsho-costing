@@ -56,7 +56,7 @@ export default function FactoriesPage({ me, embedded = false }: { me: Me; embedd
   const editor = me.roles.some((r) => r.code !== "observer");          // заводят и правят все; утверждают КД или ЗГД
   const contactEditor = editor;
   const approver = me.roles.some((r) => ["cd", "gd"].includes(r.code));
-  const isGD = me.roles.some((r) => r.code === "gd");
+  const canDelete = me.roles.some((r) => ["gd", "cd", "fd"].includes(r.code));
   const [confirmDel, setConfirmDel] = useState(false);
   const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
   const [kind, setKind] = useState<"gsho" | "parts" | "" | "approval">(() => { try { return (localStorage.getItem("suppliers_kind") as "gsho" | "parts" | "" | "approval") ?? "gsho"; } catch { return "gsho"; } });
@@ -259,7 +259,7 @@ export default function FactoriesPage({ me, embedded = false }: { me: Me; embedd
                 </div>)}
 
               {(editor || contactEditor) && <div className="row" style={{ marginBottom: 12 }}><button className="btn" onClick={save} disabled={!cur.name}>{cur.id && cur.approval_status === "approved" && !approver ? "Предложить изменения" : "Сохранить"}</button><UndoButton h={history} /><button className="btn ghost" onClick={() => setCur(null)}>закрыть</button>
-                {isGD && cur.id && <button className="btn ghost" style={{ marginLeft: "auto", color: "var(--bad)" }} title="только ЗГД; если завод уже есть в сделках или каталоге — переносится в архив" onClick={remove}>{confirmDel ? "Подтвердить удаление" : "Удалить поставщика"}</button>}</div>}
+                {canDelete && cur.id && <button className="btn ghost" style={{ marginLeft: "auto", color: "var(--bad)" }} title="ФД, КД, ЗГД; если поставщик уже есть в сделках, каталоге или заказах — переносится в архив" onClick={remove}>{confirmDel ? "Подтвердить удаление" : "Удалить поставщика"}</button>}</div>}
 
               {cur.id && <LegalProfileBlock ownerKind="factory" ownerId={cur.id} title="Юридический профиль поставщика" />}
               {cur.id && (

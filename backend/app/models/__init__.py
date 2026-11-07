@@ -108,6 +108,7 @@ class Client(TimestampMixin, Base):
     # наборы реквизитов для договоров (юрлицо/филиал, банк, адреса, подписант): [{id, title, is_default, legal_name, inn, kpp, ogrn,
     #   legal_address, postal_address, bank_name, bik, account, corr_account, signatory_name, signatory_position, signatory_basis, phone, email, comment}]
     requisites: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)              # архив: клиент используется в сделках — не удаляется, а скрывается
 
 
 def designation(trademark: Optional[str], model: Optional[str]) -> str:
