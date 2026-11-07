@@ -105,3 +105,14 @@ def test_legal_profiles():
         assert bk["currency"] == "USD"
         own = c.get("/api/legal/own", headers=H(CD)).json()
         assert own["can_edit"] and next(e for e in own["items"] if e["id"] == ru["id"])["profiles"][0]["names"]["en"]["full"] == "BERG-HAUS LLC"
+
+        # удаление профиля — только ЗГД; единственный активный и использованный в сделке/пакете — нельзя
+        GD = "gd@example.com"
+        assert c.delete(f"/api/legal/profiles/{p2['id']}", headers=H(CD)).status_code == 403
+        assert c.delete(f"/api/legal/profiles/{auto['id']}", headers=H(GD)).status_code == 409          # выбран в реквизитах контракта сделки
+        assert c.get(f"/api/legal/profiles?owner_kind=client&owner_id={cl['id']}", headers=H(GD)).json()["can_delete"] is True
+        r = c.delete(f"/api/legal/profiles/{p2['id']}", headers=H(GD)).json()
+        assert r["deleted"]
+        items = c.get(f"/api/legal/profiles?owner_kind=client&owner_id={cl['id']}", headers=H(GD)).json()["items"]
+        assert [x["id"] for x in items] == [auto["id"]] and items[0]["is_default"]                        # «по умолчанию» перешло на оставшийся
+        assert c.delete(f"/api/legal/profiles/{auto['id']}", headers=H(GD)).status_code == 409          # и единственный активный
