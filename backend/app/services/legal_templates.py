@@ -20,6 +20,8 @@ LEGAL_KINDS: dict[str, dict[str, Any]] = {
     "spec_zip":                {"title": "Приложение № 2 — спецификация ЗИП", "deal_kind": "purchase", "country": "", "language": "ru-zh", "loops": ["zip"]},
     "disagreements_protocol":  {"title": "Протокол разногласий к договору заказчика", "deal_kind": "sale", "country": "RU", "language": "ru", "loops": ["clauses"]},
     "tech_spec_client":        {"title": "Техническая спецификация для заказчика", "deal_kind": "sale", "country": "RU", "language": "ru", "loops": ["items", "params", "options"]},
+    "power_of_attorney":       {"title": "Доверенность от компании группы", "deal_kind": "corporate", "country": "RU", "language": "ru", "loops": ["powers"]},
+    "poa_revocation":          {"title": "Уведомление об отмене доверенности", "deal_kind": "corporate", "country": "RU", "language": "ru", "loops": []},
 }
 EXAMPLE_KINDS: dict[str, str] = {"example_client_contract": "Пример договора заказчика", "example_protocol": "Пример протокола разногласий"}
 LANGUAGES = {"ru": "русский", "ru-zh": "русский / китайский", "ru-en": "русский / английский", "en": "английский", "zh": "китайский"}
@@ -57,6 +59,14 @@ VARIABLES: dict[str, dict[str, str]] = {
     "options[]": {"n": "№", "name": "наименование опции", "qty": "количество", "position": "к какой позиции", "comment": "комментарий"},
     "clauses[]": {"n": "№", "clause": "пункт договора", "client_text": "редакция заказчика", "our_text": "редакция БЕРГ-ХАУС", "comment": "комментарий"},
     "package": {"created_on": "дата формирования", "author": "автор", "version": "версия пакета", "status": "статус (черновик)"},
+    "poa": {"number": "номер доверенности", "date": "дата выдачи (дд.мм.гггг)", "date_words": "дата выдачи прописью", "valid_to": "действительна до (дд.мм.гггг)", "place": "место выдачи",
+            "kind": "вид (генеральная / специальная / разовая)", "substitution": "с правом / без права передоверия", "amount_limit": "ограничение по сумме (текст)",
+            "counterparties": "ограничение по контрагентам", "territory": "территория действия", "extra": "прочие ограничения", "revoked_on": "дата отзыва (для уведомления)", "revoke_reason": "причина отзыва"},
+    "principal": {"name": "доверитель — полное наименование", "short": "доверитель — краткое наименование", "inn": "ИНН", "kpp": "КПП", "ogrn": "ОГРН", "address": "адрес",
+                  "signatory": "подписант (ФИО)", "signatory_position": "должность подписанта", "signatory_basis": "основание полномочий подписанта"},
+    "attorney": {"full_name": "представитель — ФИО", "position": "должность", "text": "представитель — полный текст (ФИО, дата рождения, паспорт, адрес)", "birth_date": "дата рождения",
+                 "address": "адрес регистрации", "passport": "паспорт (серия и номер)"},
+    "powers[]": {"n": "№", "text": "полномочие (текст)"},
 }
 
 
@@ -148,7 +158,15 @@ def sample_data(kind: str) -> dict:
             "totals": {"equipment_amount": amount, "zip_amount": 2360.0, "options_amount": 0.0, "amount": amount + 2360.0, "amount_words": "пять миллионов двести две тысячи триста шестьдесят юаней 00 фэней",
                        "currency": "CNY" if purchase else "RUB", "vat_text": "НДС не облагается" if purchase else "в том числе НДС 20 %", "items_count": len(items), "units_count": 3},
             "items": items, "zip": zip_rows, "params": params, "options": options, "clauses": clauses,
-            "package": {"created_on": "15.11.2026", "author": "Петров А.", "version": "1", "status": "черновик — требует проверки юристом"}}
+            "package": {"created_on": "15.11.2026", "author": "Петров А.", "version": "1", "status": "черновик — требует проверки юристом"},
+            "poa": {"number": "Д-RU-2026-001", "date": "15.11.2026", "date_words": "пятнадцатое ноября две тысячи двадцать шестого года", "valid_to": "31.12.2027", "place": "г. Москва",
+                    "kind": "Специальная", "substitution": "без права передоверия", "amount_limit": "на сумму не более 5 000 000 (пяти миллионов) рублей по одной сделке",
+                    "counterparties": "", "territory": "Российская Федерация", "extra": "", "revoked_on": "01.03.2027", "revoke_reason": "прекращение трудовых отношений"},
+            "principal": {"name": "Общество с ограниченной ответственностью «БЕРГ-ХАУС»", "short": "ООО «БЕРГ-ХАУС»", "inn": "7700000000", "kpp": "770001001", "ogrn": "1177700000000",
+                          "address": "123456, г. Москва, ул. Примерная, д. 1", "signatory": "Иванов Иван Иванович", "signatory_position": "Генеральный директор", "signatory_basis": "Устава"},
+            "attorney": {"full_name": "Петров Пётр Петрович", "position": "Менеджер по продажам", "birth_date": "01.01.1990", "address": "г. Москва, ул. Лесная, д. 5, кв. 7", "passport": "4510 123456",
+                         "text": "Петров Пётр Петрович, 01.01.1990 года рождения, паспорт 4510 123456, выдан ОВД района Примерный г. Москвы 01.02.2010, код подразделения 770-001, зарегистрированный по адресу: г. Москва, ул. Лесная, д. 5, кв. 7"},
+            "powers": [{"n": 1, "text": "представлять интересы Общества во взаимоотношениях с контрагентами"}, {"n": 2, "text": "подписывать договоры поставки на сумму не более 5 000 000 рублей по одной сделке"}]}
 
 
 def template_payload(t: Template, names: dict[str, str]) -> dict:
