@@ -26,6 +26,7 @@ export default function CatalogAdd({ editor, onAdded }: { editor: boolean; onAdd
   const [sel, setSel] = useState<Set<number> | null>(null);
   const [listFactory, setListFactory] = useState("");
   const [notes, setNotes] = useState<{ severity: string; message: string }[]>([]);
+  const [allNotes, setAllNotes] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const history = useUndoHistory({ form, rows }, (st) => { setForm(st.form); setRows(st.rows); });
@@ -97,7 +98,9 @@ export default function CatalogAdd({ editor, onAdded }: { editor: boolean; onAdd
           <input type="file" accept=".xlsx,.xlsm,.csv" onChange={(e) => { setFile((e.target as HTMLInputElement).files?.[0] || null); setList(null); }} />
           <button className="btn secondary" disabled={!file || busy} onClick={preview}>Загрузить</button>
         </div>
-        {notes.length > 0 && <div className="alert warn" style={{ marginTop: 6 }}>{notes.slice(0, 6).map((n, i) => <div key={i}>{n.message}</div>)}{notes.length > 6 && <div>… и ещё {notes.length - 6}</div>}</div>}
+        {notes.length > 0 && <div className="alert warn" style={{ marginTop: 6, maxHeight: allNotes ? 360 : undefined, overflowY: allNotes ? "auto" : undefined }}>
+          {(allNotes ? notes : notes.slice(0, 6)).map((n, i) => <div key={i}>{n.message}</div>)}
+          {notes.length > 6 && <a href="#" onClick={(e) => { e.preventDefault(); setAllNotes(!allNotes); }}>{allNotes ? "свернуть" : `показать все замечания (${notes.length})`}</a>}</div>}
         {list && sh && (
           <div style={{ marginTop: 8 }}>
             <div className="row" style={{ flexWrap: "wrap" }}>

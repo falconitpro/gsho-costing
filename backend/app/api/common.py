@@ -50,6 +50,8 @@ def can_see_deal(user: CurrentUser, deal: Deal) -> bool:
         return True
     if user.has(Role.SERVICE_HEAD) and deal.service_flag and deal.status not in (DealStatus.DRAFT,):
         return True
+    if user.has(Role.SERVICE_HEAD) and deal.status in (DealStatus.EXECUTION, DealStatus.CLOSED):
+        return True   # приёмка машин на заводе и дальнейший сервис
     if user.has(Role.SERVICE_HEAD, Role.PURCHASING) and any(p.local_option_rows for p in deal.positions) and deal.status not in (DealStatus.DRAFT,):
         return True   # задача 6: опции РФ оценивает сервис, в будущем — закупки
     if user.has(Role.LAWYER):   # юрист проверяет документы любой сделки (тендер, договор, протокол разногласий)

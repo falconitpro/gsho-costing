@@ -175,6 +175,12 @@ def set_actual(deal_id: str, stage_id: str, body: ActualIn, db: Session = Depend
         raise HTTPException(404)
     if not ex.can_set(user, st):
         raise HTTPException(403, f"Этап «{st.title}» отмечают: {', '.join(role_title(r) for r in st.responsible_roles)}")
+    if st.code == "factory_final" and body.actual_on and st.position_id:
+        from .acceptance import position_accepted
+        if not position_accepted(db, st.position_id):
+            raise HTTPException(409, "Окончательный расчёт с заводом — после приёмки всех машин позиции на заводе (вкладка «Исполнение» → «Приёмка на заводе»)")
+    if st.code == "factory_acceptance":
+        raise HTTPException(409, "Приёмка на заводе отмечается сама, когда приняты все машины позиции")
     if ex.STAGE_DEFS[st.code]["kind"] in ("payment_in", "payment_out") and body.actual_on and body.actual_amount is None:
         raise HTTPException(422, "Укажите фактическую сумму платежа")
     ex.set_actual(db, deal, st, body.actual_on, body.actual_amount, body.note, user)

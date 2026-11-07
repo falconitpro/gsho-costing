@@ -185,6 +185,7 @@ class EquipmentModel(TimestampMixin, Base):
     hs_info: Mapped[dict] = mapped_column(JSONType, default=dict)            # код ТН ВЭД, введённый логистом: {code, description, duty_pct, vat_pct, util_applies}
     maintenance_regulations: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     default_hours_per_month: Mapped[Optional[float]] = mapped_column(Float)
+    acceptance_checklist: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # чек-лист приёмки на заводе: [{group, item}]
     status: Mapped[str] = mapped_column(String(16), default="approved")      # approved | pending | archived
     proposed_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     approved_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
@@ -462,6 +463,7 @@ class Position(TimestampMixin, Base):
     batch_id: Mapped[Optional[str]] = mapped_column(ForeignKey("batches.id"))
     # блок сервиса
     service_calc: Mapped[dict] = mapped_column(JSONType, default=dict)         # ServiceInput + ServiceResult
+    zip_items: Mapped[list[dict]] = mapped_column(JSONType, default=list)        # ЗИП позиции: [{assembly, article, name, unit, qty, price, currency, interval_hours, kind: supply|to, lead_days, comment}]
     warranty_reserve_pct: Mapped[Optional[float]] = mapped_column(Float)
     # задача 2: фактические даты событий позиции (готовность, отгрузка, ПНР …) — пересчёт платежей от факта
     actual_events: Mapped[dict] = mapped_column(JSONType, default=dict)        # {event: "YYYY-MM-DD"}
@@ -1448,3 +1450,52 @@ class FactoryChange(Base):
     decided_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     decision_comment: Mapped[str] = mapped_column(Text, default="")
+
+
+# ------------------------------------------------------------------ документы модели и приёмка машины на заводе
+
+class ModelDocument(Base):
+    """Документ модели каталога: руководство по эксплуатации (версии, языки), чертежи, схемы (гидравлика, электрика…), каталог запчастей."""
+    __tablename__ = "model_documents"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    model_id: Mapped[str] = mapped_column(ForeignKey("equipment_models.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(24))                                    # manual | drawing | hydraulic | electric | pneumatic | scheme | parts_catalog | certificate | other
+    title: Mapped[str] = mapped_column(String(255), default="")
+    language: Mapped[str] = mapped_column(String(8), default="ru")
+    version: Mapped[str] = mapped_column(String(64), default="")
+    file_name: Mapped[str] = mapped_column(String(255))
+    storage_path: Mapped[str] = mapped_column(String(1024))
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    source_deal_id: Mapped[Optional[str]] = mapped_column(String(36))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    uploaded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AcceptanceUnit(TimestampMixin, Base):
+    """Приёмка одной машины на заводе: серийные номера, чек-лист, испытания, фото и видео, замечания, решение и акт."""
+    __tablename__ = "acceptance_units"
+    __table_args__ = (UniqueConstraint("position_id", "unit_no", name="uq_acceptance_unit"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    position_id: Mapped[str] = mapped_column(ForeignKey("positions.id", ondelete="CASCADE"), index=True)
+    unit_no: Mapped[int] = mapped_column(Integer, default=1)
+    serial: Mapped[str] = mapped_column(String(128), default="")                     # заводской номер машины
+    engine_no: Mapped[str] = mapped_column(String(128), default="")
+    frame_no: Mapped[str] = mapped_column(String(128), default="")
+    components: Mapped[list[dict]] = mapped_column(JSONType, default=list)           # основные агрегаты: [{name, serial}]
+    checklist: Mapped[list[dict]] = mapped_column(JSONType, default=list)            # [{id, group, item, expected, result: ""|ok|fail|na, comment}]
+    tests: Mapped[list[dict]] = mapped_column(JSONType, default=list)                # [{id, name, result: ""|ok|fail, value, note}]
+    files: Mapped[list[dict]] = mapped_column(JSONType, default=list)                # фото, видео, документы: [{path, name, kind, at, by}]
+    remarks: Mapped[list[dict]] = mapped_column(JSONType, default=list)              # [{id, text, responsible, due, fixed_on, fixed_note}]
+    inspector: Mapped[str] = mapped_column(String(255), default="")                  # кто принимал (наш представитель)
+    factory_rep: Mapped[str] = mapped_column(String(255), default="")                # представитель завода
+    place: Mapped[str] = mapped_column(String(255), default="")
+    inspected_on: Mapped[Optional[date]] = mapped_column(Date)
+    decision: Mapped[str] = mapped_column(String(24), default="")                    # "" | accepted | accepted_remarks | rejected
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    act: Mapped[dict] = mapped_column(JSONType, default=dict)                        # {number, date, signed_factory_on, signed_ours_on, file: {path, name}}
+    comment: Mapped[str] = mapped_column(Text, default="")
+    machine_id: Mapped[Optional[str]] = mapped_column(String(36))                    # машина в парке (эксплуатация, сервис)

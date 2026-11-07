@@ -156,13 +156,14 @@ class ModelPatch(BaseModel):
     logistics_params: Optional[dict] = None   # {код: {name, value, unit}}
     maintenance_regulations: Optional[list[dict]] = None   # [{name, interval_hours, operations: [{name, hours}]}]
     default_hours_per_month: Optional[float] = None
+    acceptance_checklist: Optional[list[dict]] = None   # чек-лист приёмки на заводе: [{group, item}]
     comment: str = ""                        # что и почему исправлено (в историю изменений)
 
 
 MODEL_FIELD_TITLES = {"model": "модель", "machine_type": "тип машины", "trademark": "торговая марка", "brand_name": "наименование под брендом компании",
                       "status": "статус", "names": "наименования", "default_hs_code": "код ТН ВЭД", "name": "наименование исполнения",
                       "tech_params": "технические характеристики", "hs_info": "ТН ВЭД: описание и ставки", "logistics_params": "данные для логистики",
-                      "maintenance_regulations": "регламенты ТО", "default_hours_per_month": "наработка в месяц"}
+                      "maintenance_regulations": "регламенты ТО", "default_hours_per_month": "наработка в месяц", "acceptance_checklist": "чек-лист приёмки"}
 
 
 @router.patch("/catalog/models/{model_id}")
@@ -195,6 +196,9 @@ def model_patch(model_id: str, body: ModelPatch, db: Session = Depends(get_db), 
         data["machine_type"], data["machine_type_id"] = name, mt.id
     if "maintenance_regulations" in data:
         data["maintenance_regulations"] = [r for r in data["maintenance_regulations"] if str(r.get("name") or "").strip() and float(r.get("interval_hours") or 0) > 0]
+    if "acceptance_checklist" in data:
+        data["acceptance_checklist"] = [{"group": str(x.get("group") or "Проверки").strip(), "item": str(x.get("item") or "").strip()}
+                                        for x in data["acceptance_checklist"] if str(x.get("item") or "").strip()]
     if "hs_info" in data:
         data["hs_info"] = {**(m.hs_info or {}), **data["hs_info"]}
     if "status" in data and data["status"] not in ("approved", "pending", "archived"):

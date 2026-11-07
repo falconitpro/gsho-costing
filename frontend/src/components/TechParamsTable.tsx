@@ -7,6 +7,8 @@ import type { Position, TechParamRow } from "../types";
 type Preview = { sheets: { name: string; rows: unknown[][]; total_rows: number; mapping: { header_row: number; first_row: number; columns: Record<string, number>; source?: string } }[];
   columns: { key: string; title: string }[] };
 type Factory = { id: string; name: string; trademarks?: string[] };
+const CJK = /[\u3400-\u9fff]/;
+const freeRow = (r: TechParamRow) => !(r.name_ru || "").trim() && !r.value_ru && !r.value_zh && !r.customer_requirement_ru;
 const isCountry = (r: { code?: string; name_ru?: string }) => r.code === "1.3" || /^(страна|country)/i.test((r.name_ru || "").trim());
 /** торговая марка для выбранного завода: марка позиции, если она у этого завода, иначе первая марка завода */
 const tmFor = (f: Factory | undefined, pos: Position) => {
@@ -46,6 +48,9 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
   const [answerOffer, setAnswerOffer] = useState<string>("");    // после импорта ответа завода — предложить загрузить его фото/чертежи
   const [offerFiles, setOfferFiles] = useState<FileList | null>(null);
   const [closed, setClosed] = useState<Record<string, boolean>>({});   // свёрнутые разделы
+  const [showFree, setShowFree] = useState<Record<string, boolean>>({});   // пустые свободные строки раздела (заполняет завод)
+  const [autoAt, setAutoAt] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const history = useUndoHistory({ rows }, (s) => { setRows(s.rows); setDirty(true); }, position.id);
   const load = () => api.get<{ rows: TechParamRow[]; missing_required: string[] }>(base).then((r) => { history.accept(); setRows(r.rows); setMissing(r.missing_required); setDirty(false); }).catch((e) => setErr(e.message));
@@ -54,15 +59,20 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
   const upd = (i: number, patch: Partial<TechParamRow>) => { setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r))); setDirty(true); };
   const addRow = () => { setRows((rs) => [...rs, { no: (rs[rs.length - 1]?.no || 0) + 1, code: "", name_ru: "", name_zh: "", unit: "", customer_requirement_ru: "", value_ru: "", value_zh: "", comment_ru: "", required: false, local_ru: false, section: rs[rs.length - 1]?.section || "Дополнительные параметры" }]); setDirty(true); };
   const delRow = (i: number) => { setRows((rs) => rs.filter((_, j) => j !== i)); setDirty(true); };
-  async function save() {
+  async function save(auto = false) {
+    if (saving) return;
+    setSaving(true);
     try {
       const r = await api.put<{ synced?: { machine_type?: string; model?: string; country?: string } }>(base, rows);
       const s = r.synced || {};
-      setMsg("Таблица сохранена" + (s.machine_type ? ` · тип машины в позиции: «${s.machine_type}»` : "") + (s.model ? ` · модель в позиции: «${s.model}»` : "")
-        + (s.country ? ` · страна: «${s.country}»` : ""));
-      setErr(""); await load(); onChanged();
-    } catch (e) { setErr((e as Error).message); }
+      const info = (s.machine_type ? ` · тип машины в позиции: «${s.machine_type}»` : "") + (s.model ? ` · модель в позиции: «${s.model}»` : "") + (s.country ? ` · страна: «${s.country}»` : "");
+      if (auto) { setAutoAt(new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })); if (info) setMsg("Сохранено автоматически" + info); setDirty(false); }
+      else { setMsg("Таблица сохранена" + info); await load(); }
+      setErr(""); onChanged();
+    } catch (e) { setErr((e as Error).message); } finally { setSaving(false); }
   }
+  // автосохранение: через 5 секунд после последней правки; кнопка «Сохранить» — сразу
+  useEffect(() => { if (!dirty || !canEdit) return; const t = setTimeout(() => save(true), 5000); return () => clearTimeout(t); }, [rows, dirty]);
   async function doPreview() {
     if (!file) return;
     try {
@@ -123,7 +133,8 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
             <a className="btn ghost" href={`/api/deals/${dealId}/positions/${position.id}/rfq/file`} title="шаблон RFQ с требованиями заказчика из таблицы; строки «в РФ» помечены">RFQ с требованиями</a>
             <UndoButton h={history} />
             <button className="btn add" onClick={addRow}>Строка</button>
-            <button className="btn" onClick={save} disabled={!dirty}>Сохранить таблицу</button>
+            <button className="btn" onClick={() => save()} disabled={!dirty || saving}>Сохранить</button>
+            <span className="muted" style={{ fontSize: 11 }}>{dirty ? "есть несохранённые правки — сохранятся автоматически" : autoAt ? `автосохранение ${autoAt}` : ""}</span>
           </div>
         )}
       </div>
@@ -176,13 +187,19 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
                   {closed[sec] ? "▸" : "▾"} {ru(sec)} <span className="muted" style={{ fontWeight: 400 }}>· заполнено {inSec.filter((x) => x.value_ru || x.value_zh).length} из {inSec.length}
                     {inSec.some((x) => x.req_status === "mismatch") && ` · не соответствует требованию: ${inSec.filter((x) => x.req_status === "mismatch").length}`}</span></td></tr>);
             if (closed[sec]) return <Fragment key={r.id || i}>{header}</Fragment>;
+            const freeInSec = inSec.filter(freeRow).length;
+            const freeToggle = head && freeInSec > 0 && (
+              <tr key={"f" + i}><td colSpan={COLS.length + 2 + (canEdit ? 1 : 0)} style={{ padding: "2px 8px", fontSize: 12 }} className="muted">
+                Свободные строки раздела для параметров, которых нет в шаблоне (их заполняет завод в RFQ): пустых {freeInSec} —{" "}
+                <a href="#" onClick={(e) => { e.preventDefault(); setShowFree({ ...showFree, [sec]: !showFree[sec] }); }}>{showFree[sec] ? "скрыть" : "показать"}</a></td></tr>);
+            if (freeRow(r) && !showFree[sec]) return <Fragment key={r.id || i}>{header}{freeToggle}</Fragment>;
             const empty = !r.value_ru && !r.value_zh;
             const bg = r.local_ru ? "#eef4ff" : empty && r.required ? "#fde7e7" : empty ? "#fff6d6" : r.translation_status === "machine" ? "#f3e8ff" : undefined;
             // значение завода не соответствует требованию заказчика — оранжевая ячейка, соответствует — зелёная рамка
             const vStyle = (cKey: string) => cKey !== "value_ru" ? {} : r.req_status === "mismatch" ? { background: "#ffd9b3", borderColor: "#e08a00", fontWeight: 600 } : r.req_status === "match" ? { borderColor: "#2e9e5b" } : {};
             const vTitle = r.req_status === "mismatch" ? `Не соответствует требованию заказчика: «${r.customer_requirement_ru}»` : r.req_status === "match" ? "Соответствует требованию заказчика" : undefined;
             return (
-              <Fragment key={r.id || i}>{header}
+              <Fragment key={r.id || i}>{header}{freeToggle}
               <tr style={{ background: bg }}>
                 {COLS.map((c) => (
                   <td key={c.key} style={{ padding: 3 }}>
@@ -194,10 +211,12 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
                         {countries.map((x) => <option key={x}>{x}</option>)}
                       </select>)
                     : canEdit ? <input style={{ width: "100%", padding: 4, ...vStyle(c.key) }} value={String(r[c.key] ?? "")} type={c.key === "no" ? "number" : "text"}
+                      placeholder={c.key === "name_ru" && freeRow(r) ? "свободная строка: параметр" : undefined}
                       onChange={(e) => upd(i, { [c.key]: c.key === "no" ? Number(e.target.value) : e.target.value } as Partial<TechParamRow>)}
                       title={c.key === "name_ru" && r.name_zh ? r.name_zh : c.key === "value_ru" ? [vTitle, r.value_zh ? `CN: ${r.value_zh}` : ""].filter(Boolean).join(" · ") || undefined : undefined} />
                       : <span style={{ padding: "1px 4px", borderRadius: 3, ...vStyle(c.key) }} title={c.key === "value_ru" ? vTitle : undefined}>{String(r[c.key] ?? "")}</span>}
-                    {c.key === "value_ru" && r.value_zh && r.value_zh !== r.value_ru && <div className="muted" style={{ fontSize: 11 }}>{r.value_zh}{r.translation_status === "machine" && canEdit && <> · <a href="#" onClick={(e) => { e.preventDefault(); api.post(`${base}/verify/${r.id}`).then(load); }}>перевод верный</a></>}</div>}
+                    {c.key === "name_ru" && !(r.name_ru || "").trim() && (r.value_ru || r.value_zh) && <div className="muted" style={{ fontSize: 11, color: "#b45309" }}>свободная строка — укажите параметр</div>}
+                    {c.key === "value_ru" && r.value_zh && r.value_zh !== r.value_ru && CJK.test(r.value_zh) && <div className="muted" style={{ fontSize: 11 }} title="значение завода на китайском">CN: {r.value_zh}{r.translation_status === "machine" && canEdit && <> · <a href="#" onClick={(e) => { e.preventDefault(); api.post(`${base}/verify/${r.id}`).then(load); }}>перевод верный</a></>}</div>}
                   </td>
                 ))}
                 <td style={{ textAlign: "center" }}><input type="checkbox" checked={!!r.required} disabled={!canEdit} onChange={(e) => upd(i, { required: e.target.checked })} /></td>
@@ -207,6 +226,11 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
           })}</tbody>
         </table>
       </div>
+      {canEdit && dirty && (
+        <div style={{ position: "sticky", bottom: 0, zIndex: 5, background: "#fff", borderTop: "2px solid var(--accent)", padding: "6px 8px", display: "flex", gap: 8, alignItems: "center" }}>
+          <button className="btn" onClick={() => save()} disabled={saving}>Сохранить технические характеристики</button>
+          <span className="muted" style={{ fontSize: 12 }}>есть несохранённые правки — через 5 секунд без правок сохранятся автоматически</span>
+        </div>)}
       <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Цвета: красный — обязательный параметр без значения, жёлтый — не заполнено, фиолетовый — машинный перевод (проверьте), синий — реализуется в России (в запрос заводу не попадает). Значение: оранжевое — не соответствует требованию заказчика, зелёная рамка — соответствует. Разделы сворачиваются щелчком по заголовку.</div>
 
       {canEdit && (

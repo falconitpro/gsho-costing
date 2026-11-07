@@ -195,7 +195,11 @@ def sync_from_deals(db: Session, deal_id: Optional[str] = None, user_id: Optiona
     n = 0
     for deal in db.scalars(stmt).all():
         for pos in db.scalars(select(Position).where(Position.deal_id == deal.id)).all():
-            have = {m.unit_no for m in db.scalars(select(ClientMachine).where(ClientMachine.deal_id == deal.id, ClientMachine.position_id == pos.id)).all()}
+            existing = {m.unit_no: m for m in db.scalars(select(ClientMachine).where(ClientMachine.deal_id == deal.id, ClientMachine.position_id == pos.id)).all()}
+            for m in existing.values():      # машина из приёмки на заводе — дата ввода по закрытию сделки
+                if not m.commissioned_on and deal.execution_closed_at:
+                    m.commissioned_on = deal.execution_closed_at.date() if hasattr(deal.execution_closed_at, "date") else deal.execution_closed_at
+            have = set(existing)
             f = db.get(Factory, pos.factory_id)
             for unit in range(1, int(pos.qty or 1) + 1):
                 if unit in have:
@@ -305,6 +309,8 @@ def kits_from_deal(deal_id: str, db: Session = Depends(get_db), user: CurrentUse
         if not pos.equipment_model_id:
             continue
         rows = [r for r in ((pos.service_calc or {}).get("spare_parts") or []) if r.get("interval_hours") and (r.get("part_no") or r.get("name"))]
+        rows += [{"part_no": z.get("article"), "name": z.get("name"), "interval_hours": z.get("interval_hours"), "qty_per_service": z.get("qty")}
+                 for z in pos.zip_items or [] if z.get("kind") == "to" and z.get("interval_hours") and (z.get("article") or z.get("name"))]
         by_int: dict[float, list[KitLineIn]] = {}
         for r in rows:
             by_int.setdefault(float(r["interval_hours"]), []).append(KitLineIn(article=r.get("part_no") or r.get("name"), qty=float(r.get("qty_per_service") or 1)))

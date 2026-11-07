@@ -6,6 +6,7 @@ import { api, designation, fmtDate, fmtRub } from "../api";
 import type { TechParamRow } from "../types";
 import TechParamsView from "./TechParamsView";
 import { ImagesEditor, MoreEditor, TechEditor } from "./CatalogEdit";
+import { ModelDocsBlock } from "./PositionExtras";
 
 type Hist = { at: string | null; user: string; object: string; action: string; changes: { field: string; before: unknown; after: unknown }[]; comment: string; deal: string | null };
 const fmtVal = (v: unknown) => (v == null || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
@@ -25,7 +26,7 @@ type Analytics = {
 };
 type Card = { id: string; model: string; trademark: string; trademark_saved?: string; manually_checked?: boolean; brand_name: string; machine_type: string; status: string; factory: string;
   logistics_params: Record<string, { name?: string; value?: unknown; unit?: string }>; maintenance_regulations: { name: string; interval_hours: number; operations?: { name: string; hours: number }[] }[];
-  default_hours_per_month?: number | null; hs?: { code: string; description?: string; duty_pct?: number | null; vat_pct?: number | null; on?: string; deal?: string } | null; executions: Exec[]; with_prices: boolean; factory_prices?: FPrice[]; client_prices?: CPrice[]; analytics?: Analytics };
+  default_hours_per_month?: number | null; acceptance_checklist?: { group: string; item: string }[]; hs?: { code: string; description?: string; duty_pct?: number | null; vat_pct?: number | null; on?: string; deal?: string } | null; executions: Exec[]; with_prices: boolean; factory_prices?: FPrice[]; client_prices?: CPrice[]; analytics?: Analytics };
 
 const UNITS: Record<string, string> = { calendar_days: "кал. дн.", working_days: "раб. дн.", weeks: "нед.", date: "" };
 const OUTCOME: Record<string, string> = { won: "выиграна", lost: "проиграна" };
@@ -47,7 +48,9 @@ function Spark({ pts }: { pts: { on: string; v: number }[] }) {
 
 /** Карточка машины в каталоге: технические характеристики, фото и чертежи, опции и регламенты;
  *  для КД и ЗГД — цены и сроки завода, цены клиентам (список) и аналитическая справка. */
-export default function CatalogCard({ modelId, execId, onExec }: { modelId: string; execId?: string; onExec?: (id: string) => void }) {
+export default function CatalogCard({ modelId, execId, onExec, models = [], onChanged }: { modelId: string; execId?: string; onExec?: (id: string) => void;
+  models?: { id: string; label: string }[]; onChanged?: () => void }) {
+  const [mergeInto, setMergeInto] = useState("");
   const [card, setCard] = useState<Card | null>(null);
   const [tab, setTab] = useState("tech");
   const [ex, setEx] = useState(execId || "");
@@ -85,15 +88,23 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
   const e = card.executions.find((x) => x.id === ex) || card.executions[0];
   const images = card.executions.flatMap((x) => x.images.map((im) => ({ ...im, exec: x.name })));
   const an = card.analytics;
-  const tabs: [string, string][] = [["tech", "Технические характеристики"], ["photo", `Фото и чертежи (${images.length})`], ["more", "Опции, регламенты, логистика"],
+  const tabs: [string, string][] = [["tech", "Технические характеристики"], ["photo", `Фото и чертежи (${images.length})`], ["docs", "Документы"], ["more", "Опции, регламенты, логистика"],
     ...(card.with_prices ? [["prices", "Цены и сроки — список"], ["analytics", "Аналитическая справка"]] as [string, string][] : []), ["history", "История изменений"]];
   const pickExec = (id: string) => { setEx(id); setEditing(""); onExec?.(id); };
   const done = (m: string) => { setEditing(""); if (m) { setMsg(m); reload(); } };
 
   return (
-    <div className="card">
-      <h2 style={{ marginTop: 0 }}>{card.machine_type} <b>{designation(card)}</b> {card.brand_name && <span className="badge accent">{card.brand_name}</span>}</h2>
-      <div className="muted" style={{ marginBottom: 8 }}>{card.factory} · торговая марка: {card.trademark || "—"} · исполнений: {card.executions.length}{card.manually_checked ? "" : " · данные модели пока не проверены КД / ЗГД"}</div>
+    <div className="card" style={{ overflowWrap: "anywhere", minWidth: 0 }}>
+      <h2 style={{ marginTop: 0 }}>{card.machine_type} <b>{designation(card)}</b> {card.brand_name && <span className="badge accent" title="наименование под брендом компании">{card.brand_name}</span>}</h2>
+      {canEdit && (
+        <div className="row" style={{ flexWrap: "wrap", marginBottom: 6, fontSize: 13 }}>
+          <button className="btn ghost" title="собственное наименование для КП под брендом компании" onClick={() => { const b = prompt("Наименование под брендом компании (пусто — убрать):", card.brand_name || ""); if (b !== null) api.patch(`/api/catalog/models/${card.id}`, { brand_name: b, comment: "наименование под брендом" }).then(() => { setMsg("Наименование под брендом сохранено"); reload(); onChanged?.(); }).catch((x) => setMsg((x as Error).message)); }}>Под своим брендом…</button>
+          {models.length > 1 && <><select value={mergeInto} onChange={(x) => setMergeInto(x.target.value)} style={{ maxWidth: 260 }} title="дубль: сделки и история цен перейдут в выбранную модель">
+            <option value="">объединить дубль с моделью…</option>{models.filter((m) => m.id !== card.id).map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}</select>
+            {mergeInto && <button className="btn ghost" onClick={() => api.post(`/api/catalog/models/${card.id}/merge`, { into_id: mergeInto }).then(() => { setMsg("Модели объединены; дубль в архиве"); onChanged?.(); }).catch((x) => setMsg((x as Error).message))}>объединить</button>}</>}
+          <button className="btn ghost" onClick={() => { if (confirm(`Перенести модель ${card.model} в архив? В подборе участвовать не будет, восстановить можно на вкладке «Архив».`)) api.patch(`/api/catalog/models/${card.id}`, { status: "archived" }).then(() => onChanged?.()).catch((x) => setMsg((x as Error).message)); }}>Модель в архив</button>
+        </div>)}
+      <div className="muted" style={{ marginBottom: 8, whiteSpace: "normal" }}>{card.factory} · торговая марка: {card.trademark || "—"} · исполнений: {card.executions.length}{card.manually_checked ? "" : " · данные модели пока не проверены КД / ЗГД"}</div>
       {msg && <div className="alert info">{msg}</div>}
       <div className="row" style={{ marginBottom: 8, flexWrap: "wrap" }}>
         {has("manager", "cd", "gd") && e && e.status === "approved" && <button className="btn" onClick={() => { setNewDeal({ client_id: "", qty: "1", site: "", kp_due: "", comment: "" }); if (!clients.length) api.get<typeof clients>("/api/refs/clients").then(setClients); }}>Создать заявку для клиента по этой машине</button>}
@@ -148,11 +159,12 @@ export default function CatalogCard({ modelId, execId, onExec }: { modelId: stri
             </a>))}
         </div>))}
 
+      {tab === "docs" && <ModelDocsBlock modelId={card.id} canUpload={!!me && !me.roles.every((r) => r.code === "observer")} canRemove={canEdit} />}
       {tab === "more" && canEdit && editing !== "more" && <button className="btn secondary" style={{ marginBottom: 6 }} onClick={() => setEditing("more")}>Редактировать опции, регламенты, ТН ВЭД и логистику</button>}
       {tab === "more" && canEdit && editing === "more" && <MoreEditor key={(e?.id || "") + card.id} modelId={card.id} execId={e?.id} options={e?.local_options || []} hs={card.hs || null}
-        logistics={card.logistics_params} regs={card.maintenance_regulations} hours={card.default_hours_per_month} onDone={done} />}
+        logistics={card.logistics_params} regs={card.maintenance_regulations} hours={card.default_hours_per_month} checklist={card.acceptance_checklist} onDone={done} />}
       {tab === "more" && editing !== "more" && (
-        <div className="grid cols-2">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, minWidth: 0 }}>
           <div><h3>Опции РФ (доукомплектование)</h3>
             {e && e.local_options.length ? <ul>{e.local_options.map((o, i) => <li key={i}>{o.name}{o.cost != null && ` — ${fmtRub(o.cost)} ${o.currency || ""}`}{o.install_days ? `, установка ${o.install_days} дн.` : ""}</li>)}</ul> : <div className="muted">нет</div>}
             <h3>Регламенты ТО</h3>
