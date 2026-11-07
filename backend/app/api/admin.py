@@ -140,12 +140,58 @@ def update_user(user_id: str, body: dict, db: Session = Depends(get_db), user: C
             raise HTTPException(409, "Нельзя снять с себя роль администратора / ЗГД")
     if body.get("is_active") is False and u.id == user.id:
         raise HTTPException(409, "Нельзя отключить свою учётную запись")
+    if "email" in body:
+        email = str(body["email"] or "").strip().lower()
+        if "@" not in email:
+            raise HTTPException(422, "Неверный e-mail")
+        clash = db.scalar(select(User).where(User.email == email, User.id != u.id))
+        if clash:
+            raise HTTPException(409, "Сотрудник с таким e-mail уже есть")
+        if u.external_id == u.email:          # вход по e-mail (dev / сопоставление по почте) — обновляем и внешний идентификатор
+            u.external_id = email
+        body["email"] = email
     for k, v in body.items():
-        if k in UserIn.model_fields:
+        if k in UserIn.model_fields and k != "external_id":
             setattr(u, k, v)
     audit(db, user.id, None, "user", u.id, "update", {k: before.get(k) for k in body}, body)
     db.commit()
     return serialize(u)
+
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN)):
+    """Удаление сотрудника — администратор или ЗГД. Если на сотрудника есть ссылки (сделки, задачи, визы, журнал…), учётная запись
+    отключается (данные и история сохраняются); иначе удаляется. Себя удалить нельзя."""
+    from sqlalchemy.exc import IntegrityError
+    from ..models import Approval, AuditLog, Deal, Task
+    u = db.get(User, user_id)
+    if u is None:
+        raise HTTPException(404)
+    if u.id == user.id:
+        raise HTTPException(409, "Нельзя удалить свою учётную запись")
+    name = u.display_name
+    used = (db.scalar(select(Deal.id).where(Deal.manager_id == u.id).limit(1)) or db.scalar(select(Task.id).where(Task.assignee_id == u.id).limit(1))
+            or db.scalar(select(Approval.id).where(Approval.user_id == u.id).limit(1)) or db.scalar(select(AuditLog.id).where(AuditLog.user_id == u.id).limit(1)))
+    if used:
+        u.is_active = False
+        u.deputy_id = None
+        audit(db, user.id, None, "user", u.id, "deactivate", {"name": name}, {"is_active": False}, "сотрудник участвует в сделках/задачах — отключён, история сохранена")
+        db.commit()
+        return {"deleted": False, "deactivated": True, "message": f"«{name}» участвует в сделках, задачах или журнале — учётная запись отключена, история сохранена"}
+    try:
+        audit(db, user.id, None, "user", u.id, "delete", {"name": name, "email": u.email})
+        for other in db.scalars(select(User).where(User.deputy_id == u.id)).all():
+            other.deputy_id = None
+        db.delete(u)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        u = db.get(User, user_id)
+        u.is_active = False
+        audit(db, user.id, None, "user", u.id, "deactivate", {"name": name}, {"is_active": False}, "есть ссылки — отключён")
+        db.commit()
+        return {"deleted": False, "deactivated": True, "message": f"На «{name}» есть ссылки в данных — учётная запись отключена"}
+    return {"deleted": True, "deactivated": False, "message": f"Сотрудник «{name}» удалён"}
 
 
 # ------------------------------------------------------------------ ТН ВЭД
