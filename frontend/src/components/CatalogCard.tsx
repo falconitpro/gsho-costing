@@ -94,7 +94,7 @@ export default function CatalogCard({ modelId, execId, onExec, models = [], onCh
   const done = (m: string) => { setEditing(""); if (m) { setMsg(m); reload(); } };
 
   return (
-    <div className="card" style={{ overflowWrap: "anywhere", minWidth: 0 }}>
+    <div className="card" style={{ overflowWrap: "break-word", minWidth: 0 }}>
       <h2 style={{ marginTop: 0 }}>{card.machine_type} <b>{designation(card)}</b> {card.brand_name && <span className="badge accent" title="наименование под брендом компании">{card.brand_name}</span>}</h2>
       {canEdit && (
         <div className="row" style={{ flexWrap: "wrap", marginBottom: 6, fontSize: 13 }}>
@@ -163,24 +163,38 @@ export default function CatalogCard({ modelId, execId, onExec, models = [], onCh
       {tab === "more" && canEdit && editing !== "more" && <button className="btn secondary" style={{ marginBottom: 6 }} onClick={() => setEditing("more")}>Редактировать опции, регламенты, ТН ВЭД и логистику</button>}
       {tab === "more" && canEdit && editing === "more" && <MoreEditor key={(e?.id || "") + card.id} modelId={card.id} execId={e?.id} options={e?.local_options || []} hs={card.hs || null}
         logistics={card.logistics_params} regs={card.maintenance_regulations} hours={card.default_hours_per_month} checklist={card.acceptance_checklist} onDone={done} />}
-      {tab === "more" && editing !== "more" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, minWidth: 0 }}>
-          <div><h3>Опции РФ (доукомплектование)</h3>
-            {e && e.local_options.length ? <ul>{e.local_options.map((o, i) => <li key={i}>{o.name}{o.cost != null && ` — ${fmtRub(o.cost)} ${o.currency || ""}`}{o.install_days ? `, установка ${o.install_days} дн.` : ""}</li>)}</ul> : <div className="muted">нет</div>}
+      {tab === "more" && editing !== "more" && (() => {
+        const unit = (u?: string) => { const x = (u || "").split(" / ")[0].trim(); return x === "—" ? "" : x; };
+        const fmtV = (v: unknown) => (typeof v === "number" ? fmtRub(v) : String(v ?? "—"));
+        const kv = { display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: "4px 12px", padding: "6px 0", borderBottom: "1px solid #eee", alignItems: "baseline" } as const;
+        return (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "8px 28px", minWidth: 0 }}>
+          <section style={{ minWidth: 0 }}>
+            <h3>Опции РФ (доукомплектование)</h3>
+            {e && e.local_options.length ? e.local_options.map((o, i) => (
+              <div key={i} style={kv}><div>{o.name}</div>
+                <div style={{ whiteSpace: "nowrap" }}>{o.cost != null ? <b>{fmtRub(o.cost)} {o.currency || ""}</b> : <span className="muted">цена не указана</span>}
+                  {o.install_days ? <div className="muted" style={{ fontSize: 12 }}>установка {o.install_days} дн.</div> : null}</div></div>)) : <div className="muted">нет</div>}
             <h3>Регламенты ТО</h3>
-            {card.maintenance_regulations.length ? <table><tbody>{card.maintenance_regulations.map((r, i) => <tr key={i}><td>{r.name}</td><td className="num">каждые {r.interval_hours} м·ч</td>
-              <td className="muted" style={{ fontSize: 12 }}>{(r.operations || []).map((o) => `${o.name} (${o.hours} ч)`).join("; ")}</td></tr>)}</tbody></table> : <div className="muted">не заданы</div>}
-            {card.default_hours_per_month && <div className="muted">Наработка: {card.default_hours_per_month} м·ч в месяц</div>}
-          </div>
-          <div><h3>Код ТН ВЭД</h3>
-            {card.hs ? <div><b>{card.hs.code}</b>{card.hs.description && <> — {card.hs.description}</>}
-              <div className="muted" style={{ fontSize: 12 }}>{card.hs.duty_pct != null && `пошлина ${card.hs.duty_pct} % · `}{card.hs.vat_pct != null && `НДС ${card.hs.vat_pct} % · `}внёс логист{card.hs.deal && ` по сделке ${card.hs.deal}`}{card.hs.on && `, ${fmtDate(card.hs.on)}`}</div></div>
+            {card.maintenance_regulations.length ? card.maintenance_regulations.map((r, i) => (
+              <div key={i} style={{ padding: "6px 0", borderBottom: "1px solid #eee" }}>
+                <div style={{ display: "flex", gap: 12, justifyContent: "space-between", alignItems: "baseline" }}><b>{r.name}</b><span style={{ whiteSpace: "nowrap" }}>каждые <b>{fmtRub(r.interval_hours)}</b> м·ч</span></div>
+                {(r.operations || []).length > 0 && <ul style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 13 }}>{(r.operations || []).map((o, j) => <li key={j}>{o.name} <span className="muted" style={{ whiteSpace: "nowrap" }}>— {o.hours} ч</span></li>)}</ul>}
+              </div>)) : <div className="muted">не заданы</div>}
+            {card.default_hours_per_month ? <div style={{ marginTop: 6 }}>Наработка: <b>{fmtRub(card.default_hours_per_month)}</b> м·ч в месяц</div> : null}
+          </section>
+          <section style={{ minWidth: 0 }}>
+            <h3>Код ТН ВЭД</h3>
+            {card.hs ? <div><b style={{ fontSize: 15 }}>{card.hs.code}</b>{card.hs.description && <div>{card.hs.description}</div>}
+              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{[card.hs.duty_pct != null && `пошлина ${card.hs.duty_pct} %`, card.hs.vat_pct != null && `НДС ${card.hs.vat_pct} %`,
+                `внёс логист${card.hs.deal ? ` по сделке ${card.hs.deal}` : ""}${card.hs.on ? `, ${fmtDate(card.hs.on)}` : ""}`].filter(Boolean).join(" · ")}</div></div>
               : <div className="muted">ещё не задан — появится после расчёта логистики по этой модели</div>}
             <h3>Данные для логистики</h3>
-            {Object.keys(card.logistics_params).length ? <table><tbody>{Object.entries(card.logistics_params).map(([code, f]) => <tr key={code}><td>{f.name || code}</td><td className="num"><b>{String(f.value ?? "—")}</b></td><td className="muted">{(f.unit || "").split(" / ")[0]}</td></tr>)}</tbody></table>
+            {Object.keys(card.logistics_params).length ? Object.entries(card.logistics_params).map(([code, f]) => (
+              <div key={code} style={kv}><div>{f.name || code}</div><div><b>{fmtV(f.value)}</b>{unit(f.unit) && <span className="muted" style={{ whiteSpace: "nowrap" }}> {unit(f.unit)}</span>}</div></div>))
               : <div className="muted">нет</div>}
-          </div>
-        </div>)}
+          </section>
+        </div>); })()}
 
       {tab === "prices" && card.with_prices && (
         <>
