@@ -62,7 +62,7 @@ def contract(deal_id: str, body: ContractIn, db: Session = Depends(get_db), user
     """Менеджер вносит номер контракта и даты подписания (с клиентом и с заводом); при альтернативах — выбранное предложение."""
     deal = get_deal_or_404(db, deal_id, user)
     _stage_deal(deal)
-    if not (user.has(Role.GD) or (user.has(Role.MANAGER) and deal.manager_id == user.id) or user.has(Role.CD)):
+    if not (user.has(Role.GD) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id)) or user.has(Role.CD)):
         raise HTTPException(403, "Реквизиты контракта вносит менеджер сделки")
     before = {k: getattr(deal, k) for k in ContractIn.model_fields}
     for k, v in body.model_dump(exclude_none=True).items():
@@ -98,7 +98,7 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
     step = next((c for c in ex.CONTRACT_STEPS if c["code"] == body.code), None)
     if step is None:
         raise HTTPException(404, "Неизвестный подэтап")
-    is_owner = user.has(_R.MANAGER, _R.CD) and deal.manager_id == user.id
+    is_owner = user.has(_R.MANAGER, _R.CD) and user.is_manager_of(deal.manager_id)
     allowed = user.has(_R.GD) or any(user.has(_R(r)) for r in step["roles"] if r != "manager") or ("manager" in step["roles"] and is_owner)
     if not allowed:
         raise HTTPException(403, f"Подэтап «{step['title']}» отмечают: {', '.join(role_title(r) for r in step['roles'])}")
@@ -147,7 +147,7 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
 def start(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Контракт подписан → исполнение: этапы и задачи ответственным (в т. ч. заказ и установка опций РФ)."""
     deal = get_deal_or_404(db, deal_id, user)
-    if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):
+    if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id))):
         raise HTTPException(403)
     if deal.has_alternatives and not deal.won_variant_id:
         raise HTTPException(422, "Укажите, какое предложение выбрал клиент")
@@ -232,7 +232,7 @@ class TermsChangedIn(BaseModel):
 def terms_changed(deal_id: str, body: TermsChangedIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Условия контракта отличаются от утверждённого КП → новая версия расчёта, сброс виз, повторная визация."""
     deal = get_deal_or_404(db, deal_id, user)
-    if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):
+    if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id))):
         raise HTTPException(403)
     try:
         tr = contract_terms_changed(DealState(status=deal.status, service_flag=deal.service_flag, in_execution=True), body.reason, date.today(), sla(db))

@@ -92,6 +92,14 @@ def notify(db: Session, deal: Deal | None, user_id: str | None, event: str, chan
     """Уведомление исполнителю — во все каналы, выбранные в его карточке (e-mail, мессенджеры, в системе).
     Канал без подключённой интеграции записывается в журнал со статусом «ожидает подключения»."""
     user = db.get(User, user_id) if user_id else None
+    # заместитель на период получает уведомления замещаемого
+    if user is not None and user.deputy_id and user.deputy_id != user_id:
+        from datetime import date as _date
+        today = _date.today()
+        if (user.deputy_from is None or user.deputy_from <= today) and (user.deputy_to is None or user.deputy_to >= today):
+            dep = db.get(User, user.deputy_id)
+            if dep is not None and dep.is_active:
+                notify(db, deal, dep.id, event, channels, f"{text} (за {user.display_name})")
     contacts = (user.contacts or {}) if user else {}
     for ch in _channels_of(user):
         row = NotificationLog(deal_id=deal.id if deal else None, user_id=user_id, event=event, channel=ch, text=text)

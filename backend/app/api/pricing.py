@@ -23,7 +23,7 @@ from ..db import get_db
 from ..models import Approval, Attachment, ClientPriceHistory, Deal, DealVersion, Factory, FactoryPriceHistory, FeedEntry, Position, User, Variant
 from ..services import settings_service
 from ..services.deal_calc import approval_flags, build_calc_input, run_calc
-from ..services.deal_service import apply_transition, audit, complete_tasks, create_version, ensure_folders, sla
+from ..services.deal_service import apply_transition, audit, complete_tasks, create_version, ensure_folders, notify, sla
 from ..services.kp_generator import KpData, KpVariant, build_kp
 from ..services.offers_service import kp_brand_check, kp_model_name
 from .common import get_deal_or_404, payment_terms_set, serialize
@@ -270,16 +270,24 @@ def submit(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
         tr = cd_submit_price(st, flags, date.today(), sla(db), _ladder(db))
     except Exception as e:
         raise HTTPException(409, str(e))
+    self_approval = user.is_manager_of(deal.manager_id)   # «считал — не утверждает»: пока только предупреждение
     db.add(Approval(deal_id=deal.id, step="commercial", role=user.roles and sorted(r.value for r in user.roles)[0], user_id=user.id,
-                    approved=True, prices_snapshot={v.id: v.price_rub for v in deal.variants}))
+                    approved=True, prices_snapshot={v.id: v.price_rub for v in deal.variants},
+                    comment="Внимание: утверждает менеджер этой сделки (считал и утвердил один человек)" if self_approval else ""))
     complete_tasks(db, deal, block="pricing")
     apply_transition(db, deal, tr, user.id)
+    if self_approval:
+        from ..models import User
+        audit(db, user.id, deal.id, "deal", deal.id, "self_approval", None, {"by": user.display_name}, "КД утвердил собственную сделку")
+        for u in db.scalars(select(User).where(User.is_active.is_(True))).all():
+            if Role.GD.value in (u.roles or []) and u.id != user.id:
+                notify(db, deal, u.id, "self_approval", None, f"{deal.number}: цену утвердил менеджер этой сделки ({user.display_name}) — проверьте")
     if tr.status == DealStatus.APPROVED:
         _finalize_approval(db, deal, user.id)
     elif tr.status in (DealStatus.CONTRACT, DealStatus.EXECUTION):
         _finalize_contract_change(db, deal, user.id)
     db.commit()
-    return {"status": deal.status.value, "approval_flags": flags, "reasons": res.approval.reasons}
+    return {"status": deal.status.value, "approval_flags": flags, "reasons": res.approval.reasons, "self_approval": self_approval}
 
 
 class VisaIn(BaseModel):
@@ -567,7 +575,7 @@ def _pay_text(l: dict) -> str:
 # ------------------------------------------------------------------ КП: пересобрать, выгрузить Word / PDF, отправить клиенту
 
 def _kp_access(deal: Deal, user: CurrentUser) -> None:
-    if not (user.has(Role.CD, Role.GD, Role.ADMIN) or (user.has(Role.MANAGER) and deal.manager_id == user.id)):
+    if not (user.has(Role.CD, Role.GD, Role.ADMIN) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id))):
         raise HTTPException(403, "КП формируют и отправляют менеджер сделки, КД или ЗГД")
 
 

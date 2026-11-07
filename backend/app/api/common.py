@@ -36,7 +36,7 @@ def serialize(obj, exclude: set[str] | None = None) -> dict[str, Any]:
 
 def is_deal_owner(user: CurrentUser, deal: Deal) -> bool:
     """Ответственный по сделке: менеджер сделки или КД, заведший сделку на себя."""
-    return deal.manager_id == user.id and user.has(Role.MANAGER, Role.CD)
+    return user.is_manager_of(deal.manager_id) and user.has(Role.MANAGER, Role.CD)
 
 
 def can_see_deal(user: CurrentUser, deal: Deal) -> bool:
@@ -44,7 +44,7 @@ def can_see_deal(user: CurrentUser, deal: Deal) -> bool:
         return False
     if user.has(Role.CD, Role.FD, Role.GD):
         return True
-    if user.has(Role.MANAGER) and deal.manager_id == user.id:
+    if user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id):
         return True
     if user.has(Role.LOGISTICIAN) and deal.status in LOGISTICS_VISIBLE_FROM:
         return True
@@ -57,9 +57,36 @@ def can_see_deal(user: CurrentUser, deal: Deal) -> bool:
     if user.has(Role.LAWYER):   # юрист проверяет документы любой сделки (тендер, договор, протокол разногласий)
         return True
     if user.has(Role.OBSERVER):
-        scope = user.observer_scope or {}
-        return not scope.get("deal_ids") or deal.id in scope["deal_ids"]
+        return observer_sees(user.observer_scope or {}, deal)
     return False
+
+
+POST_WIN = (DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED)
+
+
+def observer_sees(scope: dict, deal: Deal) -> bool:
+    """Область наблюдателя: пустая область — ничего не видно. Срез по клиентам, менеджерам, сделкам, фазе (sale | contract) и сроку доступа."""
+    from datetime import date
+    until = scope.get("until")
+    if until and str(until) < date.today().isoformat():
+        return False
+    ok = False
+    if scope.get("all"):
+        ok = True
+    if deal.id in (scope.get("deal_ids") or []):
+        ok = True
+    if deal.client_id in (scope.get("client_ids") or []):
+        ok = True
+    if deal.manager_id in (scope.get("manager_ids") or []):
+        ok = True
+    if not ok:
+        return False
+    phase = scope.get("phase")
+    if phase == "sale" and deal.status in POST_WIN:
+        return False
+    if phase == "contract" and deal.status not in POST_WIN:
+        return False
+    return True
 
 
 def get_deal_or_404(db: Session, deal_id: str, user: CurrentUser) -> Deal:
@@ -105,4 +132,11 @@ def deal_payload(deal: Deal, user: CurrentUser, extra: dict[str, Any] | None = N
         for v in data["variants"] + ([data["offer"]] if data["offer"] else []):
             for k in ("price_rub", "price_amount", "price_fx_rate"):
                 v.pop(k, None)
+    # юрист видит цену и условия оплаты только с выигрыша — когда они нужны для договора
+    if user.has(Role.LAWYER) and not user.has(Role.CD, Role.FD, Role.GD, Role.MANAGER) and deal.status not in POST_WIN:
+        for v in data["variants"] + ([data["offer"]] if data["offer"] else []):
+            for k in ("price_rub", "price_amount", "price_fx_rate", "client_payments", "factory_payments"):
+                v.pop(k, None)
+        for k in ("client_payments", "client_payments_alt", "factory_payments", "bank_guarantee", "advance_guarantee"):
+            data.pop(k, None)
     return filter_payload(data, user)

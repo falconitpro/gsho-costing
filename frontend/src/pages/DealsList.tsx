@@ -3,6 +3,7 @@ import { lbl, PRIORITY } from "../labels";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, STATUS_TITLES, type Deal, type Me } from "../types";
+import ColleaguesDeals from "../components/ColleaguesDeals";
 
 type Exec = { done: number; total: number; overdue: number; next: { title: string; on: string } | null; delay_days: number | null };
 type Row = Deal & { group?: string; parent_number?: string; related_count?: number; manager_name?: string; machines?: number; equipment?: string;
@@ -160,7 +161,8 @@ export default function DealsList({ me }: { me: Me }) {
   const [docs, setDocs] = useState<{ file: File; category: string }[]>([]);   // файлы от клиента — хранятся в сделке
   async function create() {
     try {
-      const d = await api.post<Deal>("/api/deals", { ...form, manager_id: managerId || undefined, kp_due: form.kp_due || null, target_hours: form.target_hours ? Number(form.target_hours) : null });
+      const d = await api.post<Deal & { warning?: string }>("/api/deals", { ...form, manager_id: managerId || undefined, kp_due: form.kp_due || null, target_hours: form.target_hours ? Number(form.target_hours) : null });
+      if (d.warning) alert(d.warning);
       for (const x of docs) await api.upload(`/api/deals/${d.id}/documents`, x.file, { category: x.category, comment: "загружено при заведении сделки" });
       nav(`/deals/${d.id}`);
     } catch (e) { setErr((e as Error).message); }
@@ -280,6 +282,7 @@ export default function DealsList({ me }: { me: Me }) {
           </tbody>
         </table>
       </div>
+      {me.roles.some((r) => r.code === "manager") && !me.roles.some((r) => ["cd", "fd", "gd"].includes(r.code)) && <ColleaguesDeals />}
     </>
   );
 }
