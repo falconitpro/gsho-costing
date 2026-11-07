@@ -63,7 +63,7 @@ def test_templates_library_and_company_card():
         assert r.status_code == 200 and r.headers["content-type"].startswith("application/vnd.openxmlformats") and r.headers["X-Unresolved"] == "foo.bar"
         out = Document(io.BytesIO(r.content))
         text = "\n".join(p.text for p in out.paragraphs) + "\n".join(cell.text for tb in out.tables for row in tb.rows for cell in row.cells)
-        assert "БЕРГ-ХАУС" in text and "SHACMAN" in text and "{{foo.bar}}" in text and "{{seller.name_ru}}" not in text
+        assert "БЕРГ-ХАУС" in text and "X3000" in text and "{{foo.bar}}" in text and "{{seller.name_ru}}" not in text
         # новая версия того же вида и языка — действующая, прежняя в архив; можно вернуть
         t2 = c.post("/api/legal/templates", headers=H(CD), data={"kind": "purchase_contract_cn", "notes": "v2"}, files={"file": ("contract_cn_v2.docx", good)}).json()
         items = {x["id"]: x for x in c.get("/api/legal/templates", headers=H(MGR)).json()["items"]}
