@@ -586,13 +586,26 @@ def catalog_update(deal_id: str, pos_id: str, codes: list[str], db: Session = De
 
 # ------------------------------------------------------------------ переходы менеджера
 
+class SendToCalcIn(BaseModel):
+    force: bool = False          # КД / ЗГД: отправить, хотя обязательные данные заполнены не до конца
+    comment: str = ""
+
+
 @router.post("/{deal_id}/send-to-calc")
-def send_to_calc_ep(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+def send_to_calc_ep(deal_id: str, body: Optional[SendToCalcIn] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    body = body or SendToCalcIn()
     deal = get_deal_or_404(db, deal_id, user)
-    _editable_by_manager(deal, user)
+    if not user.has(Role.CD, Role.GD):      # КД и ЗГД отправляют на расчёт и не свою сделку
+        _editable_by_manager(deal, user)
     errors = manager_checks(_deal_dict(deal))
+    if errors and not (body.force and user.has(Role.CD, Role.GD)):
+        raise HTTPException(422, {"message": "Проверки не пройдены", "errors": errors, "can_force": user.has(Role.CD, Role.GD)})
+    if errors and not deal.positions:
+        raise HTTPException(422, {"message": "В сделке нет позиций — считать нечего", "errors": errors})
     if errors:
-        raise HTTPException(422, {"message": "Проверки не пройдены", "errors": errors})
+        audit(db, user.id, deal.id, "deal", deal.id, "send_to_calc_incomplete", None,
+              {"missing": errors, "comment": body.comment}, f"Отправлено на расчёт без полных данных: {'; '.join(str(e) for e in errors)}"
+              + (f". {body.comment}" if body.comment else ""))
     st = DealState(status=deal.status, service_flag=deal.service_flag)
     try:
         tr = send_to_calc(st, date.today(), sla(db))

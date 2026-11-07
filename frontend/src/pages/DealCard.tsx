@@ -81,7 +81,14 @@ export default function DealCard({ me }: { me: Me }) {
     setVariantName(""); load();
   }
   async function send() {
-    try { await api.post(`/api/deals/${deal!.id}/send-to-calc`); setErr(""); load(); }
+    const checks = deal!.checks || [];
+    let body: { force?: boolean; comment?: string } = {};
+    if (checks.length) {   // КД / ЗГД — отправка без полностью заполненных обязательных данных
+      const c = prompt(`Не заполнено:\n• ${checks.join("\n• ")}\n\nОтправить на расчёт всё равно? Логист и сервис увидят пометку в ленте. Комментарий (необязательно):`, "");
+      if (c === null) return;
+      body = { force: true, comment: c };
+    }
+    try { await api.post(`/api/deals/${deal!.id}/send-to-calc`, body); setErr(""); load(); }
     catch (e) { const d = (e as ApiError).detail as { errors?: string[] }; setErr(d?.errors ? d.errors.join(" ") : (e as Error).message); }
   }
   async function removeOrArchive() {
@@ -117,8 +124,9 @@ export default function DealCard({ me }: { me: Me }) {
           {deal.legal_review?.status && <> <span className={"badge " + (REVIEW_BADGE[deal.legal_review.status] || "")} title={deal.legal_review.comment || ""}>юрист: {{ in_review: "на проверке", ok: "замечаний нет", remarks: "есть замечания" }[deal.legal_review.status] || deal.legal_review.status}</span></>}
         </div>
         <div className="row">
-          {editable && deal.status !== "approved" && deal.status !== "kp_sent" && (
-            <button className="btn" onClick={send} disabled={(deal.checks || []).length > 0} title={(deal.checks || []).join("\n")}>Отправить на расчёт</button>
+          {(editable || has("cd", "gd")) && ["draft", "rework"].includes(deal.status) && (
+            <button className="btn" onClick={send} disabled={(deal.checks || []).length > 0 && !has("cd", "gd")} title={(deal.checks || []).join("\n")}>
+              Отправить на расчёт{(deal.checks || []).length > 0 && has("cd", "gd") ? " (не всё заполнено)" : ""}</button>
           )}
           {isOwner && deal.status === "approved" && (
             <button className="btn ghost" title="если КП отправили вручную из своей почты" onClick={() => api.post(`/api/deals/${deal.id}/kp-sent`, { recipients: ["client"], sent_via: "outlook" }).then(load)}>Отметить: КП отправлено вручную</button>

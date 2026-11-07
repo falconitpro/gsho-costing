@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { lbl, STATUS } from "../labels";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Deal, type Me, type Stage } from "../types";
+import ContractScans from "./ContractScans";
 
 type Resp = { stages: Stage[]; status: string; contract_number: string; contract_signed_at: string | null; factory_contract_signed_at: string | null; won_variant_id: string | null;
   related: { id: string; number: string; status: string }[]; contract_steps: CStep[]; status_detail: string };
@@ -22,7 +23,8 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
   const isCdGd = me.roles.some((r) => r.code === "cd" || r.code === "gd");
   const load = () => api.get<Resp>(`/api/deals/${deal.id}/execution/stages`).then(setData).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, [deal.id, deal.status]);
-  async function act(fn: () => Promise<unknown>) { try { await fn(); setErr(""); reload(); load(); } catch (e) { setErr((e as Error).message); } }
+  const [ver, setVer] = useState(0);
+  async function act(fn: () => Promise<unknown>) { try { await fn(); setErr(""); reload(); load(); setVer((v) => v + 1); } catch (e) { setErr((e as Error).message); } }
   if (!data) return <div className="muted">{err || "Загрузка…"}</div>;
   const groups: Record<string, Stage[]> = {};
   for (const s of data.stages) { const k = s.batch ? `Партия: ${s.batch}` : s.position ? `Позиция: ${s.position}` : "Сделка"; (groups[k] ||= []).push(s); }
@@ -49,7 +51,8 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
                   <td><b>{c.title}</b><div className="muted" style={{ fontSize: 12 }}>{c.hint}</div></td>
                   <td style={{ fontSize: 12 }}>{c.roles.map((r) => ROLE_T[r] || r).join(", ")}</td>
                   <td>{c.state === "done" ? fmtDate(c.on) : editable ? <input type="date" value={v.on} onChange={(e) => setStep({ ...step, [c.code]: { ...v, on: e.target.value } })} /> : "—"}</td>
-                  <td style={{ fontSize: 12 }}>{c.state === "done" ? <>{c.by}{c.comment && <div className="muted">{c.comment}</div>}</> : editable && <>
+                  <td style={{ fontSize: 12 }}>{c.state === "done" ? <>{c.by}{c.comment && <div className="muted">{c.comment}</div>}
+                    {(c.code === "client_signed" || c.code === "factory_signed") && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} only={c.code === "client_signed" ? "client" : "factory"} />}</> : editable && <>
                     {c.code === "client_signed" && <input placeholder="номер контракта" value={v.number} onChange={(e) => setStep({ ...step, [c.code]: { ...v, number: e.target.value } })} style={{ width: 150, marginRight: 4 }} />}
                     <input placeholder="комментарий" value={v.comment} onChange={(e) => setStep({ ...step, [c.code]: { ...v, comment: e.target.value } })} style={{ width: 200 }} /></>}</td>
                   <td>{c.state === "done" ? (canStep(c) && <button className="btn ghost" onClick={() => markStep(c, false)}>снять отметку</button>)
@@ -76,6 +79,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
               <button className="btn secondary" onClick={() => act(() => api.patch(`/api/deals/${deal.id}/execution/contract`, { ...form, contract_signed_at: form.contract_signed_at || null, factory_contract_signed_at: form.factory_contract_signed_at || null, won_variant_id: form.won_variant_id || null }))}>Сохранить реквизиты</button>
             </div>
           )}
+          {["won", "contract", "execution", "closed"].includes(deal.status) && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} />}
           {(deal.status === "contract" || deal.status === "execution") && (isMgr || isCdGd) && (
             <div className="row" style={{ marginTop: 10 }}>
               <input placeholder="что изменилось в условиях контракта относительно КП" value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: 360 }} />
