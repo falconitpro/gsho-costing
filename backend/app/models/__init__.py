@@ -934,6 +934,53 @@ class BankProfile(TimestampMixin, Base):
     history: Mapped[list[dict]] = mapped_column(JSONType, default=list)        # [{at, by, action, fields: {name: [old, new]}}]
 
 
+class LegalZipSet(TimestampMixin, Base):
+    """Договорный комплект ЗИП по сделке и поставщику (юридический блок, этап 3): что из сервисного / RFQ-ЗИП идёт в приложение № 2.
+    Хранится отдельно от сервисного расчёта — правки юриста/менеджера не меняют себестоимость."""
+    __tablename__ = "legal_zip_sets"
+    __table_args__ = (UniqueConstraint("deal_id", "factory_id", name="uq_legal_zip_set"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    factory_id: Mapped[str] = mapped_column(ForeignKey("factories.id"), index=True)
+    # [{id, position_id, article, name, name_zh, assembly, unit, qty, unit_price, currency, interval_hours, kind, lead_days, included, selected, source, comment}]
+    lines: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    pricing_mode: Mapped[str] = mapped_column(String(16), default="included")   # included — в стоимости оборудования | separate — оплачивается отдельно
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    confirmed_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    history: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+
+
+class LegalPackage(TimestampMixin, Base):
+    """Пакет юридических документов по сделке (юридический блок): закупка у поставщика (договор + 2 приложения) или продажа заказчику
+    (рабочая копия договора заказчика + протокол разногласий + техспецификация). Версионируется; хранит снимки всех исходных данных."""
+    __tablename__ = "legal_packages"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))                               # purchase | sale
+    counterparty_kind: Mapped[str] = mapped_column(String(16))                  # factory | client
+    counterparty_id: Mapped[str] = mapped_column(String(36), index=True)
+    version_no: Mapped[int] = mapped_column(Integer, default=1)
+    deal_version_id: Mapped[Optional[str]] = mapped_column(String(36))
+    deal_version_no: Mapped[Optional[int]] = mapped_column(Integer)
+    own_entity_id: Mapped[Optional[str]] = mapped_column(ForeignKey("legal_entities.id"))   # компания группы (покупатель в закупке / продавец в продаже)
+    own_profile_id: Mapped[Optional[str]] = mapped_column(String(36))
+    own_bank_id: Mapped[Optional[str]] = mapped_column(String(36))
+    cp_profile_id: Mapped[Optional[str]] = mapped_column(String(36))             # профиль контрагента
+    cp_bank_id: Mapped[Optional[str]] = mapped_column(String(36))
+    language: Mapped[str] = mapped_column(String(16), default="ru")
+    templates: Mapped[dict] = mapped_column(JSONType, default=dict)             # {doc_kind: {"id", "version", "title"} | None (встроенный генератор)}
+    rules_version: Mapped[str] = mapped_column(String(32), default="")
+    snapshot: Mapped[dict] = mapped_column(JSONType, default=dict)              # все данные, подставленные в документы (стороны, банки, позиции, ЗИП, итоги, договор, источники)
+    checks: Mapped[dict] = mapped_column(JSONType, default=dict)                # {"errors": [...], "warnings": [...]}
+    files: Mapped[list[dict]] = mapped_column(JSONType, default=list)           # [{kind, title, file_name, attachment_id, size, format}]
+    status: Mapped[str] = mapped_column(String(32), default="draft")            # needs_data | draft | lawyer_review | commercial_review | approved | signed | superseded | archived
+    stage_code: Mapped[str] = mapped_column(String(32), default="")             # этап исполнения, к которому привязан пакет (factory_contract | contract_signed)
+    approvals: Mapped[list[dict]] = mapped_column(JSONType, default=list)       # [{at, by, from, to, comment}]
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    superseded_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+
 class SupplyRoute(TimestampMixin, Base):
     """Маршрут поставки: цепочка продаж от поставщика до компании, продающей клиенту."""
     __tablename__ = "supply_routes"

@@ -19,16 +19,17 @@ import OutcomePanel from "../components/OutcomePanel";
 import WaitingPanel from "../components/WaitingPanel";
 import ExecutionTab from "../components/ExecutionTab";
 import DocumentsTab, { REVIEW_BADGE } from "../components/DocumentsTab";
+import LegalDocsTab from "../components/LegalDocsTab";
 import { ImagesBlock, LocalOptionsBlock, OffersBlock, RelatedDeals } from "../components/ImagesLocalOptions";
 import { ModelDocsBlock, ZipBlock } from "../components/PositionExtras";
 import AcceptanceTab from "../components/AcceptanceTab";
 import { payText } from "../components/PaymentTermsEditor";
 
-type Tab = "acceptance" | "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "documents" | "catalog" | "feed" | "versions";
+type Tab = "acceptance" | "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "documents" | "legal" | "catalog" | "feed" | "versions";
 const POST_WIN = ["contract", "execution", "closed"];
 type Phase = "sale" | "contract";
 const SALE_TABS: Tab[] = ["main", "positions", "offers", "logistics", "service", "pricing", "catalog"];
-const CONTRACT_TABS: Tab[] = ["execution", "acceptance", "planfact", "documents"];
+const CONTRACT_TABS: Tab[] = ["execution", "acceptance", "planfact", "documents", "legal"];
 
 export default function DealCard({ me }: { me: Me }) {
   const { id } = useParams();
@@ -216,6 +217,7 @@ export default function DealCard({ me }: { me: Me }) {
           {["contract", "execution", "closed"].includes(deal.status) && has("manager", "service_head", "cd", "gd", "fd", "logistician") && <button className={tab === "acceptance" ? "active" : ""} onClick={() => setTab("acceptance")}>Приёмка машин</button>}
           <button className={tab === "planfact" ? "active" : ""} onClick={() => setTab("planfact")}>Платежи и план/факт</button>
           {can(me, "legal_docs") && <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>Документы</button>}
+          {can(me, "legal_docs") && <button className={tab === "legal" ? "active" : ""} onClick={() => setTab("legal")}>Юридические документы</button>}
         </>}
       </div>
 
@@ -348,6 +350,7 @@ export default function DealCard({ me }: { me: Me }) {
       {tab === "acceptance" && <AcceptanceTab dealId={deal.id} />}
       {tab === "planfact" && <PlanFactTab key={me.id} deal={deal} />}
       {tab === "documents" && <DocumentsTab deal={deal} me={me} onChanged={load} />}
+      {tab === "legal" && <LegalDocsTab deal={deal} me={me} reload={load} />}
 
       {tab === "catalog" && (
         <div className="card">
