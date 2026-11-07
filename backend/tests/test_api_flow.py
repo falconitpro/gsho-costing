@@ -184,6 +184,20 @@ def test_full_flow(client, tmp_path):
     assert rc["mail_configured"] is False
     assert client.post(f"/api/deals/{did}/kp/send", headers=H(MGR), json={"to": ["mech@rudnik.example"], "format": "docx"}).status_code == 409
     assert _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": ["mech@rudnik.example"]}))["status"] == "kp_sent"
+    # ожидание результата: задача менеджеру «уточнить решение», подстатус, отметка «уточнил» с новой датой
+    d_ = _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))
+    assert d_["decision_expected_on"] and "ожидание результата" in d_["status_detail"]
+    wt = [t for t in _ok(client.get("/api/tasks/my", headers=H(MGR))) if t["deal_id"] == did and t["block"] == "waiting"]
+    assert len(wt) == 1 and wt[0]["hint"] and wt[0]["tab"] == "main" and wt[0]["can_close"]
+    assert client.post(f"/api/deals/{did}/status-check", headers=H(LOG), json={"note": "x"}).status_code == 403
+    from datetime import date as _dt, timedelta as _tdl
+    far = (_dt.today() + _tdl(days=12)).isoformat()
+    sc = _ok(client.post(f"/api/deals/{did}/status-check", headers=H(MGR), json={"note": "тендерная комиссия 20-го", "expected_on": far}))
+    assert sc["decision_expected_on"] == far and _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))["status_check_note"] == "тендерная комиссия 20-го"
+    wt2 = [t for t in _ok(client.get("/api/tasks/my", headers=H(MGR))) if t["deal_id"] == did and t["block"] == "waiting"]
+    assert len(wt2) == 1 and wt2[0]["due"] == far and wt2[0]["id"] != wt[0]["id"]            # прежняя задача закрыта, новая — к дате решения
+    _ok(client.post(f"/api/tasks/{wt2[0]['id']}/done", headers=H(MGR), json={"comment": "клиент ответил"}))   # закрытие вручную
+    assert not [t for t in _ok(client.get("/api/tasks/my", headers=H(MGR))) if t["id"] == wt2[0]["id"]]
     assert _ok(client.get(f"/api/deals/{did}/kp/revisions", headers=H(CD)))["rows"][1]["sent_at"]   # в историю цен ушла редакция
     card_cd = _ok(client.get(f"/api/refs/clients/{clients[0]['id']}", headers=H(CD)))
     assert card_cd["kp_history"] and card_cd["kp_history"][0]["deal_number"] == deal["number"] and card_cd["kp_history"][0]["versions"]

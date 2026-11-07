@@ -47,6 +47,7 @@ DEFAULTS: dict[str, Any] = {
     "logistics_deviation_pct": 15.0,
     "plan_fact_deviation_pct": 10.0,
     "sla_days": {"logistics": 1, "service": 2, "cd": 1, "fd": 1, "gd": 1, "manager_rework": 1},
+    "waiting_check_days": 5,   # ожидание результата после КП: через сколько рабочих дней напомнить менеджеру уточнить решение клиента
     "kp_fx_clause_pct": 5.0,
     "kp_validity_days": 30,
     # запасные части (ТЗ запчастей, раздел 6): порог маржи по себестоимости строки, минимум маржи КП, допуск КД
@@ -267,6 +268,8 @@ META: dict[str, dict] = {
                                 "help": "Больше — логист обязан написать комментарий."},
     "plan_fact_deviation_pct": {"group": "Контроль отклонений", "title": "Допустимое отклонение план/факт", "unit": "%", "type": "number"},
     # Сроки
+    "waiting_check_days": {"group": "Сроки и календарь", "title": "Напоминание уточнить решение клиента после КП", "unit": "раб. дн.", "type": "number",
+                           "help": "Через сколько рабочих дней после отправки КП (и после каждого уточнения без даты) менеджеру ставится задача уточнить статус у клиента."},
     "sla_days": {"group": "Сроки и календарь", "title": "Сроки выполнения задач (SLA)", "unit": "раб. дн.", "type": "object",
                  "fields": [{"key": "logistics", "label": "Логист"}, {"key": "service", "label": "Сервис"}, {"key": "cd", "label": "КД"},
                             {"key": "fd", "label": "ФД"}, {"key": "gd", "label": "ЗГД"}, {"key": "manager_rework", "label": "Доработка менеджером"}]},

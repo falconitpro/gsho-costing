@@ -78,7 +78,7 @@ export interface Deal {
   kp_due: string | null; priority: string; status: string; manager_id: string; base_currency: string; service_flag: boolean;
   target_hours: number | null; client_payments: PaymentLine[]; client_payment_wishes?: string; bank_guarantee?: Record<string, unknown>;
   positions: Position[]; variants: Variant[]; batches: Batch[]; offer?: Variant | null; payment_terms_set?: boolean;
-  now?: import("./components/DealHeader").Now; checks?: string[]; check_items?: { group: string; tab: string; position_id: string | null; fields: string[]; tech: string[] }[]; report_date?: string | null; current_version_no: number; outcome?: string | null; outcome_reason?: string; status_detail?: string; archived_at?: string | null; archive_reason?: string; legal_review?: { status?: string; comment?: string; by?: string; at?: string } | null; contract_steps?: Record<string, unknown>; logistics_done: boolean; service_done: boolean;
+  now?: import("./components/DealHeader").Now; decision_expected_on?: string | null; status_checked_on?: string | null; status_check_note?: string; checks?: string[]; check_items?: { group: string; tab: string; position_id: string | null; fields: string[]; tech: string[] }[]; report_date?: string | null; current_version_no: number; outcome?: string | null; outcome_reason?: string; status_detail?: string; archived_at?: string | null; archive_reason?: string; legal_review?: { status?: string; comment?: string; by?: string; at?: string } | null; contract_steps?: Record<string, unknown>; logistics_done: boolean; service_done: boolean;
   has_alternatives?: boolean; won_variant_id?: string | null; parent_deal_id?: string | null; request_group_id?: string | null;
   kp_brand?: string; kp_images_mode?: string; contract_number?: string; contract_signed_at?: string | null; factory_contract_signed_at?: string | null; factory_contract_number?: string | null;
   in_execution?: boolean;
@@ -114,7 +114,8 @@ export interface CalcResponse {
     positions: { id: string; model: string; factory_payments: PaymentLine[]; factory_payments_offer: PaymentLine[]; delivery_term: DeliveryTerm; production_term: ProductionTerm }[] };
   events?: Record<string, string>; kp_brand?: string; kp_images_mode?: string;
 }
-export interface Task { id: string; deal_id: string; deal_number: string; title: string; role: string; block: string; due: string; overdue: boolean; deal_status: string }
+export interface Task { id: string; deal_id: string; deal_number: string; title: string; role: string; block: string; due: string; overdue: boolean; deal_status: string;
+  days_left?: number; client_name?: string; site?: string; equipment?: string; hint?: string; tab?: string; can_close?: boolean }
 
 export interface Stage {
   id: string; code: string; title: string; planned_on: string | null; actual_on: string | null; amount?: number | null; currency: string; actual_amount?: number | null;
