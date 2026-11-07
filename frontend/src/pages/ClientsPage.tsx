@@ -9,10 +9,12 @@ import type { Me } from "../types";
 import { payText } from "../components/PaymentTermsEditor";
 import type { PaymentLine } from "../types";
 
-type Stats = { deals: number; open: number; won: number; lost: number; last_on: string | null; last_number: string; last_status: string; manager: string; sum_won_rub: number | null };
+type PartsStats = { requests: number; open: number; done: number; last_on: string | null; last_number: string; sum_rub: number | null };
+type Stats = { deals: number; open: number; won: number; lost: number; last_on: string | null; last_number: string; last_status: string; manager: string; sum_won_rub: number | null; parts?: PartsStats };
 type Client = { id: string; name: string; inn: string; address: string; sites: { name: string }[]; contacts: { name: string; email?: string }[];
   full_name?: string; kpp?: string; ogrn?: string; director?: string; legal_status?: string; okved?: string; registry_checked_at?: string | null; stats?: Stats; requisites_count?: number };
-type SortKey = "name" | "deals" | "open" | "won" | "sum" | "last";
+type SortKey = "name" | "deals" | "open" | "won" | "sum" | "last" | "preq" | "popen" | "psum" | "plast";
+const NO_PARTS: PartsStats = { requests: 0, open: 0, done: 0, last_on: null, last_number: "", sum_rub: null };
 type Found = { inn: string; name: string; full_name: string; kpp: string; ogrn: string; address: string; director: string; status: string; okved: string;
   registered_on: string | null; kind: string; source: string; raw: Record<string, unknown> };
 const STATUS_RU: Record<string, string> = { ACTIVE: "действующая", LIQUIDATING: "ликвидируется", LIQUIDATED: "ликвидирована", BANKRUPT: "банкротство", REORGANIZING: "реорганизация" };
@@ -54,6 +56,8 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
   const canReq = me.roles.some((r) => ["manager", "cd", "gd", "admin", "lawyer"].includes(r.code));
   const [q, setQ] = useState("");
   const [view, setView] = useState<"all" | "open" | "won" | "none">("all");
+  const [seg, setSeg] = useState<"all" | "gsho" | "parts">(() => { try { return (localStorage.getItem("clients_seg") as "all" | "gsho" | "parts") || "all"; } catch { return "all"; } });
+  useEffect(() => { try { localStorage.setItem("clients_seg", seg); } catch { /* приватный режим */ } }, [seg]);
   const [mgr, setMgr] = useState("");
   const [sort, setSort] = useState<{ k: SortKey; d: 1 | -1 }>({ k: "last", d: -1 });
   const [showNew, setShowNew] = useState(false);
@@ -97,17 +101,30 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
           const fin = clients.some((c) => c.stats?.sum_won_rub != null);
           const st = (c: Client): Stats => c.stats || { deals: 0, open: 0, won: 0, lost: 0, last_on: null, last_number: "", last_status: "", manager: "", sum_won_rub: null };
           const managers = [...new Set(clients.map((c) => st(c).manager).filter(Boolean))].sort();
+          const pt = (c: Client): PartsStats => st(c).parts || NO_PARTS;
+          const showG = seg !== "parts", showP = seg !== "gsho";
+          const openCnt = (c: Client) => (showG ? st(c).open : 0) + (showP ? pt(c).open : 0);
+          const wonCnt = (c: Client) => (showG ? st(c).won : 0) + (showP ? pt(c).done : 0);
+          const total = (c: Client) => (showG ? st(c).deals : 0) + (showP ? pt(c).requests : 0);
+          const lastAny = (c: Client) => [showG ? st(c).last_on : null, showP ? pt(c).last_on : null].filter(Boolean).sort().pop() || "";
           const shown = clients.filter((c) => (!q || `${c.name} ${c.inn} ${c.full_name || ""}`.toLowerCase().includes(q.toLowerCase()))
-            && (view === "all" || (view === "open" ? st(c).open > 0 : view === "won" ? st(c).won > 0 : st(c).deals === 0)) && (!mgr || st(c).manager === mgr))
-            .sort((a, b) => { const A = st(a), B = st(b); const v = sort.k === "name" ? a.name.localeCompare(b.name, "ru") : sort.k === "deals" ? A.deals - B.deals : sort.k === "open" ? A.open - B.open
-              : sort.k === "won" ? A.won - B.won : sort.k === "sum" ? (A.sum_won_rub || 0) - (B.sum_won_rub || 0) : String(A.last_on || "").localeCompare(String(B.last_on || "")); return v * sort.d; });
+            && (view === "all" || (view === "open" ? openCnt(c) > 0 : view === "won" ? wonCnt(c) > 0 : total(c) === 0)) && (!mgr || st(c).manager === mgr))
+            .sort((a, b) => { const A = st(a), B = st(b), PA = pt(a), PB = pt(b); const v = sort.k === "name" ? a.name.localeCompare(b.name, "ru") : sort.k === "deals" ? A.deals - B.deals : sort.k === "open" ? A.open - B.open
+              : sort.k === "won" ? A.won - B.won : sort.k === "sum" ? (A.sum_won_rub || 0) - (B.sum_won_rub || 0) : sort.k === "preq" ? PA.requests - PB.requests : sort.k === "popen" ? PA.open - PB.open
+              : sort.k === "psum" ? (PA.sum_rub || 0) - (PB.sum_rub || 0) : sort.k === "plast" ? String(PA.last_on || "").localeCompare(String(PB.last_on || "")) : lastAny(a).localeCompare(lastAny(b)); return v * sort.d; });
           const th = (k: SortKey, t: string, num = false) => <th className={num ? "num" : undefined} style={{ cursor: "pointer", whiteSpace: "nowrap" }} onClick={() => setSort({ k, d: sort.k === k ? (sort.d === 1 ? -1 : 1) : (k === "name" ? 1 : -1) })}>{t}{sort.k === k ? (sort.d === 1 ? " ↑" : " ↓") : ""}</th>;
-          const kpis: [string, string | number][] = [["клиентов", clients.length], ["с открытыми сделками", clients.filter((c) => st(c).open > 0).length], ["выигравших", clients.filter((c) => st(c).won > 0).length],
-            ["без сделок", clients.filter((c) => st(c).deals === 0).length], ...(fin ? [["сумма выигранных, RUB", fmtRub(clients.reduce((a, c) => a + (st(c).sum_won_rub || 0), 0))] as [string, string]] : [])];
+          const kpis: [string, string | number][] = [["клиентов", clients.length],
+            ...(showG ? [["с открытыми сделками ГШО", clients.filter((c) => st(c).open > 0).length] as [string, number], ["выигравших ГШО", clients.filter((c) => st(c).won > 0).length] as [string, number]] : []),
+            ...(showP ? [["с открытыми заявками ЗЧ", clients.filter((c) => pt(c).open > 0).length] as [string, number], ["заявок на запчасти", clients.reduce((a, c) => a + pt(c).requests, 0)] as [string, number]] : []),
+            ["без сделок и заявок", clients.filter((c) => total(c) === 0).length],
+            ...(fin && showG ? [["сумма выигранных ГШО, RUB", fmtRub(clients.reduce((a, c) => a + (st(c).sum_won_rub || 0), 0))] as [string, string]] : []),
+            ...(fin && showP ? [["сумма КП по запчастям, RUB", fmtRub(clients.reduce((a, c) => a + (pt(c).sum_rub || 0), 0))] as [string, string]] : [])];
           return (
             <div className="card">
               <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
                 <input placeholder="🔍 название, ИНН" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: "1 1 220px" }} />
+                <div className="row" style={{ gap: 0, border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>{([["gsho", "ГШО"], ["parts", "Запасные части"], ["all", "Все"]] as const).map(([k, t]) => (
+                  <button key={k} onClick={() => setSeg(k)} style={{ border: 0, cursor: "pointer", padding: "6px 12px", fontFamily: "inherit", fontSize: 13, fontWeight: seg === k ? 700 : 500, background: seg === k ? "var(--ink)" : "#fff", color: seg === k ? "#fff" : "var(--ink)" }}>{t}</button>))}</div>
                 <select value={mgr} onChange={(e) => setMgr(e.target.value)}><option value="">все менеджеры</option>{managers.map((m) => <option key={m}>{m}</option>)}</select>
                 <div className="row" style={{ gap: 2 }}>{([["all", "все"], ["open", "с открытыми"], ["won", "выигравшие"], ["none", "без сделок"]] as const).map(([k, t]) => (
                   <button key={k} onClick={() => setView(k)} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "6px 10px", fontWeight: view === k ? 700 : 500, borderBottom: view === k ? "2px solid var(--accent)" : "2px solid transparent", fontFamily: "inherit", fontSize: 13 }}>{t}</button>))}</div>
@@ -118,17 +135,25 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
               </div>
               <div style={{ overflowX: "auto", marginTop: 10 }}>
                 <table style={{ fontSize: 13 }}>
-                  <thead><tr>{th("name", "Клиент")}{th("deals", "Сделок", true)}{th("open", "В работе", true)}{th("won", "Выиграно", true)}{fin && th("sum", "Сумма выигранных, RUB", true)}{th("last", "Последняя сделка")}<th>Менеджер</th><th title="наборов реквизитов для договоров">Реквизиты</th></tr></thead>
-                  <tbody>{shown.map((c) => { const x = st(c); return (
+                  <thead><tr>{th("name", "Клиент")}
+                    {showG && <>{th("deals", "Сделок ГШО", true)}{th("open", "В работе", true)}{th("won", "Выиграно", true)}{fin && !card && th("sum", "Сумма выигранных, RUB", true)}{!card && th("last", "Последняя сделка")}</>}
+                    {showP && <>{th("preq", "Заявок ЗЧ", true)}{th("popen", "Открытых", true)}{fin && !card && th("psum", "КП по ЗЧ, RUB", true)}{!card && seg === "parts" && th("plast", "Последняя заявка")}</>}
+                    {!card && <th>Менеджер</th>}{!card && <th title="юридический профиль и реквизиты для договоров">Юр. профиль</th>}</tr></thead>
+                  <tbody>{shown.map((c) => { const x = st(c); const p = pt(c); return (
                     <tr key={c.id} style={{ cursor: "pointer", background: card?.id === c.id ? "var(--accent-soft)" : undefined }} onClick={() => api.get<Card>(`/api/refs/clients/${c.id}`).then(setCard)}>
                       <td><b>{c.name}</b><div className="muted" style={{ fontSize: 11 }}>ИНН {c.inn}{c.legal_status && c.legal_status !== "ACTIVE" && <span className="badge bad" style={{ marginLeft: 6 }}>{STATUS_RU[c.legal_status] || c.legal_status}</span>}</div></td>
-                      <td className="num">{x.deals || <span className="muted">—</span>}</td><td className="num">{x.open ? <span className="badge info">{x.open}</span> : <span className="muted">—</span>}</td>
-                      <td className="num">{x.won ? <span className="badge ok">{x.won}</span> : <span className="muted">—</span>}{x.lost > 0 && <span className="muted" style={{ fontSize: 11 }}> / {x.lost} пр.</span>}</td>
-                      {fin && <td className="num">{x.sum_won_rub ? fmtRub(x.sum_won_rub) : <span className="muted">—</span>}</td>}
-                      <td style={{ whiteSpace: "nowrap" }}>{x.last_number ? <>{x.last_number} <span className="badge" style={{ background: toneOf(x.last_status)[0], color: toneOf(x.last_status)[1], fontSize: 11 }}>{STATUS_TITLES[x.last_status] || x.last_status}</span><div className="muted" style={{ fontSize: 11 }}>{fmtDate(x.last_on)}</div></> : <span className="muted">—</span>}</td>
-                      <td style={{ whiteSpace: "nowrap" }}>{x.manager || <span className="muted">—</span>}</td>
-                      <td className="num">{c.requisites_count ? c.requisites_count : <span className="badge warn" title="нет наборов реквизитов для договоров">нет</span>}</td></tr>); })}
-                    {shown.length === 0 && <tr><td colSpan={8} className="muted">Не найдено</td></tr>}</tbody>
+                      {showG && <>
+                        <td className="num">{x.deals || <span className="muted">—</span>}</td><td className="num">{x.open ? <span className="badge info">{x.open}</span> : <span className="muted">—</span>}</td>
+                        <td className="num">{x.won ? <span className="badge ok">{x.won}</span> : <span className="muted">—</span>}{x.lost > 0 && <span className="muted" style={{ fontSize: 11 }}> / {x.lost} пр.</span>}</td>
+                        {fin && !card && <td className="num">{x.sum_won_rub ? fmtRub(x.sum_won_rub) : <span className="muted">—</span>}</td>}
+                        {!card && <td style={{ whiteSpace: "nowrap" }}>{x.last_number ? <>{x.last_number} <span className="badge" style={{ background: toneOf(x.last_status)[0], color: toneOf(x.last_status)[1], fontSize: 11 }}>{STATUS_TITLES[x.last_status] || x.last_status}</span><div className="muted" style={{ fontSize: 11 }}>{fmtDate(x.last_on)}</div></> : <span className="muted">—</span>}</td>}</>}
+                      {showP && <>
+                        <td className="num">{p.requests || <span className="muted">—</span>}</td><td className="num">{p.open ? <span className="badge info">{p.open}</span> : <span className="muted">—</span>}{p.done > 0 && <span className="muted" style={{ fontSize: 11 }}> / {p.done} вып.</span>}</td>
+                        {fin && !card && <td className="num">{p.sum_rub ? fmtRub(p.sum_rub) : <span className="muted">—</span>}</td>}
+                        {!card && seg === "parts" && <td style={{ whiteSpace: "nowrap" }}>{p.last_number ? <>{p.last_number}<div className="muted" style={{ fontSize: 11 }}>{fmtDate(p.last_on)}</div></> : <span className="muted">—</span>}</td>}</>}
+                      {!card && <td style={{ whiteSpace: "nowrap" }}>{x.manager || <span className="muted">—</span>}</td>}
+                      {!card && <td className="num">{c.requisites_count ? c.requisites_count : <span className="badge warn" title="юридический профиль не заполнен">нет</span>}</td>}</tr>); })}
+                    {shown.length === 0 && <tr><td colSpan={12} className="muted">Не найдено</td></tr>}</tbody>
                 </table>
               </div>
             </div>);

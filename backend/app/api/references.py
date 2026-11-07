@@ -101,6 +101,85 @@ def _client_stats(db: Session, user: CurrentUser) -> dict[str, dict]:
     for st in out.values():
         st["last_on"] = st["last_on"].isoformat() if st["last_on"] else None
         st["sum_won_rub"] = round(st["sum_won_rub"], 2) if fin else None
+    # запасные части: заявки клиента (ЗЧ-…), открытые, последняя, сумма КП по закрытым «выполнено» (finance)
+    from ..models import PartKp, PartRequest
+    kps = {}
+    if fin:
+        for k in db.scalars(select(PartKp)).all():
+            kps[k.request_id] = k
+    for r in db.scalars(select(PartRequest).order_by(PartRequest.created_at)).all():
+        st = out.setdefault(r.client_id, {"deals": 0, "open": 0, "won": 0, "lost": 0, "last_on": None, "last_number": "", "last_status": "", "manager": "", "sum_won_rub": 0.0 if fin else None})
+        pt = st.setdefault("parts", {"requests": 0, "open": 0, "done": 0, "last_on": None, "last_number": "", "sum_rub": 0.0 if fin else None})
+        pt["requests"] += 1
+        if not r.closed:
+            pt["open"] += 1
+        elif r.closed == "done":
+            pt["done"] += 1
+            k = kps.get(r.id)
+            if fin and k and (k.currency or "RUB") == "RUB":
+                pt["sum_rub"] = round((pt["sum_rub"] or 0) + (k.total or 0), 2)
+        on = (r.updated_at or r.created_at)
+        if on and (pt["last_on"] is None or on > pt["last_on"]):
+            pt["last_on"], pt["last_number"] = on, r.number
+            if not st["manager"]:
+                st["manager"] = users.get(r.manager_id, "")
+    for st in out.values():
+        if "parts" in st and st["parts"]["last_on"]:
+            st["parts"]["last_on"] = st["parts"]["last_on"].isoformat()
+    return out
+
+
+def _factory_stats(db: Session, user: CurrentUser) -> dict[str, dict]:
+    """Аналитика по поставщикам: ГШО — сделки с позициями завода (всего / в работе / выиграно), последняя сделка, сумма выигранных
+    по валюте завода (finance_analytics); запасные части — заказы поставщику (всего / открытые), сумма по валютам, последний заказ, запросы цен."""
+    from ..models import PurchaseOrder, SupplierRfq
+    fin = user.can("finance_analytics")
+    out: dict[str, dict] = {}
+    blank = lambda: {"gsho": {"deals": 0, "open": 0, "won": 0, "lost": 0, "last_on": None, "last_number": "", "last_status": "", "sum_won": {} if fin else None, "models": 0},  # noqa: E731
+                     "parts": {"po": 0, "po_open": 0, "po_sum": {} if fin else None, "last_on": None, "last_number": "", "last_status": "", "rfq": 0}}
+    deals = {d.id: d for d in db.scalars(select(Deal).where(Deal.deleted_at.is_(None))).all()}
+    seen: set[tuple[str, str]] = set()
+    for pos in db.scalars(select(Position)).all():
+        d = deals.get(pos.deal_id)
+        if d is None or not pos.factory_id:
+            continue
+        g = out.setdefault(pos.factory_id, blank())["gsho"]
+        won = d.outcome == "won" or d.status in WON_STATUSES
+        if (pos.factory_id, d.id) not in seen:
+            seen.add((pos.factory_id, d.id))
+            g["deals"] += 1
+            if won:
+                g["won"] += 1
+            elif d.status in OPEN_STATUSES:
+                g["open"] += 1
+            elif d.status == DealStatus.LOST or d.outcome == "lost":
+                g["lost"] += 1
+            on = d.updated_at or d.created_at
+            if on and (g["last_on"] is None or on > g["last_on"]):
+                g["last_on"], g["last_number"], g["last_status"] = on, d.number, d.status.value
+        if fin and won:
+            cur = (pos.currency or "CNY").upper()
+            g["sum_won"][cur] = round(g["sum_won"].get(cur, 0) + (pos.unit_price or 0) * (pos.qty or 1) + (pos.options_price or 0) * (pos.qty or 1), 2)
+    for mdl in db.scalars(select(EquipmentModel)).all():
+        if mdl.factory_id:
+            out.setdefault(mdl.factory_id, blank())["gsho"]["models"] += 1
+    for po in db.scalars(select(PurchaseOrder).where(PurchaseOrder.supplier_id.is_not(None), PurchaseOrder.kind == "external")).all():
+        p = out.setdefault(po.supplier_id, blank())["parts"]
+        p["po"] += 1
+        if po.status in ("draft", "sent", "confirmed", "in_progress"):
+            p["po_open"] += 1
+        if fin and po.status != "cancelled":
+            cur = (po.currency or "CNY").upper()
+            p["po_sum"][cur] = round(p["po_sum"].get(cur, 0) + (po.total or 0), 2)
+        on = po.updated_at or po.created_at
+        if on and (p["last_on"] is None or on > p["last_on"]):
+            p["last_on"], p["last_number"], p["last_status"] = on, po.number, po.status
+    for rfq in db.scalars(select(SupplierRfq)).all():
+        out.setdefault(rfq.supplier_id, blank())["parts"]["rfq"] += 1
+    for st in out.values():
+        for k in ("gsho", "parts"):
+            if st[k]["last_on"]:
+                st[k]["last_on"] = st[k]["last_on"].isoformat()
     return out
 
 
@@ -288,9 +367,9 @@ def client_refresh_registry(client_id: str, db: Session = Depends(get_db), user:
 
 
 @router.get("/factories")
-def factories(include_archived: bool = False, supplies: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Поставщики; supplies=gsho | parts — только поставщики ГШО или запасных частей."""
-    from ..models import FactoryChange
+def factories(include_archived: bool = False, supplies: str = "", stats: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Поставщики; supplies=gsho | parts — только поставщики ГШО или запасных частей; stats=1 — аналитика (ГШО и запасные части отдельно)."""
+    from ..models import FactoryChange, LegalProfile
     pend = {}
     for fid in db.scalars(select(FactoryChange.factory_id).where(FactoryChange.status == "pending")).all():
         pend[fid] = pend.get(fid, 0) + 1
@@ -300,6 +379,16 @@ def factories(include_archived: bool = False, supplies: str = "", db: Session = 
     if not user.can("factory_price_history"):          # банковские реквизиты — тем, кто видит цены завода
         for f in out:
             f.pop("bank_details", None)
+    if stats:
+        from sqlalchemy import func as _f
+        st = _factory_stats(db, user)
+        prof = dict(db.execute(select(LegalProfile.owner_id, _f.count()).where(LegalProfile.owner_kind == "factory", LegalProfile.is_active.is_(True)).group_by(LegalProfile.owner_id)).all())
+        fin = user.can("finance_analytics")
+        empty = {"gsho": {"deals": 0, "open": 0, "won": 0, "lost": 0, "last_on": None, "last_number": "", "last_status": "", "sum_won": {} if fin else None, "models": 0},
+                 "parts": {"po": 0, "po_open": 0, "po_sum": {} if fin else None, "last_on": None, "last_number": "", "last_status": "", "rfq": 0}}
+        for f in out:
+            f["stats"] = st.get(f["id"], empty)
+            f["profiles_count"] = prof.get(f["id"], 0)
     return out
 
 

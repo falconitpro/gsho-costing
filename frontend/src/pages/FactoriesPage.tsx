@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { lbl, CATALOG_STATUS, PRICE_SOURCE } from "../labels";
 import { UndoButton, useUndoHistory } from "../undo";
 import { api, fmtDate, fmtRub } from "../api";
+import { STATUS_TITLES } from "../types";
+import { toneOf } from "../colors";
 import { can, type Me } from "../types";
 
 type Contact = {
@@ -14,8 +16,13 @@ type Factory = {
   bank_details: { beneficiary?: string; bank?: string; swift?: string; account?: string; bank_address?: string };
   default_currency: string; default_basis: string; machine_types: string[]; trademarks: string[]; typical_production_days: number | null; rating: number | null;
   notes: string; is_active: boolean; approval_status?: string; can_approve?: boolean; created_by_name?: string; approved_by_name?: string; approved_at?: string | null;
-  pending_changes?: Change[] | number; legal_entity_id?: string | null; language?: string; supplies?: string[]; default_route_id?: string | null; models?: { id: string; model: string; machine_type: string; status: string }[]; deals?: number;
+  pending_changes?: Change[] | number; stats?: FStats; profiles_count?: number; legal_entity_id?: string | null; language?: string; supplies?: string[]; default_route_id?: string | null; models?: { id: string; model: string; machine_type: string; status: string }[]; deals?: number;
 };
+type Sums = Record<string, number> | null;
+type FStats = { gsho: { deals: number; open: number; won: number; lost: number; last_on: string | null; last_number: string; last_status: string; sum_won: Sums; models: number };
+  parts: { po: number; po_open: number; po_sum: Sums; last_on: string | null; last_number: string; last_status: string; rfq: number } };
+const PO_T: Record<string, string> = { draft: "черновик", sent: "отправлен", confirmed: "подтверждён", in_progress: "в работе", closed: "закрыт", cancelled: "отменён" };
+const sums = (x: Sums) => (x && Object.keys(x).length ? Object.entries(x).map(([c, v]) => `${fmtRub(v)} ${c}`).join(" · ") : "");
 type Change = { id: string; proposed_by_name: string; proposed_at: string; comment: string; fields: { field: string; title: string; old: unknown; new: unknown }[] };
 type Price = { on: string; model: string; unit_price: number; currency: string; basis: string; production_term: { value?: number; unit?: string }; source: string };
 
@@ -63,7 +70,9 @@ export default function FactoriesPage({ me, embedded = false }: { me: Me; embedd
     try { const r = await api.del<{ message: string }>(`/api/refs/factories/${cur.id}`); setMsg(r.message); setCur(null); load(); }
     catch (e) { setMsg((e as Error).message); }
   }
-  const load = () => api.get<Factory[]>("/api/refs/factories").then(setList);
+  const load = () => api.get<Factory[]>("/api/refs/factories?stats=1").then(setList);
+  const [view, setView] = useState<"all" | "active" | "won" | "none">("all");
+  const [sort, setSort] = useState<{ k: string; d: 1 | -1 }>({ k: "last", d: -1 });
   useEffect(() => { load(); api.get<Record<string, string>>("/api/refs/factories/contact-roles").then(setRoles); }, []);
   async function open(id: string) {
     setConfirmDel(false);
@@ -101,21 +110,66 @@ export default function FactoriesPage({ me, embedded = false }: { me: Me; embedd
         <div className="push">{editor && <button className="btn add" onClick={() => { setCur({ ...EMPTY, supplies: [kind || "gsho"], contacts: [{ ...EMPTY_CONTACT, roles: ["rfq"], primary: true }] }); setPrices([]); setMsg(""); }}>Добавить поставщика</button>}</div>
       </div>
       {msg && <div className="alert info">{msg}</div>}
-      <div className="grid" style={{ gridTemplateColumns: "360px 1fr" }}>
-        <div className="card">
-          <div className="row"><input placeholder="поиск: название, марка, город" value={q} onChange={(e) => setQ(e.target.value)} />
-            <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} title="есть контакт по направлению"><option value="">все</option>{Object.entries(roles).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></div>
-          <table style={{ marginTop: 6 }}><tbody>{shown.map((f) => {
-            const rfq = (f.contacts || []).find((c) => (c.roles || []).includes("rfq"));
-            return (
-              <tr key={f.id} style={{ cursor: "pointer", background: cur?.id === f.id ? "var(--accent-soft)" : undefined, opacity: f.is_active === false ? 0.5 : 1 }} onClick={() => open(f.id!)}>
-                <td><b>{f.short_name || f.name}</b>{(f.trademarks || []).map((t) => <span key={t} className="badge accent" style={{ marginLeft: 4 }}>{t}</span>)}{!kind && (f.supplies || []).map((x) => <span key={x} className="badge" style={{ marginLeft: 4 }}>{KINDS[x]}</span>)}{f.approval_status === "pending" && <span className="badge bad" style={{ marginLeft: 4 }}>на утверждении</span>}{Number(f.pending_changes || 0) > 0 && <span className="badge bad" style={{ marginLeft: 4 }}>изменения</span>}{f.name_zh && <div className="muted" style={{ fontSize: 11 }}>{f.name_zh}</div>}
-                  <div className="muted" style={{ fontSize: 11 }}>{[f.city, f.province].filter(Boolean).join(", ")}{rfq ? ` · заявки: ${rfq.name}` : " · нет контакта по заявкам"}</div></td>
-                <td className="muted" style={{ fontSize: 11 }}>{(f.contacts || []).length} конт.</td></tr>);
-          })}{shown.length === 0 && <tr><td className="muted">Не найдено</td></tr>}</tbody></table>
-        </div>
-        <div>
-          {!cur ? <div className="card muted">Выберите поставщика слева или добавьте нового. Поставщик может поставлять и ГШО, и запасные части — отметьте оба. Запрос заводу из сделки уходит контактам с направлением «Заявки и КП» (WeCom и почта).</div> : (
+      {(() => {
+        const fin = list.some((f) => f.stats?.gsho.sum_won != null);
+        const st = (f: Factory): FStats => f.stats || { gsho: { deals: 0, open: 0, won: 0, lost: 0, last_on: null, last_number: "", last_status: "", sum_won: null, models: 0 }, parts: { po: 0, po_open: 0, po_sum: null, last_on: null, last_number: "", last_status: "", rfq: 0 } };
+        const showG = kind !== "parts", showP = kind !== "gsho";
+        const activity = (f: Factory) => (showG ? st(f).gsho.open : 0) + (showP ? st(f).parts.po_open : 0);
+        const wins = (f: Factory) => (showG ? st(f).gsho.won : 0) + (showP ? st(f).parts.po : 0);
+        const lastOn = (f: Factory) => [showG ? st(f).gsho.last_on : null, showP ? st(f).parts.last_on : null].filter(Boolean).sort().pop() || "";
+        const rows = shown.filter((f) => view === "all" || (view === "active" ? activity(f) > 0 : view === "won" ? wins(f) > 0 : st(f).gsho.deals + st(f).parts.po === 0))
+          .sort((a, b) => { const A = st(a), B = st(b); const v = sort.k === "name" ? (a.short_name || a.name).localeCompare(b.short_name || b.name, "ru") : sort.k === "deals" ? A.gsho.deals - B.gsho.deals : sort.k === "open" ? A.gsho.open - B.gsho.open
+            : sort.k === "won" ? A.gsho.won - B.gsho.won : sort.k === "po" ? A.parts.po - B.parts.po : sort.k === "po_open" ? A.parts.po_open - B.parts.po_open : sort.k === "rating" ? (a.rating || 0) - (b.rating || 0) : lastOn(a).localeCompare(lastOn(b)); return v * sort.d; });
+        const th = (k: string, t: string, num = false) => <th className={num ? "num" : undefined} style={{ cursor: "pointer", whiteSpace: "nowrap" }} onClick={() => setSort({ k, d: sort.k === k ? (sort.d === 1 ? -1 : 1) : (k === "name" ? 1 : -1) })}>{t}{sort.k === k ? (sort.d === 1 ? " ↑" : " ↓") : ""}</th>;
+        const kpis: [string, string | number][] = [["поставщиков", shown.length], ["с активными сделками / заказами", shown.filter((f) => activity(f) > 0).length],
+          ...(showG ? [["выигранных сделок ГШО", shown.reduce((a, f) => a + st(f).gsho.won, 0)] as [string, number]] : []), ...(showP ? [["заказов запчастей", shown.reduce((a, f) => a + st(f).parts.po, 0)] as [string, number]] : []),
+          ["без сделок и заказов", shown.filter((f) => st(f).gsho.deals + st(f).parts.po === 0).length]];
+        const statusBadge = (code: string, title: string) => <span className="badge" style={{ background: toneOf(code)[0], color: toneOf(code)[1], fontSize: 11 }}>{title}</span>;
+        const table = (
+          <div className="card">
+            <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+              <input placeholder="🔍 название, марка, город" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: "1 1 220px" }} />
+              <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} title="есть контакт по направлению"><option value="">все контакты</option>{Object.entries(roles).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+              <div className="row" style={{ gap: 2 }}>{([["all", "все"], ["active", "с активными"], ["won", showG ? "с выигранными" : "с заказами"], ["none", "без сделок"]] as const).map(([k, t]) => (
+                <button key={k} onClick={() => setView(k)} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "6px 10px", fontWeight: view === k ? 700 : 500, borderBottom: view === k ? "2px solid var(--accent)" : "2px solid transparent", fontFamily: "inherit", fontSize: 13 }}>{t}</button>))}</div>
+            </div>
+            {!cur && <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
+              {kpis.map(([t, v]) => <div key={t} style={{ flex: "1 1 120px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", background: "#fff" }}><div style={{ fontSize: 20, fontWeight: 700 }}>{v}</div><div className="muted" style={{ fontSize: 12 }}>{t}</div></div>)}
+            </div>}
+            <div style={{ overflowX: "auto", marginTop: 10 }}>
+              <table style={{ fontSize: 13 }}>
+                <thead><tr>{th("name", "Поставщик")}<th>Тип</th>
+                  {showG && <>{th("deals", "Сделок ГШО", true)}{th("open", "В работе", true)}{th("won", "Выиграно", true)}{fin && !cur && <th className="num">Сумма выигранных</th>}{!cur && th("last", "Последняя сделка")}</>}
+                  {showP && <>{th("po", "Заказов ЗЧ", true)}{th("po_open", "Открытых", true)}{fin && !cur && <th className="num">Сумма заказов</th>}{!cur && kind === "parts" && th("last", "Последний заказ")}</>}
+                  {!cur && th("rating", "Рейтинг", true)}{!cur && <th>Контакты</th>}{!cur && <th title="юридический профиль">Юр. профиль</th>}</tr></thead>
+                <tbody>{rows.map((f) => { const x = st(f); const rfq = (f.contacts || []).find((c) => (c.roles || []).includes("rfq")); return (
+                  <tr key={f.id} style={{ cursor: "pointer", background: cur?.id === f.id ? "var(--accent-soft)" : undefined, opacity: f.is_active === false ? 0.5 : 1 }} onClick={() => open(f.id!)}>
+                    <td style={{ minWidth: 260 }}><b>{f.short_name || f.name}</b>{(f.trademarks || []).map((t) => <span key={t} className="badge accent" style={{ marginLeft: 4, whiteSpace: "nowrap" }}>{t}</span>)}{f.approval_status === "pending" && <span className="badge warn" style={{ marginLeft: 4 }}>на утверждении</span>}{Number(f.pending_changes || 0) > 0 && <span className="badge warn" style={{ marginLeft: 4 }}>изменения</span>}
+                      <div className="muted" style={{ fontSize: 11 }}>{[f.name_zh, [f.city, f.province].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}{!kind && (f.supplies || []).map((x2) => <span key={x2} className="badge" style={{ marginLeft: 4, whiteSpace: "nowrap" }}>{KINDS[x2]}</span>)}</div></td>
+                    <td className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>{STATUS[f.supplier_status] || "—"}</td>
+                    {showG && <>
+                      <td className="num">{x.gsho.deals || <span className="muted">—</span>}{x.gsho.models > 0 && !cur && <div className="muted" style={{ fontSize: 11 }}>{x.gsho.models} мод.</div>}</td>
+                      <td className="num">{x.gsho.open ? <span className="badge info">{x.gsho.open}</span> : <span className="muted">—</span>}</td>
+                      <td className="num">{x.gsho.won ? <span className="badge ok">{x.gsho.won}</span> : <span className="muted">—</span>}{x.gsho.lost > 0 && <span className="muted" style={{ fontSize: 11 }}> / {x.gsho.lost} пр.</span>}</td>
+                      {fin && !cur && <td className="num" style={{ whiteSpace: "nowrap" }}>{sums(x.gsho.sum_won) || <span className="muted">—</span>}</td>}
+                      {!cur && <td style={{ whiteSpace: "nowrap" }}>{x.gsho.last_number ? <>{x.gsho.last_number} {statusBadge(x.gsho.last_status, STATUS_TITLES[x.gsho.last_status] || x.gsho.last_status)}<div className="muted" style={{ fontSize: 11 }}>{fmtDate(x.gsho.last_on)}</div></> : <span className="muted">—</span>}</td>}</>}
+                    {showP && <>
+                      <td className="num">{x.parts.po || <span className="muted">—</span>}{x.parts.rfq > 0 && !cur && <div className="muted" style={{ fontSize: 11 }}>{x.parts.rfq} запр.</div>}</td>
+                      <td className="num">{x.parts.po_open ? <span className="badge info">{x.parts.po_open}</span> : <span className="muted">—</span>}</td>
+                      {fin && !cur && <td className="num" style={{ whiteSpace: "nowrap" }}>{sums(x.parts.po_sum) || <span className="muted">—</span>}</td>}
+                      {!cur && kind === "parts" && <td style={{ whiteSpace: "nowrap" }}>{x.parts.last_number ? <>{x.parts.last_number} <span className="badge" style={{ fontSize: 11 }}>{PO_T[x.parts.last_status] || x.parts.last_status}</span><div className="muted" style={{ fontSize: 11 }}>{fmtDate(x.parts.last_on)}</div></> : <span className="muted">—</span>}</td>}</>}
+                    {!cur && <td className="num">{f.rating ? `${f.rating} / 5` : <span className="muted">—</span>}</td>}
+                    {!cur && <td className="muted" style={{ fontSize: 11 }}>{(f.contacts || []).length} конт.{rfq ? ` · заявки: ${rfq.name}` : <span style={{ color: "var(--warn)" }}> · нет контакта по заявкам</span>}</td>}
+                    {!cur && <td className="num">{f.profiles_count ? f.profiles_count : <span className="badge warn" title="юридический профиль не заполнен">нет</span>}</td>}
+                  </tr>); })}
+                  {rows.length === 0 && <tr><td colSpan={12} className="muted">Не найдено</td></tr>}</tbody>
+              </table>
+            </div>
+          </div>);
+        return <div className="grid" style={{ gridTemplateColumns: cur ? "minmax(0, 2fr) minmax(0, 3fr)" : "1fr" }}>
+        {table}
+        {cur && <div>
+          {!cur ? null : (
             <>
               <div className="card">
                 <h2 style={{ marginTop: 0 }}>{cur.id ? cur.name : "Новый поставщик"} {!cur.is_active && <span className="badge bad">не работаем</span>}</h2>
@@ -218,8 +272,8 @@ export default function FactoriesPage({ me, embedded = false }: { me: Me; embedd
                 </div>)}
             </>
           )}
-        </div>
-      </div>
+        </div>}
+      </div>; })()}
     </>
   );
 }

@@ -48,6 +48,18 @@ def test_client_list_stats_and_requisites_in_contract():
         rows_cd = c.get("/api/refs/clients?stats=1", headers=H(CD)).json()
         assert next(r for r in rows_cd if r["id"] == cl["id"])["stats"]["sum_won_rub"] is not None
 
+        # поставщики со статистикой: ГШО и запасные части раздельно; суммы по валютам — только finance_analytics
+        fac = c.get("/api/refs/factories?stats=1", headers=H(MGR)).json()
+        assert fac and all("gsho" in f["stats"] and "parts" in f["stats"] for f in fac)
+        assert all(f["stats"]["gsho"]["sum_won"] is None and f["stats"]["parts"]["po_sum"] is None for f in fac)
+        fac_cd = c.get("/api/refs/factories?stats=1", headers=H(CD)).json()
+        assert all(isinstance(f["stats"]["gsho"]["sum_won"], dict) for f in fac_cd)
+        # сделка с позицией завода попадает в статистику ГШО этого завода
+        pos = c.post(f"/api/deals/{d['id']}/positions", headers=H(MGR), json={"factory_id": fac[0]["id"], "model": "T-1", "qty": 2, "unit_price": 1000, "currency": "CNY"})
+        if pos.status_code in (200, 201):
+            f0 = next(f for f in c.get("/api/refs/factories?stats=1", headers=H(CD)).json() if f["id"] == fac[0]["id"])
+            assert f0["stats"]["gsho"]["deals"] >= 1 and f0["stats"]["gsho"]["open"] >= 1
+
         # наборы реквизитов: логист не редактирует; два набора, один по умолчанию
         url = f"/api/refs/clients/{cl['id']}/requisites"
         assert c.get(url, headers=H(LOG)).json()["from_card"]["inn"] == cl["inn"]
