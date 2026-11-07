@@ -122,7 +122,7 @@ def test_sale_package_flow():
         copy_txt = _text(c.get(f"/api/legal/packages/{pkg['id']}/files/client_contract_copy", headers=H(MGR)).content)
         assert "ИНН 7700000000 КПП 770101001" in copy_txt and "40702810900000000002" in copy_txt and "РАБОЧАЯ КОПИЯ" in copy_txt
         assert "ООО «БЕРГ-ХАУС», именуемое в дальнейшем «Поставщик»" in copy_txt and "Петров П. П." in copy_txt
-        assert "1402046085" in copy_txt                                   # реквизиты Покупателя не тронуты
+        assert "1402046085" in copy_txt and "Иванова И.И., действующего на основании Устава" in copy_txt   # сторона Покупателя не тронута
         # исходник не изменился
         src_docs = c.get(f"/api/deals/{d['id']}/documents", headers=H(MGR)).json()["documents"]
         orig = next(x for x in src_docs if x["id"] == up["id"])

@@ -172,22 +172,27 @@ def plan_replacements(path: str, seller: dict) -> tuple[list[Replacement], dict]
                 reps.append(Replacement(id=f"{addr}:name", kind="name", where=addr, old=text, new=f"{m.group(1)}: {seller['name_ru']}", confidence="high", reason="наименование в блоке продавца"))
             if re.match(r"^(Генеральный директор|Директор|Руководитель|Должность)\b", text, re.I) and seller.get("signatory"):
                 reps.append(Replacement(id=f"{addr}:sign", kind="signatory", where=addr, old=text, new=f"{seller.get('signatory_position') or 'Генеральный директор'}: {seller['signatory']}", confidence="medium", reason="подписант продавца — подтвердите", apply=False))
-    # преамбула: «ООО «___», именуемое … Поставщик, в лице …» — подстановка названия перед словом Поставщик (medium)
+    # преамбула: «…, и ООО «___», именуемое в дальнейшем «Поставщик», в лице …, действующего на основании …» —
+    # наименование берётся из сегмента непосредственно перед фразой о Поставщике, подписант — только из части ПОСЛЕ неё (не трогаем сторону Покупателя)
     for i, p in enumerate(doc.paragraphs[:40]):
         t = p.text or ""
-        m = re.search(r"(.{0,120}?)(,?\s*именуем\w+ в дальнейшем\s*[«\"]?(Поставщик|Продавец)[»\"]?)", t, re.I)
-        if m and seller.get("name_ru"):
-            head = m.group(1)
-            if BLANK_RE.search(head) or (seller["name_ru"] not in head and len(head.strip()) > 3):
-                new_head = BLANK_RE.sub(seller["name_ru"], head, count=1) if BLANK_RE.search(head) else seller["name_ru"]
-                new_t = t.replace(head, new_head, 1)
-                sig = re.search(r"в лице\s+(.{3,120}?),?\s*действующ\w+ на основании\s+([^,;.]{2,80})", t, re.I)
-                if sig and seller.get("signatory"):
-                    new_t = new_t.replace(sig.group(1), f"{seller.get('signatory_position', '')} {seller['signatory']}".strip(), 1)
-                    if seller.get("signatory_basis"):
-                        new_t = new_t.replace(sig.group(2), seller["signatory_basis"], 1)
-                reps.append(Replacement(id=f"p:{i}:preamble", kind="preamble", where=f"p:{i}", old=t[:400], new=new_t[:400], confidence="medium", reason="преамбула: наименование и подписант продавца — подтвердите", apply=False))
-            break
+        m = re.search(r",?\s*именуем\w+\s+в\s+дальнейшем\s*[«\"]?(Поставщик|Продавец|Исполнитель)[»\"]?", t, re.I)
+        if not m or not seller.get("name_ru"):
+            continue
+        pre = t[:m.start()]
+        seg = re.split(r",\s*и\s+|\bи\s+(?=[A-ZА-ЯЁ«\"_])", pre)[-1].strip()       # «ООО «___»» или «ООО «Старое имя»»
+        new_t = t
+        if seg and seller["name_ru"] not in seg and (BLANK_RE.search(seg) or re.search(r"\b(ООО|АО|ПАО|ЗАО|ИП)\b|«", seg)):
+            new_t = t[:m.start() - len(seg)] + seller["name_ru"] + t[m.start():] if t[:m.start()].endswith(seg) else t.replace(seg, seller["name_ru"], 1)
+        tail_start = len(new_t) - (len(t) - m.end())
+        tail = new_t[tail_start:]
+        sig = re.search(r"в\s+лице\s+(.{3,120}?),?\s*действующ\w+\s+на\s+основании\s+([^,;.]{2,80})", tail, re.I)
+        if sig and seller.get("signatory"):
+            new_tail = tail[:sig.start(1)] + f"{seller.get('signatory_position', '')} {seller['signatory']}".strip() + tail[sig.end(1):sig.start(2)] + (seller.get("signatory_basis") or sig.group(2)) + tail[sig.end(2):]
+            new_t = new_t[:tail_start] + new_tail
+        if new_t != t:
+            reps.append(Replacement(id=f"p:{i}:preamble", kind="preamble", where=f"p:{i}", old=t, new=new_t, confidence="medium", reason="преамбула: наименование и подписант Поставщика — подтвердите", apply=False))
+        break
     # дедупликация по адресу (одна замена на абзац)
     seen, uniq = set(), []
     for r in reps:
@@ -234,19 +239,10 @@ def make_working_copy(src: str, dst: str, reps: list[Replacement], approved_ids:
             pending.append(r.id)
             continue
         p = _resolve(doc, r.where)
-        if p is None or (p.text or "").strip() != r.old.strip() and r.kind != "preamble":
+        if p is None or (p.text or "").strip() != r.old.strip():
             skipped.append(r.id)
             continue
-        if r.kind == "preamble":
-            full = p.text or ""
-            # для преамбулы old/new — усечённые до 400 символов фрагменты; применяем как замену начала
-            if full.startswith(r.old):
-                _set_paragraph_text(p, r.new + full[len(r.old):])
-            else:
-                skipped.append(r.id)
-                continue
-        else:
-            _set_paragraph_text(p, r.new)
+        _set_paragraph_text(p, r.new)
         applied.append(r.id)
     if header_note:
         for s in doc.sections:
