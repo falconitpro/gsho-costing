@@ -85,3 +85,38 @@ def test_client_list_stats_and_requisites_in_contract():
         c.put(url, headers=H(MGR), json={"items": [saved[0], {**saved[1], "kpp": "333"}]})
         assert c.get(f"/api/deals/{d['id']}/execution/stages", headers=H(MGR)).json()["client_requisites"]["kpp"] == "222"
         assert c.patch(f"/api/deals/{d['id']}/execution/contract", headers=H(MGR), json={"client_requisites_id": "nope"}).status_code == 422
+
+
+def _inn() -> str:
+    import random
+    d = [random.randint(0, 9) for _ in range(9)]
+    d[0] = d[0] or 7
+    return "".join(map(str, d)) + str(sum(c * x for c, x in zip([2, 4, 10, 3, 5, 9, 4, 6, 8], d)) % 11 % 10)
+
+
+def test_delete_clients_and_factories_by_fd_cd_gd():
+    seed()
+    FD = "fd@example.com"
+    with TestClient(app) as c:
+        fresh = c.post("/api/refs/clients", headers=H(MGR), json={"name": f"ООО «Удалить-{uuid.uuid4().hex[:4]}»", "inn": _inn()}).json()
+        assert c.delete(f"/api/refs/clients/{fresh['id']}", headers=H(MGR)).status_code == 403
+        c.get(f"/api/legal/profiles?owner_kind=client&owner_id={fresh['id']}", headers=H(MGR))      # профиль создан — удалится вместе с клиентом
+        r = c.delete(f"/api/refs/clients/{fresh['id']}", headers=H(FD)).json()
+        assert r["deleted"] and not r["archived"]
+        assert all(x["id"] != fresh["id"] for x in c.get("/api/refs/clients?include_archived=1", headers=H(MGR)).json())
+
+        # клиент со сделкой — в архив, скрыт из списка, виден с include_archived, можно вернуть
+        used = c.post("/api/refs/clients", headers=H(MGR), json={"name": f"ООО «Архив-{uuid.uuid4().hex[:4]}»", "inn": _inn()}).json()
+        c.post("/api/deals", headers=H(MGR), json={"client_id": used["id"], "site": "x"})
+        r = c.delete(f"/api/refs/clients/{used['id']}", headers=H(CD)).json()
+        assert r["archived"] and not r["deleted"]
+        assert all(x["id"] != used["id"] for x in c.get("/api/refs/clients", headers=H(MGR)).json())
+        arch = next(x for x in c.get("/api/refs/clients?include_archived=1", headers=H(CD)).json() if x["id"] == used["id"])
+        assert arch["is_active"] is False
+        assert c.post(f"/api/refs/clients/{used['id']}/restore", headers=H(CD)).json()["is_active"] is True
+
+        # поставщик: ФД может удалить / архивировать, менеджер — нет
+        f = c.post("/api/refs/factories", headers=H(CD), json={"name": f"Del Factory {uuid.uuid4().hex[:4]}", "country": "CN"}).json()
+        assert c.delete(f"/api/refs/factories/{f['id']}", headers=H(MGR)).status_code == 403
+        r = c.delete(f"/api/refs/factories/{f['id']}", headers=H(FD)).json()
+        assert r["deleted"] or r["archived"]

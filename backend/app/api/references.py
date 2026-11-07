@@ -184,8 +184,10 @@ def _factory_stats(db: Session, user: CurrentUser) -> dict[str, dict]:
 
 
 @router.get("/clients")
-def clients(q: str = "", stats: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+def clients(q: str = "", stats: bool = False, include_archived: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     stmt = select(Client).order_by(Client.name)
+    if not include_archived:
+        stmt = stmt.where(Client.is_active.is_not(False))
     if q:
         stmt = stmt.where(or_(Client.name.ilike(f"%{q}%"), Client.inn.like(f"{q}%")))
     rows = [serialize(c) for c in db.scalars(stmt).all()]
@@ -340,6 +342,54 @@ def client_card(client_id: str, db: Session = Depends(get_db), user: CurrentUser
                  "last_kp": last_kp[:10], "kp_history": kp_history, "kp_totals": totals,
                  "avg_margin_pct": round(sum(margins) / len(margins), 2) if margins else None, "sum_won_rub": sums})
     return filter_payload(data, user)
+
+
+@router.delete("/clients/{client_id}")
+def delete_client(client_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Удаление клиента — ФД, КД или ЗГД. Если по клиенту есть сделки, заявки на запчасти, машины или история цен — он переносится
+    в архив (скрыт из выбора и списков, данные сохраняются); иначе удаляется вместе с юридическими профилями."""
+    from sqlalchemy.exc import IntegrityError
+    from ..models import ClientMachine, ClientPriceHistory, LegalProfile, PartRequest
+    if not user.has(Role.GD, Role.CD, Role.FD):
+        raise HTTPException(403, "Удалить клиента могут ФД, КД и ЗГД")
+    c = db.get(Client, client_id)
+    if c is None:
+        raise HTTPException(404)
+    used = (db.scalar(select(Deal.id).where(Deal.client_id == c.id).limit(1)) or db.scalar(select(PartRequest.id).where(PartRequest.client_id == c.id).limit(1))
+            or db.scalar(select(ClientMachine.id).where(ClientMachine.client_id == c.id).limit(1)) or db.scalar(select(ClientPriceHistory.id).where(ClientPriceHistory.client_id == c.id).limit(1)))
+    name = c.name
+    if used:
+        c.is_active = False
+        audit(db, user.id, None, "client", c.id, "archive", {"name": name}, {"is_active": False}, "по клиенту есть сделки или заявки — перенесён в архив")
+        db.commit()
+        return {"deleted": False, "archived": True, "message": f"По клиенту «{name}» есть сделки или заявки — перенесён в архив"}
+    try:
+        audit(db, user.id, None, "client", c.id, "delete", {"name": name, "inn": c.inn})
+        for lp in db.scalars(select(LegalProfile).where(LegalProfile.owner_kind == "client", LegalProfile.owner_id == c.id)).all():
+            db.delete(lp)
+        db.delete(c)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        c = db.get(Client, client_id)
+        c.is_active = False
+        audit(db, user.id, None, "client", c.id, "archive", {"name": name}, {"is_active": False}, "на клиента есть ссылки — перенесён в архив")
+        db.commit()
+        return {"deleted": False, "archived": True, "message": f"Клиент «{name}» используется — перенесён в архив"}
+    return {"deleted": True, "archived": False, "message": f"Клиент «{name}» удалён"}
+
+
+@router.post("/clients/{client_id}/restore")
+def restore_client(client_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    if not user.has(Role.GD, Role.CD, Role.FD):
+        raise HTTPException(403, "Вернуть клиента из архива могут ФД, КД и ЗГД")
+    c = db.get(Client, client_id)
+    if c is None:
+        raise HTTPException(404)
+    c.is_active = True
+    audit(db, user.id, None, "client", c.id, "restore", after={"is_active": True})
+    db.commit()
+    return serialize(c)
 
 
 @router.post("/clients/{client_id}/refresh-registry")
@@ -735,19 +785,21 @@ def reject_change(change_id: str, body: DecisionIn, db: Session = Depends(get_db
 
 @router.delete("/factories/{factory_id}")
 def delete_factory(factory_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Удаление завода — только ЗГД. Если завод уже есть в сделках, каталоге или истории цен — он переносится в архив
+    """Удаление поставщика — ФД, КД или ЗГД. Если он уже есть в сделках, каталоге, заказах или истории цен — переносится в архив
     (скрывается из выбора, история и сделки сохраняются)."""
     from sqlalchemy.exc import IntegrityError
-    from ..models import FactoryOffer, Position, RfqImport
-    if not user.has(Role.GD):
-        raise HTTPException(403, "Удалить завод может только ЗГД")
+    from ..models import FactoryOffer, LegalProfile, Position, PurchaseOrder, RfqImport, SupplierRfq
+    if not user.has(Role.GD, Role.CD, Role.FD):
+        raise HTTPException(403, "Удалить поставщика могут ФД, КД и ЗГД")
     f = db.get(Factory, factory_id)
     if f is None:
         raise HTTPException(404)
     used = (db.scalar(select(Position.id).where(Position.factory_id == f.id).limit(1)) or db.scalar(select(EquipmentModel.id).where(EquipmentModel.factory_id == f.id).limit(1))
             or db.scalar(select(FactoryPriceHistory.id).where(FactoryPriceHistory.factory_id == f.id).limit(1))
             or db.scalar(select(FactoryOffer.id).where(FactoryOffer.factory_id == f.id).limit(1))      # ответы завода / запросы заводу
-            or db.scalar(select(RfqImport.id).where(RfqImport.factory_id == f.id).limit(1)))           # импорт RFQ этого завода
+            or db.scalar(select(RfqImport.id).where(RfqImport.factory_id == f.id).limit(1))            # импорт RFQ этого завода
+            or db.scalar(select(PurchaseOrder.id).where(PurchaseOrder.supplier_id == f.id).limit(1))   # заказы запчастей
+            or db.scalar(select(SupplierRfq.id).where(SupplierRfq.supplier_id == f.id).limit(1)))
     if used:
         f.is_active = False
         audit(db, user.id, None, "factory", f.id, "archive", {"name": f.name}, {"is_active": False}, "завод используется — перенесён в архив")
@@ -756,6 +808,8 @@ def delete_factory(factory_id: str, db: Session = Depends(get_db), user: Current
     name = f.name
     try:
         audit(db, user.id, None, "factory", f.id, "delete", {"name": name})
+        for lp in db.scalars(select(LegalProfile).where(LegalProfile.owner_kind == "factory", LegalProfile.owner_id == f.id)).all():
+            db.delete(lp)
         db.delete(f)
         db.commit()
     except IntegrityError:   # на завод ссылаются другие записи — не удаляем, а переносим в архив
