@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toneOf } from "../colors";
 import { blockTitle } from "../labels";
 import { Link } from "react-router-dom";
 import { api, fmtDate } from "../api";
@@ -38,18 +39,18 @@ export default function TasksPage() {
   const card = (t: Task) => {
     const late = (t.days_left ?? 0) < 0;
     return (
-      <div key={t.id} style={{ background: "#fff", border: "1px solid var(--line)", borderLeft: `4px solid ${late ? "var(--accent)" : (t.days_left ?? 0) === 0 ? "var(--ink)" : "var(--line)"}`,
+      <div key={t.id} style={{ background: "#fff", border: "1px solid var(--line)", borderLeft: `4px solid ${late ? "var(--bad)" : (t.days_left ?? 0) === 0 ? "var(--warn)" : "var(--line)"}`,
         borderRadius: 8, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
         <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
           <Link to={`/deals/${t.deal_id}?tab=${t.tab || "main"}`} style={{ fontWeight: 700, textDecoration: "none" }}>{t.deal_number}</Link>
-          <span style={{ fontSize: 12, fontWeight: 600, color: late ? "var(--accent)" : "var(--muted)", whiteSpace: "nowrap" }}>{fmtDate(t.due)} · {dueText(t)}</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: late ? "var(--bad)" : "var(--muted)", whiteSpace: "nowrap" }}>{fmtDate(t.due)} · {dueText(t)}</span>
         </div>
         <div style={{ fontSize: 13 }}><b>{t.client_name}</b>{t.site && <span className="muted"> · {t.site}</span>}</div>
         {t.equipment && <div className="muted" style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.equipment}</div>}
         <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.3 }}>{t.title}</div>
         {t.hint && <div className="muted" style={{ fontSize: 12 }}>Что сделать: {t.hint}</div>}
         <div className="row" style={{ justifyContent: "space-between", marginTop: 2, gap: 8, flexWrap: "wrap" }}>
-          <span className="row" style={{ gap: 6 }}><span className="badge">{blockTitle(t.block)}</span><span className="badge accent">{STATUS_TITLES[t.deal_status] || t.deal_status}</span></span>
+          <span className="row" style={{ gap: 6 }}><span className="badge">{blockTitle(t.block)}</span><span className="badge" style={{ background: toneOf(t.deal_status)[0], color: toneOf(t.deal_status)[1], fontWeight: 600 }}>{STATUS_TITLES[t.deal_status] || t.deal_status}</span></span>
           <span className="row" style={{ gap: 6 }}>
             <Link to={`/deals/${t.deal_id}?tab=${t.tab || "main"}`} className="btn" style={{ padding: "4px 12px", fontSize: 12, textDecoration: "none" }}>Открыть →</Link>
             {t.can_close && <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => done(t)} title="задача сделана вне системы">Выполнено</button>}
@@ -60,7 +61,7 @@ export default function TasksPage() {
   return (
     <>
       <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-        <h1 style={{ margin: 0 }}>Мои задачи <span className="muted" style={{ fontSize: 16, fontWeight: 400 }}>{tasks.length}{tasks.some((t) => (t.days_left ?? 0) < 0) && <> · <span style={{ color: "var(--accent)" }}>просрочено {tasks.filter((t) => (t.days_left ?? 0) < 0).length}</span></>}</span></h1>
+        <h1 style={{ margin: 0 }}>Мои задачи <span className="muted" style={{ fontSize: 16, fontWeight: 400 }}>{tasks.length}{tasks.some((t) => (t.days_left ?? 0) < 0) && <> · <span style={{ color: "var(--bad)" }}>просрочено {tasks.filter((t) => (t.days_left ?? 0) < 0).length}</span></>}</span></h1>
         <div className="row" style={{ gap: 8 }}>
           <input placeholder="🔍 сделка, клиент, задача" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} />
           <div className="tabs" style={{ margin: 0 }}>
@@ -76,7 +77,7 @@ export default function TasksPage() {
         if (!items.length) return null;
         return (
           <section key={g.key} style={{ marginTop: 14 }}>
-            <h2 style={{ margin: "0 0 8px", fontSize: 14, color: g.key === "late" ? "var(--accent)" : "var(--muted)", letterSpacing: ".4px", textTransform: "uppercase" }}>{g.title} · {items.length}</h2>
+            <h2 style={{ margin: "0 0 8px", fontSize: 14, color: g.key === "late" ? "var(--bad)" : "var(--muted)", letterSpacing: ".4px", textTransform: "uppercase" }}>{g.title} · {items.length}</h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 10 }}>{items.map(card)}</div>
           </section>);
       })}
@@ -86,10 +87,10 @@ export default function TasksPage() {
             <thead><tr><th>Сделка</th><th>Клиент</th><th>Задача</th><th>Блок</th><th>Срок</th><th>Статус сделки</th><th /></tr></thead>
             <tbody>
               {shown.map((t) => (
-                <tr key={t.id} style={(t.days_left ?? 0) < 0 ? { boxShadow: "inset 3px 0 0 var(--accent)" } : undefined}>
+                <tr key={t.id} style={(t.days_left ?? 0) < 0 ? { boxShadow: "inset 3px 0 0 var(--bad)" } : undefined}>
                   <td><Link to={`/deals/${t.deal_id}?tab=${t.tab || "main"}`}>{t.deal_number}</Link></td><td>{t.client_name}{t.site && <div className="muted" style={{ fontSize: 11 }}>{t.site}</div>}</td>
                   <td>{t.title}{t.hint && <div className="muted" style={{ fontSize: 11 }}>{t.hint}</div>}</td><td>{blockTitle(t.block)}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>{fmtDate(t.due)} <span style={{ color: (t.days_left ?? 0) < 0 ? "var(--accent)" : "var(--muted)", fontSize: 12 }}>{dueText(t)}</span></td>
+                  <td style={{ whiteSpace: "nowrap" }}>{fmtDate(t.due)} <span style={{ color: (t.days_left ?? 0) < 0 ? "var(--bad)" : "var(--muted)", fontSize: 12 }}>{dueText(t)}</span></td>
                   <td>{STATUS_TITLES[t.deal_status] || t.deal_status}</td>
                   <td>{t.can_close && <button className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => done(t)}>Выполнено</button>}</td>
                 </tr>))}
