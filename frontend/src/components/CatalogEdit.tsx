@@ -58,9 +58,10 @@ export function TechEditor({ execId, name, brand, rows, onDone }: { execId: stri
   );
 }
 
-export function MoreEditor({ modelId, execId, options, hs, logistics, regs, hours, onDone }: {
+export function MoreEditor({ modelId, execId, options, hs, logistics, regs, hours, checklist = [], onDone }: {
   modelId: string; execId?: string; options: Opt[]; hs: { code?: string; description?: string; duty_pct?: number | null; vat_pct?: number | null } | null;
-  logistics: Record<string, { name?: string; value?: unknown; unit?: string }>; regs: Reg[]; hours?: number | null; onDone: (msg: string) => void }) {
+  logistics: Record<string, { name?: string; value?: unknown; unit?: string }>; regs: Reg[]; hours?: number | null; checklist?: { group: string; item: string }[]; onDone: (msg: string) => void }) {
+  const [chk, setChk] = useState(checklist.map((x) => `${x.group}: ${x.item}`).join("\n"));
   const [opts, setOpts] = useState<Opt[]>(options.map((o) => ({ ...o })));
   const [h, setH] = useState({ code: hs?.code || "", description: hs?.description || "", duty_pct: hs?.duty_pct ?? "", vat_pct: hs?.vat_pct ?? "" });
   const [lg, setLg] = useState(Object.entries(logistics).map(([code, f]) => ({ code, name: f.name || "", value: f.value == null ? "" : String(f.value), unit: f.unit || "" })));
@@ -77,7 +78,8 @@ export function MoreEditor({ modelId, execId, options, hs, logistics, regs, hour
         logistics_params: Object.fromEntries(lg.filter((x) => x.code.trim()).map((x) => [x.code.trim(), { name: x.name, unit: x.unit, value: num(x.value) ?? x.value }])),
         maintenance_regulations: rg.map((r) => ({ name: r.name, interval_hours: Number(r.interval_hours) || 0,
           operations: r.ops.split(";").map((s) => s.trim()).filter(Boolean).map((s) => { const [a, b] = s.split(":"); return { name: (a || "").trim(), hours: Number((b || "0").replace(",", ".")) || 0 }; }) })),
-        default_hours_per_month: num(hpm), comment: comment || "правка опций, регламентов и логистики" });
+        default_hours_per_month: num(hpm), comment: comment || "правка опций, регламентов и логистики",
+        acceptance_checklist: chk.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { const i = l.indexOf(":"); return i > 0 ? { group: l.slice(0, i).trim(), item: l.slice(i + 1).trim() } : { group: "Проверки", item: l }; }) });
       onDone("Опции, регламенты, ТН ВЭД и данные для логистики сохранены");
     } catch (e) { setErr((e as Error).message); }
   }
@@ -118,6 +120,8 @@ export function MoreEditor({ modelId, execId, options, hs, logistics, regs, hour
           <button className="btn ghost" onClick={() => setLg([...lg, { code: "", name: "", value: "", unit: "" }])}>+ параметр</button>
         </div>
       </div>
+      <label className="f" style={{ marginTop: 6 }}>Чек-лист приёмки на заводе — по строке «раздел: пункт» (пусто — типовой; пункты по характеристикам, ЗИП и документам сделки добавятся сами)
+        <textarea rows={5} value={chk} onChange={(e) => setChk(e.target.value)} placeholder={"Внешний осмотр: окраска без повреждений\nКузов: футеровка установлена"} /></label>
       <label className="f" style={{ marginTop: 6 }}>Что исправлено (в историю изменений)<input value={comment} onChange={(e) => setComment(e.target.value)} style={{ width: "100%" }} /></label>
       <div className="row" style={{ marginTop: 6 }}><button className="btn" onClick={save}>Сохранить</button><button className="btn ghost" onClick={() => onDone("")}>отмена</button>{err && <span className="muted">{err}</span>}</div>
     </div>

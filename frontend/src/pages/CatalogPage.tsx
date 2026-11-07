@@ -17,7 +17,10 @@ type TplRow = { id?: string; no: number; code: string; name_ru: string; name_zh:
 export default function CatalogPage({ me }: { me: Me }) {
   const [tab, setTab] = useState<"tree" | "add" | "pending" | "glossary" | "templates" | "archive">("tree");
   const [mergeExec, setMergeExec] = useState("");
-  const [mergeModel, setMergeModel] = useState<Record<string, string>>({});
+  const [selType, setSelType] = useState("");
+  const [selBrand, setSelBrand] = useState("");
+  const [cmp, setCmp] = useState<string[]>([]);
+  const [showCmp, setShowCmp] = useState(false);
   const [archive, setArchive] = useState<{ models: { id: string; model: string; trademark?: string; brand_name: string }[]; executions: { id: string; name: string; model_id: string }[] }>({ models: [], executions: [] });
   const [tree, setTree] = useState<Tree>([]);
   const [exec, setExec] = useState<Exec | null>(null);
@@ -38,7 +41,7 @@ export default function CatalogPage({ me }: { me: Me }) {
   useEffect(() => { loadTree(); api.get<typeof types>("/api/refs/machine-types").then(setTypes); if (editor) api.get<typeof pending>("/api/catalog/pending").then(setPending); }, []);
   useEffect(() => { if (tab === "glossary") loadGl(); if (tab === "templates") loadTpl(); if (tab === "archive") loadArchive(); }, [tab, tplType]);
   const loadArchive = () => api.get<typeof archive>("/api/catalog/archive").then(setArchive).catch(() => setArchive({ models: [], executions: [] }));
-  const allModels = tree.flatMap((f) => f.types.flatMap((t) => t.models.map((m) => ({ ...m, factory: f.factory, factory_id: f.factory_id }))));
+  const allModels = tree.flatMap((f) => f.types.flatMap((t) => t.models.map((m) => ({ ...m, machine_type: t.machine_type, factory: f.factory, factory_id: f.factory_id }))));
   const allExecs = allModels.flatMap((m) => m.executions.map((e) => ({ ...e, model: m.model, factory: m.factory })));
   async function act(fn: () => Promise<unknown>, ok: string) {
     try { await fn(); setMsg(ok); loadTree(); if (tab === "archive") loadArchive(); } catch (e) { setMsg((e as Error).message); }
@@ -54,42 +57,42 @@ export default function CatalogPage({ me }: { me: Me }) {
       <h1>Каталог оборудования</h1>
       {msg && <div className="alert info">{msg}</div>}
       <div className="tabs">
-        <button className={tab === "tree" ? "active" : ""} onClick={() => setTab("tree")}>Производитель → тип → модель → исполнение</button>
+        <button className={tab === "tree" ? "active" : ""} onClick={() => setTab("tree")}>Тип → бренд → модель → исполнение</button>
         {contributor && <button className={tab === "add" ? "active" : ""} onClick={() => setTab("add")}>+ Добавить оборудование</button>}
         {editor && <button className={tab === "pending" ? "active" : ""} onClick={() => setTab("pending")}>На подтверждение ({pending.length})</button>}
         {can(me, "glossary") && <button className={tab === "glossary" ? "active" : ""} onClick={() => setTab("glossary")}>Глоссарий RU ↔ CN</button>}
         <button className={tab === "templates" ? "active" : ""} onClick={() => setTab("templates")}>Шаблоны технических характеристик</button>
         {editor && <button className={tab === "archive" ? "active" : ""} onClick={() => setTab("archive")}>Архив</button>}
       </div>
-      {tab === "tree" && (
-        <div className="grid" style={{ gridTemplateColumns: "380px 1fr" }}>
+      {tab === "tree" && (() => {
+        const brandOf = (m: { trademark?: string; factory: string }) => (m.trademark || m.factory || "").trim();
+        const typeList = [...new Set(allModels.map((m) => m.machine_type || "без типа"))].sort((a, b) => a.localeCompare(b, "ru"));
+        const byType = allModels.filter((m) => !selType || (m.machine_type || "без типа") === selType);
+        const brandList = [...new Set(byType.map(brandOf))].sort((a, b) => a.localeCompare(b, "ru"));
+        const modelList = byType.filter((m) => !selBrand || brandOf(m) === selBrand).sort((a, b) => designation(a).localeCompare(designation(b), "ru"));
+        const curModel = allModels.find((m) => m.id === modelId);
+        return (
+        <>
           <div className="card">
-            {tree.length === 0 && <div className="muted">Каталог пуст — модели появляются после отправки КП (менеджер предлагает, КД/ЗГД подтверждает)</div>}
-            {tree.map((f) => (
-              <details key={f.factory_id} open><summary style={{ fontWeight: 700, cursor: "pointer" }}>{f.factory}</summary>
-                {f.types.map((t) => (
-                  <div key={t.machine_type} style={{ marginLeft: 12 }}><div className="muted">{t.machine_type}</div>
-                    {t.models.map((m) => (
-                      <div key={m.id} style={{ marginLeft: 12 }}>
-                        <b style={{ cursor: "pointer", color: modelId === m.id ? "var(--accent)" : undefined, textDecoration: "underline dotted" }} title="открыть карточку машины"
-                          onClick={() => { setModelId(m.id); setExec(null); }}>{designation(m)}</b>{m.brand_name && <span className="badge accent" style={{ marginLeft: 4 }}>{m.brand_name}</span>}{m.status === "pending" && <span className="badge warn"> на проверке</span>}
-                        {editor && <button className="btn ghost" style={{ padding: "0 6px", marginLeft: 4 }} onClick={() => { const b = prompt("Наименование под брендом компании:", m.brand_name || ""); if (b !== null) api.patch(`/api/catalog/models/${m.id}`, { brand_name: b }).then(loadTree); }}>бренд</button>}
-                        {editor && (
-                          <div className="row" style={{ fontSize: 12, margin: "2px 0" }}>
-                            <select value={mergeModel[m.id] || ""} onChange={(e) => setMergeModel({ ...mergeModel, [m.id]: e.target.value })} style={{ padding: 2, maxWidth: 170 }} title="объединить дубль модели с другой моделью">
-                              <option value="">объединить с…</option>
-                              {allModels.filter((x) => x.id !== m.id).map((x) => <option key={x.id} value={x.id}>{designation(x)} ({x.factory.slice(0, 18)})</option>)}</select>
-                            {mergeModel[m.id] && <button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => act(() => api.post(`/api/catalog/models/${m.id}/merge`, { into_id: mergeModel[m.id] }), `Модель ${m.model} объединена; дубль в архиве`)}>объединить</button>}
-                            <button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => act(() => api.patch(`/api/catalog/models/${m.id}`, { status: "archived" }), `Модель ${m.model} в архиве`)}>в архив</button>
-                          </div>)}
-                        {m.executions.map((e) => (
-                          <div key={e.id} style={{ marginLeft: 12, cursor: "pointer", color: exec?.id === e.id ? "var(--accent)" : undefined }} onClick={() => openExec(e.id)}>
-                            ↳ {e.name} <span className="muted">({e.params} парам., {e.images} изобр.)</span>{e.status === "pending" && <span className="badge warn">на проверке</span>}
-                          </div>))}
-                      </div>))}
-                  </div>))}
-              </details>))}
+            {tree.length === 0 ? <div className="muted">Каталог пуст — модели появляются после отправки КП (менеджер предлагает, КД/ЗГД подтверждает)</div> : (
+              <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+                <label className="f">Тип оборудования<select value={selType} onChange={(e) => { setSelType(e.target.value); setSelBrand(""); setModelId(""); setExec(null); }}>
+                  <option value="">все типы ({typeList.length})</option>{typeList.map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
+                <label className="f">Бренд<select value={selBrand} onChange={(e) => { setSelBrand(e.target.value); setModelId(""); setExec(null); }}>
+                  <option value="">все бренды ({brandList.length})</option>{brandList.map((b) => <option key={b} value={b}>{b}</option>)}</select></label>
+                <label className="f">Модель<select value={modelId} onChange={(e) => { setModelId(e.target.value); setExec(null); }} style={{ minWidth: 220 }}>
+                  <option value="">— выберите модель ({modelList.length}) —</option>
+                  {modelList.map((m) => <option key={m.id} value={m.id}>{designation(m)}{m.brand_name ? ` · ${m.brand_name}` : ""}{m.status === "pending" ? " · на проверке" : ""}{!selBrand ? ` — ${brandOf(m)}` : ""}</option>)}</select></label>
+                {curModel && curModel.executions.length > 0 && <label className="f">Исполнение<select value={exec?.id || ""} onChange={(e) => e.target.value ? openExec(e.target.value) : setExec(null)} style={{ minWidth: 200 }}>
+                  <option value="">— исполнение —</option>{curModel.executions.map((e) => <option key={e.id} value={e.id}>{e.name} ({e.params} парам.){e.status === "pending" ? " · на проверке" : ""}</option>)}</select></label>}
+                {exec && !cmp.includes(exec.id) && <button className="btn ghost" onClick={() => setCmp([...cmp, exec.id])}>+ к сравнению</button>}
+                {cmp.length > 0 && <span className="row" style={{ flexWrap: "wrap" }}>
+                  <span className="muted">сравнение:</span>{cmp.map((id) => { const x = allExecs.find((e) => e.id === id); return (
+                    <span key={id} className="badge">{x ? `${x.model} › ${x.name}` : id.slice(0, 6)} <a href="#" onClick={(e) => { e.preventDefault(); setCmp(cmp.filter((y) => y !== id)); }}>×</a></span>); })}
+                  <button className="btn" disabled={cmp.length < 2} onClick={() => setShowCmp(true)}>Сравнить ({cmp.length})</button></span>}
+              </div>)}
           </div>
+          {showCmp && cmp.length > 1 && <CompareTable ids={cmp} onClose={() => setShowCmp(false)} />}
           <div>
             {modelId ? (
               <>
@@ -108,12 +111,11 @@ export default function CatalogPage({ me }: { me: Me }) {
                     <button className="btn ghost" onClick={() => act(() => api.patch(`/api/catalog/executions/${exec.id}`, { status: "archived" }).then(() => setExec(null)), "Исполнение в архиве")}>в архив</button>
                   </div>)}
                 </div>}
-                <CatalogCard modelId={modelId} execId={exec?.id} onExec={(id) => openExec(id)} />
+                <CatalogCard modelId={modelId} execId={exec?.id} onExec={(id) => openExec(id)} models={allModels.map((x) => ({ id: x.id, label: `${designation(x)} (${x.factory.slice(0, 24)})` }))} onChanged={() => { loadTree(); setModelId(""); setExec(null); }} />
               </>
-            ) : <div className="card muted">Нажмите на машину слева — откроется карточка: технические характеристики, фото и чертежи, опции и регламенты{editor ? ", цены и аналитическая справка" : ""}.</div>}
+            ) : <div className="card muted">Выберите тип оборудования, бренд и модель — откроется карточка машины: технические характеристики, фото и чертежи, документы, опции и регламенты{editor ? ", цены и аналитическая справка" : ""}. Исполнения разных моделей и брендов можно добавить к сравнению.</div>}
           </div>
-        </div>
-      )}
+        </>); })()}
       {tab === "archive" && (
         <div className="card">
           <p className="muted">Объединённые дубли и архивированные позиции каталога. В подборе при вводе заявок не участвуют; можно восстановить.</p>
@@ -168,5 +170,39 @@ export default function CatalogPage({ me }: { me: Me }) {
         </div>
       )}
     </>
+  );
+}
+
+type CmpExec = { id: string; name: string; brand_name: string; tech_params: { code?: string; name_ru: string; unit: string; value_ru: string; section?: string }[];
+  model: { model: string; trademark?: string; brand_name: string; machine_type: string } | null };
+
+/** Сравнение исполнений (в том числе разных брендов): параметры по коду или названию, различия подсвечены. */
+function CompareTable({ ids, onClose }: { ids: string[]; onClose: () => void }) {
+  const [list, setList] = useState<CmpExec[]>([]);
+  const [onlyDiff, setOnlyDiff] = useState(false);
+  useEffect(() => { Promise.all(ids.map((id) => api.get<CmpExec>(`/api/catalog/executions/${id}`))).then(setList).catch(() => setList([])); }, [ids.join(",")]);
+  const key = (r: { code?: string; name_ru: string }) => (r.code || "").trim() || r.name_ru.trim().toLowerCase();
+  const rows: { key: string; name: string; unit: string; section: string }[] = [];
+  const seen = new Set<string>();
+  for (const e of list) for (const r of e.tech_params || []) {
+    const k = key(r);
+    if (!k || seen.has(k) || !(r.name_ru || "").trim()) continue;
+    seen.add(k); rows.push({ key: k, name: r.name_ru, unit: (r.unit || "").split(" / ")[0], section: r.section || "" });
+  }
+  const val = (e: CmpExec, k: string) => (e.tech_params || []).find((r) => key(r) === k)?.value_ru || "";
+  const shown = rows.filter((r) => { const vs = list.map((e) => val(e, r.key)); return vs.some(Boolean) && (!onlyDiff || new Set(vs).size > 1); });
+  return (
+    <div className="card">
+      <div className="row" style={{ justifyContent: "space-between" }}><h2 style={{ margin: 0 }}>Сравнение исполнений</h2>
+        <div className="row"><label className="row"><input type="checkbox" checked={onlyDiff} onChange={(e) => setOnlyDiff(e.target.checked)} /> только различия</label><button className="btn ghost" onClick={onClose}>закрыть</button></div></div>
+      <div style={{ overflowX: "auto", marginTop: 6 }}>
+        <table style={{ fontSize: 12 }}>
+          <thead><tr><th>Параметр</th><th>Ед.</th>{list.map((e) => <th key={e.id} style={{ minWidth: 140 }}>{e.model ? `${e.model.trademark ? e.model.trademark + " " : ""}${e.model.model}` : ""}<div className="muted" style={{ fontWeight: 400 }}>{e.name}{e.model?.brand_name ? ` · ${e.model.brand_name}` : ""}</div></th>)}</tr></thead>
+          <tbody>{shown.map((r) => { const vs = list.map((e) => val(e, r.key)); const diff = new Set(vs).size > 1; return (
+            <tr key={r.key} style={{ background: diff ? "#fff6d6" : undefined }}><td>{r.name}</td><td className="muted">{r.unit}</td>{vs.map((v, i) => <td key={i}>{v || <span className="muted">—</span>}</td>)}</tr>); })}</tbody>
+        </table>
+      </div>
+      <div className="muted" style={{ fontSize: 11 }}>Жёлтым — параметры, которые различаются.</div>
+    </div>
   );
 }

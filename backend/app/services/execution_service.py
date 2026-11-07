@@ -32,6 +32,7 @@ STAGE_DEFS: dict[str, dict[str, Any]] = {
     "factory_advance":   {"title": "Оплата заводу (аванс)", "level": "position", "event": "factory_prepayment", "roles": ["fd"], "kind": "payment_out", "sort": 50},
     "production":        {"title": "Производство", "level": "position", "event": "production_start", "roles": ["manager", "logistician"], "kind": "date", "sort": 60},
     "readiness":         {"title": "Готовность на заводе", "level": "position", "event": "readiness", "roles": ["logistician", "manager"], "kind": "date", "sort": 70},
+    "factory_acceptance": {"title": "Приёмка на заводе", "level": "position", "event": "", "roles": ["manager", "service_head", "cd", "gd"], "kind": "date", "sort": 75},
     "factory_final":     {"title": "Окончательный расчёт с заводом", "level": "position", "event": "", "roles": ["fd"], "kind": "payment_out", "sort": 80},
     "shipment":          {"title": "Отгрузка", "level": "batch", "event": "shipment", "roles": ["logistician"], "kind": "date", "sort": 90},
     "border":            {"title": "Пересечение границы (CMR с отметкой таможни)", "level": "batch", "event": "border", "roles": ["logistician"], "kind": "date", "sort": 100},
@@ -208,6 +209,7 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
         start_ev = "factory_prepayment" if (p.production_term or {}).get("start_event") == "factory_prepayment" else "factory_contract"
         upsert("production", pc.events.get(start_ev), position_id=p.id, title=f"Производство — {p.designation}")
         upsert("readiness", pc.events.get("readiness"), position_id=p.id, title=f"Готовность на заводе — {p.designation}")
+        upsert("factory_acceptance", pc.events.get("readiness"), position_id=p.id, title=f"Приёмка на заводе — {p.designation}")
         upsert("commissioning", pc.events.get("commissioning"), position_id=p.id, title=f"ПНР — {p.designation}")
         if p.batch_id is None:
             for code in ("shipment", "border", "declaration", "delivery"):

@@ -16,9 +16,11 @@ import OutcomePanel from "../components/OutcomePanel";
 import ExecutionTab from "../components/ExecutionTab";
 import DocumentsTab, { REVIEW_BADGE } from "../components/DocumentsTab";
 import { ImagesBlock, LocalOptionsBlock, OffersBlock, RelatedDeals } from "../components/ImagesLocalOptions";
+import { ModelDocsBlock, ZipBlock } from "../components/PositionExtras";
+import AcceptanceTab from "../components/AcceptanceTab";
 import { payText } from "../components/PaymentTermsEditor";
 
-type Tab = "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "documents" | "catalog" | "feed" | "versions";
+type Tab = "acceptance" | "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "documents" | "catalog" | "feed" | "versions";
 const POST_WIN = ["contract", "execution", "closed"];
 
 export default function DealCard({ me }: { me: Me }) {
@@ -147,6 +149,7 @@ export default function DealCard({ me }: { me: Me }) {
         {deal.service_flag && has("service_head", "cd", "fd", "gd") && <button className={tab === "service" ? "active" : ""} onClick={() => setTab("service")}>Сервис</button>}
         {isMgmt && <button className={tab === "pricing" ? "active" : ""} onClick={() => setTab("pricing")}>Расчёт и утверждение</button>}
         {POST_WIN.includes(deal.status) && <button className={tab === "execution" ? "active" : ""} onClick={() => setTab("execution")}>Контракт и исполнение</button>}
+        {["contract", "execution", "closed"].includes(deal.status) && has("manager", "service_head", "cd", "gd", "fd", "logistician") && <button className={tab === "acceptance" ? "active" : ""} onClick={() => setTab("acceptance")}>Приёмка на заводе</button>}
         {POST_WIN.includes(deal.status) && <button className={tab === "planfact" ? "active" : ""} onClick={() => setTab("planfact")}>План/факт</button>}
         {["kp_sent", ...POST_WIN, "lost"].includes(deal.status) && (isOwner || has("cd")) && <button className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>В каталог</button>}
         {can(me, "legal_docs") && <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>Документы клиента и юридические</button>}
@@ -208,12 +211,12 @@ export default function DealCard({ me }: { me: Me }) {
               {editable && <button className="btn add" onClick={() => setPosForm("new")}>Добавить вручную / из каталога</button>}
             </div>
             <table>
-              <thead><tr><th>Завод</th><th>Тип / модель</th><th className="num">Кол-во</th><th className="num">Цена за ед.</th><th>Валюта</th><th className="num">Опции</th><th>Базис</th><th>Срок производства</th><th>Срок клиенту</th><th>Справка по цене</th><th>Источник</th>{editable && <th />}</tr></thead>
+              <thead><tr><th>Завод</th><th>Тип машины</th><th>Марка и модель</th><th className="num">Кол-во</th><th className="num">Цена за ед.</th><th>Валюта</th><th className="num">Опции</th><th>Базис</th><th>Срок производства</th><th>Срок клиенту</th><th>Справка по цене</th><th>Источник</th>{editable && <th />}</tr></thead>
               <tbody>{(deal.positions || []).map((p) => {
                 const pr = (p.price_reference || {}) as { last_price?: number; deviation_pct?: number; comment?: string };
                 const dt = p.delivery_term || {};
-                return (<tr key={p.id} style={multi && shownPos?.id === p.id ? { background: "var(--accent-soft)" } : undefined}><td>{factories[p.factory_id] || p.factory_id.slice(0, 8)}</td><td>{multi ? <a href={"#pos-" + p.id} title="открыть технические характеристики позиции" onClick={(e) => { e.preventDefault(); openPos(p.id); }}
-                    style={{ fontWeight: shownPos?.id === p.id ? 700 : 400 }}>{p.machine_type} <b>{designation(p)}</b></a> : <>{p.machine_type} <b>{designation(p)}</b></>}{p.execution_id && <span className="badge" title="из каталога"> каталог</span>}</td><td className="num">{p.qty}</td>
+                return (<tr key={p.id} style={multi && shownPos?.id === p.id ? { background: "var(--accent-soft)" } : undefined}><td>{factories[p.factory_id] || p.factory_id.slice(0, 8)}</td><td>{p.machine_type}</td><td>{multi ? <a href={"#pos-" + p.id} title="открыть технические характеристики позиции" onClick={(e) => { e.preventDefault(); openPos(p.id); }}
+                    style={{ fontWeight: shownPos?.id === p.id ? 700 : 400 }}><b>{designation(p)}</b></a> : <b>{designation(p)}</b>}{p.execution_id && <span className="badge" title="из каталога"> каталог</span>}</td><td className="num">{p.qty}</td>
                   <td className="num">{fmtRub(p.unit_price)}</td><td>{p.currency}</td><td className="num">{fmtRub(p.options_price)}</td><td>{p.basis}</td><td>{posTerm(p)}</td>
                   <td className="muted">{TERM_UNITS[dt.unit || "calendar_days"]} {DELIVERY_START[dt.start_event || "client_contract"]} (+10 %, до недели)</td>
                   <td>{pr.last_price ? <>посл. {fmtRub(pr.last_price)} ({pr.deviation_pct} %) {pr.comment && <span className="muted">— {pr.comment}</span>}</> : <span className="muted">нет истории</span>}</td>
@@ -252,6 +255,8 @@ export default function DealCard({ me }: { me: Me }) {
               {can(me, "tech_params") && <TechParamsTable dealId={deal.id} position={p} canEdit={canTech} canDelete={has("admin", "cd", "gd")} onChanged={load} />}
               <div style={{ marginTop: 14 }}>{can(me, "images") && <ImagesBlock dealId={deal.id} position={p} me={me} onChanged={load} />}</div>
               <div style={{ marginTop: 14 }}>{can(me, "local_options") && <LocalOptionsBlock dealId={deal.id} position={p} me={me} onChanged={load} />}</div>
+              <div style={{ marginTop: 14 }}><ZipBlock dealId={deal.id} positionId={p.id} canEdit={has("manager", "service_head", "cd", "gd")} /></div>
+              <div style={{ marginTop: 14 }}><ModelDocsBlock dealId={deal.id} positionId={p.id} canUpload={!me.roles.every((r) => r.code === "observer")} canRemove={has("cd", "gd")} /></div>
               <details style={{ marginTop: 10 }}><summary className="muted" style={{ cursor: "pointer" }}>Опросник RFQ по кодам (как импортировано)</summary><Questionnaire position={p} /></details>
               {Array.isArray(p.options) && p.options.length > 0 && <div className="muted" style={{ marginTop: 6 }}>Опции завода (на 1 машину): {p.options.map((o: { name?: string; value?: number | null }) => `${o.name}${o.value != null ? ` — ${fmtRub(o.value)} ${p.currency}` : " (цена не указана)"}`).join("; ")}</div>}
             </div>
@@ -278,6 +283,7 @@ export default function DealCard({ me }: { me: Me }) {
       {tab === "service" && <ServiceBlock key={me.id} deal={deal} me={me} reload={load} />}
       {tab === "pricing" && <ApprovalScreen key={me.id} deal={deal} me={me} reload={load} />}
       {tab === "execution" && <ExecutionTab key={me.id} deal={deal} me={me} reload={load} />}
+      {tab === "acceptance" && <AcceptanceTab dealId={deal.id} />}
       {tab === "planfact" && <PlanFactTab key={me.id} deal={deal} />}
       {tab === "documents" && <DocumentsTab deal={deal} me={me} onChanged={load} />}
 
