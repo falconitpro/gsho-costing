@@ -1,23 +1,44 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { lbl, PRIORITY } from "../labels";
 import { Link, useNavigate } from "react-router-dom";
-import { api, fmtDate } from "../api";
+import { api, fmtDate, fmtRub } from "../api";
 import { STATUS_TITLES, type Deal, type Me } from "../types";
 
-type Row = Deal & { group?: string; parent_number?: string; related_count?: number };
+type Exec = { done: number; total: number; overdue: number; next: { title: string; on: string } | null; delay_days: number | null };
+type Row = Deal & { group?: string; parent_number?: string; related_count?: number; manager_name?: string; machines?: number; equipment?: string;
+  price_rub?: number | null; price_amount?: number | null; price_currency?: string | null; exec?: Exec; factory_contract_number?: string | null };
 
-type SortKey = "number" | "date" | "client" | "status" | "kp_due" | "priority" | "version";
+// Блоки экрана: в обработке (до результата), выигранные (контракт, исполнение, закрытые), проигранные и отменённые
+type Block = "work" | "won" | "lost" | "archive";
+const BLOCK_STATUSES: Record<Exclude<Block, "archive">, string[]> = {
+  work: ["draft", "logistics_calc", "service_calc", "calc_ready", "cd_approval", "fd_visa", "gd_visa", "rework", "approved", "kp_sent"],
+  won: ["won", "contract", "execution", "closed"],
+  lost: ["lost", "cancelled"],
+};
+const blockOf = (st: string): Exclude<Block, "archive"> => (BLOCK_STATUSES.won.includes(st) ? "won" : BLOCK_STATUSES.lost.includes(st) ? "lost" : "work");
+// цвет статуса по этапу воронки
+const ST_COLOR: Record<string, [string, string]> = {
+  draft: ["#f1f3f5", "#495057"], logistics_calc: ["#e7f1ff", "#1c5fb8"], service_calc: ["#e7f1ff", "#1c5fb8"], calc_ready: ["#f3ecff", "#6741d9"],
+  cd_approval: ["#f3ecff", "#6741d9"], fd_visa: ["#f3ecff", "#6741d9"], gd_visa: ["#f3ecff", "#6741d9"], rework: ["#fff1e0", "#c25e00"],
+  approved: ["#e3faf6", "#0b7a6b"], kp_sent: ["#e6f5ec", "#2b8a3e"], won: ["#fff0f0", "#d62828"], contract: ["#fff0f0", "#d62828"],
+  execution: ["#e7f1ff", "#1c5fb8"], closed: ["#eef1ee", "#5c6b5c"], lost: ["#fde7e7", "#b02a2a"], cancelled: ["#f1f3f5", "#868e96"],
+};
 const PRIO_ORDER: Record<string, number> = { low: 0, normal: 1, medium: 1, high: 2, urgent: 3, critical: 3 };
+const PRIO_COLOR: Record<number, string> = { 0: "#adb5bd", 1: "#4dabf7", 2: "#f59f00", 3: "#e03131" };
 const dealDate = (d: Row) => (d.requested_at || d.created_at || "") as string;
+const today = () => new Date().toISOString().slice(0, 10);
+const daysTo = (iso?: string | null) => (iso ? Math.round((new Date(iso.slice(0, 10)).getTime() - new Date(today()).getTime()) / 86400000) : null);
+const kpOverdue = (d: Row) => BLOCK_STATUSES.work.slice(0, 9).includes(d.status) && (daysTo(d.kp_due) ?? 1) < 0;
+
+type SortKey = "number" | "date" | "client" | "status" | "kp_due" | "priority" | "manager" | "price" | "next" | "progress";
 const sortVal = (d: Row, k: SortKey): string | number => {
   switch (k) {
     case "number": return d.number; case "date": return dealDate(d); case "client": return d.client_name || "";
-    case "status": return d.status_detail || STATUS_TITLES[d.status] || d.status;
-    case "kp_due": return d.kp_due || ""; case "priority": return PRIO_ORDER[d.priority] ?? 1; case "version": return d.current_version_no || 0;
+    case "status": return BLOCK_STATUSES.work.concat(BLOCK_STATUSES.won, BLOCK_STATUSES.lost).indexOf(d.status);
+    case "kp_due": return d.kp_due || "9999"; case "priority": return PRIO_ORDER[d.priority] ?? 1; case "manager": return d.manager_name || "";
+    case "price": return d.price_rub ?? -1; case "next": return d.exec?.next?.on || "9999"; case "progress": return d.exec ? d.exec.done / Math.max(d.exec.total, 1) : -1;
   }
 };
-const COLS: [SortKey, string, number?][] = [["number", "Номер", 130], ["date", "Дата запроса", 110], ["kp_due", "Срок КП", 100], ["client", "Клиент"],
-  ["priority", "Приоритет", 100], ["status", "Статус"], ["version", "Версия", 70]];
 
 /** Задача 9: связанные заявки (исходная и её дубли) идут подряд — дубли сразу под исходной, с отступом. */
 function grouped(deals: Row[]): Row[] {
@@ -34,6 +55,40 @@ function grouped(deals: Row[]): Row[] {
   return out;
 }
 
+function StatusBadge({ d }: { d: Row }) {
+  const [bg, fg] = ST_COLOR[d.status] || ["#eee", "#333"];
+  const detail = (d.status_detail || "").split(" · ").slice(1).join(" · ");
+  return <div style={{ minWidth: 120 }}><span className="badge" style={{ background: bg, color: fg, fontWeight: 600, whiteSpace: "nowrap" }}>{STATUS_TITLES[d.status] || d.status}</span>
+    {detail && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{detail}</div>}</div>;
+}
+function KpDue({ d }: { d: Row }) {
+  if (!d.kp_due) return <span className="muted">—</span>;
+  const n = daysTo(d.kp_due)!;
+  const active = BLOCK_STATUSES.work.slice(0, 9).includes(d.status);
+  return <span style={{ whiteSpace: "nowrap" }}>{fmtDate(d.kp_due)}{active && (n < 0 ? <span className="badge bad" style={{ marginLeft: 4 }}>просрочен {-n} дн.</span>
+    : n <= 2 ? <span className="badge warn" style={{ marginLeft: 4 }}>{n === 0 ? "сегодня" : `через ${n} дн.`}</span> : null)}</span>;
+}
+function Prio({ p }: { p: string }) {
+  const o = PRIO_ORDER[p] ?? 1;
+  return <span style={{ whiteSpace: "nowrap" }}><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, background: PRIO_COLOR[o], marginRight: 5 }} />{lbl(PRIORITY, p)}</span>;
+}
+function Progress({ e }: { e?: Exec }) {
+  if (!e || !e.total) return <span className="muted">—</span>;
+  const pct = Math.round((e.done / e.total) * 100);
+  return (<div style={{ minWidth: 110 }}>
+    <div style={{ height: 6, background: "#eee", borderRadius: 3, overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: e.overdue ? "#f08c00" : "#2b8a3e" }} /></div>
+    <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{e.done} из {e.total} этапов{e.overdue ? <span style={{ color: "var(--bad)" }}> · просрочено {e.overdue}</span> : ""}</div>
+  </div>);
+}
+const money = (d: Row) => (d.price_rub == null ? <span className="muted">—</span> : d.price_currency && d.price_currency !== "RUB" && d.price_amount != null
+  ? <span style={{ whiteSpace: "nowrap" }}>{fmtRub(d.price_amount)} {d.price_currency}<div className="muted" style={{ fontSize: 11 }}>≈ {fmtRub(d.price_rub)} RUB</div></span>
+  : <span style={{ whiteSpace: "nowrap" }}>{fmtRub(d.price_rub)} RUB</span>);
+
+type Filters = { q: string; manager: string; client: string; priority: string; statuses: string[]; flag: "" | "overdue" | "mine" };
+const EMPTY_F: Filters = { q: "", manager: "", client: "", priority: "", statuses: [], flag: "" };
+const load = <T,>(k: string, d: T): T => { try { const v = JSON.parse(localStorage.getItem(k) || ""); return v ?? d; } catch { return d; } };
+const save = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* хранилище недоступно */ } };
+
 export default function DealsList({ me }: { me: Me }) {
   const [deals, setDeals] = useState<Row[]>([]);
   const [clients, setClients] = useState<{ id: string; name: string; sites: { name: string }[] }[]>([]);
@@ -49,21 +104,55 @@ export default function DealsList({ me }: { me: Me }) {
     if (canAssign) api.get<{ users: { id: string; display_name: string; roles: string[] }[] }>("/api/team").then((r) => setManagers(r.users.filter((u) => u.roles.includes("manager") && u.id !== me.id))).catch(() => setManagers([]));
   }, [canAssign, me.id]);
 
-  const [archived, setArchived] = useState(false);
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(() => {
-    try { const v = JSON.parse(localStorage.getItem("gsho.dealsSort") || ""); if (v?.key) return v; } catch { /* нет сохранённой сортировки */ }
-    return { key: "date", dir: -1 };
-  });
+  const [block, setBlockState] = useState<Block>(() => load<Block>("gsho.dealsBlock", "work"));
+  const setBlock = (b: Block) => { setBlockState(b); save("gsho.dealsBlock", b); setF({ ...f, statuses: [] }); };
+  const [f, setFState] = useState<Filters>(() => ({ ...EMPTY_F, ...load<Partial<Filters>>("gsho.dealsFilters", {}) }));
+  const setF = (x: Filters) => { setFState(x); save("gsho.dealsFilters", x); };
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(() => load("gsho.dealsSort2", { key: "date" as SortKey, dir: -1 as 1 | -1 }));
   const toggleSort = (key: SortKey) => {
-    const next = { key, dir: (sort.key === key ? -sort.dir : key === "date" || key === "kp_due" || key === "priority" ? -1 : 1) as 1 | -1 };
-    setSort(next); try { localStorage.setItem("gsho.dealsSort", JSON.stringify(next)); } catch { /* хранилище недоступно */ }
+    const next = { key, dir: (sort.key === key ? -sort.dir : ["date", "priority", "price", "progress"].includes(key) ? -1 : 1) as 1 | -1 };
+    setSort(next); save("gsho.dealsSort2", next);
   };
-  const sorted = [...deals].sort((a, b) => {
+  const [archive, setArchive] = useState<Row[]>([]);
+  useEffect(() => { api.get<Row[]>("/api/deals").then(setDeals); }, []);
+  useEffect(() => { if (block === "archive") api.get<Row[]>("/api/deals?archived=true").then(setArchive); }, [block]);
+  const counts = useMemo(() => ({ work: deals.filter((d) => blockOf(d.status) === "work").length, won: deals.filter((d) => blockOf(d.status) === "won").length,
+    lost: deals.filter((d) => blockOf(d.status) === "lost").length }), [deals]);
+  const inBlock = block === "archive" ? archive : deals.filter((d) => blockOf(d.status) === block);
+  const q = f.q.trim().toLowerCase();
+  const shown = inBlock.filter((d) => (!q || [d.number, d.client_name, d.site, d.equipment, d.contract_number, d.factory_contract_number, d.manager_name].some((x) => (x || "").toLowerCase().includes(q)))
+    && (!f.manager || d.manager_id === f.manager) && (!f.client || d.client_id === f.client) && (!f.priority || String(PRIO_ORDER[d.priority] ?? 1) === f.priority)
+    && (!f.statuses.length || f.statuses.includes(d.status))
+    && (f.flag !== "overdue" || kpOverdue(d) || (d.exec?.overdue || 0) > 0) && (f.flag !== "mine" || d.manager_id === me.id));
+  const sorted = [...shown].sort((a, b) => {
     const x = sortVal(a, sort.key), y = sortVal(b, sort.key);
     const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "ru", { numeric: true });
     return c * sort.dir || a.number.localeCompare(b.number, "ru", { numeric: true }) * -1;
   });
-  useEffect(() => { api.get<Row[]>(`/api/deals${archived ? "?archived=true" : ""}`).then(setDeals); }, [archived]);
+  const statusChips = block === "archive" ? [] : BLOCK_STATUSES[block].map((st) => [st, inBlock.filter((d) => d.status === st).length] as const).filter(([, n]) => n > 0);
+  const mgrs = [...new Map(inBlock.filter((d) => d.manager_id).map((d) => [d.manager_id, d.manager_name || "—"])).entries()].sort((a, b) => a[1].localeCompare(b[1], "ru"));
+  const cls = [...new Map(inBlock.filter((d) => d.client_id).map((d) => [d.client_id, d.client_name || "—"])).entries()].sort((a, b) => a[1].localeCompare(b[1], "ru"));
+  const anyFilter = JSON.stringify({ ...f, q: f.q.trim() }) !== JSON.stringify(EMPTY_F);
+  const kpis = block === "work" ? [
+    ["В обработке", shown.length, ""], ["Срок КП просрочен", shown.filter(kpOverdue).length, "bad"],
+    ["На утверждении и визах", shown.filter((d) => ["calc_ready", "cd_approval", "fd_visa", "gd_visa"].includes(d.status)).length, ""],
+    ["На доработке", shown.filter((d) => d.status === "rework").length, "warn"], ["КП отправлено", shown.filter((d) => d.status === "kp_sent").length, "ok"]]
+    : block === "won" ? [
+    ["Сделок", shown.length, ""], ["Заключение контракта", shown.filter((d) => ["won", "contract"].includes(d.status)).length, ""],
+    ["Исполнение", shown.filter((d) => d.status === "execution").length, ""], ["С просроченными этапами", shown.filter((d) => (d.exec?.overdue || 0) > 0).length, "bad"],
+    ["Машин", shown.reduce((s_, d) => s_ + (d.machines || 0), 0), ""],
+    ...(shown.some((d) => d.price_rub != null) ? [["Портфель, RUB без НДС", fmtRub(shown.reduce((s_, d) => s_ + (d.price_rub || 0), 0)), ""]] : [])]
+    : [["Сделок", shown.length, ""]];
+  const th = (k: SortKey, t: string, w?: number) => (
+    <th key={k} onClick={() => toggleSort(k)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", width: w, minWidth: w }} title="сортировать по столбцу">
+      {t} <span style={{ opacity: sort.key === k ? 1 : 0.35 }}>{sort.key === k ? (sort.dir === 1 ? "▲" : "▼") : "↕"}</span></th>);
+  const numCell = (d: Row) => (
+    <td style={{ whiteSpace: "nowrap", ...(d.parent_number ? { paddingLeft: 22 } : {}) }}>{d.parent_number && <span className="muted">↳ </span>}<Link to={`/deals/${d.id}`} style={{ fontWeight: 600 }}>{d.number}</Link>
+      {!d.parent_number && (d.related_count || 0) > 0 && <span className="badge" title="связанные заявки по одному запросу клиента" style={{ marginLeft: 6 }}>+{d.related_count} связ.</span>}
+      {d.parent_number && <div className="muted" style={{ fontSize: 11 }}>дубль {d.parent_number}</div>}
+      <div className="muted" style={{ fontSize: 11 }}>{fmtDate(dealDate(d))}</div></td>);
+  const clientCell = (d: Row) => (<td style={{ minWidth: 160 }}><b>{d.client_name}</b>{d.site && <div className="muted" style={{ fontSize: 12 }}>{d.site}</div>}</td>);
+  const eqCell = (d: Row) => (<td style={{ minWidth: 180, fontSize: 13 }}>{d.equipment || <span className="muted">позиций нет</span>}</td>);
   useEffect(() => { api.get<typeof clients>("/api/refs/clients").then(setClients); }, []);
 
   const [docs, setDocs] = useState<{ file: File; category: string }[]>([]);   // файлы от клиента — хранятся в сделке
@@ -80,8 +169,8 @@ export default function DealsList({ me }: { me: Me }) {
       <div className="page-head">
         <h1>Сделки</h1>
         <div className="tabs" style={{ margin: 0 }}>
-          <button className={!archived ? "active" : ""} onClick={() => setArchived(false)}>В работе</button>
-          <button className={archived ? "active" : ""} onClick={() => setArchived(true)}>Архив</button>
+          {([["work", "В обработке", counts.work], ["won", "Выигранные и исполнение", counts.won], ["lost", "Проигранные и отменённые", counts.lost], ["archive", "Архив", null]] as const).map(([k, t, n]) => (
+            <button key={k} className={block === k ? "active" : ""} onClick={() => setBlock(k)}>{t}{n != null && <span className="badge" style={{ marginLeft: 6 }}>{n}</span>}</button>))}
         </div>
         {isManager && <div className="push"><button className="btn add" onClick={() => setShowNew(!showNew)}>Новая сделка</button></div>}
       </div>
@@ -129,22 +218,63 @@ export default function DealsList({ me }: { me: Me }) {
           <div className="row" style={{ marginTop: 10 }}><button className="btn" onClick={create} disabled={!form.client_id}>Создать</button></div>
         </div>
       )}
-      <div className="card">
-        <table>
-          <thead><tr>{COLS.map(([k, t, w]) => (
-            <th key={k} onClick={() => toggleSort(k)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", width: w, minWidth: w }} title="сортировать по столбцу">
-              {t} <span style={{ opacity: sort.key === k ? 1 : 0.35 }}>{sort.key === k ? (sort.dir === 1 ? "▲" : "▼") : "↕"}</span></th>))}</tr></thead>
+      <div className="card" style={{ padding: "10px 12px" }}>
+        <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <input placeholder="🔍 номер, клиент, объект, оборудование, контракт…" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} style={{ flex: "1 1 260px", minWidth: 0 }} />
+          <select value={f.manager} onChange={(e) => setF({ ...f, manager: e.target.value })}><option value="">все менеджеры</option>{mgrs.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
+          <select value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} style={{ maxWidth: 220 }}><option value="">все клиенты</option>{cls.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
+          <select value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}><option value="">любой приоритет</option>
+            <option value="3">срочный</option><option value="2">высокий</option><option value="1">обычный</option><option value="0">низкий</option></select>
+          <div className="tabs" style={{ margin: 0 }}>
+            <button className={f.flag === "" ? "active" : ""} onClick={() => setF({ ...f, flag: "" })}>все</button>
+            <button className={f.flag === "mine" ? "active" : ""} onClick={() => setF({ ...f, flag: "mine" })}>мои</button>
+            <button className={f.flag === "overdue" ? "active" : ""} onClick={() => setF({ ...f, flag: "overdue" })}>с просрочкой</button></div>
+          {anyFilter && <button className="btn ghost" onClick={() => setF(EMPTY_F)}>сбросить фильтры</button>}
+        </div>
+        {statusChips.length > 1 && <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+          <span className="muted" style={{ fontSize: 12 }}>Этап:</span>
+          {statusChips.map(([st, n]) => { const on = f.statuses.includes(st); const [bg, fg] = ST_COLOR[st] || ["#eee", "#333"];
+            return <button key={st} onClick={() => setF({ ...f, statuses: on ? f.statuses.filter((x) => x !== st) : [...f.statuses, st] })}
+              style={{ border: `1px solid ${on ? fg : "transparent"}`, background: bg, color: fg, borderRadius: 14, padding: "3px 10px", cursor: "pointer", fontSize: 12, fontWeight: on ? 700 : 500 }}>
+              {STATUS_TITLES[st]} · {n}</button>; })}
+        </div>}
+        <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
+          {kpis.map(([t, v, c]) => (
+            <div key={String(t)} style={{ flex: "1 1 130px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", background: "#fff" }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: c === "bad" && Number(v) > 0 ? "var(--bad)" : c === "warn" && Number(v) > 0 ? "#c25e00" : c === "ok" ? "var(--ok)" : undefined }}>{v}</div>
+              <div className="muted" style={{ fontSize: 12 }}>{t}</div></div>))}
+        </div>
+      </div>
+      <div className="card" style={{ padding: 0, overflowX: "auto" }}>
+        <table style={{ minWidth: 900 }}>
+          {block === "won" ? (
+            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th><th>Контракт</th>{th("price", "Сумма")}
+              {th("progress", "Исполнение", 130)}{th("next", "Ближайший этап")}{th("status", "Статус")}{th("manager", "Менеджер")}</tr></thead>
+          ) : (
+            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th>{th("kp_due", "Срок КП", 120)}{th("priority", "Приоритет", 100)}
+              {th("status", "Статус")}{th("manager", "Менеджер")}{block !== "work" && th("price", "Сумма")}<th>Версия</th></tr></thead>)}
           <tbody>
-            {grouped(sorted).map((d) => (
-              <tr key={d.id} style={d.parent_number ? { background: "#fafafa" } : undefined}>
-                <td style={{ whiteSpace: "nowrap", ...(d.parent_number ? { paddingLeft: 22 } : {}) }}>{d.parent_number && <span className="muted">↳ </span>}<Link to={`/deals/${d.id}`}>{d.number}</Link>
-                  {!d.parent_number && (d.related_count || 0) > 0 && <span className="badge" title="связанные заявки по одному запросу клиента" style={{ marginLeft: 6 }}>+{d.related_count} связ.</span>}
-                  {d.parent_number && <div className="muted" style={{ fontSize: 11 }}>дубль {d.parent_number}</div>}</td><td style={{ whiteSpace: "nowrap" }}>{fmtDate(dealDate(d))}</td>
-                <td style={{ whiteSpace: "nowrap" }}>{fmtDate(d.kp_due)}</td><td>{d.client_name}</td><td>{lbl(PRIORITY, d.priority)}</td>
-                <td><span className="badge accent">{d.status_detail || STATUS_TITLES[d.status] || d.status}</span></td><td>{d.current_version_no}</td>
-              </tr>
-            ))}
-            {deals.length === 0 && <tr><td colSpan={8} className="muted">{archived ? "В архиве сделок нет" : "Сделок нет"}</td></tr>}
+            {grouped(sorted).map((d) => {
+              const late = kpOverdue(d) || (d.exec?.overdue || 0) > 0;
+              const rowStyle = { ...(d.parent_number ? { background: "#fafafa" } : {}), ...(late ? { boxShadow: "inset 3px 0 0 var(--bad)" } : {}) };
+              return block === "won" ? (
+                <tr key={d.id} style={rowStyle}>
+                  {numCell(d)}{clientCell(d)}{eqCell(d)}
+                  <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{d.contract_number ? <>клиент № {d.contract_number}{d.contract_signed_at && <span className="muted"> от {fmtDate(d.contract_signed_at)}</span>}</> : <span className="muted">не подписан</span>}
+                    <div>{d.factory_contract_number ? <>завод № {d.factory_contract_number}{d.factory_contract_signed_at && <span className="muted"> от {fmtDate(d.factory_contract_signed_at)}</span>}</> : <span className="muted">завод — нет</span>}</div></td>
+                  <td>{money(d)}</td>
+                  <td><Progress e={d.exec} />{d.exec?.delay_days ? <div style={{ fontSize: 11, color: d.exec.delay_days > 0 ? "var(--bad)" : "var(--ok)" }}>{d.exec.delay_days > 0 ? `+${d.exec.delay_days}` : d.exec.delay_days} дн. к плану</div> : null}</td>
+                  <td style={{ fontSize: 13, minWidth: 160 }}>{d.exec?.next ? <>{d.exec.next.title}<div style={{ fontSize: 12, color: (daysTo(d.exec.next.on) ?? 1) < 0 ? "var(--bad)" : "var(--muted)" }}>
+                    {fmtDate(d.exec.next.on)}{(daysTo(d.exec.next.on) ?? 1) < 0 ? ` · просрочен ${-(daysTo(d.exec.next.on) || 0)} дн.` : ""}</div></> : <span className="muted">—</span>}</td>
+                  <td><StatusBadge d={d} /></td><td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>
+                </tr>) : (
+                <tr key={d.id} style={rowStyle}>
+                  {numCell(d)}{clientCell(d)}{eqCell(d)}<td><KpDue d={d} /></td><td><Prio p={d.priority} /></td>
+                  <td><StatusBadge d={d} /></td><td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>{block !== "work" && <td>{money(d)}</td>}
+                  <td className="muted">{d.current_version_no || ""}</td>
+                </tr>);
+            })}
+            {sorted.length === 0 && <tr><td colSpan={9} className="muted" style={{ padding: 16 }}>{inBlock.length ? "Нет сделок по выбранным фильтрам" : block === "archive" ? "В архиве сделок нет" : "Сделок нет"}</td></tr>}
           </tbody>
         </table>
       </div>
