@@ -341,37 +341,6 @@ def own_companies(db: Session = Depends(get_db), user: CurrentUser = Depends(_re
 
 # ------------------------------------------------------------------ автозаполнение по ИНН, сканы документов, карточка компании
 
-@router.post("/profiles/{pid}/fill-by-inn")
-def fill_by_inn(pid: str, inn: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
-    """Реквизиты российского юрлица из ЕГРЮЛ/ЕГРИП (DaData) по ИНН профиля: наименования, ОГРН, КПП, адрес, руководитель, ОКВЭД."""
-    from .references import _registry_lookup
-    p = _profile(db, pid)
-    if p.owner_kind == "own":
-        _own_editor(user)
-    inn = (inn or p.tax_number or "").strip()
-    if len(inn) not in (10, 12) or not inn.isdigit():
-        raise HTTPException(422, "Укажите ИНН (10 или 12 цифр)")
-    found = _registry_lookup(db, inn, user)
-    if not found:
-        raise HTTPException(404, "Организация с таким ИНН в реестре не найдена")
-    main = next((x for x in found if (x.get("raw") or {}).get("branch_type") in (None, "MAIN")), found[0])
-    names = dict(p.names or svc._names())
-    names["ru"] = {"full": main.get("full_name") or main.get("name") or "", "short": main.get("name") or ""}
-    data = {"tax_number": inn, "names": names, "reg_number": main.get("ogrn") or p.reg_number, "kpp": main.get("kpp") or p.kpp, "legal_address": main.get("address") or p.legal_address,
-            "director": main.get("director") or p.director, "country": "RU"}
-    if main.get("director") and not p.signatory_name:
-        data.update(signatory_name=main["director"], signatory_position="Генеральный директор", signatory_basis="Устава")
-    if main.get("okved"):
-        data["extra"] = {**(p.extra or {}), "okved": main["okved"]}
-    opf = (main.get("raw") or {}).get("opf") or ""
-    if opf:
-        data["opf"] = str(opf)[:128]
-    changed = svc.apply_changes(p, data, svc.PROFILE_FIELDS, user.id, action="registry")
-    audit(db, user.id, None, "legal_profile", p.id, "fill_by_inn", after={"inn": inn, "source": main.get("source"), "changed": list(changed)})
-    db.commit()
-    return {**svc.profile_payload(p, svc.user_names(db)), "registry_status": main.get("status", ""), "changed": list(changed)}
-
-
 def _docs_dir(pid: str) -> str:
     d = os.path.join(get_settings().storage_local_root, "_legal", "profiles", pid)
     os.makedirs(d, exist_ok=True)

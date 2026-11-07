@@ -76,6 +76,10 @@ function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, onSaved, onMsg, o
   const [f, setF] = useState<Profile>(p);
   const [dirty, setDirty] = useState(false);
   const [newBank, setNewBank] = useState<Partial<Bank> | null>(null);
+  const [branches, setBranches] = useState<{ kpp: string; name: string; address: string }[]>([]);
+  const fillByInn = (kpp = "") => api.post<{ profile: Profile; registry_status: string; branches: { kpp: string; name: string; address: string }[] }>(`/api/legal/profiles/${p.id}/fill-by-inn`, { inn: f.tax_number, kpp })
+    .then((r) => { setBranches(r.branches || []); onSaved(); onMsg(`Заполнено из реестра${r.registry_status && r.registry_status !== "ACTIVE" ? ` · внимание: статус организации ${r.registry_status}` : ""}${r.branches?.length ? ` · у организации есть филиалы (${r.branches.length}) — можно выбрать ниже` : ""}`); })
+    .catch((e) => onMsg((e as Error).message));
   useEffect(() => { setF(p); setDirty(false); }, [p]);
   const set = (x: Partial<Profile>) => { setF({ ...f, ...x }); setDirty(true); };
   const setName = (lang: keyof Names, k: "full" | "short", v: string) => set({ names: { ...f.names, [lang]: { ...f.names[lang], [k]: v } } });
@@ -157,8 +161,7 @@ function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, onSaved, onMsg, o
           <label className="f" style={{ marginTop: 6 }}>Комментарий юриста<textarea rows={2} value={f.lawyer_comment} disabled={!canEdit && !canCheck} onChange={(e) => set({ lawyer_comment: e.target.value })} /></label>
           <div className="row" style={{ marginTop: 8, gap: 6, flexWrap: "wrap" }}>
             {canEdit && <button className="btn" disabled={!dirty} onClick={save}>Сохранить профиль</button>}
-            {canEdit && isRu && <button className="btn secondary" title="заполнить наименования, ОГРН, КПП, адрес и руководителя из ЕГРЮЛ/ЕГРИП по ИНН" disabled={!/^\d{10}$|^\d{12}$/.test(f.tax_number)}
-              onClick={() => api.post<Profile & { changed: string[]; registry_status: string }>(`/api/legal/profiles/${p.id}/fill-by-inn?inn=${f.tax_number}`).then((r) => { onSaved(); onMsg(r.changed.length ? `Заполнено из реестра: ${r.changed.map((k) => FIELD_T[k] || k).join(", ")}${r.registry_status && r.registry_status !== "ACTIVE" ? ` · внимание: статус ${r.registry_status}` : ""}` : "Данные в реестре совпадают с профилем"); }).catch((e) => onMsg((e as Error).message))}>Заполнить по ИНН</button>}
+            {canEdit && isRu && <button className="btn secondary" title="заполнить наименования, ОГРН, КПП, адрес и руководителя из ЕГРЮЛ/ЕГРИП по ИНН" disabled={!/^\d{10}$|^\d{12}$/.test(f.tax_number)} onClick={() => fillByInn()}>Заполнить по ИНН</button>}
             <a className="btn ghost" href={`/api/legal/profiles/${p.id}/card`} title="карточка компании с реквизитами и счетами — DOCX для отправки контрагенту">Карточка DOCX</a>
             <a className="btn ghost" href={`/api/legal/profiles/${p.id}/card?fmt=pdf`} target="_blank" rel="noreferrer">Карточка PDF</a>
             {canCheck && <>
@@ -166,6 +169,9 @@ function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, onSaved, onMsg, o
               <button className="btn ghost" style={{ color: "var(--bad)" }} onClick={() => api.post(`/api/legal/profiles/${p.id}/check`, { status: "issues", comment: f.lawyer_comment }).then(onSaved).catch((e) => onMsg((e as Error).message))}>Есть замечания</button></>}
             {canEdit && p.is_active && <button className="btn ghost" style={{ marginLeft: "auto", color: "var(--muted)", borderColor: "var(--line)" }} onClick={() => { if (confirm("Перевести профиль в архив? В новые договоры он подставляться не будет.")) api.put(`/api/legal/profiles/${p.id}`, { is_active: false, is_default: false }).then(onSaved).catch((e) => onMsg((e as Error).message)); }}>в архив</button>}
           </div>
+          {branches.length > 0 && <div style={{ fontSize: 12, marginTop: 6 }}><span className="muted">Филиалы в реестре — подставить вместо головной: </span>
+            {branches.map((b) => <button key={b.kpp} className="btn ghost" style={{ padding: "1px 8px", fontSize: 11, marginRight: 4 }} title={b.address} onClick={() => fillByInn(b.kpp)}>{b.name} · КПП {b.kpp}</button>)}
+            <button className="btn ghost" style={{ padding: "1px 8px", fontSize: 11, color: "var(--muted)", borderColor: "var(--line)" }} onClick={() => setBranches([])}>скрыть</button></div>}
           <div className="row" style={{ justifyContent: "space-between", margin: "12px 0 4px" }}>
             <b style={{ fontSize: 13 }}>Банковские реквизиты <span className="muted" style={{ fontWeight: 400 }}>· {p.banks.length || "нет"}</span></b>
             {canEdit && <button className="btn add" style={{ padding: "3px 10px", fontSize: 12 }} onClick={() => setNewBank({ ...EMPTY_BANK, currency: isRu ? "RUB" : isCn ? "CNY" : "USD", country: f.country })}>Счёт</button>}

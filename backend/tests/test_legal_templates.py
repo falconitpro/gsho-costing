@@ -95,5 +95,5 @@ def test_templates_library_and_company_card():
         card = Document(io.BytesIO(r.content))
         assert any("Карточка компании" in p.text for p in card.paragraphs)
         # автозаполнение по ИНН: без ключа DaData — 503 (источник не подключён), с неверным ИНН — 422
-        assert c.post(f"/api/legal/profiles/{pid}/fill-by-inn?inn=12", headers=H(CD)).status_code == 422
-        assert c.post(f"/api/legal/profiles/{pid}/fill-by-inn?inn=7707083893", headers=H(CD)).status_code in (200, 404, 502, 503)
+        assert c.post(f"/api/legal/profiles/{pid}/fill-by-inn", headers=H(CD), json={"inn": "12"}).status_code == 422
+        assert c.post(f"/api/legal/profiles/{pid}/fill-by-inn", headers=H(CD), json={"inn": "7707083893"}).status_code in (200, 404, 502, 503)
