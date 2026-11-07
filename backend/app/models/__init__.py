@@ -393,6 +393,10 @@ class Deal(TimestampMixin, Base):
     storage_folder: Mapped[str] = mapped_column(String(512), default="")
     outcome: Mapped[Optional[str]] = mapped_column(String(16))
     outcome_reason: Mapped[str] = mapped_column(Text, default="")
+    # ожидание результата после отправки КП: когда менеджер последний раз уточнял статус, что сказал клиент, когда ждём решение
+    decision_expected_on: Mapped[Optional[date]] = mapped_column(Date)
+    status_checked_on: Mapped[Optional[date]] = mapped_column(Date)
+    status_check_note: Mapped[str] = mapped_column(Text, default="")
     plan_fact_closed: Mapped[bool] = mapped_column(Boolean, default=False)
     # задача 5: альтернативные предложения в одном КП (по умолчанию одно предложение без выбора вариантов)
     has_alternatives: Mapped[bool] = mapped_column(Boolean, default=False)
