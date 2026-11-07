@@ -9,7 +9,7 @@ import zipfile
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -250,6 +250,12 @@ def purchase_build(deal_id: str, body: ChoiceIn, db: Session = Depends(get_db), 
         unresolved = [f"{x['title']}: {', '.join(x['unresolved'])}" for x in docs if x["unresolved"]]
         if unresolved:
             raise HTTPException(422, {"message": "В шаблоне остались незаполненные переменные", "errors": unresolved, "warnings": checks["warnings"]})
+        from ..services.legal_verify import verify_package_files
+        verified = verify_package_files(docs, ctx["totals"], "purchase")
+        if not verified["ok"]:
+            bad = [f"{svc.DOC_TITLES.get(k, k)}: {'; '.join(r['problems'])}" for k, r in verified["files"].items() if not r["ok"]]
+            raise HTTPException(422, {"message": "Сформированные файлы не прошли проверку", "errors": bad, "warnings": checks["warnings"]})
+        checks = {**checks, "documents": verified}
         ensure_folders(db, deal)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
         files = []
@@ -312,8 +318,33 @@ def all_packages(status: str = "", kind: str = "", db: Session = Depends(get_db)
             continue
         if (status and p.status != status) or (kind and p.kind != kind):
             continue
-        out.append({**svc.package_payload(p, names), "deal_number": deal.number, "client_name": deal.client.name if deal.client else ""})
-    return {"items": out, "statuses": svc.STATUS_TITLES}
+        out.append({**svc.package_payload(p, names), "deal_number": deal.number, "client_name": deal.client.name if deal.client else "", "deal_status": deal.status.value, "manager_id": deal.manager_id,
+                    "signed_scans": [f for f in (p.files or []) if f.get("kind") == "signed_scan"]})
+    summary = {st: sum(1 for x in out if x["status"] == st) for st in svc.STATUS_TITLES}
+    return {"items": out, "statuses": svc.STATUS_TITLES, "summary": summary, "kinds": {"purchase": "Закупка у поставщика", "sale": "Продажа заказчику"}}
+
+
+@router.post("/legal/packages/{pid}/signed-scan", status_code=201)
+def package_signed_scan(pid: str, file: UploadFile = File(...), comment: str = Form(""), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Подписанный скан к пакету: хранится отдельно от рабочих версий (категория «Подписанный договор / контракт с заводом» в папке 08) и прикрепляется к пакету.
+    Загружают менеджер сделки, юрист, КД, ЗГД — для пакета в статусе «утверждён» или «подписан»."""
+    from .documents import _save
+    p, deal = _pkg(db, pid, user)
+    if not (user.has(Role.LAWYER, Role.CD, Role.GD) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id))):
+        raise HTTPException(403, "Скан подписанного договора загружают менеджер сделки, юрист, КД или ЗГД")
+    if p.status not in ("approved", "signed"):
+        raise HTTPException(409, "Скан подписанного договора прикладывается к утверждённому или подписанному пакету")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in (".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".zip"):
+        raise HTTPException(422, "Скан: PDF, JPG, PNG, TIFF или ZIP")
+    category = "factory_contract_signed" if p.kind == "purchase" else "contract_signed"
+    att = _save(db, deal, user, file, category, comment or f"скан подписанного договора · пакет v{p.version_no}")
+    att.entity, att.entity_id = "legal_package", p.id
+    p.files = list(p.files or []) + [{"kind": "signed_scan", "title": "Подписанный скан", "file_name": att.file_name, "attachment_id": att.id, "size": att.size, "format": ext.lstrip("."), "template": None}]
+    p.approvals = list(p.approvals or []) + [{"at": datetime.now(timezone.utc).isoformat(), "by": user.id, "from": p.status, "to": p.status, "comment": f"приложен подписанный скан {att.file_name}"}]
+    audit(db, user.id, deal.id, "legal_package", p.id, "signed_scan", after={"file": att.file_name})
+    db.commit()
+    return svc.package_payload(p, svc.user_names(db))
 
 
 def _pkg(db: Session, pid: str, user: CurrentUser) -> tuple[LegalPackage, Deal]:
@@ -348,6 +379,8 @@ def package_file(pid: str, kind: str, fmt: str = "docx", db: Session = Depends(g
     if f is None:
         raise HTTPException(404, "Документ не найден")
     local, d, name = _download_attachment(db, f["attachment_id"])
+    if kind == "signed_scan" or f.get("format") not in (None, "docx"):
+        return file_response(local, name, inline=True, background=BackgroundTask(shutil.rmtree, d, True))
     if fmt == "pdf":
         from ..services.legal_card import to_pdf
         pdf = to_pdf(local, d)
@@ -408,7 +441,6 @@ def package_status(pid: str, body: StatusIn, db: Session = Depends(get_db), user
 
 # ================================================================== этап 4: клиентский пакет (договор заказчика)
 
-from fastapi import File, Form, UploadFile  # noqa: E402
 
 from ..services import legal_sale as sale  # noqa: E402
 from ..services import legal_rules as rules  # noqa: E402
@@ -614,6 +646,12 @@ def sale_build(deal_id: str, body: SaleChoiceIn, db: Session = Depends(get_db), 
         unresolved = [f"{x['title']}: {', '.join(x['unresolved'])}" for x in docs if x["unresolved"]]
         if unresolved:
             raise HTTPException(422, {"message": "В шаблоне остались незаполненные переменные", "errors": unresolved, "warnings": checks["warnings"]})
+        from ..services.legal_verify import verify_package_files
+        verified = verify_package_files(docs, None, "sale")
+        if not verified["ok"]:
+            bad = [f"{sale.SALE_TITLES.get(k, k)}: {'; '.join(r['problems'])}" for k, r in verified["files"].items() if not r["ok"]]
+            raise HTTPException(422, {"message": "Сформированные файлы не прошли проверку", "errors": bad, "warnings": checks["warnings"]})
+        checks = {**checks, "documents": verified}
         ensure_folders(db, deal)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M")
         files = []

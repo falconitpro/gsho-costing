@@ -132,6 +132,12 @@ def test_sale_package_flow():
         assert "критический" not in proto.lower() or "ЧЕРНОВИК" in proto   # критичность в протокол не выводится таблицей
         spec = _text(c.get(f"/api/legal/packages/{pkg['id']}/files/tech_spec_client", headers=H(MGR)).content)
         assert "ТЕХНИЧЕСКАЯ СПЕЦИФИКАЦИЯ" in spec and "X3000" in spec and "Кондиционер" in spec and "1 500 000" not in spec and "CNY" not in spec
+        # сквозная проверка файлов: отчёт в пакете, все три документа открываются, без служебных тегов
+        det0 = c.get(f"/api/legal/packages/{pkg['id']}", headers=H(LAW)).json()
+        assert det0["checks"]["documents"]["ok"] and set(det0["checks"]["documents"]["files"]) == {"client_contract_copy", "disagreements_protocol", "tech_spec_client"}
+        for f in det0["files"]:
+            txt = _text(c.get(f"/api/legal/packages/{pkg['id']}/files/{f['kind']}", headers=H(MGR)).content)
+            assert "{{" not in txt and len(txt) > 100, f["kind"]
         # детали пакета: служебные замечания с риском сохранены внутри, версия правил записана
         det = c.get(f"/api/legal/packages/{pkg['id']}", headers=H(LAW)).json()
         assert det["snapshot"]["findings"] and det["snapshot"]["findings"][0]["risk"] and det["snapshot"]["source"]["id"] == up["id"]
