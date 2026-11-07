@@ -116,8 +116,9 @@ def _action_for(d: Deal, user: CurrentUser, today: date, tasks_by_deal: dict[str
 
 @router.get("")
 def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    today = date.today()
     now = datetime.now(timezone.utc)
+    local = now + timedelta(hours=3)          # московское время: дата и приветствие — по нему, а не по UTC сервера
+    today = local.date()
     role = _primary_role(user)
     u = db.get(User, user.id)
     names = {x.id: x.display_name for x in db.scalars(select(User)).all()}
@@ -356,7 +357,7 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
     prefs = ((u.prefs if u else None) or {}).get("workplace", {})
     order = [b for b in (prefs.get("order") or []) if b in default_order] + [b for b in default_order if b not in (prefs.get("order") or [])]
     hidden = [b for b in (prefs.get("hidden") or []) if b in default_order and b not in required]
-    greeting = "Доброе утро" if 5 <= (now + timedelta(hours=3)).hour < 12 else "Добрый день" if (now + timedelta(hours=3)).hour < 18 else "Добрый вечер"
+    greeting = "Доброе утро" if 5 <= local.hour < 12 else "Добрый день" if 12 <= local.hour < 18 else "Добрый вечер"
     first = (user.display_name or "").split()
     return {"user": {"name": user.display_name, "first_name": first[1] if len(first) > 1 and role != "observer" else (first[0] if first else ""), "role": role, "role_title": ROLE_TITLES.get(Role(role), role), "greeting": greeting},
             "date": {"iso": today.isoformat(), "text": f"{WEEKDAYS[today.weekday()]}, {today.day} {MONTHS[today.month - 1]}", "weekday": today.weekday()},
