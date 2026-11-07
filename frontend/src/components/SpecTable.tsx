@@ -24,7 +24,7 @@ export default function SpecTable({ sections, refTitle = "Справка", nameT
                     <span className="muted" style={{ fontWeight: 400 }}> · заполнено {filled} из {s.rows.length}</span></td>
                 </tr>
                 {!isClosed && s.rows.map((r) => {
-                  const bg = !r.filled && r.required ? "#fde7e7" : !r.filled ? "#fff6d6" : undefined;
+                  const bg = !r.filled && r.required ? "#ffe3e3" : !r.filled ? "#f4f4f4" : undefined;
                   return (
                     <tr key={r.key} style={{ background: bg }}>
                       <td className="muted">{r.no ?? `${si + 1}.${s.rows.indexOf(r) + 1}`}</td>

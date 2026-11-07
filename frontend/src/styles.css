@@ -5,9 +5,10 @@
   --muted: #6b6b6b;
   --line: #e4e4e4;
   --bg: #fafafa;
-  --ok: #2e9e5b;
-  --warn: #e0a800;
-  --bad: #d32f2f;
+  /* фирменная палитра: красный акцент, чёрный, серые; без зелёного, жёлтого и синего */
+  --ok: #000;
+  --warn: #b00000;
+  --bad: #ff3131;
   --font: "Intro", "Arial", system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
@@ -74,9 +75,9 @@ input, select, textarea { font-family: inherit; font-size: 14px; padding: 7px 9p
 label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; background: #eee; }
 .badge.accent { background: var(--accent-soft); color: var(--accent); }
-.badge.ok { background: #e6f5ec; color: var(--ok); }
-.badge.warn { background: #fff6d6; color: #8a6d00; }
-.badge.bad { background: #fde7e7; color: var(--bad); }
+.badge.ok { background: #000; color: #fff; }
+.badge.warn { background: #ffd6d6; color: #8a0000; }
+.badge.bad { background: var(--accent); color: #fff; }
 .margin-ind { font-size: 28px; font-weight: 800; }
 .margin-ind.ok { color: var(--ok); }
 .margin-ind.warn { color: var(--warn); }
@@ -86,9 +87,9 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; colo
 .tabs button { background: none; border: 0; padding: 8px 12px; cursor: pointer; font-family: inherit; font-size: 14px; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tabs button.active { border-color: var(--accent); font-weight: 700; }
 .alert { padding: 10px 12px; border-radius: 6px; margin: 8px 0; }
-.alert.error { background: #fde7e7; color: var(--bad); }
-.alert.warn { background: #fff6d6; }
-.alert.info { background: #eef4ff; }
+.alert.error { background: #fff0f0; color: #b00000; border-left: 4px solid var(--accent); }
+.alert.warn { background: #f3f3f3; border-left: 4px solid var(--accent); }
+.alert.info { background: #f3f3f3; border-left: 4px solid #000; }
 .board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); gap: 10px; overflow-x: auto; }
 .board .col { background: #f1f1f1; border-radius: 8px; padding: 8px; min-height: 200px; }
 .board .col h3 { font-size: 13px; margin: 4px 0 8px; }

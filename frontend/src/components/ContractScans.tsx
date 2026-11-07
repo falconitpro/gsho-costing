@@ -37,7 +37,7 @@ export default function ContractScans({ dealId, meId, canRemoveAll, only, versio
                   e.preventDefault(); if (confirm("Убрать скан из документов сделки?")) api.del(`/api/deals/${dealId}/documents/${f.id}`).then(load).catch((z) => setMsg((z as Error).message)); }}>убрать</a>}
               </div>))}
             {x.files.length === 0 && <div className="muted" style={{ fontSize: 12, marginLeft: only ? 0 : 10 }}>
-              {x.signed ? <span style={{ color: "var(--warn, #b26a00)" }}>скан не приложен</span> : "скан можно приложить после ввода даты договора или отметки подписания"}</div>}
+              {x.signed ? <span style={{ color: "var(--warn, #b00000)" }}>скан не приложен</span> : "скан можно приложить после ввода даты договора или отметки подписания"}</div>}
             {d.can_upload && x.signed && (
               <label className="btn ghost" style={{ fontSize: 12, padding: "2px 8px", marginLeft: only ? 0 : 10, cursor: busy ? "wait" : "pointer" }}>
                 {x.files.length ? "Приложить ещё файл" : "Приложить скан"}

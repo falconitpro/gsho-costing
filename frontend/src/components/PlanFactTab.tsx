@@ -81,7 +81,7 @@ export default function PlanFactTab({ deal }: { deal: Deal }) {
           <table>
             <thead><tr><th>№</th><th>Статья</th><th className="num">План (базовый), ₽</th><th className="num">План (пессим.), ₽</th><th className="num">Факт, ₽</th><th className="num">Отклонение, ₽</th><th className="num">Отклонение</th></tr></thead>
             <tbody>{rep.rows.filter((r) => r.plan_base || r.fact != null).map((r) => (
-              <tr key={r.code} style={{ background: r.flag ? "#fff4e5" : undefined }}>
+              <tr key={r.code} style={{ background: r.flag ? "#f4f4f4" : undefined }}>
                 <td>{r.no}</td><td>{r.title}</td><td className="num">{fmtRub(r.plan_base)}</td><td className="num">{fmtRub(r.plan_pess)}</td>
                 <td className="num">{r.fact == null ? <span className="muted">нет факта</span> : <b>{fmtRub(r.fact)}</b>}</td>
                 <td className="num">{r.deviation_rub == null ? "—" : `${r.deviation_rub > 0 ? "+" : ""}${fmtRub(r.deviation_rub)}`}</td>

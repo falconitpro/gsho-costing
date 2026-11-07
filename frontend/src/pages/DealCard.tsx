@@ -395,7 +395,7 @@ function RfqPreview({ data }: { data: Record<string, unknown> }) {
       {errors.map((e, i) => <div key={i} className={"alert " + (e.severity === "error" ? "error" : "warn")}>{e.message}</div>)}
       <table><thead><tr><th>Код</th><th>Параметр</th><th>Значение</th><th>Ед.</th><th>Для логиста</th></tr></thead>
         <tbody>{Object.entries(fields).map(([code, f]) => (
-          <tr key={code} style={{ background: missing.includes(code) ? "#fde7e7" : undefined }}><td>{code}</td><td>{f.label_ru}</td><td>{f.value == null ? <span className="badge bad">пусто</span> : String(f.value)}</td><td>{f.unit}</td><td>{f.is_l ? "да" : ""}</td></tr>))}</tbody></table>
+          <tr key={code} style={{ background: missing.includes(code) ? "#ffe3e3" : undefined }}><td>{code}</td><td>{f.label_ru}</td><td>{f.value == null ? <span className="badge bad">пусто</span> : String(f.value)}</td><td>{f.unit}</td><td>{f.is_l ? "да" : ""}</td></tr>))}</tbody></table>
     </div>
   );
 }

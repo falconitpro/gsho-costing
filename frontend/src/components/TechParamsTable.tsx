@@ -125,7 +125,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
         <span className="muted"><b>{designation(position)}</b> · {fname(factories.find((f) => f.id === position.factory_id))} · Технические характеристики: заполнено значений {filled} из {rows.length}
           {missing.length > 0 && <> · <span className="badge bad">не заполнены обязательные: {missing.slice(0, 4).join(", ")}{missing.length > 4 ? " …" : ""}</span></>}
           {rows.some((r) => r.translation_status === "machine") && <> · <span className="badge warn">машинный перевод — проверьте</span></>}
-          {rows.some((r) => r.req_status === "mismatch") && <> · <span className="badge" style={{ background: "#ffd9b3" }}>не соответствует требованию: {rows.filter((r) => r.req_status === "mismatch").length}</span></>}</span>
+          {rows.some((r) => r.req_status === "mismatch") && <> · <span className="badge" style={{ background: "#ffe3e3" }}>не соответствует требованию: {rows.filter((r) => r.req_status === "mismatch").length}</span></>}</span>
         {canEdit && (
           <div className="row">
             <button className="btn ghost" onClick={() => { setWizard("requirements"); setPreview(null); setOfferId(""); }}>Импорт требований клиента</button>
@@ -194,9 +194,9 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
                 <a href="#" onClick={(e) => { e.preventDefault(); setShowFree({ ...showFree, [sec]: !showFree[sec] }); }}>{showFree[sec] ? "скрыть" : "показать"}</a></td></tr>);
             if (freeRow(r) && !showFree[sec]) return <Fragment key={r.id || i}>{header}{freeToggle}</Fragment>;
             const empty = !r.value_ru && !r.value_zh;
-            const bg = r.local_ru ? "#eef4ff" : empty && r.required ? "#fde7e7" : empty ? "#fff6d6" : r.translation_status === "machine" ? "#f3e8ff" : undefined;
+            const bg = r.local_ru ? "#f0f0f0" : empty && r.required ? "#ffe3e3" : empty ? "#f4f4f4" : r.translation_status === "machine" ? "#f8f8f8" : undefined;
             // значение завода не соответствует требованию заказчика — оранжевая ячейка, соответствует — зелёная рамка
-            const vStyle = (cKey: string) => cKey !== "value_ru" ? {} : r.req_status === "mismatch" ? { background: "#ffd9b3", borderColor: "#e08a00", fontWeight: 600 } : r.req_status === "match" ? { borderColor: "#2e9e5b" } : {};
+            const vStyle = (cKey: string) => cKey !== "value_ru" ? {} : r.req_status === "mismatch" ? { background: "#ffe3e3", borderColor: "#ff3131", fontWeight: 600 } : r.req_status === "match" ? { borderColor: "#000" } : {};
             const vTitle = r.req_status === "mismatch" ? `Не соответствует требованию заказчика: «${r.customer_requirement_ru}»` : r.req_status === "match" ? "Соответствует требованию заказчика" : undefined;
             return (
               <Fragment key={r.id || i}>{header}{freeToggle}

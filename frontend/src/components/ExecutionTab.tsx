@@ -138,7 +138,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
               const a = actual[s.id] || { actual_on: s.actual_on || "", actual_amount: s.actual_amount != null ? String(s.actual_amount) : (s.amount != null ? String(s.amount) : ""), note: s.note || "" };
               return (
                 <Fragment key={s.id}>
-                <tr style={{ background: s.done ? "#e6f5ec" : s.overdue ? "#fde7e7" : undefined }}>
+                <tr style={{ background: s.done ? "#ededed" : s.overdue ? "#ffe3e3" : undefined }}>
                   <td>{s.title}{s.note && <div className="muted" style={{ fontSize: 11 }}>{s.note}</div>}
                     {(s.history || []).length > 0 && <div><a href="#" style={{ fontSize: 11 }} onClick={(e) => { e.preventDefault(); setHist({ ...hist, [s.id]: !hist[s.id] }); }}>
                       история дат ({s.history!.length}) {hist[s.id] ? "▴" : "▾"}</a></div>}</td>

@@ -23,7 +23,7 @@ export default function CashflowChart({ points, width = 720, height = 220 }: { p
       ))}
       {points.map((p, i) => (
         <g key={i}>
-          {p.inflow > 0 && <rect x={x(i) - bw / 2} y={y(p.inflow)} width={bw} height={y(0) - y(p.inflow)} fill="#2e9e5b" opacity={0.5} />}
+          {p.inflow > 0 && <rect x={x(i) - bw / 2} y={y(p.inflow)} width={bw} height={y(0) - y(p.inflow)} fill="#000" opacity={0.5} />}
           {p.outflow > 0 && <rect x={x(i) - bw / 2} y={y(0)} width={bw} height={y(-p.outflow) - y(0)} fill="#ff3131" opacity={0.4} />}
         </g>
       ))}

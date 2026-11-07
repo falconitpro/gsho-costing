@@ -62,7 +62,7 @@ export default function KpRevisions({ dealId, status, onDone }: { dealId: string
       <table>
         <thead><tr><th>№</th><th>Дата</th><th>Автор</th><th className="num">Цена без НДС, RUB</th><th className="num">Изменение</th><th className="num">Маржа</th><th>Описание изменений</th><th>Файлы</th></tr></thead>
         <tbody>{rows.map((r) => (
-          <tr key={r.no} style={{ background: r.no === rows[rows.length - 1]?.no ? "#f1f6ff" : undefined }}>
+          <tr key={r.no} style={{ background: r.no === rows[rows.length - 1]?.no ? "#f4f4f4" : undefined }}>
             <td>{r.no === 0 ? "исходное" : `ред. ${r.no}`}{r.no === rows[rows.length - 1]?.no && <div className="badge accent">актуальное</div>}</td>
             <td>{fmtDate(r.at)}{r.sent_at && <div className="badge ok">отправлено {fmtDate(r.sent_at)}</div>}</td><td>{r.author}</td>
             <td className="num"><b>{fmtRub(r.price_rub)}</b></td>

@@ -25,8 +25,9 @@ const POST = [
 export function dealPhase(deal: Deal): "sale" | "contract" { return POST_WIN_STATUSES.includes(deal.status) ? "contract" : "sale"; }
 
 function Chip({ state, title, sub }: { state: "done" | "current" | "todo" | "lost"; title: string; sub?: string }) {
-  const st = state === "done" ? { background: "var(--ok)", color: "#fff" } : state === "current" ? { background: "var(--accent)", color: "#fff", fontWeight: 700, outline: "3px solid var(--accent-soft)" }
-    : state === "lost" ? { background: "var(--bad)", color: "#fff" } : { background: "#eef0f2", color: "var(--muted)" };
+  // фирменные цвета: пройдено — чёрный, текущий — красный, впереди — серый
+  const st = state === "done" ? { background: "var(--ink)", color: "#fff" } : state === "current" ? { background: "var(--accent)", color: "#fff", fontWeight: 700, outline: "3px solid var(--accent-soft)" }
+    : state === "lost" ? { background: "#fff", color: "var(--accent)", border: "1px solid var(--accent)" } : { background: "#ececec", color: "var(--muted)" };
   return <span style={{ ...st, borderRadius: 10, padding: "2px 9px", fontSize: 11, whiteSpace: "nowrap", lineHeight: "16px" }} title={sub}>{title}{state === "done" ? " ✓" : ""}</span>;
 }
 
@@ -40,8 +41,8 @@ export function StageStrip({ deal, now }: { deal: Deal; now?: Now }) {
   return (
     <div className="row" style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
       {PRE.map((p, i) => <span key={p.key} className="row" style={{ gap: 6 }}>
-        <Chip title={p.title} state={post || lost || (preIdx > i) ? (lost && i === preIdx ? "lost" : "done") : preIdx === i ? "current" : "todo"} />{i < PRE.length - 1 && sep}</span>)}
-      <span style={{ color: lost ? "var(--bad)" : "#d97757", fontWeight: 700, fontSize: 11, letterSpacing: ".4px", padding: "0 10px", borderLeft: "2px dashed currentColor", borderRight: "2px dashed currentColor", margin: "0 4px" }}>
+        <Chip title={p.title} state={post || lost || (preIdx > i) ? "done" : preIdx === i ? "current" : "todo"} />{i < PRE.length - 1 && sep}</span>)}
+      <span style={{ color: "var(--accent)", fontWeight: 700, fontSize: 11, letterSpacing: ".4px", padding: "0 10px", borderLeft: "2px dashed currentColor", borderRight: "2px dashed currentColor", margin: "0 4px" }}>
         {lost ? (deal.status === "lost" ? "ПРОИГРАНА" : "ОТМЕНЕНА") : post ? `ВЫИГРАНА${now?.sale?.won_on ? " " + fmtDate(now.sale.won_on) : ""}` : "ВЫИГРЫШ"}</span>
       {POST.map((p, i) => <span key={p.key} className="row" style={{ gap: 6 }}>
         <Chip title={p.title} state={!post ? "todo" : deal.status === "closed" ? "done" : postIdx > i ? "done" : postIdx === i ? "current" : "todo"} />{i < POST.length - 1 && sep}</span>)}
@@ -54,11 +55,11 @@ export function NowLine({ now, onGo }: { now?: Now; onGo: (block: string) => voi
   const t = now.task;
   const late = now.exec?.overdue || [];
   return (
-    <div className="row" style={{ background: "#fff7e8", border: "1px solid #f0d9a8", borderRadius: 8, padding: "7px 12px", gap: 10, flexWrap: "wrap", fontSize: 13 }}>
-      <b style={{ color: "#8a5a00" }}>Сейчас:</b>
-      {t && <span>{t.title} · <b>{t.who}</b> · срок <b style={{ color: t.overdue_days > 0 ? "var(--bad)" : undefined }}>{fmtDate(t.due)}</b>{t.overdue_days > 0 && <span style={{ color: "var(--bad)" }}> (просрочено {t.overdue_days} дн.)</span>}</span>}
+    <div className="row" style={{ background: "#fff", borderLeft: "4px solid var(--accent)", border: "1px solid var(--line)", borderLeftWidth: 4, borderLeftColor: "var(--accent)", borderRadius: 8, padding: "7px 12px", gap: 10, flexWrap: "wrap", fontSize: 13 }}>
+      <b>Сейчас:</b>
+      {t && <span>{t.title} · <b>{t.who}</b> · срок <b style={{ color: t.overdue_days > 0 ? "var(--accent)" : undefined }}>{fmtDate(t.due)}</b>{t.overdue_days > 0 && <span style={{ color: "var(--accent)", fontWeight: 600 }}> (просрочено {t.overdue_days} дн.)</span>}</span>}
       {now.open_tasks > 1 && <span className="muted">ещё задач: {now.open_tasks - 1}</span>}
-      {late.map((x, i) => <span key={i} style={{ color: "var(--bad)" }}>{x.title.toLowerCase()} — просрочен {x.days} дн.</span>)}
+      {late.map((x, i) => <span key={i} style={{ color: "var(--accent)", fontWeight: 600 }}>{x.title.toLowerCase()} — просрочен {x.days} дн.</span>)}
       {t && <a href="#" style={{ marginLeft: "auto", fontWeight: 600 }} onClick={(e) => { e.preventDefault(); onGo(t.block); }}>Перейти →</a>}
     </div>
   );
