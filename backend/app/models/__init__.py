@@ -861,6 +861,70 @@ class LegalEntity(TimestampMixin, Base):
     notes: Mapped[str] = mapped_column(Text, default="")
 
 
+class LegalProfile(TimestampMixin, Base):
+    """Юридический профиль контрагента (юридический блок): привязан к клиенту, поставщику или компании группы (БЕРГ-ХАУС).
+    У одного владельца может быть несколько профилей (головная организация, филиал, другое юрлицо группы); один — по умолчанию."""
+    __tablename__ = "legal_profiles"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    owner_kind: Mapped[str] = mapped_column(String(16), index=True)            # client | factory | own (компания группы)
+    owner_id: Mapped[str] = mapped_column(String(36), index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="other")             # ru_customer | cn_factory | foreign_supplier | kg_company | intermediary | own | other
+    title: Mapped[str] = mapped_column(String(255), default="")                # понятное название профиля («Головной офис», «Филиал Норильск»)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    country: Mapped[str] = mapped_column(String(64), default="RU")
+    # наименования по языкам: {"ru": {"full","short"}, "en": {...}, "zh": {...}}
+    names: Mapped[dict] = mapped_column(JSONType, default=dict)
+    opf: Mapped[str] = mapped_column(String(128), default="")                  # организационно-правовая форма
+    reg_number: Mapped[str] = mapped_column(String(64), default="")            # ОГРН / рег. номер / 统一社会信用代码
+    tax_number: Mapped[str] = mapped_column(String(64), default="")            # ИНН / налоговый номер
+    kpp: Mapped[str] = mapped_column(String(16), default="")
+    legal_address: Mapped[str] = mapped_column(Text, default="")
+    actual_address: Mapped[str] = mapped_column(Text, default="")
+    postal_address: Mapped[str] = mapped_column(Text, default="")
+    director: Mapped[str] = mapped_column(String(255), default="")             # руководитель / законный представитель
+    signatory_name: Mapped[str] = mapped_column(String(255), default="")
+    signatory_position: Mapped[str] = mapped_column(String(255), default="")
+    signatory_basis: Mapped[str] = mapped_column(String(255), default="")      # Устава / доверенности № … от …
+    contacts: Mapped[list[dict]] = mapped_column(JSONType, default=list)       # [{name, position, phone, email}]
+    documents: Mapped[list[dict]] = mapped_column(JSONType, default=list)      # регистрационные документы: [{title, number, issued_on, valid_until, attachment_id}]
+    powers_of_attorney: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # [{person, number, issued_on, valid_until, scope, attachment_id}]
+    extra: Mapped[dict] = mapped_column(JSONType, default=dict)                # страновые поля: business_license {...}, legal_representative, и т. п.
+    check_status: Mapped[str] = mapped_column(String(16), default="not_checked")   # not_checked | checked | issues
+    checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    checked_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    lawyer_comment: Mapped[str] = mapped_column(Text, default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    history: Mapped[list[dict]] = mapped_column(JSONType, default=list)        # [{at, by, fields: {name: [old, new]}}]
+
+    banks = relationship("BankProfile", cascade="all, delete-orphan", order_by="BankProfile.created_at")
+
+
+class BankProfile(TimestampMixin, Base):
+    """Банковский профиль юридического профиля: несколько счетов (валюты, банки), статусы действующий/архивный, история изменений."""
+    __tablename__ = "bank_profiles"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("legal_profiles.id"), index=True)
+    title: Mapped[str] = mapped_column(String(255), default="")                # «Основной RUB», «Валютный USD»
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    country: Mapped[str] = mapped_column(String(64), default="")
+    beneficiary: Mapped[str] = mapped_column(String(255), default="")          # получатель платежа (если отличается от наименования)
+    bank_name: Mapped[str] = mapped_column(String(255), default="")
+    bank_address: Mapped[str] = mapped_column(Text, default="")
+    account: Mapped[str] = mapped_column(String(64), default="")
+    bik: Mapped[str] = mapped_column(String(16), default="")
+    swift: Mapped[str] = mapped_column(String(16), default="")
+    corr_account: Mapped[str] = mapped_column(String(64), default="")
+    corr_bank: Mapped[str] = mapped_column(String(255), default="")           # банк-корреспондент (для валютных платежей)
+    purpose: Mapped[str] = mapped_column(String(255), default="")              # назначение: расчёты с поставщиками КНР, с клиентами РФ …
+    status: Mapped[str] = mapped_column(String(16), default="active")          # active | archived
+    valid_from: Mapped[Optional[date]] = mapped_column(Date)
+    valid_to: Mapped[Optional[date]] = mapped_column(Date)
+    verified: Mapped[bool] = mapped_column(Boolean, default=False)             # реквизиты проверены (ФД / юрист)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    verified_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    history: Mapped[list[dict]] = mapped_column(JSONType, default=list)        # [{at, by, action, fields: {name: [old, new]}}]
+
+
 class SupplyRoute(TimestampMixin, Base):
     """Маршрут поставки: цепочка продаж от поставщика до компании, продающей клиенту."""
     __tablename__ = "supply_routes"

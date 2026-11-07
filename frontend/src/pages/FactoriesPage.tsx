@@ -3,6 +3,7 @@ import { lbl, CATALOG_STATUS, PRICE_SOURCE } from "../labels";
 import { UndoButton, useUndoHistory } from "../undo";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
+import LegalProfileBlock from "../components/LegalProfileBlock";
 
 type Contact = {
   name: string; name_zh: string; position: string; roles: string[]; phone: string; mobile: string; email: string; wechat: string;
@@ -206,6 +207,7 @@ export default function FactoriesPage({ me, embedded = false }: { me: Me; embedd
               {(editor || contactEditor) && <div className="row" style={{ marginBottom: 12 }}><button className="btn" onClick={save} disabled={!cur.name}>{cur.id && cur.approval_status === "approved" && !approver ? "Предложить изменения" : "Сохранить"}</button><UndoButton h={history} /><button className="btn ghost" onClick={() => setCur(null)}>закрыть</button>
                 {isGD && cur.id && <button className="btn ghost" style={{ marginLeft: "auto", color: "var(--bad)" }} title="только ЗГД; если завод уже есть в сделках или каталоге — переносится в архив" onClick={remove}>{confirmDel ? "Подтвердить удаление" : "Удалить поставщика"}</button>}</div>}
 
+              {cur.id && <LegalProfileBlock ownerKind="factory" ownerId={cur.id} title="Юридический профиль поставщика" />}
               {cur.id && (
                 <div className="card">
                   <h2 style={{ marginTop: 0 }}>Модели в каталоге и цены</h2>
