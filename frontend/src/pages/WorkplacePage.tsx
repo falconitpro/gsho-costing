@@ -16,7 +16,7 @@ type Data = {
   user: { name: string; first_name: string; role: string; role_title: string; greeting: string };
   date: { iso: string; text: string };
   layout: { order: string[]; hidden: string[]; required: string[]; available: { code: string; title: string }[]; can_lock: boolean; role_required: Record<string, string[]>; roles: Record<string, string>; role_blocks: Record<string, string[]>; all_blocks: Record<string, string> };
-  kpis: { title: string; value: string; sub: string; tone: string }[];
+  kpis: { title: string; value: string; sub: string; tone: string; url?: string }[];
   focus: { title: string; text: string; action: string; url: string; tone: string } | null;
   today: { events: Ev[]; week: { date: string; wd: string; day: number; today: boolean; count: number; tones: string[] }[] };
   upcoming: Ev[]; tasks: TaskRow[]; tasks_total: number; tasks_overdue: number; deals: DealRow[]; approvals: Approval[]; attention: Att[];
@@ -78,7 +78,6 @@ export default function WorkplacePage({ me }: { me: Me }) {
   const nav = useNavigate();
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState("");
-  const [setup, setSetup] = useState(false);
   const load = () => api.get<Data>("/api/workplace").then(setD).catch((e) => setErr((e as Error).message));
   useEffect(() => { load(); }, []);
   const visible = useMemo(() => d ? d.layout.order.filter((b) => !d.layout.hidden.includes(b)) : [], [d]);
@@ -211,13 +210,15 @@ export default function WorkplacePage({ me }: { me: Me }) {
       <header className="wp-top">
         <div><h1>{d.user.greeting}, {d.user.first_name || d.user.name}</h1><div className="muted" style={{ fontSize: 13 }}>{d.date.text} · {d.user.role_title} · {d.today.events.length} событий сегодня{d.tasks_overdue ? ` · ${d.tasks_overdue} задач просрочено` : ""}</div></div>
         <div className="row" style={{ gap: 8 }}>
-          <button className="btn ghost" onClick={() => setSetup(!setup)}>Настроить блоки</button>
+          <Link to="/settings?s=workplace" className="muted" style={{ fontSize: 12 }} title="видимость и порядок блоков — в Настройках">настроить блоки</Link>
           {d.quick[0] && <button className="btn add" onClick={() => nav(d.quick[0].url)}>{d.quick[0].title}</button>}
         </div>
       </header>
-      {setup && <Setup d={d} onClose={() => setSetup(false)} onSaved={() => { setSetup(false); load(); }} />}
       {visible.includes("kpis") && (
-        <section className="wp-kpis">{d.kpis.map((k) => <div key={k.title} className="wp-kpi"><small>{k.title}</small><b style={{ color: TONE_FG[k.tone] && k.tone ? TONE_FG[k.tone] : "inherit" }}>{k.value}</b><span className="muted">{k.sub}</span></div>)}</section>)}
+        <section className="wp-kpis">{d.kpis.map((k) => (
+          <button key={k.title} type="button" className={`wp-kpi ${k.url ? "link" : ""}`} title={k.url ? "открыть" : undefined}
+            onClick={() => { if (!k.url) return; if (k.url.startsWith("#")) { const el = rootRef.current?.querySelector<HTMLElement>(`[data-block="${k.url.slice(1)}"]`); el?.scrollIntoView({ behavior: "smooth", block: "start" }); el?.classList.add("wp-flash"); setTimeout(() => el?.classList.remove("wp-flash"), 1600); } else nav(k.url); }}>
+            <small>{k.title}</small><b style={{ color: TONE_FG[k.tone] && k.tone ? TONE_FG[k.tone] : "inherit" }}>{k.value}</b><span className="muted">{k.sub}</span></button>))}</section>)}
       <section className="wp-cols">
         <div className="wp-col">{cols[0].map(block)}</div>
         <div className="wp-col">{cols[1].map(block)}</div>
@@ -240,7 +241,23 @@ function Bars({ curve }: { curve: { label: string; in: number; out: number; net:
     </div>);
 }
 
-function Setup({ d, onClose, onSaved }: { d: Data; onClose: () => void; onSaved: () => void }) {
+/** Блок «Рабочее место» в Настройках: видимость и порядок блоков главной страницы; для ЗГД — закрепление блоков по ролям. */
+export function WorkplaceSettings() {
+  const [d, setD] = useState<Data | null>(null);
+  const [saved, setSaved] = useState("");
+  const [err, setErr] = useState("");
+  const load = () => api.get<Data>("/api/workplace").then(setD).catch((e) => setErr((e as Error).message));
+  useEffect(() => { load(); }, []);
+  if (err) return <div className="alert error">{err}</div>;
+  if (!d) return <div className="muted">Загрузка…</div>;
+  return (
+    <>
+      {saved && <div className="alert ok">{saved}</div>}
+      <Setup key={d.layout.order.join(",") + d.layout.hidden.join(",")} d={d} onSaved={() => { setSaved("Раскладка главной страницы сохранена"); load(); }} />
+    </>);
+}
+
+function Setup({ d, onClose, onSaved }: { d: Data; onClose?: () => void; onSaved: () => void }) {
   const [order, setOrder] = useState(d.layout.order);
   const [hidden, setHidden] = useState(d.layout.hidden);
   const [role, setRole] = useState(d.user.role);
@@ -252,7 +269,8 @@ function Setup({ d, onClose, onSaved }: { d: Data; onClose: () => void; onSaved:
   const saveRole = () => api.put("/api/workplace/role-blocks", { role, required: req[role] || [] }).then(() => setMsg(`Обязательные блоки для роли «${d.layout.roles[role]}» сохранены`)).catch((e) => setMsg((e as Error).message));
   return (
     <div className="wp-card" style={{ marginBottom: 14 }}>
-      <div className="wp-head"><h2>Настройка главной страницы</h2><button className="btn ghost" onClick={onClose}>✕</button></div>
+      <div className="wp-head"><h2>Главная страница — блоки</h2>{onClose && <button className="btn ghost" onClick={onClose}>✕</button>}</div>
+      <p className="muted" style={{ fontSize: 12, margin: "0 0 10px" }}>Набор блоков зависит от роли. Здесь можно скрыть ненужные и задать порядок — он учитывается при раскладке по колонкам («Сегодня» всегда слева сверху, «Главное сейчас» — в центре).</p>
       {msg && <div className="alert info">{msg}</div>}
       <div className="wp-setup">
         <div>

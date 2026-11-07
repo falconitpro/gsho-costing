@@ -4,11 +4,12 @@ import SettingsPage from "./SettingsPage";
 import TeamPage from "./TeamPage";
 import AccessPage from "./AccessPage";
 import AdminPage from "./AdminPage";
+import { WorkplaceSettings } from "./WorkplacePage";
 
 // «Настройки» одним разделом: ставки и нормативы, сотрудники, уровни доступа, администрирование.
 // Доступ к каждому блоку — как и раньше (уровни доступа и администрирование — ЗГД / админ / ФД); блок виден только тем, кому он доступен.
 
-type Sec = "rates" | "team" | "access" | "admin";
+type Sec = "workplace" | "rates" | "team" | "access" | "admin";
 
 export default function SettingsHub({ me }: { me: Me }) {
   const loc = useLocation();
@@ -16,6 +17,7 @@ export default function SettingsHub({ me }: { me: Me }) {
   const has = (...codes: string[]) => me.roles.some((r) => codes.includes(r.code));
   const perm = (g: string, lvl: number) => (me.perms?.[g] ?? 0) >= lvl;
   const sections: [Sec, string, boolean][] = [
+    ["workplace", "Рабочее место", true],
     ["rates", "Ставки и нормативы", has("admin", "fd", "gd", "cd")],
     ["team", "Сотрудники", true],
     ["access", "Уровни доступа", perm("access_admin", 2)],
@@ -23,7 +25,7 @@ export default function SettingsHub({ me }: { me: Me }) {
   ];
   const visible = sections.filter(([, , ok]) => ok);
   const want = new URLSearchParams(loc.search).get("s") as Sec | null;
-  const cur: Sec = visible.some(([k]) => k === want) ? (want as Sec) : visible[0]?.[0] || "team";
+  const cur: Sec = visible.some(([k]) => k === want) ? (want as Sec) : visible.find(([k]) => k !== "workplace")?.[0] || "workplace";
   return (
     <>
       <div className="row" style={{ alignItems: "baseline", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
@@ -34,6 +36,7 @@ export default function SettingsHub({ me }: { me: Me }) {
               fontWeight: cur === k ? 700 : 500, color: cur === k ? "var(--ink)" : "var(--muted)", borderBottom: cur === k ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>{t}</button>))}
         </div>
       </div>
+      {cur === "workplace" && <WorkplaceSettings />}
       {cur === "rates" && <SettingsPage me={me} embedded />}
       {cur === "team" && <TeamPage me={me} embedded />}
       {cur === "access" && <AccessPage me={me} embedded />}
