@@ -132,9 +132,7 @@ def list_deals(status: Optional[str] = None, archived: bool = False, db: Session
         for st in db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id.in_(post_win))).all():
             stages.setdefault(st.deal_id, []).append(st)
     today = _date.today()
-    hide_price_statuses = {DealStatus.DRAFT, DealStatus.LOGISTICS_CALC, DealStatus.SERVICE_CALC, DealStatus.CALC_READY, DealStatus.CD_APPROVAL,
-                           DealStatus.FD_VISA, DealStatus.GD_VISA, DealStatus.REWORK}
-    mgr_only = user.has(Role.MANAGER) and not user.has(Role.CD, Role.FD, Role.GD)
+    fin = user.can("finance_analytics")   # суммы в списке сделок — только ФД, КД, ЗГД
     for d in deals:
         row = serialize(d, exclude={"client_payments", "bank_guarantee", "operating_conditions", "scenario_override"})
         row["client_name"] = d.client.name if d.client else None
@@ -146,7 +144,7 @@ def list_deals(status: Optional[str] = None, archived: bool = False, db: Session
         row["equipment"] = "; ".join(f"{int(p.qty or 1)} × {' '.join(x for x in (p.machine_type or '', p.trademark or '', p.model or '') if x).strip()}" for p in poss[:4]) \
             + (f" … ещё {len(poss) - 4}" if len(poss) > 4 else "")
         v = won_variant(d) if d.variants else None
-        if v is not None and v.price_rub is not None and not (mgr_only and d.status in hide_price_statuses):
+        if fin and v is not None and v.price_rub is not None:
             row["price_rub"] = v.price_rub
             row["price_amount"] = v.price_amount
             row["price_currency"] = v.price_currency

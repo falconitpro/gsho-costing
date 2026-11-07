@@ -62,6 +62,8 @@ SERVICE_INPUT_FIELDS = {"service_calc", "service"}
 FINANCE_FIELDS = {"cash_gap", "cashflow", "finance_breakdown", "fx_components", "sensitivity"}
 FACTORY_PRICE_HISTORY_FIELDS = {"factory_price_history"}
 CLIENT_PRICE_HISTORY_FIELDS = {"client_kp_history", "client_price_history", "kp_history", "last_kp"}
+# Финансовая аналитика: суммы, маржа, портфель, история цен — в карточках клиентов и поставщиков, списке сделок, отчётах
+FINANCE_ANALYTICS_FIELDS = {"kp_totals", "avg_margin_pct", "sum_won_rub", "finance_analytics"}
 PAYMENT_TERMS_FIELDS = {"client_payments", "client_payments_alt", "factory_payments", "bank_guarantee", "advance_guarantee"}
 LOCAL_OPTIONS_FIELDS = {"local_options", "local_option_cost_rub"}
 
@@ -73,6 +75,7 @@ FIELD_GROUPS: dict[str, tuple[str, set[str]]] = {
     "service_input": ("Блок сервиса", SERVICE_INPUT_FIELDS),
     "factory_price_history": ("История цен и сроков завода", FACTORY_PRICE_HISTORY_FIELDS),
     "client_price_history": ("История КП и цен клиентам", CLIENT_PRICE_HISTORY_FIELDS),
+    "finance_analytics": ("Финансовая аналитика: суммы, маржа, портфель, отчёты (карточки клиентов и поставщиков, список сделок)", FINANCE_ANALYTICS_FIELDS),
     "payment_terms": ("Условия оплаты клиента и завода, БГ", PAYMENT_TERMS_FIELDS),
     "local_options": ("Опции, реализуемые в России", LOCAL_OPTIONS_FIELDS),
     "tech_params": ("Таблица технических характеристик и запрос заводу", set()),
@@ -92,19 +95,19 @@ FIELD_GROUPS: dict[str, tuple[str, set[str]]] = {
 
 # Стартовая матрица: роль → {группа: уровень}. Не перечисленные группы = 0.
 DEFAULT_MATRIX: dict[Role, dict[str, int]] = {
-    Role.MANAGER: {"price": READ, "factory_price_history": READ, "payment_terms": READ, "local_options": EDIT, "tech_params": EDIT,
+    Role.MANAGER: {"price": READ, "payment_terms": READ, "local_options": EDIT, "tech_params": EDIT,
                    "images": EDIT, "glossary": EDIT, "execution": EDIT, "legal_docs": EDIT},
     Role.LOGISTICIAN: {"logistics_input": EDIT, "local_options": READ, "tech_params": READ, "images": READ, "execution": EDIT},
     Role.SERVICE_HEAD: {"service_input": EDIT, "local_options": EDIT, "tech_params": READ, "images": READ, "execution": EDIT},
     Role.CD: {"cost": READ, "price": EDIT, "logistics_input": READ, "service_input": READ, "factory_price_history": EDIT,
-              "client_price_history": READ, "payment_terms": EDIT, "local_options": EDIT, "tech_params": EDIT, "images": EDIT,
+              "client_price_history": READ, "finance_analytics": READ, "payment_terms": EDIT, "local_options": EDIT, "tech_params": EDIT, "images": EDIT,
               "kp_images_select": EDIT, "catalog": EDIT, "glossary": EDIT, "factory_offers": EDIT, "cost_files": READ,
               "execution": EDIT, "execution_close": EDIT, "settings": READ, "legal_docs": EDIT},
     Role.FD: {"cost": READ, "price": READ, "logistics_input": READ, "service_input": READ, "factory_price_history": READ,
-              "payment_terms": READ, "local_options": READ, "tech_params": READ, "images": READ, "cost_files": READ,
+              "client_price_history": READ, "finance_analytics": READ, "payment_terms": READ, "local_options": READ, "tech_params": READ, "images": READ, "cost_files": READ,
               "execution": READ, "execution_payments": EDIT, "settings": EDIT, "legal_docs": READ},
     Role.GD: {"cost": READ, "price": EDIT, "logistics_input": EDIT, "service_input": EDIT, "factory_price_history": EDIT,
-              "client_price_history": READ, "payment_terms": EDIT, "local_options": EDIT, "tech_params": EDIT, "images": EDIT,
+              "client_price_history": READ, "finance_analytics": READ, "payment_terms": EDIT, "local_options": EDIT, "tech_params": EDIT, "images": EDIT,
               "kp_images_select": EDIT, "catalog": EDIT, "glossary": EDIT, "factory_offers": EDIT, "cost_files": READ,
               "execution": EDIT, "execution_payments": EDIT, "execution_close": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_docs": EDIT},
     Role.ADMIN: {"tech_params": READ, "images": READ, "catalog": READ, "glossary": EDIT, "settings": EDIT, "access_admin": EDIT},

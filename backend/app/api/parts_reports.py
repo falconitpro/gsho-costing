@@ -31,6 +31,13 @@ def _reader(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     return user
 
 
+def _finance(user: CurrentUser = Depends(_reader)) -> CurrentUser:
+    """Отчёты с деньгами (продажи, маржа, гарантийные расходы, суммы отгрузок) — только финансовая аналитика: ФД, КД, ЗГД."""
+    if not user.can("finance_analytics"):
+        raise HTTPException(403, "Финансовая аналитика доступна ФД, КД и ЗГД")
+    return user
+
+
 def _period(date_from: Optional[date], date_to: Optional[date]) -> tuple[date, date]:
     to = date_to or date.today()
     return (date_from or to - timedelta(days=365)), to
@@ -42,7 +49,7 @@ def _dt(d: date, end: bool = False) -> datetime:
 
 @router.get("/sales")
 def sales(by: str = "client", date_from: Optional[date] = None, date_to: Optional[date] = None, db: Session = Depends(get_db),
-          user: CurrentUser = Depends(_reader)):
+          user: CurrentUser = Depends(_finance)):
     """Отгружено клиентам за период: выручка по цене строки заявки, себестоимость и маржа (по клиентам, группам товара, поставщикам)."""
     if by not in ("client", "group", "supplier"):
         raise HTTPException(422, "Разрез: client, group или supplier")
@@ -200,7 +207,7 @@ def missing(date_from: Optional[date] = None, date_to: Optional[date] = None, db
 
 
 @router.get("/warranty")
-def warranty(db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
+def warranty(db: Session = Depends(get_db), user: CurrentUser = Depends(_finance)):
     """Гарантийные претензии по заводам: доля признанных и средний срок компенсации."""
     agg: dict[str, dict] = defaultdict(lambda: {"claims": 0, "accepted": 0, "rejected": 0, "answered": 0, "days": [], "cost_rub": 0.0, "compensated_rub": 0.0})
     for c in db.scalars(select(WarrantyClaim).where(WarrantyClaim.status != "draft")).all():
@@ -228,7 +235,7 @@ def warranty(db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)
 
 @router.get("/shipments")
 def shipments(date_from: Optional[date] = None, date_to: Optional[date] = None, client_id: str = "", db: Session = Depends(get_db),
-              user: CurrentUser = Depends(_reader)):
+              user: CurrentUser = Depends(_finance)):
     """История отгрузок клиентам по строкам."""
     f, t = _period(date_from, date_to)
     stmt = select(PartShipment).where(PartShipment.shipped_on >= f, PartShipment.shipped_on <= t).order_by(PartShipment.shipped_on.desc())

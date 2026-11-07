@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { lbl, PRIORITY } from "../labels";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtRub } from "../api";
-import { STATUS_TITLES, type Deal, type Me } from "../types";
+import { can, STATUS_TITLES, type Deal, type Me } from "../types";
 
 type Exec = { done: number; total: number; overdue: number; next: { title: string; on: string } | null; delay_days: number | null };
 type Row = Deal & { group?: string; parent_number?: string; related_count?: number; manager_name?: string; machines?: number; equipment?: string;
@@ -133,6 +133,7 @@ export default function DealsList({ me }: { me: Me }) {
   const mgrs = [...new Map(inBlock.filter((d) => d.manager_id).map((d) => [d.manager_id, d.manager_name || "—"])).entries()].sort((a, b) => a[1].localeCompare(b[1], "ru"));
   const cls = [...new Map(inBlock.filter((d) => d.client_id).map((d) => [d.client_id, d.client_name || "—"])).entries()].sort((a, b) => a[1].localeCompare(b[1], "ru"));
   const anyFilter = JSON.stringify({ ...f, q: f.q.trim() }) !== JSON.stringify(EMPTY_F);
+  const fin = can(me, "finance_analytics");   // суммы и портфель — только ФД, КД, ЗГД
   const kpis = block === "work" ? [
     ["В обработке", shown.length, ""], ["Срок КП просрочен", shown.filter(kpOverdue).length, "bad"],
     ["На утверждении и визах", shown.filter((d) => ["calc_ready", "cd_approval", "fd_visa", "gd_visa"].includes(d.status)).length, ""],
@@ -141,7 +142,7 @@ export default function DealsList({ me }: { me: Me }) {
     ["Сделок", shown.length, ""], ["Заключение контракта", shown.filter((d) => ["won", "contract"].includes(d.status)).length, ""],
     ["Исполнение", shown.filter((d) => d.status === "execution").length, ""], ["С просроченными этапами", shown.filter((d) => (d.exec?.overdue || 0) > 0).length, "bad"],
     ["Машин", shown.reduce((s_, d) => s_ + (d.machines || 0), 0), ""],
-    ...(shown.some((d) => d.price_rub != null) ? [["Портфель, RUB без НДС", fmtRub(shown.reduce((s_, d) => s_ + (d.price_rub || 0), 0)), ""]] : [])]
+    ...(fin && shown.some((d) => d.price_rub != null) ? [["Портфель, RUB без НДС", fmtRub(shown.reduce((s_, d) => s_ + (d.price_rub || 0), 0)), ""]] : [])]
     : [["Сделок", shown.length, ""]];
   const th = (k: SortKey, t: string, w?: number) => (
     <th key={k} onClick={() => toggleSort(k)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", width: w, minWidth: w }} title="сортировать по столбцу">
@@ -248,11 +249,11 @@ export default function DealsList({ me }: { me: Me }) {
       <div className="card" style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ minWidth: 900 }}>
           {block === "won" ? (
-            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th><th>Контракт</th>{th("price", "Сумма")}
+            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th><th>Контракт</th>{fin && th("price", "Сумма")}
               {th("progress", "Исполнение", 130)}{th("next", "Ближайший этап")}{th("status", "Статус")}{th("manager", "Менеджер")}</tr></thead>
           ) : (
             <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th>{th("kp_due", "Срок КП", 120)}{th("priority", "Приоритет", 100)}
-              {th("status", "Статус")}{th("manager", "Менеджер")}{block !== "work" && th("price", "Сумма")}<th>Версия</th></tr></thead>)}
+              {th("status", "Статус")}{th("manager", "Менеджер")}{fin && block !== "work" && th("price", "Сумма")}<th>Версия</th></tr></thead>)}
           <tbody>
             {grouped(sorted).map((d) => {
               const late = kpOverdue(d) || (d.exec?.overdue || 0) > 0;
@@ -262,7 +263,7 @@ export default function DealsList({ me }: { me: Me }) {
                   {numCell(d)}{clientCell(d)}{eqCell(d)}
                   <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{d.contract_number ? <>клиент № {d.contract_number}{d.contract_signed_at && <span className="muted"> от {fmtDate(d.contract_signed_at)}</span>}</> : <span className="muted">не подписан</span>}
                     <div>{d.factory_contract_number ? <>завод № {d.factory_contract_number}{d.factory_contract_signed_at && <span className="muted"> от {fmtDate(d.factory_contract_signed_at)}</span>}</> : <span className="muted">завод — нет</span>}</div></td>
-                  <td>{money(d)}</td>
+                  {fin && <td>{money(d)}</td>}
                   <td><Progress e={d.exec} />{d.exec?.delay_days ? <div style={{ fontSize: 11, color: d.exec.delay_days > 0 ? "var(--bad)" : "var(--ok)" }}>{d.exec.delay_days > 0 ? `+${d.exec.delay_days}` : d.exec.delay_days} дн. к плану</div> : null}</td>
                   <td style={{ fontSize: 13, minWidth: 160 }}>{d.exec?.next ? <>{d.exec.next.title}<div style={{ fontSize: 12, color: (daysTo(d.exec.next.on) ?? 1) < 0 ? "var(--bad)" : "var(--muted)" }}>
                     {fmtDate(d.exec.next.on)}{(daysTo(d.exec.next.on) ?? 1) < 0 ? ` · просрочен ${-(daysTo(d.exec.next.on) || 0)} дн.` : ""}</div></> : <span className="muted">—</span>}</td>
@@ -270,7 +271,7 @@ export default function DealsList({ me }: { me: Me }) {
                 </tr>) : (
                 <tr key={d.id} style={rowStyle}>
                   {numCell(d)}{clientCell(d)}{eqCell(d)}<td><KpDue d={d} /></td><td><Prio p={d.priority} /></td>
-                  <td><StatusBadge d={d} /></td><td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>{block !== "work" && <td>{money(d)}</td>}
+                  <td><StatusBadge d={d} /></td><td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>{fin && block !== "work" && <td>{money(d)}</td>}
                   <td className="muted">{d.current_version_no || ""}</td>
                 </tr>);
             })}

@@ -107,7 +107,7 @@ def test_access_matrix_overrides_and_gd_inherits_cd():
     gd = effective_perms([Role.GD])
     assert all(gd[g] >= lvl for g, lvl in cd.items())            # ЗГД ⊇ КД
     mgr = effective_perms([Role.MANAGER])
-    assert mgr["client_price_history"] == NONE and mgr["factory_price_history"] == READ and mgr["payment_terms"] == READ
+    assert mgr["client_price_history"] == NONE and mgr["factory_price_history"] == NONE and mgr["payment_terms"] == READ
     # правило из БД и исключение сотрудника
     rules = {"manager": {"client_price_history": READ}}
     assert effective_perms([Role.MANAGER], rules)["client_price_history"] == READ
@@ -150,3 +150,19 @@ def test_cd_insists_after_fd_decline_goes_to_gd():
 def test_gd_visa_status_title():
     from app.core.workflow import STATUS_TITLES
     assert STATUS_TITLES[DealStatus.GD_VISA] == "На визе ЗГД"
+
+
+def test_finance_analytics_group():
+    """Финансовая аналитика (суммы, маржа, история цен клиентов и заводов) — только ФД, КД, ЗГД."""
+    from app.core.roles import Role, can, effective_perms, filter_payload
+    for r in (Role.FD, Role.CD, Role.GD):
+        assert can(effective_perms([r]), "finance_analytics"), r
+    for r in (Role.MANAGER, Role.LOGISTICIAN, Role.SERVICE_HEAD, Role.PURCHASING, Role.OBSERVER, Role.LAWYER, Role.ADMIN):
+        p = effective_perms([r])
+        assert not can(p, "finance_analytics"), r
+        assert not can(p, "factory_price_history"), r
+        assert not can(p, "client_price_history"), r
+    payload = {"name": "Клиент", "kp_totals": {"sum_rub": 1}, "avg_margin_pct": 12.0, "sum_won_rub": 5, "funnel": {"requests": 2}}
+    m = filter_payload(payload, effective_perms([Role.MANAGER]))
+    assert m == {"name": "Клиент", "funnel": {"requests": 2}}
+    assert filter_payload(payload, effective_perms([Role.FD])) == payload

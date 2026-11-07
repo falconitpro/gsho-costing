@@ -111,12 +111,13 @@ def client_card(client_id: str, db: Session = Depends(get_db), user: CurrentUser
               "won": sum(is_won(d) for d in deals)}
     margins, sums = [], 0.0
     last_kp = []
+    fin = user.can("finance_analytics")
     for d in deals:
         for v in d.variants:
-            if v.price_rub:
+            if v.price_rub and fin:
                 last_kp.append({"deal": d.number, "variant": v.name, "price_rub": v.price_rub, "on": d.updated_at.isoformat() if d.updated_at else None,
                                 "status": d.status.value, "models": [p.designation for p in d.positions if p.id in v.position_ids]})
-        if is_won(d) and d.approved_version_id:
+        if fin and is_won(d) and d.approved_version_id:
             ver = db.get(DealVersion, d.approved_version_id)
             if ver:
                 for vid, scen in ver.calc_result["variants"].items():
@@ -126,7 +127,7 @@ def client_card(client_id: str, db: Session = Depends(get_db), user: CurrentUser
                         sums += scen["base"].get("price_rub") or 0
     data = serialize(c)
     from ..services.catalog_service import client_kp_history
-    kp_history = client_kp_history(db, c.id) if user.can("client_price_history") else []
+    kp_history = client_kp_history(db, c.id) if fin and user.can("client_price_history") else []
     totals = {"kp_count": len(kp_history), "won": sum(1 for h in kp_history if h["outcome"] == "won"),
               "sum_rub": round(sum((h["latest"]["total_rub"] or 0) for h in kp_history), 2)}
     data.update({"funnel": funnel, "deals": [{"id": d.id, "number": d.number, "status": d.status.value, "outcome": d.outcome,
