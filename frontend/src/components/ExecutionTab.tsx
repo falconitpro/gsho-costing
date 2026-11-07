@@ -4,7 +4,7 @@ import { api, fmtDate, fmtRub } from "../api";
 import { can, type Deal, type Me, type Stage } from "../types";
 import ContractScans from "./ContractScans";
 
-type Resp = { stages: Stage[]; status: string; contract_number: string; contract_signed_at: string | null; factory_contract_signed_at: string | null; won_variant_id: string | null;
+type Resp = { stages: Stage[]; status: string; contract_number: string; contract_signed_at: string | null; factory_contract_signed_at: string | null; factory_contract_number?: string | null; won_variant_id: string | null;
   related: { id: string; number: string; status: string }[]; contract_steps: CStep[]; status_detail: string };
 type CStep = { code: string; title: string; roles: string[]; hint: string; state: "done" | "current" | "pending"; on: string | null; by: string; comment: string };
 const ROLE_T: Record<string, string> = { manager: "менеджер", logistician: "логист", service_head: "сервис", fd: "ФД", cd: "КД", gd: "ЗГД", purchasing: "закупки", lawyer: "юрист" };
@@ -13,12 +13,13 @@ const ROLE_T: Record<string, string> = { manager: "менеджер", logisticia
  *  платежи (ФД), изменение условий (повторная визация), закрытие (КД). Задача 6: этапы «заказать/установить опцию РФ». */
 export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me; reload: () => void }) {
   const [data, setData] = useState<Resp | null>(null);
-  const [form, setForm] = useState({ contract_number: deal.contract_number || "", contract_signed_at: deal.contract_signed_at || "", factory_contract_signed_at: deal.factory_contract_signed_at || "", won_variant_id: deal.won_variant_id || "" });
+  const [form, setForm] = useState({ contract_number: deal.contract_number || "", contract_signed_at: deal.contract_signed_at || "", factory_contract_signed_at: deal.factory_contract_signed_at || "", factory_contract_number: deal.factory_contract_number || "", won_variant_id: deal.won_variant_id || "" });
   const [actual, setActual] = useState<Record<string, { actual_on: string; actual_amount: string; note: string }>>({});
   const [reason, setReason] = useState("");
   const [refine, setRefine] = useState<Record<string, { on: string; note: string }>>({});
   const [err, setErr] = useState("");
-  const [step, setStep] = useState<Record<string, { on: string; comment: string; number: string }>>({});
+  const [step, setStep] = useState<Record<string, { on: string; comment: string; number: string; fnumber: string }>>({});
+  const [scan, setScan] = useState<Record<string, File | null>>({});
   const isMgr = me.roles.some((r) => r.code === "manager") && deal.manager_id === me.id;
   const isCdGd = me.roles.some((r) => r.code === "cd" || r.code === "gd");
   const load = () => api.get<Resp>(`/api/deals/${deal.id}/execution/stages`).then(setData).catch((e) => setErr(e.message));
@@ -30,8 +31,15 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
   for (const s of data.stages) { const k = s.batch ? `Партия: ${s.batch}` : s.position ? `Позиция: ${s.position}` : "Сделка"; (groups[k] ||= []).push(s); }
   const done = data.stages.filter((s) => s.done).length;
   const canStep = (c: CStep) => me.roles.some((r) => r.code === "gd" || (r.code !== "manager" && c.roles.includes(r.code))) || (isMgr && c.roles.includes("manager"));
-  const sv = (c: CStep) => step[c.code] || { on: new Date().toISOString().slice(0, 10), comment: "", number: form.contract_number };
-  const markStep = (c: CStep, done: boolean) => act(() => api.post(`/api/deals/${deal.id}/execution/contract-step`, { code: c.code, done, on: sv(c).on, comment: sv(c).comment, contract_number: sv(c).number || null }));
+  const sv = (c: CStep) => step[c.code] || { on: new Date().toISOString().slice(0, 10), comment: "", number: form.contract_number, fnumber: form.factory_contract_number };
+  const SCAN_KIND: Record<string, string> = { client_signed: "client", factory_signed: "factory" };
+  const markStep = (c: CStep, done: boolean) => act(async () => {
+    await api.post(`/api/deals/${deal.id}/execution/contract-step`, { code: c.code, done, on: sv(c).on, comment: sv(c).comment, contract_number: sv(c).number || null,
+      factory_contract_number: sv(c).fnumber || null });
+    const f = scan[c.code];
+    if (done && f && SCAN_KIND[c.code]) { await api.upload(`/api/deals/${deal.id}/contract-scans`, f, { kind: SCAN_KIND[c.code] }); setScan({ ...scan, [c.code]: null }); }
+  });
+  const needNo = (c: CStep, v: { number: string; fnumber: string }) => (c.code === "client_signed" && !v.number.trim()) || (c.code === "factory_signed" && !(v.fnumber || "").trim());
   const allSigned = data.contract_steps.find((c) => c.code === "client_signed")?.state === "done";
   return (
     <>
@@ -51,12 +59,15 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
                   <td><b>{c.title}</b><div className="muted" style={{ fontSize: 12 }}>{c.hint}</div></td>
                   <td style={{ fontSize: 12 }}>{c.roles.map((r) => ROLE_T[r] || r).join(", ")}</td>
                   <td>{c.state === "done" ? fmtDate(c.on) : editable ? <input type="date" value={v.on} onChange={(e) => setStep({ ...step, [c.code]: { ...v, on: e.target.value } })} /> : "—"}</td>
-                  <td style={{ fontSize: 12 }}>{c.state === "done" ? <>{c.by}{c.comment && <div className="muted">{c.comment}</div>}
+                  <td style={{ fontSize: 12 }}>{c.state === "done" ? <>{c.code === "client_signed" && data.contract_number && <div>№ {data.contract_number}</div>}{c.code === "factory_signed" && data.factory_contract_number && <div>№ {data.factory_contract_number}</div>}{c.by}{c.comment && <div className="muted">{c.comment}</div>}
                     {(c.code === "client_signed" || c.code === "factory_signed") && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} only={c.code === "client_signed" ? "client" : "factory"} />}</> : editable && <>
-                    {c.code === "client_signed" && <input placeholder="номер контракта" value={v.number} onChange={(e) => setStep({ ...step, [c.code]: { ...v, number: e.target.value } })} style={{ width: 150, marginRight: 4 }} />}
-                    <input placeholder="комментарий" value={v.comment} onChange={(e) => setStep({ ...step, [c.code]: { ...v, comment: e.target.value } })} style={{ width: 200 }} /></>}</td>
+                    {c.code === "client_signed" && <input placeholder="номер контракта *" value={v.number} onChange={(e) => setStep({ ...step, [c.code]: { ...v, number: e.target.value } })} style={{ width: 150, marginRight: 4 }} />}
+                    {c.code === "factory_signed" && <input placeholder="номер контракта с заводом *" value={v.fnumber || ""} onChange={(e) => setStep({ ...step, [c.code]: { ...v, fnumber: e.target.value } })} style={{ width: 190, marginRight: 4 }} />}
+                    <input placeholder="комментарий" value={v.comment} onChange={(e) => setStep({ ...step, [c.code]: { ...v, comment: e.target.value } })} style={{ width: 200 }} />
+                    {SCAN_KIND[c.code] && <div style={{ marginTop: 4 }}>скан: <input type="file" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.zip" style={{ fontSize: 11, maxWidth: 220 }}
+                      onChange={(e) => setScan({ ...scan, [c.code]: e.target.files?.[0] || null })} /></div>}</>}</td>
                   <td>{c.state === "done" ? (canStep(c) && <button className="btn ghost" onClick={() => markStep(c, false)}>снять отметку</button>)
-                    : editable && <button className={"btn " + (c.state === "current" ? "" : "secondary")} disabled={c.code === "client_signed" && !v.number.trim()} onClick={() => markStep(c, true)}>Выполнено</button>}</td>
+                    : editable && <button className={"btn " + (c.state === "current" ? "" : "secondary")} disabled={needNo(c, v)} title={needNo(c, v) ? "укажите номер контракта" : ""} onClick={() => markStep(c, true)}>Выполнено</button>}</td>
                 </tr>);
             })}</tbody>
           </table>
@@ -70,6 +81,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
           <div className="grid cols-2">
             <label className="f">Номер контракта<input value={form.contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_number: e.target.value })} /></label>
             <label className="f">Дата подписания с клиентом<input type="date" value={form.contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, contract_signed_at: e.target.value })} /></label>
+            <label className="f">Номер контракта с заводом<input value={form.factory_contract_number} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, factory_contract_number: e.target.value })} /></label>
             <label className="f">Дата подписания с заводом<input type="date" value={form.factory_contract_signed_at || ""} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, factory_contract_signed_at: e.target.value })} /></label>
             {deal.has_alternatives && <label className="f">Предложение, которое выбрал клиент
               <select value={form.won_variant_id} disabled={!(isMgr || isCdGd)} onChange={(e) => setForm({ ...form, won_variant_id: e.target.value })}><option value="">—</option>{deal.variants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>}

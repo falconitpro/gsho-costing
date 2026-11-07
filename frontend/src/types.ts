@@ -80,7 +80,7 @@ export interface Deal {
   positions: Position[]; variants: Variant[]; batches: Batch[]; offer?: Variant | null; payment_terms_set?: boolean;
   checks?: string[]; check_items?: { group: string; tab: string; position_id: string | null; fields: string[]; tech: string[] }[]; report_date?: string | null; current_version_no: number; outcome?: string | null; outcome_reason?: string; status_detail?: string; archived_at?: string | null; archive_reason?: string; legal_review?: { status?: string; comment?: string; by?: string; at?: string } | null; contract_steps?: Record<string, unknown>; logistics_done: boolean; service_done: boolean;
   has_alternatives?: boolean; won_variant_id?: string | null; parent_deal_id?: string | null; request_group_id?: string | null;
-  kp_brand?: string; kp_images_mode?: string; contract_number?: string; contract_signed_at?: string | null; factory_contract_signed_at?: string | null;
+  kp_brand?: string; kp_images_mode?: string; contract_number?: string; contract_signed_at?: string | null; factory_contract_signed_at?: string | null; factory_contract_number?: string | null;
   in_execution?: boolean;
 }
 

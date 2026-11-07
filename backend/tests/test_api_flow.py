@@ -238,6 +238,11 @@ def test_full_flow(client, tmp_path):
     assert r_ia["status_detail"].endswith("контракт подписан клиентом")
     assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "client_signed"}).status_code == 422   # нужен номер
     assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "nope"}).status_code == 404
+    assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "factory_signed"}).status_code == 422   # нужен номер с заводом
+    fs = _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "factory_signed", "factory_contract_number": "F-77", "on": "2026-12-02"}))
+    assert next(c for c in fs["contract_steps"] if c["code"] == "factory_signed")["state"] == "done"
+    st0 = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(MGR)))
+    assert st0["factory_contract_number"] == "F-77" and str(st0["factory_contract_signed_at"]) == "2026-12-02"
     assert next(x for x in _ok(client.get("/api/deals", headers=H(MGR))) if x["id"] == did)["status_detail"].startswith("Заключение контракта")
     st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(MGR)))
     codes = {s["code"] for s in st["stages"]}
