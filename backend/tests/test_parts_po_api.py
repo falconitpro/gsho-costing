@@ -84,7 +84,8 @@ def test_po_flow(client):
     assert {l["status"] for l in rq["lines"]} == {"po"} and rq["lines"][0]["eta"]
 
     # файл заказа на двух языках
-    x = client.get(f"/api/parts/po/{po['id']}/xlsx", headers=H(MGR))
+    assert client.get(f"/api/parts/po/{po['id']}/xlsx", headers=H(MGR)).status_code == 403              # файл с ценами — менеджеру закрыт
+    x = client.get(f"/api/parts/po/{po['id']}/xlsx", headers=H(CD))
     rows = list(load_workbook(io.BytesIO(x.content)).active.iter_rows(values_only=True))
     assert "订单" in rows[0][0]
     assert client.get(f"/api/parts/po/{po['intragroup'][0]['id']}/xlsx", headers=H(MGR)).status_code == 403
