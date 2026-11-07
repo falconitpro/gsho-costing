@@ -1,4 +1,4 @@
-"""Доверенности компаний группы: конструктор, реестр, печать (DOCX/PDF), копии и сканы, статусы, отзыв. Оформляют и отзывают юрист и ЗГД."""
+"""Доверенности компаний группы: конструктор, реестр, печать (DOCX/PDF), копии и сканы, статусы, отзыв. Оформляют и отзывают юрист, ЗГД и ФД."""
 from __future__ import annotations
 
 import os
@@ -34,8 +34,8 @@ def _reader(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
 
 
 def _issuer(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    if not user.has(Role.LAWYER, Role.GD):
-        raise HTTPException(403, "Оформляет и отзывает доверенности юрист или ЗГД")
+    if not user.has(Role.LAWYER, Role.GD, Role.FD):
+        raise HTTPException(403, "Оформляет и отзывает доверенности юрист, ЗГД или ФД")
     return user
 
 
@@ -131,7 +131,7 @@ def registry(entity_id: str = "", status: str = "", q: str = "", db: Session = D
     all_rows = [svc.payload(p, names, "", False) for p in rows]
     summary = {"total": len(all_rows), **{k: sum(1 for x in all_rows if x["status"] == k) for k in svc.STATUSES}, "expiring": sum(1 for x in all_rows if x["expiring"])}
     return {"items": out, "summary": summary, "statuses": svc.STATUSES, "kinds": svc.KINDS, "entities": [{"id": k, "name": v} for k, v in ents.items()],
-            "can_issue": user.has(Role.LAWYER, Role.GD), "sensitive_visible": sens,
+            "can_issue": user.has(Role.LAWYER, Role.GD, Role.FD), "sensitive_visible": sens,
             "employees": [{"id": u.id, "display_name": u.display_name, "position": (u.contacts or {}).get("position", "")} for u in db.scalars(select(User).where(User.is_active.is_(True)).order_by(User.display_name)).all()],
             "templates": [{"id": t.id, "kind": t.kind, "title": t.title, "version": t.version} for t in db.scalars(select(Template).where(Template.kind.in_(("power_of_attorney", "poa_revocation")), Template.is_active.is_(True), Template.is_example.is_(False))).all()]}
 

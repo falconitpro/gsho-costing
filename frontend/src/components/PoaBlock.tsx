@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "../api";
 
 // Доверенности компаний группы: реестр (статусы, сроки, истекающие), конструктор (представитель → вид и срок → полномочия → ограничения),
-// печать DOCX/PDF, копии и сканы, отзыв с уведомлением. Оформляет и отзывает юрист или ЗГД; остальным — реестр без паспортных данных.
+// печать DOCX/PDF, копии и сканы, отзыв с уведомлением. Оформляют и отзывают юрист, ЗГД и ФД; остальным — реестр без паспортных данных.
 
 type Passport = { series?: string; number?: string; issued_by?: string; issued_on?: string; code?: string };
 type Attorney = { full_name?: string; position?: string; birth_date?: string; birth_place?: string; passport?: Passport; address?: string; phone?: string; email?: string };
@@ -54,7 +54,7 @@ export default function PoaBlock({ entityId, compact }: { entityId?: string; com
         </div>
       </div>
       {msg && <div className="alert error" style={{ marginTop: 8 }}>{msg}</div>}
-      {!reg.can_issue && <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>Оформляет и отзывает доверенности юрист или ЗГД. {reg.sensitive_visible ? "" : "Паспортные данные представителей скрыты."}</p>}
+      {!reg.can_issue && <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>Оформляет и отзывает доверенности юрист, ЗГД или ФД. {reg.sensitive_visible ? "" : "Паспортные данные представителей скрыты."}</p>}
       <table className="table" style={{ marginTop: 8, fontSize: 13 }}>
         <thead><tr><th>Номер</th>{!entityId && <th>Компания</th>}<th>Представитель</th><th>Вид</th><th>Выдана</th><th>Действует до</th><th>Статус</th><th>Копии</th></tr></thead>
         <tbody>

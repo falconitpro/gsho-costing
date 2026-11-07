@@ -1,4 +1,4 @@
-"""Доверенности компаний группы: конструктор → оформление (номер, DOCX-копия) → сканы → отзыв; напоминания об истечении; роли и скрытие паспортных данных."""
+"""Доверенности компаний группы: конструктор → оформление (номер, DOCX-копия) → сканы → отзыв; напоминания об истечении; роли (юрист, ЗГД, ФД) и скрытие паспортных данных."""
 from __future__ import annotations
 
 import os
@@ -46,11 +46,14 @@ def test_poa_lifecycle_and_roles():
         cat = c.get("/api/legal/poa/catalog", headers=H(MGR)).json()
         codes = [i["code"] for g in cat["powers"] for i in g["items"]]
         assert "general" in cat["kinds"] and len(codes) >= 15
-        # оформляет юрист или ЗГД; КД, ФД, менеджер — нет
+        # оформляют юрист, ЗГД и ФД; КД, менеджер — нет
         body = {"entity_id": ent["id"], "kind": "special", "place": "г. Москва", "valid_to": (date.today() + timedelta(days=365)).isoformat(), "attorney": ATTORNEY,
                 "powers": [{"code": codes[0]}, {"code": codes[1]}, {"text": "получать корреспонденцию в АО «Почта России»"}], "limits": {"amount_limit": 5000000, "currency": "RUB", "substitution": False, "territory": "Российская Федерация"}}
-        for who in (CD, FD, MGR):
+        for who in (CD, MGR):
             assert c.post("/api/legal/poa", headers=H(who), json=body).status_code == 403, who
+        fd_draft = c.post("/api/legal/poa", headers=H(FD), json=body)
+        assert fd_draft.status_code == 201
+        assert c.post(f"/api/legal/poa/{fd_draft.json()['id']}/cancel", headers=H(FD)).json()["status"] == "cancelled"
         p = c.post("/api/legal/poa", headers=H(LAW), json=body)
         assert p.status_code == 201, p.text
         p = p.json()
