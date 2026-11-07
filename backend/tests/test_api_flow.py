@@ -630,10 +630,11 @@ def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
     assert client.post("/api/refs/factories", headers=H("observer@example.com"), json={"name": "X"}).status_code == 403
     card = _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(MGR)))
     assert card["contacts"][1]["wechat"] == "zhangsan_wx" and "models" in card
-    _ok(client.put(f"/api/refs/factories/{fz['id']}", headers=H(MGR), json={**{k: card[k] for k in ("name", "name_zh", "contacts")}, "bank_details": {"swift": "BKCHCNBJ"}}))
+    _ok(client.put(f"/api/refs/factories/{fz['id']}", headers=H(CD), json={**{k: card[k] for k in ("name", "name_zh", "contacts")}, "bank_details": {"swift": "BKCHCNBJ"}}))
     up = _ok(client.put(f"/api/refs/factories/{fz['id']}", headers=H(LOG), json={**{k: card[k] for k in ("name", "name_zh", "contacts")}, "website": "https://test.cn"}))
     assert up["website"] == "https://test.cn" and "bank_details" not in up              # логист не видит реквизиты…
-    assert _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(MGR)))["bank_details"] == {"swift": "BKCHCNBJ"}   # …и не стирает их
+    assert _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(CD)))["bank_details"] == {"swift": "BKCHCNBJ"}   # …и не стирает их
+    assert "bank_details" not in _ok(client.get(f"/api/refs/factories/{fz['id']}", headers=H(MGR)))                     # менеджеру реквизиты закрыты
     assert all("bank_details" not in f_ for f_ in _ok(client.get("/api/refs/factories", headers=H(LOG))))
     assert "rfq" in _ok(client.get("/api/refs/factories/contact-roles", headers=H(MGR)))
     # --- торговые марки: сопоставление «завод → марка», обозначение = марка + модель
