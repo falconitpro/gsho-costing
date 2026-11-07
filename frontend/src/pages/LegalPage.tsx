@@ -6,13 +6,14 @@ import LegalProfileBlock from "../components/LegalProfileBlock";
 import LegalTemplates from "../components/LegalTemplates";
 import LegalRules from "../components/LegalRules";
 import LegalRegistry from "../components/LegalRegistry";
+import PoaBlock from "../components/PoaBlock";
 
 // Юридический блок: карточка БЕРГ-ХАУС (компании группы с юридическими и банковскими профилями).
 // Следующие этапы добавят сюда реестр пакетов, библиотеку шаблонов и правил.
 
 type Own = { id: string; code: string; name: string; country: string; currency: string; sells_to_clients: boolean; is_active: boolean; profiles: { id: string; summary: string; check_status_title: string; banks: { status: string; verified: boolean; currency: string }[] }[] };
-type Tab = "own" | "packages" | "templates" | "rules";
-const TABS: [Tab, string, boolean][] = [["packages", "Реестр пакетов", true], ["own", "Карточка БЕРГ-ХАУС", true], ["templates", "Шаблоны и примеры", true], ["rules", "Правила и ИИ", true]];
+type Tab = "own" | "packages" | "poa" | "templates" | "rules";
+const TABS: [Tab, string, boolean][] = [["packages", "Реестр пакетов", true], ["own", "Карточка БЕРГ-ХАУС", true], ["poa", "Доверенности", true], ["templates", "Шаблоны и примеры", true], ["rules", "Правила и ИИ", true]];
 
 export default function LegalPage({ me }: { me: Me }) {
   void me;
@@ -35,6 +36,7 @@ export default function LegalPage({ me }: { me: Me }) {
       </div>
       {msg && <div className="alert error">{msg}</div>}
       {tab === "packages" && <LegalRegistry />}
+      {tab === "poa" && <PoaBlock />}
       {tab === "templates" && <LegalTemplates />}
       {tab === "rules" && <LegalRules />}
       {tab === "own" && own && (
@@ -53,7 +55,8 @@ export default function LegalPage({ me }: { me: Me }) {
             })}
             <p className="muted" style={{ fontSize: 11 }}>Сами компании (код, валюта, склад) заводятся в «Запасные части → Настройка → Компании группы».</p>
           </div>
-          <div>{cur && <LegalProfileBlock ownerKind="own" ownerId={cur} title={`Юридический профиль — ${own.items.find((x) => x.id === cur)?.name || ""}`} />}</div>
+          <div>{cur && <LegalProfileBlock ownerKind="own" ownerId={cur} title={`Юридический профиль — ${own.items.find((x) => x.id === cur)?.name || ""}`} />}
+            {cur && <div style={{ marginTop: 12 }}><PoaBlock entityId={cur} compact /></div>}</div>
         </div>)}
     </>
   );
