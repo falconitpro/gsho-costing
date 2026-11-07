@@ -15,7 +15,7 @@ from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import ROLE_TITLES, Role
 from ..core.workflow import OPEN_STATUSES, STATUS_TITLES, DealStatus
 from ..db import get_db
-from ..models import Deal, ExecutionStage, FxRate, LegalPackage, Notification, PowerOfAttorney, Task, User
+from ..models import Deal, ExecutionStage, FxRate, LegalPackage, NotificationLog, PowerOfAttorney, Task, User
 from ..services import settings_service
 from ..services.deal_service import audit
 from .common import can_see_deal
@@ -335,7 +335,7 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
         focus = sorted(cands, key=lambda x: x[0])[0][1]
 
     # ---------------- уведомления, курсы, юр. блок
-    notes = db.scalars(select(Notification).where(Notification.user_id == user.id, Notification.channel == "app").order_by(Notification.at.desc()).limit(8)).all()
+    notes = db.scalars(select(NotificationLog).where(NotificationLog.user_id == user.id, NotificationLog.channel == "app").order_by(NotificationLog.at.desc()).limit(8)).all()
     notifications = [{"id": n.id, "text": n.text, "at": n.at.isoformat() if n.at else None, "read": n.read_at is not None, "deal_id": n.deal_id, "event": n.event} for n in notes]
     fx = {}
     for cur in ("USD", "CNY", "EUR"):
