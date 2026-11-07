@@ -143,6 +143,9 @@ def list_deals(status: Optional[str] = None, archived: bool = False, db: Session
         row["machines"] = sum(int(p.qty or 0) for p in poss)
         row["equipment"] = "; ".join(f"{int(p.qty or 1)} × {' '.join(x for x in (p.machine_type or '', p.trademark or '', p.model or '') if x).strip()}" for p in poss[:4]) \
             + (f" … ещё {len(poss) - 4}" if len(poss) > 4 else "")
+        # для сводной таблицы: наименование и количество отдельными столбцами, построчно по позициям
+        row["equipment_lines"] = [{"qty": int(p.qty or 1), "name": " ".join(x for x in (p.machine_type or "", p.trademark or "", p.model or "") if x).strip()} for p in poss[:4]]
+        row["equipment_more"] = max(0, len(poss) - 4)
         v = won_variant(d) if d.variants else None
         if fin and v is not None and v.price_rub is not None:
             row["price_rub"] = v.price_rub
