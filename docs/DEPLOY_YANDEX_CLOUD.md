@@ -111,7 +111,7 @@ GitHub → репозиторий → Settings → Secrets and variables → Act
 - Перезапуск вручную: `bash deploy/deploy-remote.sh` от пользователя `deploy`.
 - Копии: контейнер `backup` ежедневно пишет дамп БД и архив файлов в том `backups` (90 дней). Для стенда достаточно; для боевого контура — выгружать дампы в Yandex Object Storage (адаптер S3 уже в проекте).
 - Сброс тестовых данных: `docker compose down -v && bash deploy/deploy-remote.sh` (удалит базу и файлы, seed создаст заново).
-- Смена пароля стенда: `docker run --rm caddy:2 caddy hash-password --plaintext 'новый'` → заменить `BASIC_AUTH_HASH` в `/opt/gsho-costing/.env` (каждый `$` в хеше удвоить: `$$`) → `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy`.
+- Вход: с 08.11.2026 общий пароль веб-сервера (basic_auth) снят — доступ закрывает страница входа приложения (логин и пароль учётной записи; пароли задаёт ЗГД в «Настройки → Сотрудники»). Переменные `BASIC_AUTH_*` в `.env` больше не используются.
 
 ## 6. Боевой контур (позже)
 
