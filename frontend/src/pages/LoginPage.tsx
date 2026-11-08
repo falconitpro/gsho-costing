@@ -83,7 +83,7 @@ export default function LoginPage({ onLoggedIn, devUsers = [], onDevPick }: { on
   return (
     <div className="bh-login">
       <Background />
-      <a className="bh-logo" href="/" aria-label="БЕРГ-ХАУС — на главную"><img src="/brand/logo-white.png" alt="БЕРГ-ХАУС" width="760" height="399" /></a>
+      <a className="bh-logo" href="/" aria-label="БЕРГ-ХАУС — на главную"><img src="/brand/logo-white.svg" alt="БЕРГ-ХАУС" width="1230" height="639" /></a>
       <div className="bh-corner" aria-hidden="true"><b>BERGHAUS</b>CORPORATE ECOSYSTEM<br />INTERNAL ACCESS ONLY</div>
       <div className="bh-vert" aria-hidden="true">ONE TEAM · ONE SYSTEM · ONE RESULT</div>
       <div className="bh-slogan" aria-hidden="true"><span>Система.</span><span>Контроль.</span><span>Результат.</span></div>
