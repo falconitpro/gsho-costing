@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -123,14 +125,45 @@ class OidcClient:
 
 # ------------------------------------------------------------------ сессии
 
-def issue_session(user: User, s: Settings) -> str:
+REMEMBER_DAYS = 30
+
+
+def issue_session(user: User, s: Settings, remember: bool = False) -> str:
+    """Сессия: 8 ч скользящего срока; «Запомнить меня» — 30 дней (пароль нигде не хранится, только подписанный JWT)."""
     now = int(time.time())
-    return jwt.encode({"sub": user.id, "iat": now, "exp": now + s.session_ttl_hours * 3600, "nonce": secrets.token_hex(4)},
-                      s.secret_key, algorithm="HS256")
+    ttl = REMEMBER_DAYS * 86400 if remember else s.session_ttl_hours * 3600
+    claims = {"sub": user.id, "iat": now, "exp": now + ttl, "nonce": secrets.token_hex(4)}
+    if remember:
+        claims["rem"] = 1
+    return jwt.encode(claims, s.secret_key, algorithm="HS256")
 
 
-def set_session_cookie(resp: Response, token: str, s: Settings) -> None:
-    resp.set_cookie(SESSION_COOKIE, token, httponly=True, secure=not s.is_dev, samesite="lax", max_age=s.session_ttl_hours * 3600)
+def set_session_cookie(resp: Response, token: str, s: Settings, remember: bool = False) -> None:
+    resp.set_cookie(SESSION_COOKIE, token, httponly=True, secure=not s.is_dev, samesite="lax",
+                    max_age=REMEMBER_DAYS * 86400 if remember else s.session_ttl_hours * 3600)
+
+
+# ------------------------------------------------------------------ пароли (вход по логину и паролю)
+_PBKDF2_ITER = 200_000
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), _PBKDF2_ITER)
+    return f"pbkdf2_sha256${_PBKDF2_ITER}${salt}${dk.hex()}"
+
+
+def verify_password(password: str, stored: Optional[str]) -> bool:
+    if not stored:
+        return False
+    try:
+        algo, iters, salt, digest = stored.split("$")
+        if algo != "pbkdf2_sha256":
+            return False
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), int(iters))
+        return hmac.compare_digest(dk.hex(), digest)
+    except (ValueError, TypeError):
+        return False
 
 
 @dataclass
@@ -176,7 +209,8 @@ async def get_current_user(request: Request, response: Response, db: Session = D
         user = db.get(User, claims["sub"])
         if user is None or not user.is_active:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Учётная запись отключена")
-        set_session_cookie(response, issue_session(user, s), s)   # скользящий срок 8 ч
+        remember = bool(claims.get("rem"))
+        set_session_cookie(response, issue_session(user, s, remember), s, remember)   # скользящий срок: 8 ч или 30 дней («Запомнить меня»)
     from ..services.access_service import acting_for, perms_for
     return CurrentUser(id=user.id, email=user.email, display_name=user.display_name,
                        roles={Role(r) for r in user.roles}, observer_scope=user.observer_scope or {}, perms=perms_for(db, user), acting_for=acting_for(db, user))

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import FloatingScrollbar from "./components/FloatingScrollbar";
 import NotificationBell from "./components/NotificationBell";
-import { BrowserRouter, NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, getDevUser, setDevUser } from "./api";
 import type { Me } from "./types";
 import DealsList from "./pages/DealsList";
@@ -16,6 +16,7 @@ import LegalPage from "./pages/LegalPage";
 import CatalogHub from "./pages/CatalogHub";
 import SupplyPage from "./pages/PartsSetupPage";
 import { PartsRequestView } from "./components/PartsRequests";
+import LoginPage from "./pages/LoginPage";
 
 export const MeContext = { current: null as Me | null };
 
@@ -24,26 +25,65 @@ function PartsRequestRoute({ me }: { me: Me }) {
   return <PartsRequestView me={me} id={id || ""} />;
 }
 
+/** Неавторизованный пользователь → страница входа с запомненным адресом; после входа — возврат на него. */
+function RequireLogin() {
+  const loc = useLocation();
+  const next = loc.pathname + loc.search;
+  return <Navigate to={`/login${next && next !== "/" ? `?next=${encodeURIComponent(next)}` : ""}`} replace />;
+}
+function AfterLogin() {
+  const loc = useLocation();
+  const next = new URLSearchParams(loc.search).get("next") || "/";
+  return <Navigate to={next.startsWith("/") && !next.startsWith("//") ? next : "/"} replace />;
+}
+function LoginRoute({ onLoggedIn, devUsers, onDevPick }: { onLoggedIn: () => Promise<void>; devUsers: { email: string; display_name: string }[]; onDevPick: (e: string) => void }) {
+  const nav = useNavigate();
+  const loc = useLocation();
+  const next = new URLSearchParams(loc.search).get("next") || "/";
+  return <LoginPage devUsers={devUsers} onDevPick={onDevPick} onLoggedIn={async () => { await onLoggedIn(); nav(next.startsWith("/") && !next.startsWith("//") ? next : "/", { replace: true }); }} />;
+}
+
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
+  const [checked, setChecked] = useState(false);          // сессия проверена: до этого ничего не показываем, чтобы рабочее место не мелькало
   const [devUsers, setDevUsers] = useState<{ email: string; display_name: string; roles: string[] }[]>([]);
-  const [err, setErr] = useState("");
 
   async function load() {
     try {
       const m = await api.get<Me>("/api/auth/me");
       setMe(m);
       MeContext.current = m;
-      setErr("");
     } catch (e) {
       setMe(null);
-      setErr(String((e as Error).message));
+      MeContext.current = null;
+      void e;
+    } finally {
+      setChecked(true);
     }
+  }
+  async function logout() {
+    try { await api.post("/api/auth/logout"); } catch { /* сессии уже нет */ }
+    setDevUser("");
+    setMe(null);
+    MeContext.current = null;
   }
   useEffect(() => {
     api.get<typeof devUsers>("/api/auth/dev-users").then(setDevUsers).catch(() => setDevUsers([]));
     load();
+    const onUnauth = () => { setMe(null); MeContext.current = null; };
+    window.addEventListener("gsho:unauthorized", onUnauth);
+    return () => window.removeEventListener("gsho:unauthorized", onUnauth);
   }, []);
+  if (!checked) return null;
+  if (!me) {
+    return (
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginRoute onLoggedIn={load} devUsers={devUsers} onDevPick={(e) => { setDevUser(e); load(); }} />} />
+          <Route path="*" element={<RequireLogin />} />
+        </Routes>
+      </BrowserRouter>);
+  }
 
   const has = (...roles: string[]) => !!me && me.roles.some((r) => roles.includes(r.code));
   const perm = (g: string, level = 1) => !!me && (me.perms?.[g] ?? 0) >= level;
@@ -73,7 +113,7 @@ export default function App() {
                 <span className="avatar">{me.display_name.replace(/\(.*\)/, "").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()}</span>
                 <span className="who"><b>{me.display_name.replace(/\s*\(.*\)\s*$/, "")}</b><small>{me.roles.map((r) => r.title).join(", ")}</small></span>
               </div>)}
-            {!me && devUsers.length === 0 && <a className="btn" href="/api/auth/login">Войти через Microsoft 365</a>}
+            {me && <button className="btn ghost" style={{ padding: "4px 10px" }} onClick={logout} title="Выйти из системы">Выйти</button>}
           </div>
         </div>
         {me && (
@@ -94,9 +134,9 @@ export default function App() {
       </header>
       <FloatingScrollbar />
       <main>
-        {!me && err && <div className="alert info">{devUsers.length ? "Выберите пользователя в шапке (dev-режим)." : "Требуется вход."}</div>}
         {me && (
           <Routes>
+            <Route path="/login" element={<AfterLogin />} />
             <Route path="/" element={<WorkplacePage me={me} />} />
             <Route path="/deals" element={<DealsList me={me} />} />
             <Route path="/deals/parts/:id" element={<PartsRequestRoute me={me} />} />

@@ -57,6 +57,10 @@ class User(TimestampMixin, Base):
     # изменения карточки, ожидающие подтверждения администратора / ЗГД: {fields: {name: [old, new]}, requested_at, requested_by}
     pending_changes: Mapped[dict] = mapped_column(JSONType, default=dict)
     prefs: Mapped[dict] = mapped_column(JSONType, default=dict)                # личные настройки интерфейса: {workplace: {order, hidden}}
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255))          # вход по паролю (страница входа); пусто — только Microsoft 365
+    password_set_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0)             # защита от перебора: 5 ошибок → блок на 15 минут
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 # ------------------------------------------------------------------ уровни доступа (задача 11)
