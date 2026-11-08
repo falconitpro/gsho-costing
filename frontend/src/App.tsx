@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import FloatingScrollbar from "./components/FloatingScrollbar";
 import NotificationBell from "./components/NotificationBell";
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
-import { api, getDevUser, setDevUser } from "./api";
+import { api, setDevUser } from "./api";
 import type { Me } from "./types";
 import DealsList from "./pages/DealsList";
 import WorkplacePage from "./pages/WorkplacePage";
@@ -36,11 +36,11 @@ function AfterLogin() {
   const next = new URLSearchParams(loc.search).get("next") || "/";
   return <Navigate to={next.startsWith("/") && !next.startsWith("//") ? next : "/"} replace />;
 }
-function LoginRoute({ onLoggedIn, devUsers, onDevPick }: { onLoggedIn: () => Promise<void>; devUsers: { email: string; display_name: string }[]; onDevPick: (e: string) => void }) {
+function LoginRoute({ onLoggedIn }: { onLoggedIn: () => Promise<void> }) {
   const nav = useNavigate();
   const loc = useLocation();
   const next = new URLSearchParams(loc.search).get("next") || "/";
-  return <LoginPage devUsers={devUsers} onDevPick={onDevPick} onLoggedIn={async () => { await onLoggedIn(); nav(next.startsWith("/") && !next.startsWith("//") ? next : "/", { replace: true }); }} />;
+  return <LoginPage onLoggedIn={async () => { setDevUser(""); await onLoggedIn(); nav(next.startsWith("/") && !next.startsWith("//") ? next : "/", { replace: true }); }} />;
 }
 
 export default function App() {
@@ -53,6 +53,7 @@ export default function App() {
       const m = await api.get<Me>("/api/auth/me");
       setMe(m);
       MeContext.current = m;
+      api.get<typeof devUsers>("/api/auth/dev-users").then(setDevUsers).catch(() => setDevUsers([]));   // тестовый стенд: переключатель учётных записей в шапке
     } catch (e) {
       setMe(null);
       MeContext.current = null;
@@ -68,9 +69,9 @@ export default function App() {
     MeContext.current = null;
   }
   useEffect(() => {
-    api.get<typeof devUsers>("/api/auth/dev-users").then(setDevUsers).catch(() => setDevUsers([]));
+    setDevUser("");          // заголовок X-Dev-User нужен только на один запрос переключения — дальше работает cookie сессии
     load();
-    const onUnauth = () => { setMe(null); MeContext.current = null; };
+    const onUnauth = () => { setDevUser(""); setMe(null); MeContext.current = null; };
     window.addEventListener("gsho:unauthorized", onUnauth);
     return () => window.removeEventListener("gsho:unauthorized", onUnauth);
   }, []);
@@ -79,7 +80,7 @@ export default function App() {
     return (
       <BrowserRouter>
         <Routes>
-          <Route path="/login" element={<LoginRoute onLoggedIn={load} devUsers={devUsers} onDevPick={(e) => { setDevUser(e); load(); }} />} />
+          <Route path="/login" element={<LoginRoute onLoggedIn={load} />} />
           <Route path="*" element={<RequireLogin />} />
         </Routes>
       </BrowserRouter>);
@@ -97,10 +98,9 @@ export default function App() {
           </NavLink>
           <div className="account">
             {devUsers.length > 0 && (
-              <label className="dev-switch" title="тестовый стенд: войти под другой учётной записью">
+              <label className="dev-switch" title="тестовый стенд: посмотреть систему под другой учётной записью">
                 <span>Войти как</span>
-                <select value={getDevUser()} onChange={(e) => { setDevUser(e.target.value); load(); }}>
-                  <option value="">— выберите пользователя —</option>
+                <select value={me.email} onChange={async (e) => { setDevUser(e.target.value); await load(); setDevUser(""); }}>
                   {devUsers.map((u) => (
                     <option key={u.email} value={u.email}>{u.display_name}</option>
                   ))}

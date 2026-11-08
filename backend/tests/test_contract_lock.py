@@ -25,7 +25,7 @@ from app.models import Deal  # noqa: E402
 from scripts.seed import run as seed  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
-MGR, CD, GD, FD = "manager@example.com", "cd@example.com", "gd@example.com", "fd@example.com"
+MGR, CD, GD, FD = "manager@example.com", "cd@example.com", "evgeniy@dobrov.pro", "fd@example.com"
 
 
 def _set(deal_id, **kw):

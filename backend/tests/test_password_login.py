@@ -18,10 +18,10 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app.core.auth import SESSION_COOKIE, hash_password, verify_password  # noqa: E402
 from app.main import app  # noqa: E402
-from scripts.seed import DEV_PASSWORD, run as seed  # noqa: E402
+from scripts.seed import DEV_PASSWORD, TEST_LOGIN, TEST_PASSWORD, run as seed  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
-MGR, GD, LOG = "manager@example.com", "gd@example.com", "logist@example.com"
+MGR, GD, LOG = "manager@example.com", TEST_LOGIN, "logist@example.com"
 
 
 def test_hash_roundtrip():
@@ -46,6 +46,13 @@ def test_password_login_flow():
         assert "Max-Age=2592000" in set_cookie and "HttpOnly" in set_cookie
         me = c.get("/api/auth/me").json()
         assert me["email"] == MGR
+        # переключатель «Войти как» — только после входа; тестовая учётная запись входит по паролю
+        assert c.get("/api/auth/dev-users").status_code == 200
+        c.cookies.clear()
+        assert c.get("/api/auth/dev-users").status_code == 401
+        r = c.post("/api/auth/password-login", json={"login": TEST_LOGIN, "password": TEST_PASSWORD})
+        assert r.status_code == 200 and c.get("/api/auth/me").json()["email"] == TEST_LOGIN
+        assert any(u["email"] == TEST_LOGIN for u in c.get("/api/auth/dev-users").json())
         # выход
         assert c.post("/api/auth/logout").status_code == 200
         c.cookies.clear()

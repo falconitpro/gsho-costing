@@ -25,7 +25,7 @@ from app.services.parts_requests import norm_article, parse_lines_text  # noqa: 
 from scripts.seed import run as seed  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
-MGR, CD, FD, GD, LOG = "manager@example.com", "cd@example.com", "fd@example.com", "gd@example.com", "logist@example.com"
+MGR, CD, FD, GD, LOG = "manager@example.com", "cd@example.com", "fd@example.com", "evgeniy@dobrov.pro", "logist@example.com"
 
 
 @pytest.fixture(scope="module")

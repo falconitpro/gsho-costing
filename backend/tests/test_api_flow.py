@@ -382,8 +382,8 @@ def test_low_margin_goes_to_fd_visa(client, tmp_path):
     assert client.post(f"/api/deals/{did}/insist", headers=H(MGR), json={"comment": "x"}).status_code == 403
     assert client.post(f"/api/deals/{did}/insist", headers=H(CD), json={"comment": ""}).status_code == 422
     assert _ok(client.post(f"/api/deals/{did}/insist", headers=H(CD), json={"comment": "стратегический клиент, вход на рудник"}))["status"] == "gd_visa"
-    assert any(t["deal_id"] == did and t["block"] == "visa" for t in _ok(client.get("/api/tasks/my", headers=H("gd@example.com"))))
-    assert _ok(client.post(f"/api/deals/{did}/visa", headers=H("gd@example.com"), json={"approved": True, "comment": "согласовано"}))["status"] == "approved"
+    assert any(t["deal_id"] == did and t["block"] == "visa" for t in _ok(client.get("/api/tasks/my", headers=H("evgeniy@dobrov.pro"))))
+    assert _ok(client.post(f"/api/deals/{did}/visa", headers=H("evgeniy@dobrov.pro"), json={"approved": True, "comment": "согласовано"}))["status"] == "approved"
     # возврат на доработку создаёт версию и задачу логисту
     rw = _ok(client.post(f"/api/deals/{did}/rework", headers=H(CD), json={"block": "logistics", "reason": "уточнить фрахт"}))
     assert rw["status"] == "rework" and rw["version_no"] >= 2
@@ -398,7 +398,7 @@ def test_low_margin_goes_to_fd_visa(client, tmp_path):
     assert any(d["id"] == did for d in board["rework"]["deals"])
 
 
-GD, ADM = "gd@example.com", "admin@example.com"
+GD, ADM = "evgeniy@dobrov.pro", "admin@example.com"
 
 
 def _png(path):
