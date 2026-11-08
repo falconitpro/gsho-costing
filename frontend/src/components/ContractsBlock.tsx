@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "../api";
+import { ClaimCard, ClaimsTable, NewClaimDialog, type ClaimRow } from "./ClaimsBlock";
 
 // Реестр договоров (юридический блок, этап 1): договоры с клиентами, поставщиками, подрядчиками и прочие.
 // По каждому договору обязательны условия оплаты «сколько — через сколько дней — после какого события»; неустойки — для потока и претензий.
@@ -426,6 +427,12 @@ function ExecTab({ c, ob, onSaved, onErr }: { c: Full; ob: Obligations; onSaved:
   const post = (body: object) => api.post<Full>(`/api/legal/contracts/${c.id}/facts`, body).then(onSaved).catch(onErr);
   const side = (x: string) => (x === "cp" ? "контрагент" : "мы");
   const t = ob.totals;
+  type Av = { kind: string; key?: string; title: string; amount: number | null; days?: number };
+  const [claims, setClaims] = useState<{ items: ClaimRow[]; available_out: Av[]; available_in: Av[] } | null>(null);
+  const [newClaim, setNewClaim] = useState<"outgoing" | "incoming" | null>(null);
+  const [openClaim, setOpenClaim] = useState<string | null>(null);
+  const loadClaims = () => api.get<{ items: ClaimRow[]; available_out: Av[]; available_in: Av[] }>(`/api/legal/contracts/${c.id}/claims`).then(setClaims).catch(() => setClaims(null));
+  useEffect(() => { loadClaims(); }, [c.id, ob]);
   const obTable = (rows: Ob[], kind: "pay" | "perf") => (
     <table className="table" style={{ fontSize: 13 }}>
       <thead><tr><th>Обязательство</th><th>Кто должен</th><th className="num">Сумма</th><th>Срок</th><th>Исполнено</th><th>Статус</th><th style={{ width: 220 }} /></tr></thead>
@@ -479,5 +486,15 @@ function ExecTab({ c, ob, onSaved, onErr }: { c: Full; ob: Obligations; onSaved:
           </table>
         </div>
       </div>
+      <div className="poa-section" style={{ marginTop: 14 }}>
+        <div className="poa-section-head" style={{ justifyContent: "space-between" }}><span><b>Претензии</b> <span className="muted">— черновик исходящей создаётся сам на 5-й день просрочки контрагента</span></span>
+          <span className="row" style={{ gap: 6 }}>
+            <button className="btn ghost add" onClick={() => setNewClaim("outgoing")}>Претензия контрагенту</button>
+            <button className="btn ghost add" onClick={() => setNewClaim("incoming")}>Входящая претензия</button>
+          </span></div>
+        <ClaimsTable items={claims?.items || []} onOpen={setOpenClaim} empty="Претензий по договору нет." />
+      </div>
+      {newClaim && claims && <NewClaimDialog contractId={c.id} direction={newClaim} available={newClaim === "outgoing" ? claims.available_out : claims.available_in} onClose={() => setNewClaim(null)} onCreated={(cid) => { setNewClaim(null); loadClaims(); setOpenClaim(cid); }} />}
+      {openClaim && <ClaimCard id={openClaim} onClose={() => { setOpenClaim(null); loadClaims(); }} />}
     </>);
 }

@@ -24,7 +24,7 @@ type Data = {
   funnel: { code: string; title: string; count: number }[]; team: { name: string; open: number; exec: number; overdue: number; share: number }[];
   notifications: { id: string; text: string; at: string | null; read: boolean; deal_id: string | null }[];
   fx: Record<string, { rate: number; on: string }>; legal: { lawyer_review: number; commercial_review: number; poa_active: number; poa_expiring: number; poa_no_scan: number;
-    contracts_review: number; contracts_signing: number; contracts_expiring: number; contracts_no_scan: number; contracts_visas: number } | null;
+    contracts_review: number; contracts_signing: number; contracts_expiring: number; contracts_no_scan: number; contracts_visas: number; claims_open?: number; claims_signing?: number; claims_answer_overdue?: number } | null;
   fin: boolean; quick: { title: string; url: string }[];
 };
 
@@ -48,7 +48,7 @@ const estimate = (d: Data, b: string): number => {
     case "team": return d.team.length ? 60 + 30 * d.team.length : 0;
     case "notifications": return 50 + (d.notifications.length ? 48 * Math.min(6, d.notifications.length) : 30);
     case "deadlines": return 50 + (d.upcoming.length ? 36 * d.upcoming.length : 30);
-    case "legal": return d.legal ? 300 : 0;
+    case "legal": return d.legal ? 380 : 0;
     case "quick": return 90 + 48 * Math.ceil(d.quick.length / 2);
     default: return 0;
   }
@@ -194,6 +194,10 @@ export default function WorkplacePage({ me }: { me: Me }) {
             <Link to="/legal?tab=contracts" className="wp-mini"><b>{d.legal.contracts_review}</b><small>на согласовании · {d.legal.contracts_signing} на подписи</small></Link>
             <Link to="/legal?tab=contracts" className="wp-mini"><b style={{ color: d.legal.contracts_expiring ? "var(--warn)" : "inherit" }}>{d.legal.contracts_expiring}</b><small>договоров истекает в 30 дней</small></Link>
             <Link to="/legal?tab=contracts" className="wp-mini"><b style={{ color: d.legal.contracts_no_scan ? "var(--bad)" : "inherit" }}>{d.legal.contracts_no_scan}</b><small>договоров без скана</small></Link>
+          </div>
+          <div className="wp-grid2" style={{ marginBottom: 8 }}>
+            <Link to="/legal?tab=claims" className="wp-mini"><b style={{ color: d.legal.claims_signing ? "var(--warn)" : "inherit" }}>{d.legal.claims_open ?? 0}</b><small>претензий в работе · {d.legal.claims_signing ?? 0} на подписи</small></Link>
+            <Link to="/legal?tab=claims" className="wp-mini"><b style={{ color: d.legal.claims_answer_overdue ? "var(--bad)" : "inherit" }}>{d.legal.claims_answer_overdue ?? 0}</b><small>истёк срок ответа</small></Link>
           </div>
           <div className="wp-grid2">
             <Link to="/legal?tab=packages" className="wp-mini"><b style={{ color: d.legal.lawyer_review ? "var(--warn)" : "inherit" }}>{d.legal.lawyer_review}</b><small>на проверке юриста</small></Link>

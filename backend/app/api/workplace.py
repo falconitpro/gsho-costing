@@ -175,6 +175,12 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
     for x in cin["expiring"]:
         if x["days"] >= 0:
             events.append({"on": x["valid_to"], "time": "", "title": f"Истекает договор {x['number']}", "sub": x["cp_name"] + (" · автопролонгация" if x["auto_renew"] else ""), "tone": "warn", "url": x["url"], "kind": "contract"})
+    from ..models import ContractClaim
+    from ..services import legal_claims as lclaims
+    claims = db.scalars(select(ContractClaim).where(ContractClaim.status.in_(lclaims.OPEN))).all() if user.has(Role.LAWYER, Role.CD, Role.GD, Role.FD) else []
+    for cl in claims:
+        if cl.answer_due and cl.status in ("sent", "received") and today <= cl.answer_due <= today + timedelta(days=14):
+            events.append({"on": cl.answer_due.isoformat(), "time": "", "title": f"Срок ответа на претензию {cl.number}", "sub": "исходящая" if cl.direction == "outgoing" else "входящая — ответить", "tone": "warn", "url": f"/legal?tab=claims&open={cl.id}", "kind": "claim"})
     events.sort(key=lambda e: (e["on"], e["time"], e["title"]))
     today_events = [e for e in events if e["on"] == today.isoformat()]
     monday = today - timedelta(days=today.weekday())
@@ -230,6 +236,13 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
     for x in cin["visas"]:
         approvals.append({"kind": "contract", "title": f"Договор {x['number']} · {x['cp_name']}", "sub": "ваша виза: " + ", ".join(x["steps"]) + (f" · {_fmt_money(float(x['amount']))} {x['currency']}" if fin and x["amount"] else ""),
                           "url": x["url"], "waiting_since": x["waiting_since"], "tone": "info"})
+    for cl in claims:
+        t = lclaims.totals(cl)
+        amt = f" · {_fmt_money(t['total'])} {cl.currency}" if fin and t["total"] else ""
+        if cl.status == "signing" and user.has(Role.CD, Role.GD):
+            approvals.append({"kind": "claim", "title": f"Подписать претензию {cl.number}", "sub": lclaims.subject(cl) + amt, "url": f"/legal?tab=claims&open={cl.id}", "waiting_since": cl.updated_at.isoformat() if cl.updated_at else None, "tone": "warn"})
+        elif cl.status == "draft" and user.has(Role.LAWYER):
+            approvals.append({"kind": "claim", "title": f"Черновик претензии {cl.number}" + (" (автоматически)" if cl.source == "auto" else ""), "sub": lclaims.subject(cl) + amt + " · проверить и передать на подпись", "url": f"/legal?tab=claims&open={cl.id}", "waiting_since": cl.created_at.isoformat() if cl.created_at else None, "tone": "info"})
     for x in cin["drafts"]:
         approvals.append({"kind": "contract", "title": f"Договор {x['number']} возвращён на доработку", "sub": x["comment"][:140], "url": x["url"], "waiting_since": x["updated_at"], "tone": "bad"})
     if user.has(Role.ADMIN, Role.GD):
@@ -374,7 +387,9 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
                  "poa_active": len(poas), "poa_expiring": sum(1 for p in poas if p.valid_to and (p.valid_to - today).days <= 30),
                  "poa_no_scan": sum(1 for p in poas if not any(f.get("kind") == "signed_scan" for f in (p.files or []))),
                  "contracts_review": db.scalar(select(func.count()).select_from(Contract).where(Contract.status.in_(("legal_review", "approval")))) or 0,
-                 "contracts_signing": cin["counts"]["signing"], "contracts_expiring": cin["counts"]["expiring"], "contracts_no_scan": cin["counts"]["no_scan"], "contracts_visas": cin["counts"]["visas"]}
+                 "contracts_signing": cin["counts"]["signing"], "contracts_expiring": cin["counts"]["expiring"], "contracts_no_scan": cin["counts"]["no_scan"], "contracts_visas": cin["counts"]["visas"],
+                 "claims_open": sum(1 for cl in claims), "claims_signing": sum(1 for cl in claims if cl.status == "signing"),
+                 "claims_answer_overdue": sum(1 for cl in claims if cl.answer_due and cl.answer_due < today and cl.status in ("sent", "received"))}
 
     # ---------------- раскладка
     default_order = ROLE_BLOCKS.get(role, ROLE_BLOCKS["observer"])
