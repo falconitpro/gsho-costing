@@ -23,7 +23,7 @@ type Data = {
   money: { curve: { week: string; label: string; in: number; out: number; net: number; cum: number }[]; receivable_sum: number; receivable_count: number; min_cum: number; min_week: string } | null;
   funnel: { code: string; title: string; count: number; parts?: number }[]; team: { name: string; open: number; exec: number; overdue: number; share: number }[];
   notifications: { id: string; text: string; at: string | null; read: boolean; deal_id: string | null }[];
-  fx: Record<string, { rate: number; on: string }>; legal: { lawyer_review: number; commercial_review: number; poa_active: number; poa_expiring: number; poa_no_scan: number;
+  legal: { lawyer_review: number; commercial_review: number; poa_active: number; poa_expiring: number; poa_no_scan: number;
     contracts_review: number; contracts_signing: number; contracts_expiring: number; contracts_no_scan: number; contracts_visas: number; claims_open?: number; claims_signing?: number; claims_answer_overdue?: number } | null;
   fin: boolean; quick: { title: string; url: string }[];
 };
@@ -210,7 +210,6 @@ export default function WorkplacePage({ me }: { me: Me }) {
         <div key={code} data-block={code} className="wp-card wp-dark">
           <div className="wp-head"><h2>Быстрые действия</h2></div>
           <div className="wp-grid2">{d.quick.map((q) => <button key={q.url} className="wp-qa" onClick={() => nav(q.url)}>{q.title}</button>)}</div>
-          {Object.keys(d.fx).length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 12 }}>Курс ЦБ: {Object.entries(d.fx).map(([k, v]) => `${k} ${v.rate.toLocaleString("ru-RU")}`).join(" · ")}</div>}
         </div>);
       default: return null;
     }

@@ -15,7 +15,7 @@ from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import ROLE_TITLES, Role
 from ..core.workflow import OPEN_STATUSES, STATUS_TITLES, DealStatus
 from ..db import get_db
-from ..models import Contract, Deal, ExecutionStage, FxRate, LegalPackage, NotificationLog, PowerOfAttorney, Task, User
+from ..models import Contract, Deal, ExecutionStage, LegalPackage, NotificationLog, PowerOfAttorney, Task, User
 from ..services import settings_service
 from ..services.deal_service import audit
 from .common import can_see_deal
@@ -396,14 +396,9 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
     if cands:
         focus = sorted(cands, key=lambda x: x[0])[0][1]
 
-    # ---------------- уведомления, курсы, юр. блок
+    # ---------------- уведомления, юр. блок (курсы ЦБ — в шапке, /api/refs/fx-today)
     notes = db.scalars(select(NotificationLog).where(NotificationLog.user_id == user.id, NotificationLog.channel == "app").order_by(NotificationLog.at.desc()).limit(8)).all()
     notifications = [{"id": n.id, "text": n.text, "at": n.at.isoformat() if n.at else None, "read": n.read_at is not None, "deal_id": n.deal_id, "event": n.event} for n in notes]
-    fx = {}
-    for cur in ("USD", "CNY", "EUR"):
-        r = db.scalars(select(FxRate).where(FxRate.currency == cur).order_by(FxRate.on.desc()).limit(1)).first()
-        if r:
-            fx[cur] = {"rate": round(r.rate, 2), "on": r.on.isoformat()}
     legal = None
     if user.has(Role.LAWYER, Role.GD):
         pk = db.scalars(select(LegalPackage.status)).all()
@@ -428,7 +423,7 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
             "date": {"iso": today.isoformat(), "text": f"{WEEKDAYS[today.weekday()]}, {today.day} {MONTHS[today.month - 1]}", "weekday": today.weekday()},
             "layout": {"order": order, "hidden": hidden, "required": required, "available": [{"code": b, "title": BLOCKS[b]} for b in default_order], "can_lock": user.has(Role.GD), "role_required": all_required if user.has(Role.GD) else {}, "roles": {k: ROLE_TITLES.get(Role(k), k) for k in ROLE_BLOCKS}, "role_blocks": ROLE_BLOCKS, "all_blocks": BLOCKS},
             "kpis": kpis, "focus": focus, "today": {"events": today_events, "week": week}, "upcoming": upcoming, "tasks": tasks[:10], "tasks_total": len(tasks), "tasks_overdue": len(overdue_tasks),
-            "deals": deal_rows, "approvals": approvals, "attention": attention, "money": money, "funnel": funnel, "team": team, "notifications": notifications, "fx": fx, "legal": legal,
+            "deals": deal_rows, "approvals": approvals, "attention": attention, "money": money, "funnel": funnel, "team": team, "notifications": notifications, "legal": legal,
             "fin": fin, "quick": _quick(user)}
 
 
