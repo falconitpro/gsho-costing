@@ -137,6 +137,11 @@ def test_purchase_package_flow():
         assert len(ctr) == 1 and ctr[0]["status"] == "draft" and ctr[0]["amount"] == 5200000.0 and ctr[0]["cp_id"] == f1["id"] and ctr[0]["terms_text"].startswith("30 %")
         full = c.get(f"/api/legal/contracts/{ctr[0]['id']}", headers=H(LAW)).json()
         assert full["package_id"] == pkg2["id"] and {p["reason"] for p in full["penalties"]} == {"late_delivery", "late_payment"} and full["liability_cap_pct"] == 10
+        # пакеты показываются в карточке договора (реестр пакетов убран): все версии, привязанная — первой, с доступными действиями
+        cp = c.get(f"/api/legal/contracts/{ctr[0]['id']}/packages", headers=H(MGR)).json()
+        assert cp["items"][0]["id"] == pkg2["id"] and cp["items"][0]["linked"] and {x["id"] for x in cp["items"]} >= {pkg["id"], pkg2["id"]}
+        assert any(a["to"] == "lawyer_review" for a in cp["items"][0]["actions"])
+        assert next(x for x in c.get("/api/legal/contracts", headers=H(LAW)).json()["items"] if x["id"] == ctr[0]["id"])["package"]["version_no"] == 2
         lst = c.get(f"{base}/packages", headers=H(MGR)).json()["items"]
         assert next(p for p in lst if p["id"] == pkg["id"])["status"] == "superseded"
 

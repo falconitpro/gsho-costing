@@ -200,8 +200,8 @@ export default function WorkplacePage({ me }: { me: Me }) {
             <Link to="/legal?tab=claims" className="wp-mini"><b style={{ color: d.legal.claims_answer_overdue ? "var(--bad)" : "inherit" }}>{d.legal.claims_answer_overdue ?? 0}</b><small>истёк срок ответа</small></Link>
           </div>
           <div className="wp-grid2">
-            <Link to="/legal?tab=packages" className="wp-mini"><b style={{ color: d.legal.lawyer_review ? "var(--warn)" : "inherit" }}>{d.legal.lawyer_review}</b><small>на проверке юриста</small></Link>
-            <Link to="/legal?tab=packages" className="wp-mini"><b>{d.legal.commercial_review}</b><small>коммерческое согласование</small></Link>
+            <Link to="/legal?tab=contracts" className="wp-mini"><b style={{ color: d.legal.lawyer_review ? "var(--warn)" : "inherit" }}>{d.legal.lawyer_review}</b><small>на проверке юриста</small></Link>
+            <Link to="/legal?tab=contracts" className="wp-mini"><b>{d.legal.commercial_review}</b><small>коммерческое согласование</small></Link>
             <Link to="/legal?tab=poa" className="wp-mini"><b style={{ color: d.legal.poa_expiring ? "var(--warn)" : "inherit" }}>{d.legal.poa_expiring}</b><small>доверенностей истекает</small></Link>
             <Link to="/legal?tab=poa" className="wp-mini"><b>{d.legal.poa_no_scan}</b><small>без подписанного скана</small></Link>
           </div>

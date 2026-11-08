@@ -265,7 +265,7 @@ def payload(db: Session, c: Contract, names: Optional[dict] = None, ents: Option
            "has_scan": any(f.get("kind") == "signed_scan" for f in (c.files or [])), "curator_id": c.curator_id, "curator_name": names.get(c.curator_id or "", ""),
            "source": c.source, "updated_at": c.updated_at.isoformat() if c.updated_at else None,
            "terms_text": "; ".join(term_text(l) for l in (c.payment_terms or [])),
-           "pending": [x["title"] for x in pending_steps(c)]}
+           "pending": [x["title"] for x in pending_steps(c)], "package": _pkg_brief(db, c)}
     if not full:
         return out
     chk = check(c)
@@ -281,6 +281,14 @@ def payload(db: Session, c: Contract, names: Optional[dict] = None, ents: Option
                 "amends": amend_changes(db, c) if c.doc_type == "amendment" else [], "obligations": obligations(db, c, today) if c.status in LOCKED else None,
                 "children": [payload(db, x, names, ents, full=False) for x in db.scalars(select(Contract).where(Contract.parent_id == c.id).order_by(Contract.created_at)).all()]})
     return out
+
+
+def _pkg_brief(db: Session, c: Contract) -> Optional[dict]:
+    p = db.get(LegalPackage, c.package_id) if c.package_id else None
+    if p is None:
+        return None
+    from .legal_packages import STATUS_TITLES as PST
+    return {"id": p.id, "version_no": p.version_no, "status": p.status, "status_title": PST.get(p.status, p.status)}
 
 
 def hist(c: Contract, user_id: Optional[str], action: str, comment: str = "", changes: Optional[dict] = None) -> None:
@@ -355,6 +363,7 @@ def upsert_from_package(db: Session, pkg: LegalPackage, deal: Deal, user_id: Opt
                      law={"claim_days": 30, "pre_trial": True}, cp_number=(snap.get("contract") or {}).get("number") or "")
         db.add(c)
     if c.status in LOCKED:
+        c.package_id = c.package_id or pkg.id
         return c
     c.package_id, c.own_profile_id, c.own_bank_id, c.cp_profile_id = pkg.id, pkg.own_profile_id, pkg.own_bank_id, pkg.cp_profile_id
     c.amount, c.currency, c.payment_terms = amount, (cur or "RUB").upper(), lines
@@ -839,3 +848,37 @@ def money_rows(db: Session, today: date, horizon: date) -> list[dict]:
                             "direction": "in" if x["payer"] == "cp" else "out", "on": max(on, today), "amount": x["amount"], "currency": c.currency,
                             "overdue_days": 0, "url": f"/legal?tab=contracts&open={c.id}", "source": "penalty"})
     return out
+
+
+
+# ------------------------------------------------------------------ пакеты документов внутри карточки договора (реестр пакетов убран 08.11.2026)
+def link_packages(db: Session) -> int:
+    """Каждый действующий пакет сделки — при своём договоре: нет договора → проект из пакета; подписанный — только привязка. Идемпотентно."""
+    n = 0
+    for pkg in db.scalars(select(LegalPackage).where(LegalPackage.status.not_in(("superseded", "archived"))).order_by(LegalPackage.created_at)).all():
+        deal = db.get(Deal, pkg.deal_id)
+        if deal is None:
+            continue
+        direction = "income" if pkg.kind == "sale" else "expense"
+        c = db.scalars(select(Contract).where(Contract.deal_id == deal.id, Contract.cp_id == pkg.counterparty_id, Contract.doc_type == "contract", Contract.direction == direction)).first()
+        if c is not None and c.package_id:
+            continue
+        upsert_from_package(db, pkg, deal, None)
+        n += 1
+    return n
+
+
+def contract_packages(db: Session, c: Contract) -> list[LegalPackage]:
+    """Пакеты договора: привязанный и все версии пакетов той же сделки, того же контрагента и направления (новые сверху)."""
+    if not c.deal_id and not c.package_id:
+        return []
+    kind = "sale" if c.direction == "income" else "purchase"
+    rows = []
+    if c.deal_id and c.cp_id:
+        rows = db.scalars(select(LegalPackage).where(LegalPackage.deal_id == c.deal_id, LegalPackage.counterparty_id == c.cp_id, LegalPackage.kind == kind)
+                          .order_by(LegalPackage.created_at.desc())).all()
+    if c.package_id and all(p.id != c.package_id for p in rows):
+        p = db.get(LegalPackage, c.package_id)
+        if p is not None:
+            rows = [p, *rows]
+    return list(rows)
