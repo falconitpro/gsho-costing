@@ -43,12 +43,16 @@ def _can_edit(user: CurrentUser, c: Contract) -> bool:
     return user.has(*EDIT_ROLES) or c.curator_id == user.id or c.created_by == user.id
 
 
+def _plain(v):
+    return v.isoformat() if isinstance(v, date) else v
+
+
 def _out(db: Session, user: CurrentUser, c: Contract) -> dict:
     """Карточка + что может сделать текущий пользователь (визы, регистрация подписанного, подпись)."""
     mine = c.curator_id == user.id or c.created_by == user.id
     return {**svc.payload(db, c), "can_edit": _can_edit(user, c), "can_edit_number": user.has(Role.GD, Role.CD),
             "my_steps": [x["title"] for x in svc.user_steps(c, user.roles)], "can_register": user.has(Role.LAWYER, Role.GD),
-            "can_sign": user.has(Role.LAWYER, Role.GD, Role.CD, Role.FD) or mine}
+            "can_sign": user.has(Role.LAWYER, Role.GD, Role.CD, Role.FD) or mine, "can_correct": c.status in svc.LOCKED and user.has(Role.GD)}
 
 
 def _get(db: Session, cid: str, user: CurrentUser) -> Contract:
@@ -110,6 +114,7 @@ class ContractIn(BaseModel):
     curator_id: Optional[str] = None
     lawyer_id: Optional[str] = None
     client_order: Optional[bool] = None
+    correction_reason: Optional[str] = None     # ЗГД исправляет ошибку в подписанном договоре — причина обязательна
 
 
 TERMS_FIELDS = {"client_order", "kind", "direction", "amount", "currency", "vat_mode", "vat_rate", "price_type", "fx_clause", "payment_terms", "performance_terms", "penalties", "liability_cap_pct",
@@ -266,13 +271,16 @@ def update_contract(cid: str, body: ContractIn, db: Session = Depends(get_db), u
     data = body.model_dump(exclude_unset=True)
     for k in ("doc_type", "parent_id"):
         data.pop(k, None)
+    reason = (data.pop("correction_reason", None) or "").strip()
     only_number = bool(data) and all(k in NUMBER_FIELDS for k in data)
     if not (_can_edit(user, c) or (c.status in svc.LOCKED and only_number and user.has(Role.CD))):
         raise HTTPException(403, "Править договор могут куратор, юрист, ФД, КД и ЗГД; подписанный — юрист и ЗГД, условия — только доп. соглашением")
     if c.status in svc.LOCKED:
         bad = [k for k in data if k not in LOCKED_OK and k not in NUMBER_FIELDS and getattr(c, k) != data[k]]
-        if bad:
-            raise HTTPException(409, "Договор подписан — условия меняются доп. соглашением")
+        if bad and not user.has(Role.GD):
+            raise HTTPException(409, "Договор подписан — условия меняются доп. соглашением; ошибку в данных исправляет ЗГД")
+        if bad and len(reason) < 5:
+            raise HTTPException(422, "Исправление подписанного договора: укажите, какая ошибка исправляется")
         num = [k for k in data if k in NUMBER_FIELDS and getattr(c, k) != data[k]]
         if num and not user.has(Role.GD, Role.CD):
             raise HTTPException(403, "Номер и дату подписанного договора меняет только ЗГД или КД")
@@ -281,7 +289,19 @@ def update_contract(cid: str, body: ContractIn, db: Session = Depends(get_db), u
         terms = [k for k in data if k in TERMS_FIELDS and getattr(c, k) != data[k]]
         if terms and not user.has(Role.LAWYER, Role.GD):
             raise HTTPException(409, "Договор на согласовании: условия меняют юрист или ЗГД. Чтобы поправить самому — верните договор на доработку")
+    correction = c.status in svc.LOCKED and user.has(Role.GD) and bool(reason)
+    before = {k: _plain(getattr(c, k)) for k in data} if correction else {}
     changes = _apply(c, data, db)
+    if correction and changes:
+        after = {k: _plain(getattr(c, k)) for k in changes}
+        svc.hist(c, user.id, "correction", f"исправление ошибки (ЗГД): {reason} · поля: " + ", ".join(changes.keys()), {k: {"from": before.get(k), "to": after[k]} for k in changes})
+        audit(db, user.id, c.deal_id, "contract", c.id, "correction", before={k: before.get(k) for k in changes}, after={**after, "reason": reason})
+        svc.notify_users(db, c, [c.curator_id or "", *[u.id for u in svc.role_users(db, "lawyer")]],
+                         f"ЗГД исправил данные подписанного договора {c.number} ({svc.cp_display(db, c)}): {reason}")
+        if "signed_on" in changes or "cp_number" in changes:
+            svc.apply_signed_to_deal(db, c, overwrite=True)
+        db.commit()
+        return _out(db, user, c)
     if in_route and any(k in TERMS_FIELDS for k in changes):
         if svc.reset_visas(db, c, user.id, "изменены условия: " + ", ".join(k for k in changes if k in TERMS_FIELDS)):
             svc.notify_pending(db, c)
