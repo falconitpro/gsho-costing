@@ -63,6 +63,10 @@ def test_request_flow(client):
     r = _ok(client.post("/api/parts/requests", headers=H(MGR), json={"client_id": cl["id"], "machine": "Sandvik LH410", "urgent": True,
                                                                     "lines_text": text}), 201)
     assert r["number"].startswith("ЗЧ-") and len(r["lines"]) == 4
+    # единый список сделок: общий этап и блок (новая заявка — «Запрос», в работе), менеджер и сделка машины
+    assert (r["stage"], r["block"], r["deal"]) == ("request", "work", None)
+    lst = next(x for x in _ok(client.get("/api/parts/requests?open_only=false", headers=H(MGR))) if x["id"] == r["id"])
+    assert (lst["stage"], lst["stage_title"], lst["block"], lst["manager_name"] != "", lst["client_id"]) == ("request", "Запрос", "work", True, cl["id"])
     L = {l["no"]: l for l in r["lines"]}
     assert (L[1]["part"]["id"], L[1]["match_kind"], L[1]["qty"]) == (a["id"], "article", 2)       # «RQ 7A-1» = «RQ-7A-1»
     assert (L[2]["part"]["id"], L[2]["match_kind"]) == (b["id"], "oem")

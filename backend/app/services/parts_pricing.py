@@ -22,6 +22,30 @@ LINE_STATUS = {
 CLOSED_LINE = {"shipped", "unavailable", "cancelled"}
 
 
+# общие этапы сделок (ГШО и запчасти в одном списке «Сделки»): запрос → расчёт и согласование → КП у клиента → исполнение → закрыта
+STAGE_TITLES = {"request": "Запрос", "calc": "Расчёт и согласование", "kp": "КП у клиента", "execution": "Исполнение", "closed": "Закрыта"}
+_LINE_STAGE = {"new": "request", "rfq": "request", "quoted": "calc", "in_kp": "kp", "ordered": "execution", "po": "execution", "transit": "execution", "in_stock": "execution", "shipped": "closed"}
+_STAGE_ORDER = ["request", "calc", "kp", "execution", "closed"]
+
+
+def request_stage(lines: Iterable[Mapping[str, Any]], closed: str = "", approval_needed: bool = False) -> dict[str, Any]:
+    """Этап заявки = самый ранний этап среди её открытых строк; блок списка сделок: в работе / выиграно / проиграно."""
+    sts = [l.get("status") or "new" for l in lines if (l.get("status") or "new") not in ("cancelled", "unavailable", "replaced")]
+    if closed:
+        stage = "closed"
+        block = "won" if closed == "done" else "lost"
+    elif not sts:
+        stage, block = "request", "work"
+    else:
+        stage = min((_LINE_STAGE.get(s, "request") for s in sts), key=_STAGE_ORDER.index)
+        if stage == "closed":
+            stage = "execution"                      # всё отгружено, но заявка не закрыта — ещё исполнение
+        if stage == "request" and approval_needed:
+            stage = "calc"
+        block = "won" if stage == "execution" else "work"
+    return {"stage": stage, "stage_title": STAGE_TITLES[stage], "block": block}
+
+
 def threshold_pct(cost_rub: Optional[float], bands: Iterable[Mapping[str, Any]] = DEFAULT_BANDS) -> Optional[float]:
     if cost_rub is None:
         return None

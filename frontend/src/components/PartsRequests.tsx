@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
 
@@ -15,6 +16,7 @@ type Line = {
 type Req = {
   id: string; number: string; client_id: string; client_name: string; manager_name: string; machine: string; urgent: boolean; warranty: boolean;
   contact: string; channel: string; comment: string; closed: string; close_reason: string; created_at: string; status_text: string;
+  stage?: string; stage_title?: string; deal?: { id: string; number: string } | null;
   lines: Line[]; approvals: { level: string; name: string; at: string; comment: string }[];
   kps: Kp[];
   summary: { lines: number; sum_rub: number; profit_rub?: number | null; margin_pct?: number | null; handling_fee_rub: number; approval_needed: string | null; uncosted_lines: number };
@@ -36,21 +38,16 @@ export default function PartsRequests({ me }: { me: Me }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [openOnly, setOpenOnly] = useState(true);
   const [q, setQ] = useState("");
-  const [cur, setCur] = useState<Req | null>(null);
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState("");
   const [clients, setClients] = useState<Ref[]>([]);
-  const seesCost = can(me, "cost");
-  const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
+  void me;
 
   const load = () => api.get<Row[]>(`/api/parts/requests?open_only=${openOnly}&q=${encodeURIComponent(q)}`).then(setRows).catch((e) => setMsg((e as Error).message));
   useEffect(() => { api.get<Meta>("/api/parts/requests/meta").then(setMeta); api.get<Ref[]>("/api/refs/clients").then(setClients).catch(() => setClients([])); }, []);
   useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [openOnly, q]);
-  const open = (id: string) => api.get<Req>(`/api/parts/requests/${id}`).then((r) => { setCur(r); setCreating(false); setMsg(""); });
-  async function act<T>(fn: () => Promise<T>, ok = "") {
-    try { const r = (await fn()) as unknown as Req; if (r && (r as Req).lines) setCur(r); if (ok) setMsg(ok); load(); }
-    catch (e) { setMsg((e as Error).message); }
-  }
+  const nav = useNavigate();
+  const open = (id: string) => nav(`/deals/parts/${id}`);
 
   return (
     <>
@@ -59,24 +56,23 @@ export default function PartsRequests({ me }: { me: Me }) {
         <div className="row" style={{ flexWrap: "wrap" }}>
           <input placeholder="номер, клиент, машина" value={q} onChange={(e) => setQ(e.target.value)} />
           <label className="row"><input type="checkbox" checked={openOnly} onChange={(e) => setOpenOnly(e.target.checked)} /> только открытые</label>
-          {meta?.can_create && <button className="btn add" style={{ marginLeft: "auto" }} onClick={() => { setCreating(true); setCur(null); }}>Заявка</button>}
+          {meta?.can_create && <button className="btn add" style={{ marginLeft: "auto" }} onClick={() => setCreating(true)}>Заявка</button>}
         </div>
         <table style={{ marginTop: 8 }}>
           <thead><tr><th>Номер</th><th>Дата</th><th>Клиент</th><th>Машина</th><th className="num">Строк</th><th>Статус</th><th className="num">Сумма, ₽</th></tr></thead>
           <tbody>{rows.map((r) => (
-            <tr key={r.id} style={{ cursor: "pointer", background: cur?.id === r.id ? "var(--accent-soft)" : undefined }} onClick={() => open(r.id)}>
+            <tr key={r.id} style={{ cursor: "pointer" }} onClick={() => open(r.id)}>
               <td><b>{r.number}</b>{r.urgent && <span className="badge bad" style={{ marginLeft: 4 }}>машина стоит</span>}</td><td>{fmtDate(r.created_at)}</td>
               <td>{r.client_name}</td><td>{r.machine}</td><td className="num">{r.lines}</td><td>{r.status_text}</td><td className="num">{r.price_rub ? fmtRub(r.price_rub) : "—"}</td></tr>))}
             {rows.length === 0 && <tr><td colSpan={7} className="muted">Заявок нет</td></tr>}</tbody>
         </table>
       </div>
-      {creating && meta && <CreateForm meta={meta} clients={clients} onCreated={(r) => { setCreating(false); setCur(r); load(); }} onCancel={() => setCreating(false)} setMsg={setMsg} />}
-      {cur && meta && <RequestCard r={cur} meta={meta} seesCost={seesCost} approver={has("cd", "fd", "gd")} act={act} />}
+      {creating && meta && <CreateForm meta={meta} clients={clients} onCreated={(r) => { setCreating(false); nav(`/deals/parts/${r.id}`); }} onCancel={() => setCreating(false)} setMsg={setMsg} />}
     </>
   );
 }
 
-function CreateForm({ meta, clients, onCreated, onCancel, setMsg }: { meta: Meta; clients: Ref[]; onCreated: (r: Req) => void; onCancel: () => void; setMsg: (s: string) => void }) {
+export function CreateForm({ meta, clients, onCreated, onCancel, setMsg }: { meta: Meta; clients: Ref[]; onCreated: (r: Req) => void; onCancel: () => void; setMsg: (s: string) => void }) {
   const [f, setF] = useState({ client_id: "", contact: "", channel: "email", machine: "", urgent: false, warranty: false, comment: "", lines_text: "" });
   async function save() {
     try { onCreated(await api.post<Req>("/api/parts/requests", f)); setMsg("Заявка создана, строки подобраны по каталогу"); }
@@ -122,7 +118,7 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between" }}>
-        <h2 style={{ margin: 0 }}>{r.number} · {r.client_name} {r.urgent && <span className="badge bad">машина стоит</span>} {r.warranty && <span className="badge">гарантия</span>}</h2>
+        <h2 style={{ margin: 0 }}>{r.number} · {r.client_name} {r.urgent && <span className="badge bad">машина стоит</span>} {r.warranty && <span className="badge">гарантия</span>}{r.stage_title && <span className="badge" style={{ marginLeft: 6 }}>{r.stage_title}</span>}{r.deal && <Link to={`/deals/${r.deal.id}`} className="badge" style={{ marginLeft: 6 }} title="сделка ГШО, по которой поставлена машина">сделка {r.deal.number}</Link>}</h2>
         <span className="muted">{r.status_text}</span>
       </div>
       <p className="muted" style={{ marginTop: 4 }}>{[r.machine, r.contact, meta.channels[r.channel], r.manager_name && `менеджер ${r.manager_name}`].filter(Boolean).join(" · ")}{r.comment && ` · ${r.comment}`}</p>
@@ -395,4 +391,26 @@ function ClaimFromRequest({ r }: { r: Req }) {
       {msg && <span className="muted">{msg}</span>}
     </div>
   );
+}
+
+
+/** Карточка заявки на запчасти по своему адресу /deals/parts/:id — единый раздел «Сделки». */
+export function PartsRequestView({ me, id }: { me: Me; id: string }) {
+  const [meta, setMeta] = useState<Meta | null>(null);
+  const [cur, setCur] = useState<Req | null>(null);
+  const [msg, setMsg] = useState("");
+  const seesCost = can(me, "cost");
+  const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
+  useEffect(() => { api.get<Meta>("/api/parts/requests/meta").then(setMeta); }, []);
+  useEffect(() => { api.get<Req>(`/api/parts/requests/${id}`).then(setCur).catch((e) => setMsg((e as Error).message)); }, [id]);
+  async function act<T>(fn: () => Promise<T>, ok = "") {
+    try { const r = (await fn()) as unknown as Req; if (r && r.lines) setCur(r); else setCur(await api.get<Req>(`/api/parts/requests/${id}`)); if (ok) setMsg(ok); }
+    catch (e) { setMsg((e as Error).message); }
+  }
+  return (
+    <>
+      <div className="page-head"><Link to="/deals?type=parts" className="muted">← Сделки</Link><h1 style={{ margin: 0 }}>Заявка на запчасти {cur?.number || ""}</h1></div>
+      {msg && <div className="alert info" onClick={() => setMsg("")}>{msg}</div>}
+      {cur && meta ? <RequestCard r={cur} meta={meta} seesCost={seesCost} approver={has("cd", "fd", "gd")} act={act} /> : !msg && <div className="card">Загрузка…</div>}
+    </>);
 }
