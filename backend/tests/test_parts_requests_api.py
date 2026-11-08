@@ -67,6 +67,13 @@ def test_request_flow(client):
     assert (r["stage"], r["block"], r["deal"]) == ("request", "work", None)
     lst = next(x for x in _ok(client.get("/api/parts/requests?open_only=false", headers=H(MGR))) if x["id"] == r["id"])
     assert (lst["stage"], lst["stage_title"], lst["block"], lst["manager_name"] != "", lst["client_id"]) == ("request", "Запрос", "work", True, cl["id"])
+    # воронка, доска и деньги считают заявки вместе со сделками ГШО
+    wp = _ok(client.get("/api/workplace", headers=H(CD)))
+    assert next(f for f in wp["funnel"] if f["code"] == "request")["parts"] >= 1 and "ЗЧ" in wp["kpis"][0]["sub"]
+    assert any(x["id"] == r["id"] and x["url"] == f"/deals/parts/{r['id']}" for x in wp["deals"])          # «машина стоит» — требует действия
+    board = _ok(client.get("/api/board", headers=H(CD)))
+    assert any(x["id"] == r["id"] and x["overdue"] for x in board["parts_request"]["deals"]) and board["parts_request"]["kind"] == "parts"
+    assert "parts" in _ok(client.get("/api/summary/money", headers=H(FD)))
     L = {l["no"]: l for l in r["lines"]}
     assert (L[1]["part"]["id"], L[1]["match_kind"], L[1]["qty"]) == (a["id"], "article", 2)       # «RQ 7A-1» = «RQ-7A-1»
     assert (L[2]["part"]["id"], L[2]["match_kind"]) == (b["id"], "oem")

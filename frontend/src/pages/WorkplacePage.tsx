@@ -9,7 +9,7 @@ import type { Me } from "../types";
 
 type Ev = { on: string; time: string; title: string; sub: string; tone: string; url: string; kind: string };
 type TaskRow = { id: string; title: string; due: string; days_left: number; overdue: boolean; deal_id: string; deal_number: string; client_name: string; priority: string; as_deputy: boolean };
-type DealRow = { id: string; number: string; client_name: string; site: string; equipment: string; status: string; status_title: string; price_rub: number | null; manager_name: string; action: string; tone: string; exec: { done: number; total: number; delay: number } | null; priority: string };
+type DealRow = { id: string; number: string; client_name: string; site: string; equipment: string; status: string; status_title: string; price_rub: number | null; manager_name: string; action: string; tone: string; exec: { done: number; total: number; delay: number } | null; priority: string; url?: string };
 type Approval = { kind: string; title: string; sub: string; url: string; waiting_since: string | null; tone: string };
 type Att = { title: string; sub: string; url: string; tone: string };
 type Data = {
@@ -21,7 +21,7 @@ type Data = {
   today: { events: Ev[]; week: { date: string; wd: string; day: number; today: boolean; count: number; tones: string[] }[] };
   upcoming: Ev[]; tasks: TaskRow[]; tasks_total: number; tasks_overdue: number; deals: DealRow[]; approvals: Approval[]; attention: Att[];
   money: { curve: { week: string; label: string; in: number; out: number; net: number; cum: number }[]; receivable_sum: number; receivable_count: number; min_cum: number; min_week: string } | null;
-  funnel: { code: string; title: string; count: number }[]; team: { name: string; open: number; exec: number; overdue: number; share: number }[];
+  funnel: { code: string; title: string; count: number; parts?: number }[]; team: { name: string; open: number; exec: number; overdue: number; share: number }[];
   notifications: { id: string; text: string; at: string | null; read: boolean; deal_id: string | null }[];
   fx: Record<string, { rate: number; on: string }>; legal: { lawyer_review: number; commercial_review: number; poa_active: number; poa_expiring: number; poa_no_scan: number;
     contracts_review: number; contracts_signing: number; contracts_expiring: number; contracts_no_scan: number; contracts_visas: number; claims_open?: number; claims_signing?: number; claims_answer_overdue?: number } | null;
@@ -134,7 +134,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
           {d.deals.length > 0 && <div style={{ overflowX: "auto" }}><table className="wp-table">
             <thead><tr><th>Сделка</th><th>Клиент</th><th>Статус</th>{d.fin && <th className="num">Сумма</th>}<th>Что сделать</th></tr></thead>
             <tbody>{d.deals.map((r) => (
-              <tr key={r.id} onClick={() => nav(`/deals/${r.id}`)}>
+              <tr key={r.id} onClick={() => nav(r.url || `/deals/${r.id}`)}>
                 <td><b>{r.number}</b>{r.exec && <div className="muted" style={{ fontSize: 11 }}>этапы {r.exec.done}/{r.exec.total}{r.exec.delay > 0 ? ` · +${r.exec.delay} дн.` : ""}</div>}</td>
                 <td>{r.client_name}<div className="muted" style={{ fontSize: 11 }}>{r.equipment}</div></td>
                 <td><span className="badge" style={{ fontSize: 11 }}>{r.status_title}</span></td>
@@ -164,7 +164,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
       case "funnel": { const mx = Math.max(1, ...d.funnel.map((f) => f.count)); return (
         <div key={code} data-block={code} className="wp-card">
           <div className="wp-head"><h2>Воронка квартала</h2><span className="muted" style={{ fontSize: 12 }}>{d.user.role === "manager" ? "по моим сделкам" : "по всем сделкам"}</span></div>
-          <div className="wp-funnel">{d.funnel.map((f) => <div key={f.code}><b>{f.count}</b><div className="bar" style={{ height: `${Math.max(6, Math.round(80 * f.count / mx))}px`, background: f.code === "won" ? "#86efac" : f.code === "approval" ? "#fdba74" : "#d4d4d8" }} /><small>{f.title}</small></div>)}</div>
+          <div className="wp-funnel">{d.funnel.map((f) => <div key={f.code}><b>{f.count}</b><div className="bar" style={{ height: `${Math.max(6, Math.round(80 * f.count / mx))}px`, background: f.code === "won" ? "#86efac" : f.code === "approval" ? "#fdba74" : "#d4d4d8" }} /><small>{f.title}{f.parts ? <span className="muted"> · ЗЧ {f.parts}</span> : null}</small></div>)}</div>
         </div>); }
       case "team": return d.team.length > 0 ? (
         <div key={code} data-block={code} className="wp-card">

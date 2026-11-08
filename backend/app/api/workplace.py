@@ -126,6 +126,11 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
     lead = user.has(Role.CD, Role.GD, Role.FD)
     deals = _deals(db, user)
     open_deals = [d for d in deals if d.status in OPEN_STATUSES]
+    from ..services import parts_deals
+    parts = parts_deals.rows(db, user)
+    mine_parts = [p for p in parts if user.has(Role.CD, Role.GD, Role.FD, Role.OBSERVER) or p["manager_id"] == user.id or p["manager_id"] in user.acting_for]
+    open_parts = [p for p in parts if p["block"] == "work"]
+    my_open_parts = [p for p in open_parts if role != "manager" or p["manager_id"] == user.id or p["manager_id"] in user.acting_for]
     exec_deals = [d for d in deals if d.status in (DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION)]
     tasks = _my_tasks(db, user, today)
     tasks_by_deal: dict[str, list[dict]] = {}
@@ -206,6 +211,15 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
         deal_rows.append({"id": d.id, "number": d.number, "client_name": d.client.name if d.client else "", "site": d.site, "equipment": _equipment(d), "status": d.status.value,
                           "status_title": STATUS_TITLES.get(d.status, d.status.value), "price_rub": _price(d) if fin else None, "manager_name": names.get(d.manager_id, ""),
                           "action": action, "tone": tone, "exec": {"done": r["done"], "total": r["total"], "delay": r["delay"]} if r else None, "priority": d.priority})
+    for p in my_open_parts:
+        age = (today - parts_deals.as_of(p)).days
+        action, tone = ("машина стоит — срочно подобрать и отправить КП", "bad") if p["urgent"] and p["stage"] in ("request", "calc") else \
+            (f"нет движения {age} дн.", "warn") if age >= 5 and p["stage"] in ("request", "calc") else ("", "")
+        if not action and not lead:
+            continue
+        deal_rows.append({"id": p["id"], "number": p["number"], "client_name": p["client_name"], "site": "", "equipment": p["machine"] or f"{p['lines']} поз.", "status": f"parts:{p['stage']}",
+                          "status_title": "ЗЧ · " + p["stage_title"], "price_rub": p["price_rub"] if fin else None, "manager_name": p["manager_name"],
+                          "action": action, "tone": tone, "exec": None, "priority": "urgent" if p["urgent"] else "normal", "url": p["url"]})
     rank = {"bad": 0, "warn": 1, "info": 2, "ok": 3, "": 4}
     deal_rows.sort(key=lambda x: (rank.get(x["tone"], 5), x["number"]))
     deal_rows = deal_rows[:8]
@@ -314,15 +328,19 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
         money = {"curve": curve, "receivable_sum": round(sum(r["amount"] for r in receivables if r["currency"] == "RUB")), "receivable_count": len(receivables),
                  "min_cum": min((c["cum"] for c in curve), default=0), "min_week": min(curve, key=lambda c: c["cum"])["label"] if curve else ""}
 
-    # ---------------- воронка и команда
+    # ---------------- воронка и команда (ГШО + заявки на запчасти — единый раздел «Сделки»)
     mine = [d for d in deals if user.has(Role.CD, Role.GD, Role.FD, Role.OBSERVER) or d.manager_id == user.id or d.manager_id in user.acting_for]
     q_start = date(today.year, 3 * ((today.month - 1) // 3) + 1, 1)
     won_q = [d for d in mine if d.status in (DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED) and (d.contract_signed_at or (d.updated_at.date() if d.updated_at else today)) >= q_start]
-    funnel = [{"code": "request", "title": "запросы", "count": sum(1 for d in mine if d.status in (DealStatus.DRAFT, DealStatus.LOGISTICS_CALC, DealStatus.SERVICE_CALC))},
-              {"code": "calc", "title": "расчёт", "count": sum(1 for d in mine if d.status in (DealStatus.CALC_READY, DealStatus.REWORK))},
-              {"code": "approval", "title": "согласование", "count": sum(1 for d in mine if d.status in (DealStatus.CD_APPROVAL, DealStatus.FD_VISA, DealStatus.GD_VISA))},
-              {"code": "kp", "title": "КП", "count": sum(1 for d in mine if d.status in (DealStatus.APPROVED, DealStatus.KP_SENT))},
-              {"code": "won", "title": "выиграно", "count": len(won_q)}]
+    won_q_parts = [p for p in mine_parts if p["block"] == "won" and parts_deals.as_of(p) >= q_start]
+    pst = lambda *st: sum(1 for p in mine_parts if p["block"] == "work" and p["stage"] in st)   # noqa: E731
+    funnel = [{"code": "request", "title": "запросы", "count": sum(1 for d in mine if d.status in (DealStatus.DRAFT, DealStatus.LOGISTICS_CALC, DealStatus.SERVICE_CALC)), "parts": pst("request")},
+              {"code": "calc", "title": "расчёт", "count": sum(1 for d in mine if d.status in (DealStatus.CALC_READY, DealStatus.REWORK)), "parts": pst("calc")},
+              {"code": "approval", "title": "согласование", "count": sum(1 for d in mine if d.status in (DealStatus.CD_APPROVAL, DealStatus.FD_VISA, DealStatus.GD_VISA)), "parts": 0},
+              {"code": "kp", "title": "КП", "count": sum(1 for d in mine if d.status in (DealStatus.APPROVED, DealStatus.KP_SENT)), "parts": pst("kp")},
+              {"code": "won", "title": "выиграно", "count": len(won_q), "parts": len(won_q_parts)}]
+    for f_ in funnel:
+        f_["count"] += f_["parts"]
     team = []
     if user.has(Role.CD, Role.GD):
         load: dict[str, dict[str, int]] = {}
@@ -330,6 +348,10 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
             if d.status in OPEN_STATUSES or d.status in (DealStatus.CONTRACT, DealStatus.EXECUTION):
                 m = load.setdefault(d.manager_id, {"open": 0, "overdue": 0, "exec": 0})
                 m["open" if d.status in OPEN_STATUSES else "exec"] += 1
+        for p in parts:
+            if p["block"] in ("work", "won") and p["stage"] != "closed":
+                m = load.setdefault(p["manager_id"], {"open": 0, "overdue": 0, "exec": 0})
+                m["open" if p["block"] == "work" else "exec"] += 1
         for t in db.scalars(select(Task).where(Task.done_at.is_(None), Task.due < today)).all():
             if t.assignee_id in load:
                 load[t.assignee_id]["overdue"] += 1
@@ -338,18 +360,20 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
 
     # ---------------- показатели по роли
     kpis: list[dict] = []
-    in_work_sum = sum(_price(d) or 0 for d in open_deals)
-    won_sum = sum(_price(d) or 0 for d in won_q)
+    in_work_sum = sum(_price(d) or 0 for d in open_deals) + sum(p["price_rub"] for p in open_parts)
+    won_sum = sum(_price(d) or 0 for d in won_q) + sum(p["price_rub"] for p in won_q_parts)
+    urgent_parts = [p for p in my_open_parts if p["urgent"]]
     if role in ("manager", "observer", "logistician", "service_head", "purchasing"):
         kp_week = [d for d in open_deals if d.kp_due and today <= d.kp_due <= today + timedelta(days=7) and (d.manager_id == user.id or d.manager_id in user.acting_for or role != "manager")]
-        kpis = [{"title": "Сделок в работе", "value": str(len([d for d in open_deals if role != "manager" or d.manager_id == user.id or d.manager_id in user.acting_for])), "sub": (_fmt_money(in_work_sum) if fin else "") , "tone": "", "url": "/deals?block=work"},
+        my_open = [d for d in open_deals if role != "manager" or d.manager_id == user.id or d.manager_id in user.acting_for]
+        kpis = [{"title": "Сделок в работе", "value": str(len(my_open) + len(my_open_parts)), "sub": ((_fmt_money(in_work_sum) + " · ") if fin else "") + f"ГШО {len(my_open)} · ЗЧ {len(my_open_parts)}" + (f" · машина стоит: {len(urgent_parts)}" if urgent_parts else ""), "tone": "bad" if urgent_parts else "", "url": "/deals?block=work"},
                 {"title": "КП со сроком на неделе", "value": str(len(kp_week)), "sub": f"ближайшее — {min(d.kp_due for d in kp_week):%d.%m}" if kp_week else "сроков нет", "tone": "warn" if kp_week else "", "url": "/deals?block=work&sort=kp_due"},
                 {"title": "Просрочено задач", "value": str(len(overdue_tasks)), "sub": f"и {sum(1 for r in exec_rows if r['overdue'])} этапов исполнения" if exec_rows else "", "tone": "bad" if overdue_tasks else "ok", "url": "/tasks"},
-                {"title": "Выиграно в квартале", "value": str(len(won_q)), "sub": (_fmt_money(won_sum) if fin else "сделок"), "tone": "ok" if won_q else "", "url": "/deals?block=won"}]
+                {"title": "Выиграно в квартале", "value": str(len(won_q) + len(won_q_parts)), "sub": (_fmt_money(won_sum) + " · " if fin else "") + f"ГШО {len(won_q)} · ЗЧ {len(won_q_parts)}", "tone": "ok" if won_q or won_q_parts else "", "url": "/deals?block=won"}]
     else:
         board = user.has(Role.CD, Role.FD, Role.GD, Role.OBSERVER)
-        kpis = [{"title": "Воронка · в работе", "value": str(len(open_deals)), "sub": (_fmt_money(in_work_sum) + " · " if fin else "") + f"{len({d.manager_id for d in open_deals})} менеджеров", "tone": "", "url": "/board" if board else "/deals?block=work"},
-                {"title": "Выиграно в квартале", "value": str(len(won_q)), "sub": _fmt_money(won_sum) if fin else "", "tone": "ok" if won_q else "", "url": "/deals?block=won"},
+        kpis = [{"title": "Воронка · в работе", "value": str(len(open_deals) + len(open_parts)), "sub": (_fmt_money(in_work_sum) + " · " if fin else "") + f"ГШО {len(open_deals)} · ЗЧ {len(open_parts)}" + (f" · машина стоит: {len(urgent_parts)}" if urgent_parts else ""), "tone": "bad" if urgent_parts else "", "url": "/board" if board else "/deals?block=work"},
+                {"title": "Выиграно в квартале", "value": str(len(won_q) + len(won_q_parts)), "sub": (_fmt_money(won_sum) + " · " if fin else "") + f"ГШО {len(won_q)} · ЗЧ {len(won_q_parts)}", "tone": "ok" if won_q or won_q_parts else "", "url": "/deals?block=won"},
                 {"title": "Ждут решения", "value": str(len(approvals)), "sub": "согласований", "tone": "warn" if approvals else "ok", "url": "#approvals"},
                 {"title": "Дебиторка просрочена", "value": str(len(receivables)), "sub": _fmt_money(sum(r["amount"] for r in receivables if r["currency"] == "RUB")) if fin and receivables else "платежей", "tone": "bad" if receivables else "ok", "url": "/summary?kind=money"} if lead else
                 {"title": "Просрочено задач", "value": str(len(overdue_tasks)), "sub": "", "tone": "bad" if overdue_tasks else "ok", "url": "/tasks"},

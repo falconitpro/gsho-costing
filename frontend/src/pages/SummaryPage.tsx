@@ -101,6 +101,7 @@ type Curve = { week: string; in: number; out: number; cum: number };
 
 function Money({ data, t }: { data: Record<string, unknown>; t: Record<string, number> }) {
   const rows = data.rows as Pay[]; const rec = data.receivables as Pay[]; const g = data.guarantees as Guar[]; const curve = data.curve as Curve[];
+  const parts = (data.parts || { rows: [], sum_rub: 0 }) as { rows: { id: string; number: string; client: string; manager: string; amount: number; lines: number; urgent: boolean; url: string }[]; sum_rub: number };
   const money = (p: Pay) => (p.amount == null ? "—" : `${fmtRub(p.amount)} ${p.currency}`);
   const maxAbs = Math.max(1, ...curve.map((c) => Math.max(c.in, c.out, Math.abs(c.cum))));
   return (
@@ -138,6 +139,12 @@ function Money({ data, t }: { data: Record<string, unknown>; t: Record<string, n
           {rows.length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 16 }}>Платежей на горизонте нет</td></tr>}</tbody>
         </table>
       </div>
+      {parts.rows.length > 0 && (
+        <div className="card" style={{ marginTop: 10 }}>
+          <b>Запасные части: заказано клиентами, не отгружено</b> <span className="muted">· ожидаемые поступления {fmtRub(parts.sum_rub)} ₽ — срок по счёту или отгрузке, в кривую не входят</span>
+          <table style={{ marginTop: 6, fontSize: 13 }}><thead><tr><th>Заявка</th><th>Клиент</th><th className="num">Позиций</th><th className="num">Сумма, ₽</th><th>Менеджер</th></tr></thead>
+            <tbody>{parts.rows.map((p) => <tr key={p.id}><td><Link to={p.url}>{p.number}</Link>{p.urgent && <span className="badge bad" style={{ marginLeft: 4 }}>машина стоит</span>}</td><td>{p.client}</td><td className="num">{p.lines}</td><td className="num"><b>{fmtRub(p.amount)}</b></td><td>{p.manager}</td></tr>)}</tbody></table>
+        </div>)}
       {g.length > 0 && (
         <div className="card" style={{ marginTop: 10 }}>
           <b>Аккредитивы и гарантии</b>
