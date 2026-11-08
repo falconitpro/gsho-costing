@@ -5,7 +5,6 @@ import type { Me } from "../types";
 import LegalProfileBlock from "../components/LegalProfileBlock";
 import LegalTemplates from "../components/LegalTemplates";
 import LegalRules from "../components/LegalRules";
-import LegalRegistry from "../components/LegalRegistry";
 import PoaBlock from "../components/PoaBlock";
 import ContractsBlock from "../components/ContractsBlock";
 import ClaimsBlock from "../components/ClaimsBlock";
@@ -14,15 +13,16 @@ import ClaimsBlock from "../components/ClaimsBlock";
 // Следующие этапы добавят сюда реестр пакетов, библиотеку шаблонов и правил.
 
 type Own = { id: string; code: string; name: string; country: string; currency: string; sells_to_clients: boolean; is_active: boolean; profiles: { id: string; summary: string; check_status_title: string; banks: { status: string; verified: boolean; currency: string }[] }[] };
-type Tab = "contracts" | "claims" | "own" | "packages" | "poa" | "templates" | "rules";
-const TABS: [Tab, string, boolean][] = [["contracts", "Договоры", true], ["claims", "Претензии", true], ["packages", "Реестр пакетов", true], ["own", "Карточка БЕРГ-ХАУС", true], ["poa", "Доверенности", true], ["templates", "Шаблоны и примеры", true], ["rules", "Правила и ИИ", true]];
+type Tab = "contracts" | "claims" | "own" | "poa" | "templates" | "rules";
+const TABS: [Tab, string, boolean][] = [["contracts", "Договоры", true], ["claims", "Претензии", true], ["own", "Карточка БЕРГ-ХАУС", true], ["poa", "Доверенности", true], ["templates", "Шаблоны и примеры", true], ["rules", "Правила и ИИ", true]];
 
 export default function LegalPage({ me }: { me: Me }) {
   const full = me.roles.some((r) => ["cd", "fd", "gd", "lawyer", "admin", "manager"].includes(r.code));   // остальные сотрудники видят только договоры
   const tabs = full ? TABS : TABS.filter(([k]) => k === "contracts" || k === "claims");
   const loc = useLocation();
   const nav = useNavigate();
-  const tab = full ? ((new URLSearchParams(loc.search).get("tab") as Tab) || "contracts") : (new URLSearchParams(loc.search).get("tab") === "claims" ? "claims" : "contracts");
+  const asked = new URLSearchParams(loc.search).get("tab") as Tab;
+  const tab = full ? (TABS.some(([k]) => k === asked) ? asked : "contracts") : (new URLSearchParams(loc.search).get("tab") === "claims" ? "claims" : "contracts");
   const [own, setOwn] = useState<{ items: Own[]; can_edit: boolean } | null>(null);
   const [cur, setCur] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
@@ -40,7 +40,6 @@ export default function LegalPage({ me }: { me: Me }) {
       {msg && <div className="alert error">{msg}</div>}
       {tab === "contracts" && <ContractsBlock />}
       {tab === "claims" && <ClaimsBlock />}
-      {tab === "packages" && <LegalRegistry />}
       {tab === "poa" && <PoaBlock />}
       {tab === "templates" && <LegalTemplates />}
       {tab === "rules" && <LegalRules />}

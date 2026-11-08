@@ -135,6 +135,8 @@ def contracts_registry(kind: str = "", status: str = "", direction: str = "", en
     if not _imported["done"]:
         if svc.import_from_deals(db):
             db.commit()
+        if svc.link_packages(db):
+            db.commit()
         _imported["done"] = True
     stmt = select(Contract).order_by(Contract.created_at.desc())
     if not include_children:
@@ -529,6 +531,27 @@ def contract_fact(cid: str, body: FactIn, db: Session = Depends(get_db), user: C
     audit(db, user.id, c.deal_id, "contract", c.id, "fact", after=body.model_dump(mode="json"))
     db.commit()
     return _out(db, user, c)
+
+
+@router.get("/legal/contracts/{cid}/packages")
+def contract_packages(cid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Юридические пакеты договора (вместо отдельного реестра пакетов): версии, документы, статусы, подписанные сканы."""
+    from ..services import legal_packages as lp
+    c = _get(db, cid, user)
+    names = lp.user_names(db)
+    d = db.get(Deal, c.deal_id) if c.deal_id else None
+    is_mgr = bool(d and user.has(Role.MANAGER) and user.is_manager_of(d.manager_id))
+    def can(to: str) -> bool:
+        allowed = lp.TRANSITION_ROLES.get(to, set())
+        return any(user.has(Role(r)) for r in allowed if r != "manager") or ("manager" in allowed and is_mgr)
+    items = []
+    for p in svc.contract_packages(db, c):
+        x = lp.package_payload(p, names)
+        x["actions"] = [{"to": t, "title": lp.STATUS_TITLES.get(t, t)} for t in x["next_statuses"] if can(t)]
+        x["can_scan"] = p.status in ("approved", "signed") and (user.has(Role.LAWYER, Role.CD, Role.GD) or is_mgr)
+        x["linked"] = p.id == c.package_id
+        items.append(x)
+    return {"items": items, "deal_id": c.deal_id}
 
 
 @router.get("/legal/contracts-inbox")

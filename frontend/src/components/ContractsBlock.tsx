@@ -15,6 +15,7 @@ type Row = {
   status: string; status_title: string; locked: boolean; own_entity_id: string | null; own_entity_name: string; cp_kind: string; cp_id: string | null; cp_name: string; cp_inn: string;
   deal_id: string | null; deal_number: string; amount: number | null; currency: string; signed_on: string | null; valid_to: string | null; days_to_expiry: number | null; sign_method: string;
   has_scan: boolean; curator_name: string; terms_text: string; pending: string[]; exec?: { overdue: number; pen_in: number; pen_out: number };
+  package?: { id: string; version_no: number; status: string; status_title: string } | null;
 };
 type Ob = { key: string; title: string; debtor: string; amount: number | null; currency: string; due_on: string | null; due_legal: boolean; done_on: string | null; done_source?: string; days_late: number; status: string; no?: number; idx?: number };
 type Pen = { key: string; payer: string; payer_title: string; reason_title: string; obligation: string; days: number; base: number | null; rate_text: string; calc_amount: number | null; amount: number | null;
@@ -92,7 +93,7 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
                 <td className="num" style={{ whiteSpace: "nowrap" }}>{money(r.amount, r.currency)}</td>
                 <td style={{ fontSize: 12, maxWidth: 280 }}>{r.terms_text || (r.direction === "none" ? <span className="muted">—</span> : <span style={{ color: "var(--bad)" }}>не заданы</span>)}</td>
                 <td style={{ whiteSpace: "nowrap" }}>{d(r.signed_on)}{r.locked && !r.has_scan && <div style={{ fontSize: 11, color: "var(--bad)" }}>нет скана</div>}{r.exec?.overdue ? <div style={{ fontSize: 11, color: "var(--bad)" }}>просрочка: {r.exec.overdue}</div> : null}{r.sign_method === "edo" && <div className="muted" style={{ fontSize: 11 }}>ЭДО</div>}</td>
-                <td><span className={`badge ${STATUS_CLASS[r.status] || ""}`}>{r.status_title}</span>{r.pending?.length > 0 && <div className="muted" style={{ fontSize: 11 }}>ждёт: {r.pending.join(", ")}</div>}{r.days_to_expiry != null && r.status === "active" && r.days_to_expiry <= 30 && <div style={{ fontSize: 11, color: "var(--warn)" }}>до {d(r.valid_to)}</div>}</td>
+                <td><span className={`badge ${STATUS_CLASS[r.status] || ""}`}>{r.status_title}</span>{r.package && <div className="muted" style={{ fontSize: 11 }}>пакет v{r.package.version_no}: {r.package.status_title}</div>}{r.pending?.length > 0 && <div className="muted" style={{ fontSize: 11 }}>ждёт: {r.pending.join(", ")}</div>}{r.days_to_expiry != null && r.status === "active" && r.days_to_expiry <= 30 && <div style={{ fontSize: 11, color: "var(--warn)" }}>до {d(r.valid_to)}</div>}</td>
               </tr>))}
           </tbody>
         </table>
@@ -169,7 +170,7 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
   const act = (path: string, body: object = {}) => api.post<Full>(`/api/legal/contracts/${id}/${path}`, body).then((x) => { setC(x); setDraft({}); setReason(""); setErr([]); setInfo(`Статус: ${x.status_title}`); }).catch(fail);
   const inRoute = ["legal_review", "approval", "approved", "signing"].includes(c.status);
   const pull = () => api.post<Full>(`/api/legal/contracts/${id}/pull-terms`).then((x) => { setC(x); setDraft({}); setInfo("Цена и условия оплаты перенесены из расчёта сделки"); }).catch(fail);
-  const tabs: [Tab, string][] = [["main", "Основное"], ["pay", "Оплата"], ["perf", "Сроки и неустойки"], ...(c.obligations ? [["exec", "Исполнение"] as [Tab, string]] : []), ["files", `Файлы (${c.files.length})`], ["history", "История"]];
+  const tabs: [Tab, string][] = [["main", "Основное"], ["pay", "Оплата"], ["perf", "Сроки и неустойки"], ...(c.obligations ? [["exec", "Исполнение"] as [Tab, string]] : []), ["files", c.package ? `Документы (${c.files.length} + пакет)` : `Документы (${c.files.length})`], ["history", "История"]];
   return (
     <Modal title={`${c.doc_type_title} ${c.number}${c.cp_name ? " — " + c.cp_name : ""}`} onClose={() => { if (!dirty || window.confirm("Закрыть без сохранения?")) onClose(); }} wide>
       <div className="poa-steps" style={{ gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}>
@@ -246,8 +247,9 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
         {tab === "perf" && <PerfTab v={v} cat={cat} ro={ro} set={set} />}
 
         {tab === "exec" && c.obligations && <ExecTab c={c} ob={c.obligations} onSaved={(x) => { setC(x); setErr([]); setInfo("Записано"); }} onErr={fail} />}
+        {tab === "files" && <PackagesSection contractId={c.id} />}
         {tab === "files" && (
-          <div className="poa-section">
+          <div className="poa-section" style={{ marginTop: 14 }}>
             <div className="poa-section-head" style={{ justifyContent: "space-between" }}>
               <span><b>Файлы договора</b> {c.locked && !c.has_scan && <span style={{ color: "var(--bad)", fontSize: 12 }}>· нет подписанного скана</span>}</span>
               <span className="row" style={{ gap: 8 }}>
@@ -506,4 +508,55 @@ function ExecTab({ c, ob, onSaved, onErr }: { c: Full; ob: Obligations; onSaved:
       {newClaim && claims && <NewClaimDialog contractId={c.id} direction={newClaim} available={newClaim === "outgoing" ? claims.available_out : claims.available_in} onClose={() => setNewClaim(null)} onCreated={(cid) => { setNewClaim(null); loadClaims(); setOpenClaim(cid); }} />}
       {openClaim && <ClaimCard id={openClaim} onClose={() => { setOpenClaim(null); loadClaims(); }} />}
     </>);
+}
+
+// ------------------------------------------------------------------ юридические пакеты сделки внутри карточки договора
+type PkgFile = { kind: string; title: string; file_name: string; format?: string };
+type Pkg = { id: string; deal_id: string; kind: string; version_no: number; deal_version_no: number | null; status: string; status_title: string; language: string; files: PkgFile[];
+  approvals: { at: string; by_name: string; to: string; comment: string }[]; created_by_name: string; created_at: string; checks: { errors?: string[]; warnings?: string[] };
+  actions: { to: string; title: string }[]; can_scan: boolean; linked: boolean };
+const PKG_TONE: Record<string, string> = { draft: "warn", needs_data: "warn", lawyer_review: "info", commercial_review: "info", approved: "ok", signed: "ok", superseded: "", archived: "" };
+
+function PackagesSection({ contractId }: { contractId: string }) {
+  const [data, setData] = useState<{ items: Pkg[]; deal_id: string | null } | null>(null);
+  const [old, setOld] = useState(false);
+  const [note, setNote] = useState("");
+  const [msg, setMsg] = useState("");
+  const load = () => api.get<{ items: Pkg[]; deal_id: string | null }>(`/api/legal/contracts/${contractId}/packages`).then(setData).catch((e) => setMsg((e as Error).message));
+  useEffect(() => { load(); }, [contractId]);
+  if (!data) return null;
+  const items = data.items.filter((p) => old || !["superseded", "archived"].includes(p.status));
+  const hidden = data.items.length - items.length;
+  const act = (p: Pkg, to: string) => api.post(`/api/legal/packages/${p.id}/status`, { status: to, comment: note }).then(() => { setNote(""); setMsg(""); load(); }).catch((e) => setMsg((e as Error).message));
+  return (
+    <div className="poa-section">
+      <div className="poa-section-head" style={{ justifyContent: "space-between" }}>
+        <span><b>Юридический пакет документов</b> <span className="muted">— сформирован по сделке: договор и приложения (закупка) или рабочая копия, протокол разногласий, техспецификация (продажа)</span></span>
+        {data.deal_id && <a className="btn ghost" href={`/deals/${data.deal_id}?tab=legal`}>{data.items.length ? "Новая версия в сделке" : "Сформировать в сделке"}</a>}
+      </div>
+      {msg && <div className="alert error">{msg}</div>}
+      {items.length === 0 ? <div className="muted" style={{ fontSize: 13 }}>{data.deal_id ? "Пакета пока нет — его формируют на вкладке «Юридические документы» сделки." : "Договор не привязан к сделке — пакета нет; документы загружаются ниже."}</div> : items.map((p) => (
+        <div key={p.id} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "10px 12px", marginBottom: 8, opacity: ["superseded", "archived"].includes(p.status) ? 0.6 : 1 }}>
+          <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+            <span><b>Версия {p.version_no}</b> <span className={`badge ${PKG_TONE[p.status] || ""}`}>{p.status_title}</span>{p.linked && <span className="badge" style={{ marginLeft: 4 }}>условия договора взяты отсюда</span>}
+              <span className="muted" style={{ fontSize: 12 }}> · {p.created_by_name} {d(p.created_at)}{p.deal_version_no ? ` · расчёт v${p.deal_version_no}` : ""}</span></span>
+            <span className="row" style={{ gap: 6 }}><a className="btn ghost" href={`/api/legal/packages/${p.id}/zip`}>ZIP</a></span>
+          </div>
+          <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+            {p.files.map((f) => (
+              <span key={f.kind + f.file_name} className="badge" style={{ fontSize: 12 }}>{f.title}:{" "}
+                <a href={`/api/legal/packages/${p.id}/files/${f.kind}`}>{f.kind === "signed_scan" || (f.format && f.format !== "docx") ? "открыть" : "DOCX"}</a>
+                {f.kind !== "signed_scan" && (!f.format || f.format === "docx") && <> · <a href={`/api/legal/packages/${p.id}/files/${f.kind}?fmt=pdf`} target="_blank" rel="noreferrer">PDF</a></>}</span>))}
+          </div>
+          {(p.checks?.errors?.length || 0) > 0 && <div style={{ fontSize: 12, color: "var(--bad)", marginTop: 6 }}>Проверка: {p.checks.errors!.join("; ")}</div>}
+          {(p.actions.length > 0 || p.can_scan) && (
+            <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {p.actions.length > 0 && <input placeholder="комментарий (для возврата в черновик — обязательно)" value={note} onChange={(e) => setNote(e.target.value)} style={{ width: 300 }} />}
+              {p.actions.map((a) => <button key={a.to} className={`btn ${a.to === "draft" || a.to === "archived" ? "ghost" : ""}`} style={{ padding: "2px 10px" }} onClick={() => act(p, a.to)}>{a.title}</button>)}
+              {p.can_scan && <label className="btn ghost" style={{ padding: "2px 10px" }}>Скан подписанного<input type="file" style={{ display: "none" }} onChange={(e) => { const fl = e.target.files?.[0]; if (fl) api.upload(`/api/legal/packages/${p.id}/signed-scan`, fl).then(load).catch((x) => setMsg((x as Error).message)); e.target.value = ""; }} /></label>}
+            </div>)}
+          {p.approvals.length > 0 && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{p.approvals.slice(0, 3).map((a, i) => <div key={i}>{d(a.at)} · {a.by_name} · {a.to}{a.comment ? ` — ${a.comment}` : ""}</div>)}</div>}
+        </div>))}
+      {hidden > 0 && <button className="btn ghost" style={{ fontSize: 12 }} onClick={() => setOld(!old)}>{old ? "скрыть старые версии" : `показать старые версии (${hidden})`}</button>}
+    </div>);
 }
