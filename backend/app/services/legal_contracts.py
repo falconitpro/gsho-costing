@@ -203,10 +203,11 @@ def check(c: Contract) -> dict:
     if not (c.subject or c.title):
         warnings.append("Не описан предмет договора")
     if c.direction in ("income", "expense"):
-        if c.amount is None and c.price_type == "fixed":
+        main = c.doc_type == "contract"          # доп. соглашение меняет только то, что в нём указано
+        if main and c.amount is None and c.price_type == "fixed":
             errors.append("Не указана цена договора")
         lines = c.payment_terms or []
-        if not lines:
+        if main and not lines:
             errors.append("Не заданы условия оплаты — для доходных и расходных договоров они обязательны")
         for i, l in enumerate(lines, 1):
             if not l.get("event"):
@@ -221,11 +222,11 @@ def check(c: Contract) -> dict:
         amounts = [float(l["amount"]) for l in lines if l.get("amount") not in (None, "") and l.get("share_pct") in (None, "")]
         if amounts and len(amounts) == len(lines) and c.amount is not None and abs(sum(amounts) - float(c.amount)) > 0.01:
             errors.append(f"Сумма платежей {sum(amounts):,.2f} не равна цене договора {float(c.amount):,.2f}".replace(",", " "))
-        if not c.penalties:
+        if main and not c.penalties:
             warnings.append("Неустойки не заданы — просрочки не попадут в расчёт и претензии")
-        if not c.performance_terms and c.direction == "expense":
+        if main and not c.performance_terms and c.direction == "expense":
             warnings.append("Не указан срок исполнения (поставки / работ) — неустойку за просрочку не рассчитать")
-        if not (c.law or {}).get("claim_days"):
+        if main and not (c.law or {}).get("claim_days"):
             warnings.append("Не указан срок ответа на претензию")
     if not (c.signatory or {}).get("name"):
         warnings.append("Не указан подписант с нашей стороны")
@@ -263,7 +264,8 @@ def payload(db: Session, c: Contract, names: Optional[dict] = None, ents: Option
            "days_to_expiry": (c.valid_to - today).days if c.valid_to else None, "sign_method": c.sign_method,
            "has_scan": any(f.get("kind") == "signed_scan" for f in (c.files or [])), "curator_id": c.curator_id, "curator_name": names.get(c.curator_id or "", ""),
            "source": c.source, "updated_at": c.updated_at.isoformat() if c.updated_at else None,
-           "terms_text": "; ".join(term_text(l) for l in (c.payment_terms or []))}
+           "terms_text": "; ".join(term_text(l) for l in (c.payment_terms or [])),
+           "pending": [x["title"] for x in pending_steps(c)]}
     if not full:
         return out
     chk = check(c)
@@ -274,7 +276,9 @@ def payload(db: Session, c: Contract, names: Optional[dict] = None, ents: Option
                 "files": [{**f, "kind_title": FILE_KINDS.get(f.get("kind"), f.get("kind")), "uploaded_by_name": names.get(f.get("uploaded_by") or "", "")} for f in (c.files or [])],
                 "history": [{**h, "by_name": names.get(h.get("by") or "", "")} for h in reversed(c.history or [])], "notes": c.notes, "lawyer_id": c.lawyer_id,
                 "created_by_name": names.get(c.created_by or "", ""), "created_at": c.created_at.isoformat() if c.created_at else None,
-                "schedule": schedule(db, c), "check": chk,
+                "schedule": schedule(db, c), "check": chk, "client_order": bool(c.client_order),
+                "approval": approval_view(db, c, names), "route_preview": [STEP_TITLES[x] for x in route(db, c)], "sign_checklist": sign_checklist(c),
+                "amends": amend_changes(db, c) if c.doc_type == "amendment" else [],
                 "children": [payload(db, x, names, ents, full=False) for x in db.scalars(select(Contract).where(Contract.parent_id == c.id).order_by(Contract.created_at)).all()]})
     return out
 
@@ -406,3 +410,217 @@ def apply_signed_to_deal(db: Session, c: Contract) -> None:
 
 def any_fields(d: dict[str, Any], keys: list[str]) -> dict:
     return {k: d[k] for k in keys if k in d}
+
+
+
+# ------------------------------------------------------------------ этап 2: маршрут согласования, подписание, доп. соглашения, сроки
+STEP_TITLES = {"lawyer": "Юрист", "fd": "ФД", "cd": "КД", "gd": "ЗГД"}
+STEP_ROLE = {"lawyer": "lawyer", "fd": "fd", "cd": "cd", "gd": "gd"}
+IN_ROUTE = {"legal_review", "approval", "approved", "signing"}       # условия заморожены: правит юрист / ЗГД, после виз — согласование заново
+AMEND_FIELDS = ("amount", "payment_terms", "performance_terms", "penalties", "liability_cap_pct", "valid_to", "subject", "security", "warranty")
+
+
+def gd_threshold(db: Session) -> float:
+    from . import settings_service
+    try:
+        return float(settings_service.get(db, "contract_gd_threshold") or 100000)
+    except (TypeError, ValueError):
+        return 100000.0
+
+
+def amount_rub(db: Session, c: Contract) -> Optional[float]:
+    if c.amount is None:
+        return None
+    cur = (c.currency or "RUB").upper()
+    if cur == "RUB":
+        return float(c.amount)
+    from ..models import FxRate
+    r = db.scalars(select(FxRate).where(FxRate.currency == cur).order_by(FxRate.on.desc()).limit(1)).first()
+    return float(c.amount) * r.rate if r else None
+
+
+def route(db: Session, c: Contract) -> list[str]:
+    """Маршрут: юрист и ФД — всегда; КД — закупки под заказы клиентов (ГШО или запчасти); ЗГД — цена выше порога (100 000 ₽) или цена не определена."""
+    steps = ["lawyer", "fd"]
+    if c.direction == "expense" and (c.kind == "supplier" or c.client_order) and (c.client_order or c.deal_id):
+        steps.append("cd")
+    rub = amount_rub(db, c)
+    if (rub is None and c.direction != "none") or (rub is not None and rub > gd_threshold(db)):
+        steps.append("gd")
+    return steps
+
+
+def start_route(db: Session, c: Contract, user_id: Optional[str]) -> None:
+    rnd = int((c.approval or {}).get("round") or 0) + 1
+    c.approval = {"round": rnd, "submitted_at": datetime.now(timezone.utc).isoformat(), "submitted_by": user_id,
+                  "steps": [{"code": x, "title": STEP_TITLES[x], "decision": None, "by": None, "at": None, "comment": ""} for x in route(db, c)]}
+    c.status = "legal_review"
+
+
+def pending_steps(c: Contract) -> list[dict]:
+    """Ожидающие визы: сначала юрист, затем параллельно ФД, КД, ЗГД."""
+    if c.status not in ("legal_review", "approval"):
+        return []
+    steps = (c.approval or {}).get("steps") or []
+    law = [x for x in steps if x["code"] == "lawyer" and x["decision"] != "approve"]
+    if law:
+        return law
+    return [x for x in steps if x["decision"] != "approve"]
+
+
+def user_steps(c: Contract, roles) -> list[dict]:
+    roles = {str(getattr(r, "value", r)) for r in roles}
+    return [x for x in pending_steps(c) if STEP_ROLE[x["code"]] in roles]
+
+
+def approval_view(db: Session, c: Contract, names: dict) -> dict:
+    a = dict(c.approval or {})
+    pend = {x["code"] for x in pending_steps(c)}
+    a["steps"] = [{**x, "by_name": names.get(x.get("by") or "", ""), "pending": x["code"] in pend} for x in a.get("steps") or []]
+    a["submitted_by_name"] = names.get(a.get("submitted_by") or "", "")
+    return a
+
+
+def reset_visas(db: Session, c: Contract, user_id: Optional[str], why: str) -> bool:
+    """Изменились условия на маршруте: маршрут пересобирается; если визы уже были — согласование заново (новый круг)."""
+    a = dict(c.approval or {})
+    had = any(x.get("decision") for x in a.get("steps") or [])
+    a["steps"] = [{"code": x, "title": STEP_TITLES[x], "decision": None, "by": None, "at": None, "comment": ""} for x in route(db, c)] if had else \
+        [next((y for y in a.get("steps") or [] if y["code"] == x), {"code": x, "title": STEP_TITLES[x], "decision": None, "by": None, "at": None, "comment": ""}) for x in route(db, c)]
+    if had:
+        a["round"] = int(a.get("round") or 1) + 1
+        c.status = "legal_review"
+    c.approval = a
+    if had:
+        hist(c, user_id, "route_reset", f"{why} — согласование заново (круг {a['round']})")
+    return had
+
+
+def sign_checklist(c: Contract) -> list[dict]:
+    files = {f.get("kind") for f in (c.files or [])}
+    out = [{"code": "approved", "title": "Договор согласован", "ok": c.status in ("approved", "signing") or c.status in LOCKED},
+           {"code": "signatory", "title": "Подписант и основание (устав / доверенность)", "ok": bool((c.signatory or {}).get("name") and (c.signatory or {}).get("basis"))},
+           {"code": "signed_on", "title": "Дата подписания", "ok": bool(c.signed_on)},
+           {"code": "scan", "title": "Подписанный скан загружен", "ok": "signed_scan" in files}]
+    if c.sign_method == "edo":
+        out.append({"code": "edo", "title": "Файл ЭДО с ЭП / квитанции оператора", "ok": "edo" in files})
+    else:
+        out.append({"code": "original", "title": "Оригинал получен и передан на хранение", "ok": bool((c.original or {}).get("received_on")), "optional": True})
+    return out
+
+
+def amend_changes(db: Session, c: Contract) -> list[dict]:
+    """Что меняет доп. соглашение в основном договоре: заполненные в нём поля."""
+    parent = db.get(Contract, c.parent_id) if c.parent_id else None
+    if parent is None:
+        return []
+    titles = {"amount": "цена", "payment_terms": "условия оплаты", "performance_terms": "сроки исполнения", "penalties": "неустойки", "liability_cap_pct": "предел ответственности",
+              "valid_to": "срок действия", "subject": "предмет", "security": "обеспечение", "warranty": "гарантия"}
+    out = []
+    for k in AMEND_FIELDS:
+        v = getattr(c, k)
+        if v in (None, "", [], {}) or v == getattr(parent, k):
+            continue
+        out.append({"field": k, "title": titles[k]})
+    return out
+
+
+def apply_amendment(db: Session, c: Contract, user_id: Optional[str]) -> list[str]:
+    """Доп. соглашение вступило в силу → основной договор принимает изменённые условия (с записью в истории)."""
+    parent = db.get(Contract, c.parent_id) if c.parent_id else None
+    if parent is None or c.doc_type != "amendment":
+        return []
+    changed = []
+    for ch in amend_changes(db, c):
+        k = ch["field"]
+        setattr(parent, k, getattr(c, k))
+        if k == "amount":
+            parent.currency = c.currency
+        changed.append(ch["title"])
+    if changed:
+        hist(parent, user_id, "amendment", f"{c.number} вступило в силу: " + ", ".join(changed))
+    return changed
+
+
+def role_users(db: Session, *roles: str) -> list[User]:
+    return [u for u in db.scalars(select(User).where(User.is_active.is_(True))).all() if set(roles) & set(u.roles or [])]
+
+
+def notify_users(db: Session, c: Contract, user_ids: list[str], text: str, event: str = "contract") -> None:
+    from .deal_service import notify
+    deal = db.get(Deal, c.deal_id) if c.deal_id else None
+    for uid in dict.fromkeys(x for x in user_ids if x):
+        notify(db, deal, uid, event, None, text)
+
+
+def notify_pending(db: Session, c: Contract) -> None:
+    roles = {STEP_ROLE[x["code"]] for x in pending_steps(c)}
+    if not roles:
+        return
+    if roles == {"lawyer"} and c.lawyer_id:
+        ids = [c.lawyer_id]                     # назначенный юрист
+    else:
+        ids = [u.id for u in role_users(db, *roles)]
+    notify_users(db, c, ids, f"Договор {c.number} ({cp_display(db, c)}) ждёт вашей визы: {', '.join(x['title'] for x in pending_steps(c))}")
+
+
+def check_expiring(db: Session, today: Optional[date] = None) -> int:
+    """Действующие договоры: напоминания куратору и юристам за 30 и 7 дней до окончания; автопролонгация на год; уведомление об истечении."""
+    today = today or date.today()
+    n = 0
+    lawyers = [u.id for u in role_users(db, "lawyer")]
+    for c in db.scalars(select(Contract).where(Contract.status == "active", Contract.valid_to.is_not(None))).all():
+        dl = (c.valid_to - today).days
+        if dl < 0 and c.auto_renew:
+            old = c.valid_to
+            try:
+                c.valid_to = old.replace(year=old.year + 1)
+            except ValueError:
+                c.valid_to = old + timedelta(days=365)
+            c.notified = []
+            hist(c, None, "renewed", f"автопролонгация: до {c.valid_to:%d.%m.%Y} (было {old:%d.%m.%Y})")
+            notify_users(db, c, [c.curator_id or "", *lawyers], f"Договор {c.number} ({cp_display(db, c)}) продлён автоматически до {c.valid_to:%d.%m.%Y}")
+            n += 1
+            continue
+        key = "expired" if dl < 0 else "expiring_7" if dl <= 7 else "expiring_30" if dl <= 30 else None
+        if key is None or key in (c.notified or []):
+            continue
+        text = (f"Срок действия договора {c.number} ({cp_display(db, c)}) истёк {c.valid_to:%d.%m.%Y} — продлите доп. соглашением или отметьте исполненным" if key == "expired"
+                else f"Договор {c.number} ({cp_display(db, c)}) действует до {c.valid_to:%d.%m.%Y} — осталось {dl} дн." + (" (автопролонгация)" if c.auto_renew else ""))
+        if key == "expiring_30" and c.auto_renew:
+            c.notified = list(c.notified or []) + [key]
+            continue
+        notify_users(db, c, [c.curator_id or "", *lawyers], text)
+        c.notified = list(c.notified or []) + [key] + (["expiring_30"] if key != "expiring_30" and "expiring_30" not in (c.notified or []) else [])
+        n += 1
+    return n
+
+
+def inbox(db: Session, user) -> dict:
+    """Договоры к действию для пользователя: мои визы, мои проекты/возвраты, на подпись, без скана, истекающие."""
+    today = date.today()
+    roles = {str(getattr(r, "value", r)) for r in user.roles}
+    sees_all = bool(roles & {"lawyer", "gd", "fd", "cd", "admin"})
+    rows = db.scalars(select(Contract).where(Contract.status.not_in(("cancelled", "closed", "terminated")))).all()
+    out: dict[str, list] = {"visas": [], "drafts": [], "signing": [], "no_scan": [], "expiring": []}
+    names = None
+    for c in rows:
+        mine = c.curator_id == user.id or c.created_by == user.id
+        base = {"id": c.id, "number": c.number, "cp_name": cp_display(db, c), "status": c.status, "status_title": STATUSES.get(c.status, c.status),
+                "url": f"/legal?tab=contracts&open={c.id}", "updated_at": c.updated_at.isoformat() if c.updated_at else None, "amount": c.amount, "currency": c.currency}
+        steps = user_steps(c, roles)
+        if steps:
+            sub = (c.approval or {}).get("submitted_at")
+            out["visas"].append({**base, "steps": [x["title"] for x in steps], "waiting_since": sub})
+        if mine and c.status == "draft" and any(h.get("action") == "visa" for h in (c.history or [])):
+            last = next((h for h in reversed(c.history or []) if h.get("action") == "visa"), {})
+            out["drafts"].append({**base, "comment": last.get("comment", "")})
+        if c.status in ("approved", "signing") and (mine or sees_all):
+            out["signing"].append(base)
+        if c.status == "active" and (mine or sees_all):
+            if not any(f.get("kind") == "signed_scan" for f in (c.files or [])):
+                out["no_scan"].append(base)
+            if c.valid_to and (c.valid_to - today).days <= 30:
+                out["expiring"].append({**base, "valid_to": c.valid_to.isoformat(), "days": (c.valid_to - today).days, "auto_renew": c.auto_renew})
+    out["expiring"].sort(key=lambda x: x["days"])
+    return {**out, "counts": {k: len(v) for k, v in out.items()}}

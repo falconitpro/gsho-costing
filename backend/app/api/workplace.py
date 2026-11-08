@@ -8,14 +8,14 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import ROLE_TITLES, Role
 from ..core.workflow import OPEN_STATUSES, STATUS_TITLES, DealStatus
 from ..db import get_db
-from ..models import Deal, ExecutionStage, FxRate, LegalPackage, NotificationLog, PowerOfAttorney, Task, User
+from ..models import Contract, Deal, ExecutionStage, FxRate, LegalPackage, NotificationLog, PowerOfAttorney, Task, User
 from ..services import settings_service
 from ..services.deal_service import audit
 from .common import can_see_deal
@@ -170,6 +170,11 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
         for p in poas:
             if p.valid_to and today <= p.valid_to <= today + timedelta(days=30):
                 events.append({"on": p.valid_to.isoformat(), "time": "", "title": f"Истекает доверенность {p.number}", "sub": (p.attorney or {}).get("full_name", ""), "tone": "warn", "url": "/legal?tab=poa", "kind": "poa"})
+    from ..services.legal_contracts import inbox as contracts_inbox
+    cin = contracts_inbox(db, user)
+    for x in cin["expiring"]:
+        if x["days"] >= 0:
+            events.append({"on": x["valid_to"], "time": "", "title": f"Истекает договор {x['number']}", "sub": x["cp_name"] + (" · автопролонгация" if x["auto_renew"] else ""), "tone": "warn", "url": x["url"], "kind": "contract"})
     events.sort(key=lambda e: (e["on"], e["time"], e["title"]))
     today_events = [e for e in events if e["on"] == today.isoformat()]
     monday = today - timedelta(days=today.weekday())
@@ -222,6 +227,11 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
                 continue
             approvals.append({"kind": "package", "title": f"{'Закупочный' if p.kind == 'purchase' else 'Клиентский'} пакет · {d.number} · {d.client.name if d.client else ''}",
                               "sub": "на проверке юриста" if p.status == "lawyer_review" else "коммерческое согласование", "url": f"/deals/{d.id}?tab=legal", "waiting_since": p.updated_at.isoformat() if p.updated_at else None, "tone": "info"})
+    for x in cin["visas"]:
+        approvals.append({"kind": "contract", "title": f"Договор {x['number']} · {x['cp_name']}", "sub": "ваша виза: " + ", ".join(x["steps"]) + (f" · {_fmt_money(float(x['amount']))} {x['currency']}" if fin and x["amount"] else ""),
+                          "url": x["url"], "waiting_since": x["waiting_since"], "tone": "info"})
+    for x in cin["drafts"]:
+        approvals.append({"kind": "contract", "title": f"Договор {x['number']} возвращён на доработку", "sub": x["comment"][:140], "url": x["url"], "waiting_since": x["updated_at"], "tone": "bad"})
     if user.has(Role.ADMIN, Role.GD):
         for x in db.scalars(select(User).where(User.is_active.is_(True))).all():
             pc = x.pending_changes or {}
@@ -250,6 +260,11 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
                 per[t.assignee_id] = per.get(t.assignee_id, 0) + 1
         if per:
             attention.append({"title": f"{len(all_over)} задач просрочено у {len(per)} сотрудников", "sub": ", ".join(f"{names.get(k, '?')} — {v}" for k, v in sorted(per.items(), key=lambda x: -x[1])[:4]), "url": "/tasks", "tone": "warn"})
+        exp = [x for x in cin["expiring"]]
+        if exp:
+            attention.append({"title": f"Договоров истекает в 30 дней: {len(exp)}", "sub": ", ".join(f"{x['number']} ({x['cp_name']}) — {x['days']} дн." for x in exp[:3]), "url": "/legal?tab=contracts", "tone": "warn"})
+        if cin["no_scan"]:
+            attention.append({"title": f"Действующих договоров без подписанного скана: {len(cin['no_scan'])}", "sub": ", ".join(x["number"] for x in cin["no_scan"][:4]), "url": "/legal?tab=contracts", "tone": "warn"})
         for p in poas:
             if p.valid_to and (p.valid_to - today).days <= 30:
                 attention.append({"title": f"Доверенность {p.number} истекает через {(p.valid_to - today).days} дн.", "sub": (p.attorney or {}).get("full_name", "") + " · продлить или отозвать", "url": "/legal?tab=poa", "tone": "warn"})
@@ -349,7 +364,9 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
         pk = db.scalars(select(LegalPackage.status)).all()
         legal = {"lawyer_review": sum(1 for s in pk if s == "lawyer_review"), "commercial_review": sum(1 for s in pk if s == "commercial_review"),
                  "poa_active": len(poas), "poa_expiring": sum(1 for p in poas if p.valid_to and (p.valid_to - today).days <= 30),
-                 "poa_no_scan": sum(1 for p in poas if not any(f.get("kind") == "signed_scan" for f in (p.files or [])))}
+                 "poa_no_scan": sum(1 for p in poas if not any(f.get("kind") == "signed_scan" for f in (p.files or []))),
+                 "contracts_review": db.scalar(select(func.count()).select_from(Contract).where(Contract.status.in_(("legal_review", "approval")))) or 0,
+                 "contracts_signing": cin["counts"]["signing"], "contracts_expiring": cin["counts"]["expiring"], "contracts_no_scan": cin["counts"]["no_scan"], "contracts_visas": cin["counts"]["visas"]}
 
     # ---------------- раскладка
     default_order = ROLE_BLOCKS.get(role, ROLE_BLOCKS["observer"])
@@ -380,8 +397,9 @@ def _quick(user: CurrentUser) -> list[dict]:
         q.append({"title": "Деньги", "url": "/summary?kind=money"})
     if user.has(Role.LAWYER, Role.GD, Role.FD):
         q.append({"title": "Доверенность", "url": "/legal?tab=poa"})
+    q.append({"title": "Договор", "url": "/legal?tab=contracts&new=1"})
     q.append({"title": "Мои задачи", "url": "/tasks"})
-    return q[:6]
+    return q[:5] + q[-2:] if len(q) > 7 else q
 
 
 class LayoutIn(BaseModel):

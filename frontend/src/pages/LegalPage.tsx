@@ -17,20 +17,21 @@ type Tab = "contracts" | "own" | "packages" | "poa" | "templates" | "rules";
 const TABS: [Tab, string, boolean][] = [["contracts", "Договоры", true], ["packages", "Реестр пакетов", true], ["own", "Карточка БЕРГ-ХАУС", true], ["poa", "Доверенности", true], ["templates", "Шаблоны и примеры", true], ["rules", "Правила и ИИ", true]];
 
 export default function LegalPage({ me }: { me: Me }) {
-  void me;
+  const full = me.roles.some((r) => ["cd", "fd", "gd", "lawyer", "admin", "manager"].includes(r.code));   // остальные сотрудники видят только договоры
+  const tabs = full ? TABS : TABS.filter(([k]) => k === "contracts");
   const loc = useLocation();
   const nav = useNavigate();
-  const tab = ((new URLSearchParams(loc.search).get("tab") as Tab) || "contracts");
+  const tab = full ? ((new URLSearchParams(loc.search).get("tab") as Tab) || "contracts") : "contracts";
   const [own, setOwn] = useState<{ items: Own[]; can_edit: boolean } | null>(null);
   const [cur, setCur] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
-  useEffect(() => { api.get<{ items: Own[]; can_edit: boolean }>("/api/legal/own").then((r) => { setOwn(r); if (!cur && r.items.length) setCur(r.items.find((x) => x.sells_to_clients)?.id || r.items[0].id); }).catch((e) => setMsg((e as Error).message)); }, []);
+  useEffect(() => { if (!full) return; api.get<{ items: Own[]; can_edit: boolean }>("/api/legal/own").then((r) => { setOwn(r); if (!cur && r.items.length) setCur(r.items.find((x) => x.sells_to_clients)?.id || r.items[0].id); }).catch((e) => setMsg((e as Error).message)); }, []);
   return (
     <>
       <div className="row" style={{ alignItems: "baseline", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
         <h1 style={{ margin: 0 }}>Юридический блок</h1>
         <div className="row" style={{ gap: 2, borderBottom: "1px solid var(--line)" }}>
-          {TABS.map(([k, t, ready]) => (
+          {tabs.map(([k, t, ready]) => (
             <button key={k} disabled={!ready} title={ready ? "" : "появится на следующих этапах"} onClick={() => nav(`/legal?tab=${k}`, { replace: true })} style={{ border: 0, background: "transparent", cursor: ready ? "pointer" : "default", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
               fontWeight: tab === k ? 700 : 500, color: !ready ? "#b9c0c9" : tab === k ? "var(--ink)" : "var(--muted)", borderBottom: tab === k ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>{t}</button>))}
         </div>

@@ -23,7 +23,8 @@ type Data = {
   money: { curve: { week: string; label: string; in: number; out: number; net: number; cum: number }[]; receivable_sum: number; receivable_count: number; min_cum: number; min_week: string } | null;
   funnel: { code: string; title: string; count: number }[]; team: { name: string; open: number; exec: number; overdue: number; share: number }[];
   notifications: { id: string; text: string; at: string | null; read: boolean; deal_id: string | null }[];
-  fx: Record<string, { rate: number; on: string }>; legal: { lawyer_review: number; commercial_review: number; poa_active: number; poa_expiring: number; poa_no_scan: number } | null;
+  fx: Record<string, { rate: number; on: string }>; legal: { lawyer_review: number; commercial_review: number; poa_active: number; poa_expiring: number; poa_no_scan: number;
+    contracts_review: number; contracts_signing: number; contracts_expiring: number; contracts_no_scan: number; contracts_visas: number } | null;
   fin: boolean; quick: { title: string; url: string }[];
 };
 
@@ -47,7 +48,7 @@ const estimate = (d: Data, b: string): number => {
     case "team": return d.team.length ? 60 + 30 * d.team.length : 0;
     case "notifications": return 50 + (d.notifications.length ? 48 * Math.min(6, d.notifications.length) : 30);
     case "deadlines": return 50 + (d.upcoming.length ? 36 * d.upcoming.length : 30);
-    case "legal": return d.legal ? 190 : 0;
+    case "legal": return d.legal ? 300 : 0;
     case "quick": return 90 + 48 * Math.ceil(d.quick.length / 2);
     default: return 0;
   }
@@ -188,6 +189,12 @@ export default function WorkplacePage({ me }: { me: Me }) {
       case "legal": return d.legal && (
         <div key={code} data-block={code} className="wp-card">
           <div className="wp-head"><h2>Юридический блок</h2><Link to="/legal" className="muted">открыть →</Link></div>
+          <div className="wp-grid2" style={{ marginBottom: 8 }}>
+            <Link to="/legal?tab=contracts" className="wp-mini"><b style={{ color: d.legal.contracts_visas ? "var(--warn)" : "inherit" }}>{d.legal.contracts_visas}</b><small>договоров ждут вашей визы</small></Link>
+            <Link to="/legal?tab=contracts" className="wp-mini"><b>{d.legal.contracts_review}</b><small>на согласовании · {d.legal.contracts_signing} на подписи</small></Link>
+            <Link to="/legal?tab=contracts" className="wp-mini"><b style={{ color: d.legal.contracts_expiring ? "var(--warn)" : "inherit" }}>{d.legal.contracts_expiring}</b><small>договоров истекает в 30 дней</small></Link>
+            <Link to="/legal?tab=contracts" className="wp-mini"><b style={{ color: d.legal.contracts_no_scan ? "var(--bad)" : "inherit" }}>{d.legal.contracts_no_scan}</b><small>договоров без скана</small></Link>
+          </div>
           <div className="wp-grid2">
             <Link to="/legal?tab=packages" className="wp-mini"><b style={{ color: d.legal.lawyer_review ? "var(--warn)" : "inherit" }}>{d.legal.lawyer_review}</b><small>на проверке юриста</small></Link>
             <Link to="/legal?tab=packages" className="wp-mini"><b>{d.legal.commercial_review}</b><small>коммерческое согласование</small></Link>
