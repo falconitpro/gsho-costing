@@ -66,4 +66,5 @@ def test_catalog_hub():
         # курсы ЦБ для шапки: у каждого курса — дата, на которую он установлен
         fx = _ok(c.get("/api/refs/fx-today", headers=H(MGR)))
         assert "rates" in fx and all(r["on"] and r["rate"] > 0 and r["currency"] in ("USD", "EUR", "CNY") for r in fx["rates"])
+        c.cookies.clear()
         assert c.get("/api/refs/fx-today").status_code == 401
