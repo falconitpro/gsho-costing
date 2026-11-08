@@ -11,6 +11,8 @@ from sqlalchemy import select
 from app.db import SessionLocal, init_db
 from app.models import Client, Factory, FxRate, HsCode, LegalEntity, MarkupPolicy, PaymentScheme, RouteStep, SupplyRoute, User
 
+TEST_LOGIN = "test@berg-haus.com"
+
 USERS = [
     ("manager@example.com", "Бочаров Егор (менеджер)", ["manager"]),
     ("logist@example.com", "Каталкина Оксана (логист)", ["logistician"]),
@@ -21,6 +23,7 @@ USERS = [
     ("admin@example.com", "Администратор", ["admin"]),
     ("observer@example.com", "Наблюдатель", ["observer"]),
     ("lawyer@example.com", "Земсков Евгений (юрист)", ["lawyer"]),
+    (TEST_LOGIN, "Тестовый вход (ЗГД)", ["gd"]),           # вход на стенд по логину и паролю; дальше — «Войти как» в шапке
 ]
 # прежние демонстрационные имена — при повторном запуске заменяются на актуальные (имена, заданные вручную, не трогаем)
 OLD_NAMES = {"Иванов Иван (менеджер)", "Петров Пётр (логист)", "Сидоров Сергей (сервис)", "Кузнецова Анна (КД)", "Смирнов Олег (ФД)",

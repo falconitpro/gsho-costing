@@ -3,10 +3,9 @@ import { api, ApiError } from "../api";
 
 
 // Страница входа CRM БЕРГ-ХАУС по утверждённому макету «Красный монолит / ПДМ».
-// Вход по логину (e-mail) и паролю — POST /api/auth/password-login; дополнительно Microsoft 365 (OIDC), на тестовом стенде — «Войти как».
+// Вход по логину (e-mail) и паролю — POST /api/auth/password-login; дополнительно Microsoft 365 (OIDC). На тестовом стенде вход — тестовой учётной записью, переключение ролей — в шапке.
 
 type Providers = { password: boolean; m365: boolean; dev: boolean; support: string };
-type DevUser = { email: string; display_name: string };
 
 const Ic = {
   user: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6" /></svg>,
@@ -38,7 +37,7 @@ function Background() {
   );
 }
 
-export default function LoginPage({ onLoggedIn, devUsers = [], onDevPick }: { onLoggedIn: () => void; devUsers?: DevUser[]; onDevPick?: (email: string) => void }) {
+export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [prov, setProv] = useState<Providers | null>(null);
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
@@ -119,16 +118,7 @@ export default function LoginPage({ onLoggedIn, devUsers = [], onDevPick }: { on
             </button>
           </form>
           <div className="bh-secure"><span className="dot" aria-hidden="true" />Защищённый контур БЕРГ-ХАУС</div>
-          {(prov?.m365 || (prov?.dev && devUsers.length > 0)) && (
-            <div className="bh-alt">
-              {prov?.m365 && <a href={`/api/auth/login`}>Войти через Microsoft 365</a>}
-              {prov?.dev && devUsers.length > 0 && (
-                <label className="bh-dev">Тестовый стенд: войти как
-                  <select defaultValue="" onChange={(e) => e.target.value && onDevPick?.(e.target.value)} aria-label="Тестовый пользователь">
-                    <option value="">— выберите —</option>{devUsers.map((u) => <option key={u.email} value={u.email}>{u.display_name}</option>)}
-                  </select>
-                </label>)}
-            </div>)}
+          {prov?.m365 && <div className="bh-alt"><a href={`/api/auth/login`}>Войти через Microsoft 365</a></div>}
           <div className="bh-card-foot">
             <span>© 2026 BERGHAUS</span>
             <button type="button" onClick={() => { setError(""); setInfo(`Техническая поддержка: ${support.charAt(0).toLowerCase()}${support.slice(1)}`); }}>Техническая поддержка</button>

@@ -171,8 +171,8 @@ def me(user: CurrentUser = Depends(get_current_user)):
 
 
 @router.get("/dev-users")
-def dev_users(db: Session = Depends(get_db), s: Settings = Depends(get_settings)):
-    """Только dev: список пользователей для переключателя ролей на фронте."""
+def dev_users(db: Session = Depends(get_db), s: Settings = Depends(get_settings), _: CurrentUser = Depends(get_current_user)):
+    """Только dev и только после входа: список учётных записей для переключателя «Войти как» в шапке."""
     if not (s.is_dev and s.auth_provider == "dev"):
         raise HTTPException(404)
     return [{"email": u.email, "display_name": u.display_name, "roles": u.roles} for u in db.scalars(select(User)).all()]
