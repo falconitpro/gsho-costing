@@ -1,6 +1,12 @@
 /* Страница входа CRM БЕРГ-ХАУС — макет «Красный монолит / ПДМ», эталон 1920 × 1200.
    Фон собран из слоёв: SVG-плоскости (красный, чёрный, тёплый белый) + локальный asset сцены (рельеф, ПДМ, фактура ромба);
-   логотип и весь текст — отдельными элементами. */
+   логотип и весь текст — отдельными элементами. Шрифты Noto Sans — локально из /fonts (лицензия OFL, см. public/fonts/LICENSE-Noto.txt). */
+@font-face { font-family: "Noto Sans"; src: url("/fonts/NotoSans-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Sans"; src: url("/fonts/NotoSans-Medium.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Sans"; src: url("/fonts/NotoSans-SemiBold.woff2") format("woff2"); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Sans"; src: url("/fonts/NotoSans-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Sans Display"; src: url("/fonts/NotoSansDisplay-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Sans Display"; src: url("/fonts/NotoSansDisplay-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
 .bh-login {
   --bh-red: #ef3035;
   --bh-red-hover: #d9242a;
@@ -14,8 +20,8 @@
   --bh-text: #f3f1ec;              /* текст на чёрной карточке */
   --bh-dim: #a39f97;
   --bh-field: #232423;             /* поля ввода на чёрной карточке */
-  --bh-font: "Noto Sans", "Intro", Arial, sans-serif;
-  --bh-font-display: "Noto Sans Display", "Noto Sans", "Intro", Arial, sans-serif;
+  --bh-font: "Noto Sans", Arial, sans-serif;
+  --bh-font-display: "Noto Sans Display", "Noto Sans", Arial, sans-serif;
   --bh-font-mono: "DejaVu Sans Mono", "Menlo", "Consolas", monospace;
   --bh-motion-fast: 160ms;
   --bh-motion-normal: 240ms;
@@ -42,7 +48,7 @@
 .bh-vert { position: absolute; left: calc(26 * var(--bh-s)); top: 50%; z-index: 2; transform: translate(-50%, -50%) rotate(-90deg); transform-origin: center; white-space: nowrap;
   font-family: var(--bh-font-mono); text-transform: uppercase; letter-spacing: 0.32em; color: rgba(255, 255, 255, 0.72); font-size: clamp(9px, calc(11 * var(--bh-s)), 11px); }
 
-.bh-slogan { position: absolute; left: calc(112 * var(--bh-s) + clamp(400px, 27vw, 500px) + 4.6vw); top: 22vh; z-index: 2; color: var(--bh-white); font-family: var(--bh-font-display); font-weight: 800;
+.bh-slogan { position: absolute; left: calc(112 * var(--bh-s) + clamp(400px, 27vw, 500px) + 4.6vw); top: 22vh; z-index: 2; color: var(--bh-white); font-family: var(--bh-font-display); font-weight: 700;
   font-size: clamp(30px, 4.6vh, 50px); line-height: 1.04; letter-spacing: -0.01em; }
 .bh-slogan::before { content: ""; display: block; width: 50px; height: 4px; background: var(--bh-white); margin-bottom: 2.4vh; }
 .bh-slogan span { display: block; }
@@ -57,7 +63,7 @@
 .bh-card { position: relative; margin-left: calc(112 * var(--bh-s)); margin-top: 0; width: clamp(400px, 27vw, 500px); background: var(--bh-ink); color: var(--bh-text);
   border-top: 6px solid var(--bh-red); padding: clamp(18px, 3.4vh, 40px) clamp(28px, 2.3vw, 44px); box-shadow: 24px 18px 0 0 rgba(0, 0, 0, 0.35); animation: bh-in var(--bh-motion-normal) var(--bh-ease) both; }
 @keyframes bh-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.bh-card h1 { margin: clamp(2px, 2.2vh, 24px) 0 clamp(12px, 4vh, 44px); font-family: var(--bh-font-display); font-size: clamp(30px, 4.2vh, 44px); font-weight: 800; line-height: 1; letter-spacing: -0.01em; color: var(--bh-text); }
+.bh-card h1 { margin: clamp(2px, 2.2vh, 24px) 0 clamp(12px, 4vh, 44px); font-family: var(--bh-font-display); font-size: clamp(30px, 4.2vh, 44px); font-weight: 700; line-height: 1; letter-spacing: -0.01em; color: var(--bh-text); }
 
 .bh-field { display: block; margin-bottom: clamp(8px, 2vh, 20px); }
 .bh-field > span { display: block; font-family: var(--bh-font-mono); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--bh-text); font-weight: 700; margin-bottom: clamp(5px, 1vh, 8px); }
