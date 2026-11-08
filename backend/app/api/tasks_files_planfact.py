@@ -99,6 +99,16 @@ def board(db: Session = Depends(get_db), user: CurrentUser = Depends(require_rol
                                                  "priority": d.priority, "tasks": by_deal.get(d.id, []), "status_detail": status_detail(d),
                                                  "overdue": any(t["overdue"] for t in by_deal.get(d.id, [])),
                                                  "group": g, "group_number": numbers.get(g, ""), "related": group_size.get(g, 1) - 1})
+    # заявки на запчасти — свои колонки по общим этапам (единый раздел «Сделки»)
+    from ..services import parts_deals
+    for st, title in parts_deals.STAGE_TITLES.items():
+        columns[f"parts_{st}"] = {"title": f"ЗЧ · {title}", "deals": [], "kind": "parts"}
+    for p in parts_deals.rows(db, user, include_closed=False):
+        age = (today - parts_deals.as_of(p)).days
+        columns[f"parts_{p['stage']}"]["deals"].append({"id": p["id"], "number": p["number"], "client": p["client_name"], "priority": "urgent" if p["urgent"] else "normal", "tasks": [],
+                                                        "status_detail": f"{p['status_text']} · {p['lines']} поз." + (f" · {p['machine']}" if p["machine"] else ""),
+                                                        "overdue": bool(p["urgent"] and p["stage"] in ("request", "calc")) or (age >= 5 and p["stage"] in ("request", "calc")),
+                                                        "group": p["id"], "group_number": "", "related": 0, "url": p["url"]})
     return columns
 
 

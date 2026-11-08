@@ -127,7 +127,12 @@ def money(days: int = 90, db: Session = Depends(get_db), user: CurrentUser = Dep
     for wk in sorted(weeks):
         cum += weeks[wk]["in"] - weeks[wk]["out"]
         curve.append({"week": wk, "in": round(weeks[wk]["in"], 2), "out": round(weeks[wk]["out"], 2), "cum": round(cum, 2)})
+    # запчасти: заказано клиентами и ещё не отгружено — ожидаемые поступления без договорной даты (оплата по счёту / отгрузке)
+    from ..services import parts_deals
+    parts = [{"id": p["id"], "number": p["number"], "client": p["client_name"], "manager": p["manager_name"], "amount": p["ordered_rub"], "lines": p["lines"], "urgent": p["urgent"], "url": p["url"]}
+             for p in parts_deals.rows(db, user, include_closed=False) if p["block"] == "won" and p["ordered_rub"]]
     return {"rows": rows, "receivables": receivables, "guarantees": guarantees, "curve": curve,
+            "parts": {"rows": sorted(parts, key=lambda x: -x["amount"]), "sum_rub": round(sum(x["amount"] for x in parts), 2)},
             "totals": {"in_rub": round(sum(float(r["amount"] or 0) for r in rows if r["direction"] == "in" and r["currency"] == "RUB"), 2),
                        "out_rub": round(sum(float(r["amount"] or 0) for r in rows if r["direction"] == "out" and r["currency"] == "RUB"), 2),
                        "receivable_count": len(receivables), "min_cum": min((c["cum"] for c in curve), default=0.0)}}
