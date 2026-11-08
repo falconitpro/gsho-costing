@@ -52,21 +52,22 @@
 .bh-foot b { color: var(--bh-white); font-weight: 700; }
 
 /* ---------- карточка ---------- */
-.bh-main { position: relative; z-index: 3; height: 100svh; min-height: 0; display: flex; align-items: center; max-width: none; margin: 0; padding: 0; }
-.bh-card { position: relative; margin-left: calc(112 * var(--bh-s)); margin-top: 6vh; width: clamp(400px, 27vw, 500px); background: var(--bh-ink); color: var(--bh-text);
-  border-top: 6px solid var(--bh-red); padding: clamp(24px, 3.4vh, 40px) clamp(28px, 2.3vw, 44px); box-shadow: 24px 18px 0 0 rgba(0, 0, 0, 0.35); animation: bh-in var(--bh-motion-normal) var(--bh-ease) both; }
+.bh-main { position: relative; z-index: 3; height: 100svh; min-height: 0; display: grid; align-content: safe center; justify-content: start; max-width: none; margin: 0;
+  padding: calc(44 * var(--bh-s) + clamp(44px, calc(100 * var(--bh-s)), 100px) + 10px) 0 12px; box-sizing: border-box; }   /* карточка не выше логотипа */
+.bh-card { position: relative; margin-left: calc(112 * var(--bh-s)); margin-top: 0; width: clamp(400px, 27vw, 500px); background: var(--bh-ink); color: var(--bh-text);
+  border-top: 6px solid var(--bh-red); padding: clamp(18px, 3.4vh, 40px) clamp(28px, 2.3vw, 44px); box-shadow: 24px 18px 0 0 rgba(0, 0, 0, 0.35); animation: bh-in var(--bh-motion-normal) var(--bh-ease) both; }
 @keyframes bh-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.bh-card h1 { margin: clamp(6px, 2.2vh, 24px) 0 clamp(18px, 4vh, 44px); font-family: var(--bh-font-display); font-size: clamp(32px, 4.2vh, 44px); font-weight: 800; line-height: 1; letter-spacing: -0.01em; color: var(--bh-text); }
+.bh-card h1 { margin: clamp(2px, 2.2vh, 24px) 0 clamp(12px, 4vh, 44px); font-family: var(--bh-font-display); font-size: clamp(30px, 4.2vh, 44px); font-weight: 800; line-height: 1; letter-spacing: -0.01em; color: var(--bh-text); }
 
-.bh-field { display: block; margin-bottom: clamp(12px, 2vh, 20px); }
-.bh-field > span { display: block; font-family: var(--bh-font-mono); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--bh-text); font-weight: 700; margin-bottom: 8px; }
-.bh-input { position: relative; display: flex; align-items: center; background: var(--bh-field); border: 1px solid rgba(255, 255, 255, 0.18); min-height: clamp(46px, 6vh, 58px);
+.bh-field { display: block; margin-bottom: clamp(8px, 2vh, 20px); }
+.bh-field > span { display: block; font-family: var(--bh-font-mono); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--bh-text); font-weight: 700; margin-bottom: clamp(5px, 1vh, 8px); }
+.bh-input { position: relative; display: flex; align-items: center; background: var(--bh-field); border: 1px solid rgba(255, 255, 255, 0.18); min-height: clamp(44px, 6vh, 58px);
   transition: border-color var(--bh-motion-fast) var(--bh-ease), box-shadow var(--bh-motion-fast) var(--bh-ease); }
 .bh-input:hover { border-color: rgba(255, 255, 255, 0.38); }
 .bh-input:focus-within { border-color: var(--bh-red); box-shadow: 0 0 0 2px rgba(239, 48, 53, 0.25); }
 .bh-input.bad { border-color: var(--bh-red); }
 .bh-input .ic { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; color: var(--bh-text); opacity: 0.85; pointer-events: none; }
-.bh-input input { flex: 1; min-width: 0; height: clamp(44px, 5.8vh, 56px); border: 0; outline: 0; background: transparent; padding: 0 16px 0 56px; font: inherit; font-size: 16px; color: var(--bh-white); border-radius: 0; }
+.bh-input input { flex: 1; min-width: 0; height: clamp(42px, 5.8vh, 56px); border: 0; outline: 0; background: transparent; padding: 0 16px 0 56px; font: inherit; font-size: 16px; color: var(--bh-white); border-radius: 0; }
 .bh-input input::placeholder { color: #8c8a84; }
 .bh-input input:-webkit-autofill { -webkit-text-fill-color: #fff; -webkit-box-shadow: 0 0 0 1000px var(--bh-field) inset; caret-color: #fff; }
 .bh-input input:focus-visible { outline: none; }
@@ -77,19 +78,19 @@
 .bh-field-err { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: 12px; color: #ff8a8d; }
 .bh-field-err svg { width: 14px; height: 14px; flex: 0 0 auto; }
 
-.bh-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 0 clamp(14px, 2.4vh, 24px); font-size: 14px; color: var(--bh-text); }
-.bh-check { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; min-height: 40px; user-select: none; }
+.bh-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 0 clamp(8px, 2.4vh, 24px); font-size: 14px; color: var(--bh-text); }
+.bh-check { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; min-height: 36px; user-select: none; }
 .bh-check input { position: absolute; opacity: 0; width: 1px; height: 1px; }
 .bh-check .box { width: 20px; height: 20px; border: 2px solid var(--bh-text); background: transparent; display: inline-flex; align-items: center; justify-content: center; color: var(--bh-white);
   transition: background var(--bh-motion-fast) var(--bh-ease), border-color var(--bh-motion-fast) var(--bh-ease); }
 .bh-check input:checked + .box { background: var(--bh-red); border-color: var(--bh-red); }
 .bh-check input:focus-visible + .box { outline: 2px solid var(--bh-red); outline-offset: 2px; }
 .bh-check .box svg { width: 12px; height: 12px; }
-.bh-link { background: none; border: 0; padding: 10px 0; min-height: 40px; font: inherit; font-size: 14px; color: var(--bh-text); cursor: pointer; text-decoration: none; border-bottom: 1px solid transparent;
+.bh-link { background: none; border: 0; padding: 8px 0; min-height: 36px; font: inherit; font-size: 14px; color: var(--bh-text); cursor: pointer; text-decoration: none; border-bottom: 1px solid transparent;
   transition: border-color var(--bh-motion-fast) var(--bh-ease); }
 .bh-link:hover { border-bottom-color: var(--bh-text); }
 
-.bh-submit { position: relative; display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: clamp(52px, 6.6vh, 64px); border: 0; background: var(--bh-red); color: var(--bh-white);
+.bh-submit { position: relative; display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: clamp(48px, 6.6vh, 64px); border: 0; background: var(--bh-red); color: var(--bh-white);
   font: inherit; font-weight: 700; font-size: 17px; padding: 0 8px 0 28px; cursor: pointer; text-align: left; transition: background var(--bh-motion-fast) var(--bh-ease); }
 .bh-submit:hover { background: var(--bh-red-hover); }
 .bh-submit:disabled { cursor: default; opacity: 0.85; }
@@ -104,18 +105,18 @@
 .bh-alert.info { background: rgba(255, 255, 255, 0.08); border-left-color: var(--bh-text); color: var(--bh-text); }
 .bh-alert svg { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; }
 
-.bh-secure { display: flex; align-items: center; gap: 8px; margin: clamp(12px, 2vh, 20px) 0 0; font-size: 13px; color: var(--bh-dim); }
+.bh-secure { display: flex; align-items: center; gap: 8px; margin: clamp(10px, 2vh, 20px) 0 0; font-size: 13px; color: var(--bh-dim); }
 .bh-secure .dot { width: 10px; height: 10px; border-radius: 50%; background: #3fae6e; box-shadow: 0 0 0 3px rgba(63, 174, 110, 0.22); }
-.bh-card-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: clamp(14px, 2.4vh, 24px); padding-top: clamp(10px, 1.6vh, 16px); border-top: 1px solid rgba(255, 255, 255, 0.14);
+.bh-card-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: clamp(10px, 2.4vh, 24px); padding-top: clamp(8px, 1.6vh, 16px); border-top: 1px solid rgba(255, 255, 255, 0.14);
   font-family: var(--bh-font-mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--bh-dim); }
-.bh-card-foot button { background: none; border: 0; padding: 12px 0; min-height: 44px; font: inherit; color: var(--bh-dim); cursor: pointer; letter-spacing: inherit; text-transform: inherit; }
+.bh-card-foot button { background: none; border: 0; padding: 8px 0; min-height: 36px; font: inherit; color: var(--bh-dim); cursor: pointer; letter-spacing: inherit; text-transform: inherit; }
 .bh-card-foot button:hover { color: var(--bh-white); }
 
-.bh-alt { margin-top: clamp(10px, 1.6vh, 16px); display: flex; flex-direction: column; gap: 4px; }
+.bh-alt { margin-top: clamp(8px, 1.6vh, 16px); display: flex; flex-direction: column; gap: 4px; }
 .bh-alt a, .bh-alt select { font: inherit; font-size: 13px; }
 .bh-alt a { color: var(--bh-text); text-decoration: underline; text-underline-offset: 3px; padding: 8px 0; min-height: 40px; display: inline-flex; align-items: center; }
-.bh-dev { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--bh-dim); }
-.bh-dev select { min-height: 36px; border: 1px solid rgba(255, 255, 255, 0.18); background: var(--bh-field); color: var(--bh-white); padding: 4px 8px; max-width: 260px; }
+.bh-dev { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--bh-dim); white-space: nowrap; }
+.bh-dev select { min-height: 32px; flex: 1; border: 1px solid rgba(255, 255, 255, 0.18); background: var(--bh-field); color: var(--bh-white); padding: 4px 8px; max-width: 260px; }
 
 .bh-login :focus-visible { outline: 2px solid var(--bh-red); outline-offset: 2px; }
 .bh-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -126,9 +127,19 @@
   .bh-slogan { left: calc(clamp(24px, 5.8vw, 112px) + clamp(400px, 27vw, 500px) + 4.6vw); }
 }
 @media (max-width: 1100px) { .bh-slogan { display: none; } }
-@media (max-height: 640px) and (min-width: 768px) {
+@media (max-height: 660px) and (min-width: 768px) {
+  .bh-logo img { height: 46px; }
+  .bh-main { padding-top: calc(44 * var(--bh-s) + 46px + 8px); }
+  .bh-card { padding: 16px clamp(28px, 2.3vw, 44px); }
+  .bh-card h1 { margin: 0 0 10px; font-size: 28px; }
+  .bh-secure { display: none; }
+  .bh-alt { margin-top: 6px; }
+  .bh-card-foot { margin-top: 8px; padding-top: 6px; }
+  .bh-slogan { font-size: 30px; top: 18vh; }
+}
+@media (max-height: 540px) and (min-width: 768px) {
   .bh-login, .bh-main { height: auto; min-height: 100svh; overflow: visible; }      /* очень низкие окна: страница прокручивается, форма доступна целиком */
-  .bh-main { padding: 90px 0 24px; }
+  .bh-main { padding: 80px 0 20px; }
 }
 @media (max-width: 900px) { .bh-vert, .bh-foot { display: none; } .bh-corner { font-size: 9px; } }
 

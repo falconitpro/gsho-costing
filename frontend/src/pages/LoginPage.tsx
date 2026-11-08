@@ -128,7 +128,7 @@ export default function LoginPage({ onLoggedIn, devUsers = [], onDevPick }: { on
             <div className="bh-alt">
               {prov?.m365 && <a href={`/api/auth/login`}>Войти через Microsoft 365</a>}
               {prov?.dev && devUsers.length > 0 && (
-                <label className="bh-dev">Тестовый стенд — войти как
+                <label className="bh-dev">Тестовый стенд: войти как
                   <select defaultValue="" onChange={(e) => e.target.value && onDevPick?.(e.target.value)} aria-label="Тестовый пользователь">
                     <option value="">— выберите —</option>{devUsers.map((u) => <option key={u.email} value={u.email}>{u.display_name}</option>)}
                   </select>
