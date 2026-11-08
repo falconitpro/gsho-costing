@@ -1045,6 +1045,40 @@ class Contract(TimestampMixin, Base):
     facts: Mapped[dict] = mapped_column(JSONType, default=dict)                               # исполнение: {pay: {no: {paid_on, amount}}, perf: {i: {done_on}}, pen: {key: {status, amount, on, comment}}}
 
 
+class ContractClaim(TimestampMixin, Base):
+    """Претензия по договору: исходящая (требуем с контрагента долг, исполнение, неустойку) или входящая (требования к нам).
+    Лестница: напоминание за 3 дня до срока → уведомление в 1-й день просрочки → черновик претензии на 5-й день; подписывает КД или ЗГД."""
+    __tablename__ = "contract_claims"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    contract_id: Mapped[str] = mapped_column(String(36), index=True)
+    deal_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    direction: Mapped[str] = mapped_column(String(8), default="outgoing")                      # outgoing | incoming
+    number: Mapped[str] = mapped_column(String(64), default="", index=True)                    # ПР-RU-2026-001 / входящий номер
+    seq: Mapped[Optional[int]] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="draft")                           # draft | signing | signed | sent | received | answered | court | closed | cancelled
+    lines: Mapped[list[dict]] = mapped_column(JSONType, default=list)                          # [{kind: debt|performance|penalty, key, title, amount, days, due_on, penalty_key, rate_text}]
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    demand: Mapped[str] = mapped_column(Text, default="")                                      # дополнительное требование / текст
+    answer_days: Mapped[int] = mapped_column(Integer, default=30)
+    issued_on: Mapped[Optional[date]] = mapped_column(Date)
+    signer_id: Mapped[Optional[str]] = mapped_column(String(36))
+    signer_role: Mapped[str] = mapped_column(String(8), default="")                            # cd | gd
+    signed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    sent_on: Mapped[Optional[date]] = mapped_column(Date)
+    sent_via: Mapped[str] = mapped_column(String(16), default="")                              # post | courier | email | edo
+    track: Mapped[str] = mapped_column(String(128), default="")
+    answer_due: Mapped[Optional[date]] = mapped_column(Date, index=True)
+    result: Mapped[str] = mapped_column(String(16), default="")                                # satisfied | partial | rejected | no_answer
+    result_amount: Mapped[Optional[float]] = mapped_column(Float)
+    answer_on: Mapped[Optional[date]] = mapped_column(Date)
+    answer_text: Mapped[str] = mapped_column(Text, default="")
+    files: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    history: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    notified: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    source: Mapped[str] = mapped_column(String(8), default="manual")                           # manual | auto
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+
 class PowerOfAttorney(TimestampMixin, Base):
     """Доверенность от компании группы (юридический блок): конструктор, реестр, печать, копии, статусы, отзыв.
     Персональные данные представителя (паспорт) видят только юрист, ЗГД, ФД и администратор."""
