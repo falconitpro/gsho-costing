@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import type { Deal, Me } from "../types";
 import LegalSaleWizard from "./LegalSaleWizard";
+import ContractsBlock from "./ContractsBlock";
 
 // Юридический блок, этап 3: вкладка «Юридические документы» в сделке — пакеты (реестр), мастер закупочного пакета,
 // экран подтверждения договорного комплекта ЗИП, предпросмотр источников и проверки перед формированием.
@@ -141,6 +142,7 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
   return (
     <>
       {msg && <div className="alert info" onClick={() => setMsg("")} style={{ cursor: "pointer" }}>{msg}</div>}
+      <ContractsBlock dealId={deal.id} compact />
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
           <h2 style={{ margin: 0 }}>Юридические документы <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· пакетов: {pkgs.length}</span></h2>
