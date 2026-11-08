@@ -136,8 +136,8 @@ def update_user(user_id: str, body: dict, db: Session = Depends(get_db), user: C
             body["roles"] = [Role(r).value for r in body["roles"]]
         except ValueError:
             raise HTTPException(422, "Неизвестная роль")
-        if u.id == user.id and not ({"admin", "gd"} & set(body["roles"])):
-            raise HTTPException(409, "Нельзя снять с себя роль администратора / ЗГД")
+        if u.id == user.id and set(body["roles"]) != set(u.roles or []):
+            raise HTTPException(409, "Свои роли не меняются: роли сотруднику назначает другой администратор или ЗГД")
     if body.get("is_active") is False and u.id == user.id:
         raise HTTPException(409, "Нельзя отключить свою учётную запись")
     if "email" in body:

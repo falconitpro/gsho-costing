@@ -768,6 +768,8 @@ def test_admin_screens_and_overdue(client, tmp_path):
     assert client.patch(f"/api/admin/users/{obs['id']}", headers=H(ADM), json={"roles": ["nobody"]}).status_code == 422
     adm = next(u for u in users if u["email"] == ADM)
     assert client.patch(f"/api/admin/users/{adm['id']}", headers=H(ADM), json={"roles": ["observer"]}).status_code == 409
+    assert client.patch(f"/api/admin/users/{adm['id']}", headers=H(ADM), json={"roles": ["admin", "cd"]}).status_code == 409   # добавить себе роли тоже нельзя
+    _ok(client.patch(f"/api/admin/users/{adm['id']}", headers=H(ADM), json={"roles": adm["roles"], "display_name": adm["display_name"]}))   # прежний набор ролей — можно
     assert client.patch(f"/api/admin/users/{adm['id']}", headers=H(ADM), json={"is_active": False}).status_code == 409
     nu = _ok(client.post("/api/admin/users", headers=H(ADM), json={"email": "new.logist@example.com", "display_name": "Новый Логист", "roles": ["logistician"]}), 201)
     assert client.post("/api/admin/users", headers=H(ADM), json={"email": "new.logist@example.com", "display_name": "Дубль", "roles": ["logistician"]}).status_code == 409

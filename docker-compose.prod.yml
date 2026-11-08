@@ -16,6 +16,10 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     ports: !reset []
     expose: ["8000"]
+    environment:
+      # backend доступен только из сети compose (наружу смотрит Caddy) — адрес клиента берём из X-Forwarded-For, который выставляет Caddy;
+      # иначе все сотрудники для приложения «на одном адресе» и 30 ошибок входа у кого угодно блокируют вход всем
+      FORWARDED_ALLOW_IPS: "*"
     restart: unless-stopped
   db:
     restart: unless-stopped

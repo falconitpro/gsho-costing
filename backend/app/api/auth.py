@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..core.auth import SESSION_COOKIE, CurrentUser, OidcClient, get_current_user, hash_password, issue_session, set_session_cookie, verify_password
+from ..core.auth import SESSION_COOKIE, CurrentUser, OidcClient, get_current_user, hash_password, issue_session, reissue_session, set_session_cookie, verify_password
 from ..core.config import Settings, get_settings
 from ..core.roles import ROLE_TITLES, Role
 from ..db import get_db
@@ -86,7 +86,7 @@ def providers(s: Settings = Depends(get_settings)):
 @router.post("/password-login")
 def password_login(body: PasswordLoginIn, request: Request, response: Response, db: Session = Depends(get_db), s: Settings = Depends(get_settings)):
     """Вход по e-mail (логину) и паролю. Ошибка одна и та же для неизвестного логина и неверного пароля; 5 ошибок — блок на 15 минут."""
-    ip = request.client.host if request.client else ""
+    ip = request.client.host if request.client else ""     # в рабочем контуре uvicorn берёт адрес клиента из X-Forwarded-For от Caddy (FORWARDED_ALLOW_IPS)
     if _ip_blocked(ip):
         raise HTTPException(429, f"Слишком много попыток. Повторите через {LOCK_MINUTES} минут")
     login = body.login.strip().lower()
@@ -131,8 +131,9 @@ def _check_strength(pw: str) -> None:
 
 
 @router.post("/password")
-def change_password(body: PasswordChangeIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Сотрудник меняет свой пароль (нужен текущий, если он был задан)."""
+def change_password(body: PasswordChangeIn, request: Request, response: Response, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user),
+                    s: Settings = Depends(get_settings)):
+    """Сотрудник меняет свой пароль (нужен текущий, если он был задан). Остальные его сессии (другие браузеры) отзываются, текущая продолжается."""
     u = db.get(User, user.id)
     if u.password_hash and not verify_password(body.current_password, u.password_hash):
         raise HTTPException(403, "Текущий пароль неверный")
@@ -140,6 +141,7 @@ def change_password(body: PasswordChangeIn, db: Session = Depends(get_db), user:
     u.password_hash, u.password_set_at = hash_password(body.new_password), datetime.now(timezone.utc)
     audit(db, user.id, None, "user", u.id, "password_change")
     db.commit()
+    reissue_session(request, response, u, s)
     return {"ok": True}
 
 
@@ -148,8 +150,10 @@ class PasswordSetIn(BaseModel):
 
 
 @router.put("/users/{user_id}/password")
-def set_password(user_id: str, body: PasswordSetIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Администратор или ЗГД задаёт (сбрасывает) пароль сотруднику — например, при первом входе или если пароль забыт."""
+def set_password(user_id: str, body: PasswordSetIn, request: Request, response: Response, db: Session = Depends(get_db),
+                 user: CurrentUser = Depends(get_current_user), s: Settings = Depends(get_settings)):
+    """Администратор или ЗГД задаёт (сбрасывает) пароль сотруднику — например, при первом входе или если пароль забыт.
+    Все прежние сессии сотрудника отзываются (если пароль скомпрометирован, прежний вход перестаёт работать)."""
     if not user.has(Role.ADMIN, Role.GD):
         raise HTTPException(403, "Пароль сотруднику задаёт администратор или ЗГД")
     u = db.get(User, user_id)
@@ -160,6 +164,8 @@ def set_password(user_id: str, body: PasswordSetIn, db: Session = Depends(get_db
     u.failed_logins, u.locked_until = 0, None
     audit(db, user.id, None, "user", u.id, "password_set", after={"by": user.display_name})
     db.commit()
+    if u.id == user.id:
+        reissue_session(request, response, u, s)
     return {"ok": True, "email": u.email}
 
 
