@@ -151,6 +151,21 @@ def duplicates(db: Session, article: str, oem: str = "", manufacturer: str = "",
     return out
 
 
+@router.get("/catalog/by-model/{model_id}")
+def parts_by_model(model_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Карточка модели ГШО в Каталоге: применимые запчасти (по узлам) и комплекты ТО."""
+    from ..models import MaintenanceKit
+    rows = db.scalars(select(PartApplicability).where(PartApplicability.equipment_model_id == model_id)).all()
+    out = []
+    for a in rows:
+        p = db.get(Part, a.part_id)
+        if p is not None and p.status == "active":
+            out.append({"id": p.id, "article": p.article, "name_ru": p.name_ru, "part_group": p.part_group, "assembly": a.assembly, "unit": p.unit})
+    out.sort(key=lambda x: (x["assembly"], x["name_ru"]))
+    kits = db.scalars(select(MaintenanceKit).where(MaintenanceKit.equipment_model_id == model_id).order_by(MaintenanceKit.interval_hours)).all()
+    return {"parts": out, "kits": [{"id": k.id, "name": k.name, "interval_hours": k.interval_hours, "lines": k.lines or [], "active": k.active} for k in kits]}
+
+
 @router.get("/catalog/check-duplicates")
 def check_duplicates(article: str = "", oem: str = "", manufacturer: str = "", exclude_id: str = "",
                      db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):

@@ -14,7 +14,7 @@ type Gl = { id: string; term_ru: string; term_zh: string; kind: string; status: 
 type TplRow = { id?: string; no: number; code: string; name_ru: string; name_zh: string; unit: string; required: boolean; section: string };
 
 /** Задача 7: каталог производитель → тип → модель → исполнение, подтверждение КД/ЗГД, история цен; задача 4: глоссарий и шаблоны (обязательность). */
-export default function CatalogPage({ me }: { me: Me }) {
+export default function CatalogPage({ me, embedded, openModelId }: { me: Me; embedded?: boolean; openModelId?: string }) {
   const [tab, setTab] = useState<"tree" | "add" | "pending" | "glossary" | "templates" | "archive">("tree");
   const [mergeExec, setMergeExec] = useState("");
   const [selType, setSelType] = useState("");
@@ -24,7 +24,8 @@ export default function CatalogPage({ me }: { me: Me }) {
   const [archive, setArchive] = useState<{ models: { id: string; model: string; trademark?: string; brand_name: string }[]; executions: { id: string; name: string; model_id: string }[] }>({ models: [], executions: [] });
   const [tree, setTree] = useState<Tree>([]);
   const [exec, setExec] = useState<Exec | null>(null);
-  const [modelId, setModelId] = useState("");   // карточка машины справа
+  const [modelId, setModelId] = useState(openModelId || "");   // карточка машины справа
+  useEffect(() => { if (openModelId) { setModelId(openModelId); setTab("tree"); } }, [openModelId]);
   const [pending, setPending] = useState<{ id: string; name: string; model: string; source_deal_id: string | null; created_at: string }[]>([]);
   const [gl, setGl] = useState<Gl[]>([]);
   const [glQ, setGlQ] = useState("");
@@ -54,7 +55,7 @@ export default function CatalogPage({ me }: { me: Me }) {
   }
   return (
     <>
-      <h1>Каталог оборудования</h1>
+      {!embedded && <h1>Каталог оборудования</h1>}
       {msg && <div className="alert info">{msg}</div>}
       <div className="tabs">
         <button className={tab === "tree" ? "active" : ""} onClick={() => setTab("tree")}>Тип → бренд → модель → исполнение</button>

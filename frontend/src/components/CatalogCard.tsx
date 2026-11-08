@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ModelPartsBlock } from "./CatalogExtra";
 import { useNavigate } from "react-router-dom";
 import { MeContext } from "../App";
 import { lbl, IMAGE_KIND, PRICE_SOURCE } from "../labels";
@@ -88,7 +89,7 @@ export default function CatalogCard({ modelId, execId, onExec, models = [], onCh
   const e = card.executions.find((x) => x.id === ex) || card.executions[0];
   const images = card.executions.flatMap((x) => x.images.map((im) => ({ ...im, exec: x.name })));
   const an = card.analytics;
-  const tabs: [string, string][] = [["tech", "Технические характеристики"], ["photo", `Фото и чертежи (${images.length})`], ["docs", "Документы"], ["more", "Опции, регламенты, логистика"],
+  const tabs: [string, string][] = [["tech", "Технические характеристики"], ["photo", `Фото и чертежи (${images.length})`], ["docs", "Документы"], ["more", "Опции, регламенты, логистика"], ["parts", "Запчасти и ТО"],
     ...(card.with_prices ? [["prices", "Цены и сроки — список"], ["analytics", "Аналитическая справка"]] as [string, string][] : []), ["history", "История изменений"]];
   const pickExec = (id: string) => { setEx(id); setEditing(""); onExec?.(id); };
   const done = (m: string) => { setEditing(""); if (m) { setMsg(m); reload(); } };
@@ -159,6 +160,7 @@ export default function CatalogCard({ modelId, execId, onExec, models = [], onCh
             </a>))}
         </div>))}
 
+      {tab === "parts" && <ModelPartsBlock modelId={card.id} />}
       {tab === "docs" && <ModelDocsBlock modelId={card.id} canUpload={!!me && !me.roles.every((r) => r.code === "observer")} canRemove={canEdit} />}
       {tab === "more" && canEdit && editing !== "more" && <button className="btn secondary" style={{ marginBottom: 6 }} onClick={() => setEditing("more")}>Редактировать опции, регламенты, ТН ВЭД и логистику</button>}
       {tab === "more" && canEdit && editing === "more" && <MoreEditor key={(e?.id || "") + card.id} modelId={card.id} execId={e?.id} options={e?.local_options || []} hs={card.hs || null}

@@ -23,7 +23,7 @@ export default function AdminPage({ me, embedded = false }: { me: Me; embedded?:
   const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
   const isAdmin = has("admin", "gd");
   const tabs: [string, string, boolean][] = [
-    ["users", "Сотрудники и роли", isAdmin], ["hs", "Справочник ТН ВЭД", isAdmin], ["fx", "Курсы валют", has("admin", "gd", "fd")],
+    ["users", "Сотрудники и роли", isAdmin], ["fx", "Курсы валют", has("admin", "gd", "fd")],
     ["templates", "Шаблоны", isAdmin], ["audit", "Журнал действий", isAdmin], ["integrations", "Журнал интеграций", isAdmin],
     ["accuracy", "Точность оценок", has("fd", "gd")], ["overdue", "Просрочки сотрудников", has("gd")],
   ];
@@ -35,7 +35,6 @@ export default function AdminPage({ me, embedded = false }: { me: Me; embedded?:
       {!embedded && <h1>Администрирование</h1>}
       <div className="tabs">{visible.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{t}</button>)}</div>
       {tab === "users" && <Users me={me} />}
-      {tab === "hs" && <HsCodes />}
       {tab === "fx" && <FxRates canManual={isAdmin} />}
       {tab === "templates" && <Templates />}
       {tab === "audit" && <AuditLog />}
@@ -91,7 +90,8 @@ function Users({ me }: { me: Me }) {
   );
 }
 
-function HsCodes() {
+/** Справочник ТН ВЭД — ведётся в разделе «Каталог» (вкладка «ТН ВЭД»). */
+export function HsCodes() {
   const [data, setData] = useState<{ total: number; rows: Hs[] }>({ total: 0, rows: [] });
   const [q, setQ] = useState("");
   const [msg, setMsg] = useState("");

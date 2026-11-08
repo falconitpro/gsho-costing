@@ -30,7 +30,7 @@ const EMPTY: Part = { article: "", name_ru: "", unit: "шт", part_group: "", st
 const n = (v: string) => (v === "" ? null : Number(v.replace(",", ".")));
 const PAGE = 50;
 
-export default function PartsCatalog({ me }: { me: Me }) {
+export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }) {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("");
@@ -60,6 +60,7 @@ export default function PartsCatalog({ me }: { me: Me }) {
     api.get<typeof warehouses>("/api/parts/warehouses").then(setWarehouses).catch(() => setWarehouses([]));
   }, []);
   useEffect(() => { const t = setTimeout(() => { setPage(0); load(0); }, 300); return () => clearTimeout(t); }, [q, group, status, inStock]);
+  useEffect(() => { if (openId) open(openId); }, [openId]);
 
   async function open(id: string) {
     const p = await api.get<Part>(`/api/parts/catalog/${id}`);
