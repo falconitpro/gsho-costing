@@ -78,7 +78,7 @@ export default function App() {
             {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
             {has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager") && <NavLink to="/summary">Сводка</NavLink>}
             <NavLink to="/counterparties">Контрагенты</NavLink>
-            {has("cd", "fd", "gd", "lawyer", "admin", "manager") && <NavLink to="/legal">Юридический блок</NavLink>}
+            {has("cd", "fd", "gd", "lawyer", "admin", "manager") ? <NavLink to="/legal">Юридический блок</NavLink> : !has("observer") && <NavLink to="/legal?tab=contracts">Договоры</NavLink>}
 
             <NavLink to="/catalog">Каталог</NavLink>
             {has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head") && <NavLink to="/parts/setup">Запасные части</NavLink>}

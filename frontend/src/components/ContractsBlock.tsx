@@ -13,14 +13,18 @@ type Row = {
   id: string; doc_type: string; doc_type_title: string; kind: string; kind_title: string; direction: string; direction_title: string; number: string; cp_number: string; title: string; subject: string;
   status: string; status_title: string; locked: boolean; own_entity_id: string | null; own_entity_name: string; cp_kind: string; cp_id: string | null; cp_name: string; cp_inn: string;
   deal_id: string | null; deal_number: string; amount: number | null; currency: string; signed_on: string | null; valid_to: string | null; days_to_expiry: number | null; sign_method: string;
-  has_scan: boolean; curator_name: string; terms_text: string;
+  has_scan: boolean; curator_name: string; terms_text: string; pending: string[];
 };
+type Step = { code: string; title: string; decision: string | null; by_name: string; at: string | null; comment: string; pending: boolean };
 type Full = Row & {
   vat_mode: string; vat_rate: number | null; price_type: string; fx_clause: string; effective_from: string | null; auto_renew: boolean; signatory: { name?: string; position?: string; basis?: string };
   payment_terms: PayLine[]; performance_terms: PerfTerm[]; penalties: Penalty[]; liability_cap_pct: number | null; security: Record<string, string>; warranty: Record<string, string>;
   law: { law?: string; court?: string; claim_days?: number; pre_trial?: boolean }; edo: { operator?: string; doc_id?: string }; original: { received_on?: string; location?: string };
   files: CFile[]; history: { at: string; by_name: string; action: string; comment: string }[]; notes: string; schedule: Sched[]; check: { ok: boolean; errors: string[]; warnings: string[] };
   children: Row[]; can_edit: boolean; can_edit_number: boolean; created_by_name: string;
+  client_order: boolean; approval: { round?: number; submitted_at?: string; submitted_by_name?: string; steps?: Step[] }; route_preview: string[];
+  sign_checklist: { code: string; title: string; ok: boolean; optional?: boolean }[]; amends: { field: string; title: string }[];
+  my_steps: string[]; can_register: boolean; can_sign: boolean;
 };
 type Catalog = { kinds: Record<string, { title: string; direction: string; cp_kind: string }>; directions: Record<string, string>; statuses: Record<string, string>; file_kinds: Record<string, string>;
   events: Record<string, string>; performance_codes: Record<string, string>; penalty_payers: Record<string, string>; penalty_reasons: Record<string, string>; rate_kinds: Record<string, string>;
@@ -36,8 +40,9 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
   const [reg, setReg] = useState<Registry | null>(null);
   const [cat, setCat] = useState<Catalog | null>(null);
   const [f, setF] = useState({ q: "", status: "", direction: "", kind: "" });
-  const [open, setOpen] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const qs = new URLSearchParams(window.location.search);
+  const [open, setOpen] = useState<string | null>(dealId ? null : qs.get("open"));
+  const [creating, setCreating] = useState(!dealId && qs.get("new") === "1");
   const [msg, setMsg] = useState("");
   const load = () => {
     const p = new URLSearchParams({ ...f, ...(dealId ? { deal_id: dealId } : {}) });
@@ -80,7 +85,7 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
                 <td className="num" style={{ whiteSpace: "nowrap" }}>{money(r.amount, r.currency)}</td>
                 <td style={{ fontSize: 12, maxWidth: 280 }}>{r.terms_text || (r.direction === "none" ? <span className="muted">—</span> : <span style={{ color: "var(--bad)" }}>не заданы</span>)}</td>
                 <td style={{ whiteSpace: "nowrap" }}>{d(r.signed_on)}{r.locked && !r.has_scan && <div style={{ fontSize: 11, color: "var(--bad)" }}>нет скана</div>}{r.sign_method === "edo" && <div className="muted" style={{ fontSize: 11 }}>ЭДО</div>}</td>
-                <td><span className={`badge ${STATUS_CLASS[r.status] || ""}`}>{r.status_title}</span>{r.days_to_expiry != null && r.status === "active" && r.days_to_expiry <= 30 && <div style={{ fontSize: 11, color: "var(--warn)" }}>до {d(r.valid_to)}</div>}</td>
+                <td><span className={`badge ${STATUS_CLASS[r.status] || ""}`}>{r.status_title}</span>{r.pending?.length > 0 && <div className="muted" style={{ fontSize: 11 }}>ждёт: {r.pending.join(", ")}</div>}{r.days_to_expiry != null && r.status === "active" && r.days_to_expiry <= 30 && <div style={{ fontSize: 11, color: "var(--warn)" }}>до {d(r.valid_to)}</div>}</td>
               </tr>))}
           </tbody>
         </table>
@@ -151,6 +156,8 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
   const fail = (e: unknown) => { const det = (e as { detail?: { errors?: string[] } }).detail; setErr(det?.errors?.length ? det.errors : [(e as Error).message]); };
   const save = () => api.put<Full>(`/api/legal/contracts/${id}`, draft).then((x) => { setC(x); setDraft({}); setErr([]); setInfo("Сохранено"); }).catch(fail);
   const status = (to: string) => api.post<Full>(`/api/legal/contracts/${id}/status`, { status: to, comment: reason }).then((x) => { setC({ ...c, ...x }); setReason(""); setErr([]); setInfo(`Статус: ${x.status_title}`); }).catch(fail);
+  const act = (path: string, body: object = {}) => api.post<Full>(`/api/legal/contracts/${id}/${path}`, body).then((x) => { setC(x); setDraft({}); setReason(""); setErr([]); setInfo(`Статус: ${x.status_title}`); }).catch(fail);
+  const inRoute = ["legal_review", "approval", "approved", "signing"].includes(c.status);
   const pull = () => api.post<Full>(`/api/legal/contracts/${id}/pull-terms`).then((x) => { setC(x); setDraft({}); setInfo("Цена и условия оплаты перенесены из расчёта сделки"); }).catch(fail);
   const tabs: [Tab, string][] = [["main", "Основное"], ["pay", "Оплата"], ["perf", "Сроки и неустойки"], ["files", `Файлы (${c.files.length})`], ["history", "История"]];
   return (
@@ -166,7 +173,10 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
         {c.locked && <div className="alert info">Договор подписан: условия меняются только дополнительным соглашением. Номер и дату у подписанного меняет ЗГД или КД.</div>}
         {err.length > 0 && <div className="alert error"><ul style={{ margin: 0, paddingLeft: 18 }}>{err.map((e) => <li key={e}>{e}</li>)}</ul></div>}
         {info && <div className="alert ok" onClick={() => setInfo("")}>{info}</div>}
-        {!c.check.ok && !c.locked && <div className="alert warn"><b>Не готов к подписанию:</b> {c.check.errors.join("; ")}</div>}
+        {!c.check.ok && !c.locked && <div className="alert warn"><b>Не готов к согласованию:</b> {c.check.errors.join("; ")}</div>}
+        {inRoute && !c.locked && <div className="alert info">Договор на маршруте: условия меняют юрист или ЗГД, после виз — согласование заново. Чтобы поправить самому — «Вернуть в проект».</div>}
+        {c.doc_type === "amendment" && <div className="alert info">{c.amends.length ? <>После подписания в основном договоре изменится: <b>{c.amends.map((x) => x.title).join(", ")}</b>.</> : "Заполните только то, что меняется: цену, условия оплаты, сроки, неустойки или срок действия — после подписания это перейдёт в основной договор."}</div>}
+        <RouteStrip c={c} />
 
         {tab === "main" && (
           <div className="poa-cols">
@@ -186,6 +196,7 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
                 <F label="Валюта"><select value={v.currency} disabled={ro} onChange={(e) => set({ currency: e.target.value })}>{["RUB", "CNY", "USD", "EUR", "KGS"].map((x) => <option key={x}>{x}</option>)}</select></F>
                 <F label="НДС"><select value={v.vat_mode} disabled={ro} onChange={(e) => set({ vat_mode: e.target.value })}><option value="included">включён в цену</option><option value="on_top">сверху</option><option value="none">без НДС</option></select></F>
                 <F label="Тип цены"><select value={v.price_type} disabled={ro} onChange={(e) => set({ price_type: e.target.value })}><option value="fixed">фиксированная</option><option value="by_spec">по спецификациям</option><option value="framework">рамочный лимит</option></select></F>
+                {v.direction === "expense" && <label className="row" style={{ gridColumn: "span 2", gap: 8, fontSize: 13 }}><input type="checkbox" style={{ width: "auto", minHeight: 0 }} checked={!!v.client_order} disabled={ro} onChange={(e) => set({ client_order: e.target.checked })} />закупка под заказ клиента (ГШО или запчасти) — согласует КД</label>}
                 <F label="Валютная оговорка" span={2}><input value={v.fx_clause || ""} disabled={ro} placeholder="по курсу ЦБ на дату оплаты ± …" onChange={(e) => set({ fx_clause: e.target.value })} /></F>
               </div>
             </Section>
@@ -198,6 +209,7 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
                 <F label="Оригинал получен"><input type="date" value={v.original?.received_on || ""} disabled={!c.can_edit} onChange={(e) => set({ original: { ...v.original, received_on: e.target.value } })} /></F>
                 <F label="Где хранится оригинал"><input value={v.original?.location || ""} disabled={!c.can_edit} onChange={(e) => set({ original: { ...v.original, location: e.target.value } })} /></F>
               </div>
+              <div style={{ marginTop: 10, fontSize: 13 }}>{c.sign_checklist.map((x) => <div key={x.code} style={{ color: x.ok ? "var(--ok)" : x.optional ? "var(--muted)" : "var(--ink)" }}>{x.ok ? "✓" : "○"} {x.title}{x.optional && !x.ok ? " (желательно)" : ""}</div>)}</div>
             </Section>
             <Section title="Гарантия, обеспечение, споры">
               <div className="poa-form">
@@ -241,10 +253,18 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
 
       <div className="poa-footer">
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-          {!c.locked && c.status !== "cancelled" && <button className="btn ghost" onClick={() => { setErr([]); status("active"); }}>Отметить подписанным</button>}
+          {c.status === "draft" && c.can_edit && <button className="btn" disabled={dirty} title={dirty ? "сначала сохраните" : ""} onClick={() => act("submit")}>На согласование</button>}
+          {c.my_steps.length > 0 && <>
+            <button className="btn" onClick={() => act("visa", { decision: "approve", comment: reason })}>Согласовать ({c.my_steps.join(", ")})</button>
+            <button className="btn ghost" style={{ color: "var(--bad)" }} onClick={() => act("visa", { decision: "reject", comment: reason })}>На доработку</button>
+          </>}
+          {inRoute && c.can_edit && <button className="btn ghost" onClick={() => act("recall", { comment: reason })}>Вернуть в проект</button>}
+          {c.status === "approved" && c.can_sign && <button className="btn" onClick={() => status("signing")}>Передать на подпись</button>}
+          {["approved", "signing"].includes(c.status) && c.can_sign && <button className="btn ghost" onClick={() => status("active")}>Отметить подписанным</button>}
+          {["draft", "legal_review", "approval"].includes(c.status) && c.can_register && <button className="btn ghost" title="договор уже подписан вне системы — регистрация без маршрута" onClick={() => status("active")}>Зарегистрировать подписанный</button>}
           {c.status === "active" && <button className="btn ghost" onClick={() => status("closed")}>Исполнен</button>}
           {(c.status === "active" || (!c.locked && c.status !== "cancelled")) && <>
-            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="причина (для расторжения / аннулирования)" style={{ width: 240 }} />
+            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="комментарий / причина" style={{ width: 240 }} />
             {c.status === "active" ? <button className="btn ghost" style={{ color: "var(--bad)" }} onClick={() => status("terminated")}>Расторгнут</button>
               : <button className="btn ghost" style={{ color: "var(--bad)" }} onClick={() => status("cancelled")}>Аннулировать</button>}
           </>}
@@ -362,6 +382,29 @@ function Modal({ title, children, onClose, wide }: { title: string; children: Re
       <div className="card poa-modal" onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: wide ? 1120 : 640 }}>
         <div className="poa-modal-head"><b>{title}</b><button className="btn ghost" onClick={onClose} title="закрыть">✕</button></div>
         {children}
+      </div>
+    </div>);
+}
+
+function RouteStrip({ c }: { c: Full }) {
+  const steps = c.approval?.steps;
+  if (!steps?.length) {
+    if (c.status !== "draft" || !c.route_preview?.length) return null;
+    return <div className="muted" style={{ fontSize: 12, margin: "0 0 12px" }}>Маршрут согласования: {c.route_preview.join(" → ")}</div>;
+  }
+  return (
+    <div className="poa-section" style={{ marginBottom: 12 }}>
+      <div className="poa-section-head"><b>Согласование</b><span className="muted">круг {c.approval.round || 1}{c.approval.submitted_by_name ? ` · отправил ${c.approval.submitted_by_name}` : ""}{c.approval.submitted_at ? ` ${d(c.approval.submitted_at)}` : ""}</span></div>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${steps.length}, 1fr)`, gap: 8 }}>
+        {steps.map((s) => {
+          const tone = s.decision === "approve" ? "ok" : s.decision === "reject" ? "bad" : s.pending ? "warn" : "";
+          return (
+            <div key={s.code} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", fontSize: 13, background: tone === "ok" ? "var(--ok-bg)" : tone === "warn" ? "var(--warn-bg, #fff7e6)" : tone === "bad" ? "var(--bad-bg, #fdecec)" : "#fff" }}>
+              <b>{s.title}</b>
+              <div className="muted" style={{ fontSize: 12 }}>{s.decision === "approve" ? `согласовал ${s.by_name}` : s.decision === "reject" ? `на доработку · ${s.by_name}` : s.pending ? "ждёт визы" : "после юриста"}{s.at ? ` · ${d(s.at)}` : ""}</div>
+              {s.comment && <div style={{ fontSize: 12, marginTop: 2 }}>{s.comment}</div>}
+            </div>);
+        })}
       </div>
     </div>);
 }

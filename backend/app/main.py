@@ -91,6 +91,13 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("poa expiry check failed: %s", e)
+        try:   # договоры: напоминания за 30 и 7 дней до окончания, автопролонгация, истечение срока
+            from .services.legal_contracts import check_expiring as check_contracts
+            with SessionLocal() as db:
+                if check_contracts(db):
+                    db.commit()
+        except Exception as e:   # pragma: no cover
+            log.warning("contracts expiry check failed: %s", e)
         await asyncio.sleep(3600)
 
 

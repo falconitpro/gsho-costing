@@ -43,6 +43,14 @@ def _can_edit(user: CurrentUser, c: Contract) -> bool:
     return user.has(*EDIT_ROLES) or c.curator_id == user.id or c.created_by == user.id
 
 
+def _out(db: Session, user: CurrentUser, c: Contract) -> dict:
+    """Карточка + что может сделать текущий пользователь (визы, регистрация подписанного, подпись)."""
+    mine = c.curator_id == user.id or c.created_by == user.id
+    return {**svc.payload(db, c), "can_edit": _can_edit(user, c), "can_edit_number": user.has(Role.GD, Role.CD),
+            "my_steps": [x["title"] for x in svc.user_steps(c, user.roles)], "can_register": user.has(Role.LAWYER, Role.GD),
+            "can_sign": user.has(Role.LAWYER, Role.GD, Role.CD, Role.FD) or mine}
+
+
 def _get(db: Session, cid: str, user: CurrentUser) -> Contract:
     c = db.get(Contract, cid)
     if c is None or not _can_see(db, user, c):
@@ -101,9 +109,10 @@ class ContractIn(BaseModel):
     notes: Optional[str] = None
     curator_id: Optional[str] = None
     lawyer_id: Optional[str] = None
+    client_order: Optional[bool] = None
 
 
-TERMS_FIELDS = {"kind", "direction", "amount", "currency", "vat_mode", "vat_rate", "price_type", "fx_clause", "payment_terms", "performance_terms", "penalties", "liability_cap_pct",
+TERMS_FIELDS = {"client_order", "kind", "direction", "amount", "currency", "vat_mode", "vat_rate", "price_type", "fx_clause", "payment_terms", "performance_terms", "penalties", "liability_cap_pct",
                 "security", "warranty", "law", "own_entity_id", "cp_id", "cp_name", "cp_kind", "subject", "valid_to", "effective_from", "auto_renew"}
 LOCKED_OK = {"original", "notes", "edo", "lawyer_id", "curator_id", "deal_ids", "title"}   # можно править у подписанного договора
 NUMBER_FIELDS = {"cp_number", "signed_on"}                                                   # у подписанного — только ЗГД или КД
@@ -229,13 +238,13 @@ def create_contract(body: ContractIn, db: Session = Depends(get_db), user: Curre
     db.flush()
     audit(db, user.id, c.deal_id, "contract", c.id, "create", after={"number": c.number, "kind": c.kind, "cp": svc.cp_display(db, c)})
     db.commit()
-    return svc.payload(db, c)
+    return _out(db, user, c)
 
 
 @router.get("/legal/contracts/{cid}")
 def get_contract(cid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     c = _get(db, cid, user)
-    return {**svc.payload(db, c), "can_edit": _can_edit(user, c), "can_edit_number": user.has(Role.GD, Role.CD)}
+    return _out(db, user, c)
 
 
 @router.put("/legal/contracts/{cid}")
@@ -254,12 +263,20 @@ def update_contract(cid: str, body: ContractIn, db: Session = Depends(get_db), u
         num = [k for k in data if k in NUMBER_FIELDS and getattr(c, k) != data[k]]
         if num and not user.has(Role.GD, Role.CD):
             raise HTTPException(403, "Номер и дату подписанного договора меняет только ЗГД или КД")
+    in_route = c.status in svc.IN_ROUTE
+    if in_route:
+        terms = [k for k in data if k in TERMS_FIELDS and getattr(c, k) != data[k]]
+        if terms and not user.has(Role.LAWYER, Role.GD):
+            raise HTTPException(409, "Договор на согласовании: условия меняют юрист или ЗГД. Чтобы поправить самому — верните договор на доработку")
     changes = _apply(c, data, db)
+    if in_route and any(k in TERMS_FIELDS for k in changes):
+        if svc.reset_visas(db, c, user.id, "изменены условия: " + ", ".join(k for k in changes if k in TERMS_FIELDS)):
+            svc.notify_pending(db, c)
     if changes:
         svc.hist(c, user.id, "edited", ", ".join(changes.keys()), {k: v for k, v in changes.items() if k not in TERMS_FIELDS or k in ("amount", "currency")})
         audit(db, user.id, c.deal_id, "contract", c.id, "update", after={"fields": list(changes.keys())})
     db.commit()
-    return {**svc.payload(db, c), "can_edit": _can_edit(user, c), "can_edit_number": user.has(Role.GD, Role.CD)}
+    return _out(db, user, c)
 
 
 @router.post("/legal/contracts/{cid}/pull-terms")
@@ -278,7 +295,7 @@ def pull_terms(cid: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     c.payment_terms, c.amount, c.currency = lines, amount, cur
     svc.hist(c, user.id, "pull_terms", f"цена и условия оплаты из расчёта сделки {deal.number}")
     db.commit()
-    return {**svc.payload(db, c), "can_edit": True, "can_edit_number": user.has(Role.GD, Role.CD)}
+    return _out(db, user, c)
 
 
 class StatusIn(BaseModel):
@@ -288,16 +305,28 @@ class StatusIn(BaseModel):
 
 @router.post("/legal/contracts/{cid}/status")
 def set_status(cid: str, body: StatusIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Этап 1: отметить подписанным (нужны дата подписания и скан), исполненным, расторгнутым, аннулировать проект. Полный маршрут согласования — этап 2."""
+    """Передать на подпись (после согласования), отметить подписанным (дата, скан, при ЭДО — файл ЭДО), исполнен, расторгнут, аннулировать проект.
+    Уже подписанный вне системы договор юрист или ЗГД регистрирует сразу, минуя маршрут."""
     c = _get(db, cid, user)
     to = body.status
-    allowed = {"draft": {"active", "cancelled"}, "legal_review": {"active", "cancelled"}, "approval": {"active", "cancelled"}, "approved": {"active", "cancelled"}, "signing": {"active", "cancelled"},
-               "active": {"closed", "terminated"}}
+    allowed = {"draft": {"active", "cancelled"}, "legal_review": {"active", "cancelled"}, "approval": {"active", "cancelled"}, "approved": {"signing", "active", "cancelled"},
+               "signing": {"active", "cancelled"}, "active": {"closed", "terminated"}}
     if to not in allowed.get(c.status, set()):
         raise HTTPException(409, f"Из статуса «{svc.STATUSES.get(c.status)}» нельзя перейти в «{svc.STATUSES.get(to, to)}»")
+    curator = c.curator_id == user.id or c.created_by == user.id
+    signers = user.has(Role.LAWYER, Role.GD, Role.CD, Role.FD) or curator
     if to == "cancelled":
         if not (_can_edit(user, c)):
             raise HTTPException(403, "Аннулировать проект могут куратор, юрист, ФД, КД и ЗГД")
+    elif to == "signing":
+        if not signers:
+            raise HTTPException(403, "Передают на подпись куратор, юрист, ФД, КД или ЗГД")
+    elif to == "active" and c.status in ("draft", "legal_review", "approval"):
+        if not user.has(Role.LAWYER, Role.GD):
+            raise HTTPException(403, "Договор сначала проходит согласование. Уже подписанный вне системы договор регистрирует юрист или ЗГД")
+    elif to == "active":
+        if not signers:
+            raise HTTPException(403, "Отмечают куратор, юрист, ФД, КД или ЗГД")
     elif not user.has(Role.LAWYER, Role.GD, Role.CD, Role.FD):
         raise HTTPException(403, "Отмечают юрист, ФД, КД или ЗГД")
     if to == "active":
@@ -314,12 +343,106 @@ def set_status(cid: str, body: StatusIn, db: Session = Depends(get_db), user: Cu
         raise HTTPException(422, "Укажите причину")
     before = c.status
     c.status = to
+    note = ""
     if to == "active":
+        if before in ("draft", "legal_review", "approval"):
+            note = " (зарегистрирован подписанный, без маршрута согласования)"
         svc.apply_signed_to_deal(db, c)
-    svc.hist(c, user.id, "status", f"{svc.STATUSES.get(before)} → {svc.STATUSES.get(to)}" + (f": {body.comment.strip()}" if body.comment.strip() else ""))
+        changed = svc.apply_amendment(db, c, user.id)
+        if changed:
+            note += " · изменения внесены в основной договор: " + ", ".join(changed)
+        svc.notify_users(db, c, [c.curator_id or ""] if c.curator_id != user.id else [], f"Договор {c.number} ({svc.cp_display(db, c)}) подписан и действует")
+    if to == "signing":
+        svc.notify_users(db, c, [c.curator_id or ""] if c.curator_id != user.id else [], f"Договор {c.number} передан на подпись")
+    svc.hist(c, user.id, "status", f"{svc.STATUSES.get(before)} → {svc.STATUSES.get(to)}" + note + (f": {body.comment.strip()}" if body.comment.strip() else ""))
     audit(db, user.id, c.deal_id, "contract", c.id, "status", {"status": before}, {"status": to, "comment": body.comment})
     db.commit()
-    return {**svc.payload(db, c), "can_edit": _can_edit(user, c), "can_edit_number": user.has(Role.GD, Role.CD)}
+    return _out(db, user, c)
+
+
+class CommentIn(BaseModel):
+    comment: str = ""
+
+
+class VisaIn(BaseModel):
+    decision: str = "approve"     # approve | reject
+    comment: str = ""
+
+
+@router.post("/legal/contracts/{cid}/submit")
+def submit(cid: str, body: Optional[CommentIn] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Отправить проект на согласование: юрист → затем параллельно ФД, КД (закупки под заказы клиентов), ЗГД (дороже порога)."""
+    c = _get(db, cid, user)
+    if c.status != "draft":
+        raise HTTPException(409, "На согласование отправляется проект")
+    if not _can_edit(user, c):
+        raise HTTPException(403, "Отправляет куратор договора, юрист, ФД, КД или ЗГД")
+    chk = svc.check(c)
+    if chk["errors"]:
+        raise HTTPException(422, {"message": "Договор заполнен не полностью", "errors": chk["errors"]})
+    svc.start_route(db, c, user.id)
+    comment = (body.comment.strip() if body else "")
+    svc.hist(c, user.id, "submitted", "на согласование: " + " → ".join(x["title"] for x in c.approval["steps"]) + (f" · {comment}" if comment else ""))
+    svc.notify_pending(db, c)
+    audit(db, user.id, c.deal_id, "contract", c.id, "submit", after={"route": [x["code"] for x in c.approval["steps"]]})
+    db.commit()
+    return _out(db, user, c)
+
+
+@router.post("/legal/contracts/{cid}/visa")
+def visa(cid: str, body: VisaIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    c = _get(db, cid, user)
+    mine = svc.user_steps(c, set(user.roles))
+    if not mine:
+        wait = ", ".join(x["title"] for x in svc.pending_steps(c))
+        raise HTTPException(403, f"Сейчас визу ставит: {wait}" if wait else "Договор не на согласовании")
+    if body.decision not in ("approve", "reject"):
+        raise HTTPException(422, "Решение: approve | reject")
+    if body.decision == "reject" and len(body.comment.strip()) < 3:
+        raise HTTPException(422, "Укажите, что исправить")
+    now = datetime.now(timezone.utc).isoformat()
+    codes = {x["code"] for x in mine}
+    a = dict(c.approval)
+    a["steps"] = [{**x, "decision": body.decision, "by": user.id, "at": now, "comment": body.comment.strip()} if x["code"] in codes else x for x in a["steps"]]
+    c.approval = a
+    titles = ", ".join(svc.STEP_TITLES[x] for x in codes)
+    if body.decision == "reject":
+        c.status = "draft"
+        svc.hist(c, user.id, "visa", f"{titles}: на доработку — {body.comment.strip()}")
+        svc.notify_users(db, c, [c.curator_id or "", a.get("submitted_by") or ""], f"Договор {c.number} возвращён на доработку ({titles}): {body.comment.strip()}")
+    else:
+        svc.hist(c, user.id, "visa", f"{titles}: согласовано" + (f" — {body.comment.strip()}" if body.comment.strip() else ""))
+        if not svc.pending_steps(c):
+            c.status = "approved"
+            svc.notify_users(db, c, [c.curator_id or "", a.get("submitted_by") or ""], f"Договор {c.number} ({svc.cp_display(db, c)}) согласован — можно передавать на подпись")
+        elif c.status == "legal_review" and "lawyer" in codes:
+            c.status = "approval"
+            svc.notify_pending(db, c)
+    audit(db, user.id, c.deal_id, "contract", c.id, "visa", after={"steps": sorted(codes), "decision": body.decision, "comment": body.comment})
+    db.commit()
+    return _out(db, user, c)
+
+
+@router.post("/legal/contracts/{cid}/recall")
+def recall(cid: str, body: Optional[CommentIn] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Вернуть с согласования / подписания в проект (куратор, юрист, ЗГД) — например, чтобы поправить условия самому."""
+    c = _get(db, cid, user)
+    if c.status not in svc.IN_ROUTE:
+        raise HTTPException(409, "Договор не на согласовании")
+    if not (_can_edit(user, c)):
+        raise HTTPException(403)
+    before = c.status
+    c.status = "draft"
+    comment = (body.comment.strip() if body else "")
+    svc.hist(c, user.id, "recalled", f"{svc.STATUSES.get(before)} → проект" + (f": {comment}" if comment else ""))
+    db.commit()
+    return _out(db, user, c)
+
+
+@router.get("/legal/contracts-inbox")
+def inbox(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Мои договоры к действию: визы, на подпись, без скана, истекающие (для рабочего места)."""
+    return svc.inbox(db, user)
 
 
 @router.post("/legal/contracts/{cid}/files", status_code=201)
@@ -342,7 +465,7 @@ async def upload_file(cid: str, file: UploadFile = File(...), kind: str = Form("
     svc.hist(c, user.id, "file", f"{svc.FILE_KINDS[kind]} v{version}: {name}")
     audit(db, user.id, c.deal_id, "contract", c.id, "file", after={"kind": kind, "file": name})
     db.commit()
-    return {**svc.payload(db, c), "can_edit": _can_edit(user, c), "can_edit_number": user.has(Role.GD, Role.CD)}
+    return _out(db, user, c)
 
 
 @router.get("/legal/contracts/{cid}/files/{fid}")
@@ -375,7 +498,7 @@ def delete_file(cid: str, fid: str, db: Session = Depends(get_db), user: Current
             os.remove(os.path.join(d, x))
     svc.hist(c, user.id, "file_removed", f["name"])
     db.commit()
-    return {**svc.payload(db, c), "can_edit": _can_edit(user, c), "can_edit_number": user.has(Role.GD, Role.CD)}
+    return _out(db, user, c)
 
 
 @router.post("/legal/contracts/{cid}/check")

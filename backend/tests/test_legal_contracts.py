@@ -65,7 +65,7 @@ def test_contract_registry_lifecycle():
         c.post(f"/api/legal/contracts/{k['id']}/files", headers=H(LOG), files={"file": PDF}, data={"kind": "signed_scan"})
         assert "ЭДО" in c.post(f"/api/legal/contracts/{k['id']}/status", headers=H(LAW), json={"status": "active"}).text
         c.post(f"/api/legal/contracts/{k['id']}/files", headers=H(LAW), files={"file": ("doc.sig", b"sig", "application/octet-stream")}, data={"kind": "edo"})
-        k = c.post(f"/api/legal/contracts/{k['id']}/status", headers=H(FD), json={"status": "active"}).json()
+        k = c.post(f"/api/legal/contracts/{k['id']}/status", headers=H(LAW), json={"status": "active"}).json()
         assert k["status"] == "active" and k["locked"] and k["has_scan"]
         # подписанный: условия — только доп. соглашением; номер/дату — ЗГД или КД; скан не удаляется
         assert c.put(f"/api/legal/contracts/{k['id']}", headers=H(LAW), json={"amount": 1}).status_code == 409
