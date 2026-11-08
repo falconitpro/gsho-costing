@@ -393,19 +393,20 @@ def import_from_deals(db: Session) -> int:
     return n
 
 
-def apply_signed_to_deal(db: Session, c: Contract) -> None:
-    """Подписанный договор сделки → номер и дата контракта в сделке (как раньше вносили вручную)."""
+def apply_signed_to_deal(db: Session, c: Contract, overwrite: bool = False) -> None:
+    """Подписанный договор сделки → номер и дата контракта в сделке (как раньше вносили вручную); при исправлении ЗГД — перезаписать."""
     if not c.deal_id or c.doc_type != "contract":
         return
     deal = db.get(Deal, c.deal_id)
     if not deal:
         return
+    num = c.cp_number or c.number
     if c.direction == "income":
-        deal.contract_number = deal.contract_number or c.cp_number or c.number
-        deal.contract_signed_at = deal.contract_signed_at or c.signed_on
+        deal.contract_number = num if overwrite else (deal.contract_number or num)
+        deal.contract_signed_at = c.signed_on if overwrite else (deal.contract_signed_at or c.signed_on)
     elif c.direction == "expense":
-        deal.factory_contract_number = deal.factory_contract_number or c.cp_number or c.number
-        deal.factory_contract_signed_at = deal.factory_contract_signed_at or c.signed_on
+        deal.factory_contract_number = num if overwrite else (deal.factory_contract_number or num)
+        deal.factory_contract_signed_at = c.signed_on if overwrite else (deal.factory_contract_signed_at or c.signed_on)
 
 
 def any_fields(d: dict[str, Any], keys: list[str]) -> dict:

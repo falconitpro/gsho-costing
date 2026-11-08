@@ -29,7 +29,7 @@ type Full = Row & {
   children: Row[]; can_edit: boolean; can_edit_number: boolean; created_by_name: string;
   client_order: boolean; approval: { round?: number; submitted_at?: string; submitted_by_name?: string; steps?: Step[] }; route_preview: string[];
   sign_checklist: { code: string; title: string; ok: boolean; optional?: boolean }[]; amends: { field: string; title: string }[];
-  my_steps: string[]; can_register: boolean; can_sign: boolean; obligations: Obligations | null;
+  my_steps: string[]; can_register: boolean; can_sign: boolean; can_correct?: boolean; obligations: Obligations | null;
 };
 type Catalog = { kinds: Record<string, { title: string; direction: string; cp_kind: string }>; directions: Record<string, string>; statuses: Record<string, string>; file_kinds: Record<string, string>;
   events: Record<string, string>; performance_codes: Record<string, string>; penalty_payers: Record<string, string>; penalty_reasons: Record<string, string>; rate_kinds: Record<string, string>;
@@ -39,7 +39,7 @@ type Registry = { items: Row[]; summary: Record<string, number>; entities: { id:
 const STATUS_CLASS: Record<string, string> = { draft: "", legal_review: "info", approval: "info", approved: "info", signing: "warn", active: "ok", closed: "", terminated: "bad", cancelled: "" };
 const d = (s?: string | null) => (s ? new Date(s).toLocaleDateString("ru-RU") : "—");
 const money = (v: number | null | undefined, cur = "") => (v == null ? "—" : `${v.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}${cur ? " " + cur : ""}`);
-const ACTION: Record<string, string> = { created: "создан", edited: "изменён", package: "обновлён из пакета", pull_terms: "условия из расчёта", status: "статус", file: "файл", file_removed: "файл удалён", imported: "импорт из сделки" };
+const ACTION: Record<string, string> = { created: "создан", edited: "изменён", package: "обновлён из пакета", pull_terms: "условия из расчёта", status: "статус", file: "файл", file_removed: "файл удалён", imported: "импорт из сделки", correction: "исправление ЗГД", submitted: "на согласование", visa: "виза", recalled: "возвращён в проект", route_reset: "согласование заново", amendment: "доп. соглашение", renewed: "продлён", fact: "исполнение", claim: "претензия" };
 
 export default function ContractsBlock({ dealId, compact }: { dealId?: string; compact?: boolean }) {
   const [reg, setReg] = useState<Registry | null>(null);
@@ -153,15 +153,18 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
   const [info, setInfo] = useState("");
   const [fileKind, setFileKind] = useState("draft");
   const [reason, setReason] = useState("");
+  const [fix, setFix] = useState(false);            // ЗГД: исправление ошибки в подписанном договоре
+  const [fixReason, setFixReason] = useState("");
   const load = () => api.get<Full>(`/api/legal/contracts/${id}`).then((x) => { setC(x); setDraft({}); }).catch((e) => setErr([(e as Error).message]));
   useEffect(() => { load(); setTab("main"); }, [id]);
   const v = useMemo(() => (c ? { ...c, ...draft } as Full : null), [c, draft]);
   if (!c || !v) return <Modal title="Договор" onClose={onClose}><div className="poa-body">{err.join("; ") || "Загрузка…"}</div></Modal>;
-  const ro = !c.can_edit || c.locked;
+  const ro = (!c.can_edit || c.locked) && !fix;
   const set = (p: Partial<Full>) => setDraft({ ...draft, ...p });
   const dirty = Object.keys(draft).length > 0;
   const fail = (e: unknown) => { const det = (e as { detail?: { errors?: string[] } }).detail; setErr(det?.errors?.length ? det.errors : [(e as Error).message]); };
-  const save = () => api.put<Full>(`/api/legal/contracts/${id}`, draft).then((x) => { setC(x); setDraft({}); setErr([]); setInfo("Сохранено"); }).catch(fail);
+  const save = () => api.put<Full>(`/api/legal/contracts/${id}`, fix ? { ...draft, correction_reason: fixReason } : draft)
+    .then((x) => { setC(x); setDraft({}); setErr([]); setInfo(fix ? "Исправление сохранено — записано в историю" : "Сохранено"); if (fix) { setFix(false); setFixReason(""); } }).catch(fail);
   const status = (to: string) => api.post<Full>(`/api/legal/contracts/${id}/status`, { status: to, comment: reason }).then((x) => { setC({ ...c, ...x }); setReason(""); setErr([]); setInfo(`Статус: ${x.status_title}`); }).catch(fail);
   const act = (path: string, body: object = {}) => api.post<Full>(`/api/legal/contracts/${id}/${path}`, body).then((x) => { setC(x); setDraft({}); setReason(""); setErr([]); setInfo(`Статус: ${x.status_title}`); }).catch(fail);
   const inRoute = ["legal_review", "approval", "approved", "signing"].includes(c.status);
@@ -177,7 +180,13 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
           <span className={`badge ${STATUS_CLASS[c.status] || ""}`}>{c.status_title}</span><span className="badge">{c.kind_title}</span><span className="badge">{c.direction_title}</span>
           <span className="muted">{c.own_entity_name}{c.deal_number ? ` · сделка ${c.deal_number}` : ""} · куратор {c.curator_name || "—"}</span>
         </div>
-        {c.locked && <div className="alert info">Договор подписан: условия меняются только дополнительным соглашением. Номер и дату у подписанного меняет ЗГД или КД.</div>}
+        {c.locked && !fix && <div className="alert info" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span>Договор подписан: условия меняются только дополнительным соглашением. Номер и дату у подписанного меняет ЗГД или КД.</span>
+          {c.can_correct && <button className="btn ghost" onClick={() => setFix(true)}>Исправить ошибку в данных</button>}</div>}
+        {fix && <div className="alert warn" style={{ display: "grid", gap: 6 }}>
+          <span><b>Исправление подписанного договора (ЗГД).</b> Меняйте только то, что внесено с ошибкой — подписанный текст договора это не меняет. «Было / стало» и причина попадут в историю, юристы и куратор получат уведомление.</span>
+          <span className="row" style={{ gap: 8 }}><input value={fixReason} onChange={(e) => setFixReason(e.target.value)} placeholder="какая ошибка исправляется (обязательно)" style={{ flex: 1 }} />
+            <button className="btn ghost" onClick={() => { setFix(false); setDraft({}); setFixReason(""); }}>Отменить</button></span></div>}
         {err.length > 0 && <div className="alert error"><ul style={{ margin: 0, paddingLeft: 18 }}>{err.map((e) => <li key={e}>{e}</li>)}</ul></div>}
         {info && <div className="alert ok" onClick={() => setInfo("")}>{info}</div>}
         {!c.check.ok && !c.locked && <div className="alert warn"><b>Не готов к согласованию:</b> {c.check.errors.join("; ")}</div>}
@@ -280,7 +289,7 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
         </div>
         <div className="row" style={{ gap: 8 }}>
           {dirty && <button className="btn ghost" onClick={() => setDraft({})}>Отменить изменения</button>}
-          <button className="btn" disabled={!dirty} onClick={save}>Сохранить</button>
+          <button className="btn" disabled={!dirty || (fix && fixReason.trim().length < 5)} title={fix && fixReason.trim().length < 5 ? "укажите, какая ошибка исправляется" : ""} onClick={save}>{fix ? "Сохранить исправление" : "Сохранить"}</button>
         </div>
       </div>
     </Modal>

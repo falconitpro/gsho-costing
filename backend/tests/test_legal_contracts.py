@@ -69,6 +69,12 @@ def test_contract_registry_lifecycle():
         assert k["status"] == "active" and k["locked"] and k["has_scan"]
         # подписанный: условия — только доп. соглашением; номер/дату — ЗГД или КД; скан не удаляется
         assert c.put(f"/api/legal/contracts/{k['id']}", headers=H(LAW), json={"amount": 1}).status_code == 409
+        # ЗГД исправляет ошибку в подписанном договоре — только с причиной, с записью «было / стало»
+        assert c.put(f"/api/legal/contracts/{k['id']}", headers=H(GD), json={"amount": 1250000}).status_code == 422
+        fixed = c.put(f"/api/legal/contracts/{k['id']}", headers=H(GD), json={"amount": 1250000, "correction_reason": "опечатка в цене"}).json()
+        assert fixed["amount"] == 1250000 and fixed["status"] == "active" and fixed["history"][0]["action"] == "correction"
+        assert fixed["history"][0]["changes"]["amount"]["to"] == 1250000 and fixed["can_correct"] is True
+        c.put(f"/api/legal/contracts/{k['id']}", headers=H(GD), json={"amount": k["amount"], "correction_reason": "возврат для теста"})
         assert c.put(f"/api/legal/contracts/{k['id']}", headers=H(LOG), json={"notes": "x"}).status_code == 403
         assert c.put(f"/api/legal/contracts/{k['id']}", headers=H(LAW), json={"cp_number": "TL-15"}).status_code == 403
         assert c.put(f"/api/legal/contracts/{k['id']}", headers=H(GD), json={"cp_number": "TL-15"}).json()["cp_number"] == "TL-15"
