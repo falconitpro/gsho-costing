@@ -77,6 +77,5 @@ export default function CatalogHub({ me }: { me: Me }) {
       {sec === "hs" && <div className="card"><HsCodes /></div>}
       {sec === "entities" && <GroupSetupBlock me={me} part="entities" />}
       {sec === "routes" && <GroupSetupBlock me={me} part="routes" />}
-      {sec === "routes" && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Наценки между компаниями — в разделе <Link to="/parts/setup">запасных частей</Link> (переедут в «Настройки → Ставки и нормативы»).</div>}
-    </>);
+          </>);
 }

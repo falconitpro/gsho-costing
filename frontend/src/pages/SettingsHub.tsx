@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import type { Me } from "../types";
+import { MarkupsBlock } from "./PartsSetupPage";
 import SettingsPage from "./SettingsPage";
 import TeamPage from "./TeamPage";
 import AccessPage from "./AccessPage";
@@ -37,7 +38,7 @@ export default function SettingsHub({ me }: { me: Me }) {
         </div>
       </div>
       {cur === "workplace" && <WorkplaceSettings />}
-      {cur === "rates" && <SettingsPage me={me} embedded />}
+      {cur === "rates" && <><SettingsPage me={me} embedded />{has("cd", "fd", "gd") && <div className="card"><h2 style={{ marginTop: 0 }}>Наценки между компаниями группы</h2><MarkupsBlock me={me} /></div>}</>}
       {cur === "team" && <TeamPage me={me} embedded />}
       {cur === "access" && <AccessPage me={me} embedded />}
       {cur === "admin" && <AdminPage me={me} embedded />}

@@ -5,6 +5,7 @@ import { api, ApiError, fmtDate, fmtPct, fmtRub } from "../api";
 import { STATUS_TITLES } from "../types";
 import { toneOf } from "../colors";
 import LegalProfileBlock from "../components/LegalProfileBlock";
+import PartsFleet from "../components/PartsFleet";
 import type { Me } from "../types";
 import { payText } from "../components/PaymentTermsEditor";
 import type { PaymentLine } from "../types";
@@ -231,6 +232,10 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
               {card.avg_margin_pct !== undefined && <div className="kpi"><span className="v">{fmtPct(card.avg_margin_pct)}</span><span className="l">средняя маржа (закрытые)</span></div>}
               {card.sum_won_rub !== undefined && <div className="kpi"><span className="v">{fmtRub(card.sum_won_rub)}</span><span className="l">сумма выигранных, RUB</span></div>}
             </div>
+            <details style={{ marginTop: 10 }}>
+              <summary style={{ cursor: "pointer", fontWeight: 600 }}>Парк машин клиента <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>· наработка, ТО, заявки на комплекты</span></summary>
+              <div style={{ marginTop: 8 }}><PartsFleet me={me} fixedClient={card.id} /></div>
+            </details>
             {card.kp_history ? (
               <>
                 <h2>История КП (все версии) <span className="muted" style={{ fontWeight: 400 }}>· видят КД и ЗГД</span></h2>
