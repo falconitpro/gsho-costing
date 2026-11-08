@@ -1,0 +1,157 @@
+/* Страница входа CRM БЕРГ-ХАУС — макет «Красный монолит / ПДМ», эталон 1920 × 1200.
+   Фон собран из слоёв: SVG-плоскости (красный, чёрный, тёплый белый) + локальный asset сцены (рельеф, ПДМ, фактура ромба);
+   логотип и весь текст — отдельными элементами. */
+.bh-login {
+  --bh-red: #ef3035;
+  --bh-red-hover: #d9242a;
+  --bh-plane-red: #c40303;          /* цвет красных плоскостей макета (замер по эталону) */
+  --bh-ink: #171817;
+  --bh-paper: #f8f5ee;
+  --bh-paper-plane: #f4ebe2;        /* тёплый белый ромб */
+  --bh-white: #ffffff;
+  --bh-muted: #706e68;
+  --bh-border: rgba(23, 24, 23, 0.16);
+  --bh-font: "Noto Sans", "Intro", Arial, sans-serif;
+  --bh-font-display: "Noto Sans Display", "Noto Sans", "Intro", Arial, sans-serif;
+  --bh-font-mono: "DejaVu Sans Mono", "Menlo", "Consolas", monospace;
+  --bh-motion-fast: 160ms;
+  --bh-motion-normal: 240ms;
+  --bh-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --bh-s: calc(100vw / 1920);       /* единица масштаба относительно эталона */
+
+  position: relative; width: 100%; min-height: 100svh; overflow-x: hidden; background: var(--bh-plane-red); color: var(--bh-ink);
+  font-family: var(--bh-font); font-size: 14px; line-height: 1.4; -webkit-font-smoothing: antialiased;
+}
+.bh-login *, .bh-login *::before, .bh-login *::after { box-sizing: border-box; }
+
+/* ---------- фон ---------- */
+.bh-bg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; pointer-events: none; }
+.bh-bg-mobile { display: none; }
+
+/* ---------- слои поверх фона ---------- */
+.bh-logo { position: absolute; left: calc(64 * var(--bh-s)); top: calc(44 * var(--bh-s)); z-index: 2; display: block; line-height: 0; }
+.bh-logo img { height: clamp(44px, calc(100 * var(--bh-s)), 100px); width: auto; display: block; }
+
+.bh-corner { position: absolute; right: calc(64 * var(--bh-s)); top: calc(62 * var(--bh-s)); z-index: 2; text-align: right;
+  font-family: var(--bh-font-mono); text-transform: uppercase; letter-spacing: 0.22em; color: rgba(255, 255, 255, 0.86); font-size: clamp(9px, calc(12 * var(--bh-s)), 12px); line-height: 1.75; }
+.bh-corner b { display: block; color: var(--bh-white); font-weight: 700; letter-spacing: 0.26em; }
+
+.bh-vert { position: absolute; left: calc(26 * var(--bh-s)); top: 50%; z-index: 2; transform: translate(-50%, -50%) rotate(-90deg); transform-origin: center; white-space: nowrap;
+  font-family: var(--bh-font-mono); text-transform: uppercase; letter-spacing: 0.32em; color: rgba(255, 255, 255, 0.72); font-size: clamp(9px, calc(11 * var(--bh-s)), 11px); }
+
+.bh-slogan { position: absolute; left: calc(736 * var(--bh-s)); top: calc(228 * var(--bh-s)); z-index: 2; color: var(--bh-white); font-family: var(--bh-font-display); font-weight: 800;
+  font-size: clamp(24px, calc(48 * var(--bh-s)), 50px); line-height: 1.04; letter-spacing: -0.01em; }
+.bh-slogan::before { content: ""; display: block; width: calc(50 * var(--bh-s)); min-width: 28px; height: 4px; background: var(--bh-white); margin-bottom: calc(28 * var(--bh-s)); }
+.bh-slogan span { display: block; }
+
+.bh-foot { position: absolute; left: calc(112 * var(--bh-s)); bottom: calc(48 * var(--bh-s)); z-index: 2; font-family: var(--bh-font-mono); text-transform: uppercase; letter-spacing: 0.26em;
+  font-size: clamp(9px, calc(11 * var(--bh-s)), 11px); color: rgba(255, 255, 255, 0.78); white-space: pre; }
+.bh-foot b { color: var(--bh-white); font-weight: 700; }
+
+/* ---------- карточка ---------- */
+.bh-main { position: relative; z-index: 3; min-height: 100svh; display: flex; align-items: center; max-width: none; margin: 0;
+  padding: max(110px, calc(176 * var(--bh-s))) 0 max(24px, calc(90 * var(--bh-s))); }
+.bh-card { position: relative; margin-left: calc(112 * var(--bh-s)); width: clamp(320px, calc(540 * var(--bh-s)), 540px); background: var(--bh-paper); border-top: 6px solid var(--bh-ink);
+  padding: clamp(28px, calc(48 * var(--bh-s)), 48px); box-shadow: 24px 18px 0 0 rgba(23, 24, 23, 0.28); animation: bh-in var(--bh-motion-normal) var(--bh-ease) both; }
+@keyframes bh-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.bh-card h1 { margin: clamp(24px, calc(76 * var(--bh-s)), 76px) 0 clamp(32px, calc(84 * var(--bh-s)), 84px); font-family: var(--bh-font-display); font-size: clamp(34px, calc(46 * var(--bh-s)), 46px); font-weight: 800; line-height: 1; letter-spacing: -0.01em; color: var(--bh-ink); }
+
+.bh-field { display: block; margin-bottom: 22px; }
+.bh-field > span { display: block; font-family: var(--bh-font-mono); font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--bh-ink); font-weight: 700; margin-bottom: 8px; }
+.bh-input { position: relative; display: flex; align-items: center; background: var(--bh-white); border: 1px solid var(--bh-border); min-height: 60px;
+  transition: border-color var(--bh-motion-fast) var(--bh-ease), box-shadow var(--bh-motion-fast) var(--bh-ease); }
+.bh-input:hover { border-color: rgba(23, 24, 23, 0.34); }
+.bh-input:focus-within { border-color: var(--bh-ink); box-shadow: 0 0 0 2px rgba(23, 24, 23, 0.12); }
+.bh-input.bad { border-color: var(--bh-red); }
+.bh-input .ic { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; color: var(--bh-ink); opacity: 0.82; pointer-events: none; }
+.bh-input input { flex: 1; min-width: 0; height: 58px; border: 0; outline: 0; background: transparent; padding: 0 16px 0 56px; font: inherit; font-size: 17px; color: var(--bh-ink); border-radius: 0; }
+.bh-input input::placeholder { color: #a39f97; }
+.bh-input input:focus-visible { outline: none; }
+.bh-eye { width: 44px; height: 44px; margin-right: 8px; border: 0; background: transparent; color: var(--bh-ink); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; opacity: 0.82;
+  transition: opacity var(--bh-motion-fast) var(--bh-ease); border-radius: 2px; }
+.bh-eye:hover { opacity: 1; }
+.bh-eye svg { width: 20px; height: 20px; }
+.bh-field-err { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: 12px; color: #a41d22; }
+.bh-field-err svg { width: 14px; height: 14px; flex: 0 0 auto; }
+
+.bh-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 2px 0 26px; font-size: 14px; }
+.bh-check { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; min-height: 44px; user-select: none; }
+.bh-check input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.bh-check .box { width: 20px; height: 20px; border: 2px solid var(--bh-ink); background: var(--bh-white); display: inline-flex; align-items: center; justify-content: center; color: var(--bh-white);
+  transition: background var(--bh-motion-fast) var(--bh-ease); }
+.bh-check input:checked + .box { background: var(--bh-ink); }
+.bh-check input:focus-visible + .box { outline: 2px solid var(--bh-red); outline-offset: 2px; }
+.bh-check .box svg { width: 12px; height: 12px; }
+.bh-link { background: none; border: 0; padding: 10px 0; min-height: 44px; font: inherit; font-size: 14px; color: var(--bh-ink); cursor: pointer; text-decoration: none; border-bottom: 1px solid transparent;
+  transition: border-color var(--bh-motion-fast) var(--bh-ease); }
+.bh-link:hover { border-bottom-color: var(--bh-ink); }
+
+.bh-submit { position: relative; display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 66px; border: 0; background: var(--bh-red); color: var(--bh-white);
+  font: inherit; font-weight: 700; font-size: 17px; padding: 0 8px 0 28px; cursor: pointer; text-align: left; transition: background var(--bh-motion-fast) var(--bh-ease); }
+.bh-submit:hover { background: var(--bh-red-hover); }
+.bh-submit:disabled { cursor: default; opacity: 0.85; }
+.bh-submit .arrow { width: 50px; height: 50px; background: var(--bh-ink); display: inline-flex; align-items: center; justify-content: center; transition: background var(--bh-motion-fast) var(--bh-ease); flex: 0 0 auto; }
+.bh-submit .arrow svg { width: 22px; height: 22px; transition: transform var(--bh-motion-fast) var(--bh-ease); }
+.bh-submit:hover:not(:disabled) .arrow { background: #000; }
+.bh-submit:hover:not(:disabled) .arrow svg { transform: translateX(4px); }
+.bh-spin { width: 18px; height: 18px; border: 2px solid rgba(255, 255, 255, 0.45); border-top-color: var(--bh-white); border-radius: 50%; animation: bh-spin 0.8s linear infinite; margin-left: 10px; }
+@keyframes bh-spin { to { transform: rotate(360deg); } }
+
+.bh-alert { display: flex; gap: 10px; align-items: flex-start; background: #fdecec; border-left: 3px solid var(--bh-red); color: #7a1c1f; padding: 10px 12px; font-size: 13px; margin-bottom: 18px; }
+.bh-alert.info { background: #efede6; border-left-color: var(--bh-ink); color: var(--bh-ink); }
+.bh-alert svg { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; }
+
+.bh-secure { display: flex; align-items: center; gap: 8px; margin: 22px 0 0; font-size: 13px; color: var(--bh-muted); }
+.bh-secure .dot { width: 10px; height: 10px; border-radius: 50%; background: #2f8f5b; box-shadow: 0 0 0 3px rgba(47, 143, 91, 0.18); }
+.bh-card-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--bh-border);
+  font-family: var(--bh-font-mono); font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--bh-muted); }
+.bh-card-foot button { background: none; border: 0; padding: 12px 0; min-height: 44px; font: inherit; color: var(--bh-muted); cursor: pointer; letter-spacing: inherit; text-transform: inherit; }
+.bh-card-foot button:hover { color: var(--bh-ink); }
+
+.bh-alt { margin-top: 18px; display: flex; flex-direction: column; gap: 8px; }
+.bh-alt a, .bh-alt select { font: inherit; font-size: 13px; }
+.bh-alt a { color: var(--bh-ink); text-decoration: underline; text-underline-offset: 3px; padding: 10px 0; min-height: 44px; display: inline-flex; align-items: center; }
+.bh-dev { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--bh-muted); }
+.bh-dev select { min-height: 36px; border: 1px solid var(--bh-border); background: var(--bh-white); padding: 4px 8px; max-width: 260px; }
+
+.bh-login :focus-visible { outline: 2px solid var(--bh-red); outline-offset: 2px; }
+.bh-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- ноутбуки и планшеты ---------- */
+@media (max-width: 1439px) {
+  .bh-card { margin-left: clamp(24px, 5.8vw, 112px); }
+  .bh-slogan { left: calc(var(--bh-card-right, 46vw) + 40px); }
+}
+@media (max-width: 1100px) { .bh-slogan { display: none; } }
+@media (max-width: 900px) { .bh-vert, .bh-foot { display: none; } .bh-corner { font-size: 9px; } }
+
+/* ---------- телефоны ---------- */
+@media (max-width: 767px) {
+  .bh-login { background: var(--bh-plane-red); }
+  .bh-bg { display: none; }
+  .bh-bg-mobile { display: block; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background: linear-gradient(118deg, var(--bh-plane-red) 0 58%, var(--bh-ink) 58% 100%); }
+  .bh-bg-mobile::after { content: ""; position: absolute; right: -40vw; bottom: -30vw; width: 90vw; height: 90vw; background: var(--bh-paper-plane); transform: rotate(45deg); opacity: 0.95; }
+  .bh-corner, .bh-vert, .bh-slogan, .bh-foot { display: none; }
+  .bh-logo { left: 16px; top: 16px; }
+  .bh-logo img { height: 44px; }
+  .bh-main { align-items: flex-start; padding: 84px 0 24px !important; }
+  .bh-card { margin: 0 auto; width: calc(100% - 32px); padding: 24px; box-shadow: 10px 10px 0 0 rgba(23, 24, 23, 0.28); }
+  .bh-card h1 { margin: 8px 0 28px; font-size: 34px; }
+  .bh-input input { font-size: 16px; }
+}
+@media (max-height: 800px) and (min-width: 768px) {
+  .bh-main { padding-top: 96px; padding-bottom: 20px; }
+  .bh-foot { display: none; }
+  .bh-card { padding-top: 28px; padding-bottom: 28px; }
+  .bh-card h1 { margin: 12px 0 28px; font-size: 38px; }
+  .bh-field { margin-bottom: 16px; }
+  .bh-row { margin-bottom: 18px; }
+  .bh-secure { margin-top: 16px; }
+  .bh-card-foot { margin-top: 18px; padding-top: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bh-card { animation: none; }
+  .bh-login * { transition: none !important; }
+  .bh-spin { animation-duration: 1.5s; }
+}

@@ -189,6 +189,7 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
                     <button className="btn secondary" disabled={cur.roles.length === 0} onClick={saveRoles}>Сохранить роли и статус</button>
                   </div>
                   {err && <div className="alert error">{err}</div>}
+                  <PasswordBlock userId={cur.id} isSelf={cur.id === me.id} onMsg={setMsg} />
                   {perms.length > 0 && (
                     <table style={{ marginTop: 8 }}><thead><tr><th>Раздел</th><th>Итоговый доступ</th><th>Индивидуально</th></tr></thead>
                       <tbody>{perms.map((p) => {
@@ -223,4 +224,26 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
       </div>
     </>
   );
+}
+
+
+/** Пароль для страницы входа: ЗГД / админ задаёт сотруднику новый пароль (например, при первом входе или если забыт). */
+function PasswordBlock({ userId, isSelf, onMsg }: { userId: string; isSelf: boolean; onMsg: (m: string) => void }) {
+  const [pw, setPw] = useState("");
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState("");
+  const save = () => api.put(`/api/auth/users/${userId}/password`, { new_password: pw }).then(() => { setPw(""); setOpen(false); setErr(""); onMsg(isSelf ? "Ваш пароль изменён" : "Пароль задан — сообщите его сотруднику лично, в системе он не хранится в открытом виде"); })
+    .catch((e) => setErr((e as Error).message));
+  return (
+    <div style={{ marginTop: 10 }}>
+      <h3>Пароль для входа</h3>
+      {!open ? <button className="btn ghost" onClick={() => setOpen(true)}>Задать новый пароль</button> : (
+        <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <input type="password" autoComplete="new-password" placeholder="не короче 8 символов, буквы и цифры" value={pw} onChange={(e) => setPw(e.target.value)} style={{ width: 280 }} />
+          <button className="btn secondary" disabled={pw.length < 8} onClick={save}>Сохранить пароль</button>
+          <button className="btn ghost" onClick={() => { setOpen(false); setPw(""); setErr(""); }}>Отмена</button>
+          {err && <span className="badge bad">{err}</span>}
+        </div>)}
+      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Вход по e-mail и паролю на странице входа; после 5 неверных попыток учётная запись блокируется на 15 минут, новый пароль снимает блокировку.</div>
+    </div>);
 }

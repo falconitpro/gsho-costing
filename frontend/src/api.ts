@@ -27,6 +27,7 @@ async function request<T>(method: string, url: string, body?: unknown, form?: Fo
   const res = await fetch(url, { method, headers, body: form ?? (body !== undefined ? JSON.stringify(body) : undefined), credentials: "include" });
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => null);
+  if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new CustomEvent("gsho:unauthorized"));   // истёкшая сессия → страница входа
   if (!res.ok) throw new ApiError(res.status, data?.detail ?? data);
   return data as T;
 }

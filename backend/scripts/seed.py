@@ -40,6 +40,9 @@ SCHEMES = [
 ]
 
 
+DEV_PASSWORD = "berghaus-demo-2026"
+
+
 def run() -> None:
     init_db()
     with SessionLocal() as db:
@@ -50,6 +53,13 @@ def run() -> None:
             elif u.display_name in OLD_NAMES:
                 u.display_name = name
         db.flush()
+        # тестовый стенд: у демо-пользователей общий пароль для страницы входа (только dev; в рабочем режиме пароли задаёт ЗГД)
+        from app.core.auth import hash_password
+        from app.core.config import get_settings
+        if get_settings().is_dev:
+            for u in db.scalars(select(User)).all():
+                if not u.password_hash:
+                    u.password_hash = hash_password(DEV_PASSWORD)
         mgr = db.scalar(select(User).where(User.email == "manager@example.com"))
         if not db.scalar(select(Client).where(Client.inn == "7701234567")):
             db.add(Client(name="ООО «Рудник Северный»", inn="7701234567", address="г. Норильск", sites=[{"name": "Месторождение Северное", "region": "Красноярский край"}],
