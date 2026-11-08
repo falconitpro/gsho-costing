@@ -984,6 +984,63 @@ class LegalPackage(TimestampMixin, Base):
     superseded_by: Mapped[Optional[str]] = mapped_column(String(36))
 
 
+class Contract(TimestampMixin, Base):
+    """Договор компании группы (юридический блок): с клиентом, поставщиком/заводом, подрядчиком и прочие.
+    Единственный источник условий оплаты, сроков исполнения и неустоек для денежного потока и претензий.
+    Доп. соглашения и спецификации — записи с parent_id."""
+    __tablename__ = "contracts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    parent_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)                  # доп. соглашение / спецификация к договору
+    doc_type: Mapped[str] = mapped_column(String(16), default="contract")                     # contract | amendment | specification
+    kind: Mapped[str] = mapped_column(String(32), default="other")                            # client_supply | client_parts | client_service | supplier | logistics | customs | works | …
+    direction: Mapped[str] = mapped_column(String(8), default="none")                         # income | expense | none
+    number: Mapped[str] = mapped_column(String(64), default="", index=True)                   # внутренний номер: К-RU-2026-001
+    seq: Mapped[Optional[int]] = mapped_column(Integer)
+    cp_number: Mapped[str] = mapped_column(String(128), default="")                           # номер у контрагента
+    title: Mapped[str] = mapped_column(String(255), default="")
+    subject: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
+    own_entity_id: Mapped[Optional[str]] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    own_profile_id: Mapped[Optional[str]] = mapped_column(String(36))
+    own_bank_id: Mapped[Optional[str]] = mapped_column(String(36))
+    signatory: Mapped[dict] = mapped_column(JSONType, default=dict)                           # {name, position, basis, poa_id}
+    cp_kind: Mapped[str] = mapped_column(String(16), default="other")                         # client | factory | other
+    cp_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    cp_name: Mapped[str] = mapped_column(String(255), default="")
+    cp_inn: Mapped[str] = mapped_column(String(32), default="")
+    cp_profile_id: Mapped[Optional[str]] = mapped_column(String(36))
+    deal_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)                    # основная сделка
+    deal_ids: Mapped[list[str]] = mapped_column(JSONType, default=list)                       # рамочный — несколько сделок
+    package_id: Mapped[Optional[str]] = mapped_column(String(36))                             # юридический пакет, из которого создан
+    amount: Mapped[Optional[float]] = mapped_column(Float)
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    vat_mode: Mapped[str] = mapped_column(String(16), default="included")                     # included | on_top | none
+    vat_rate: Mapped[Optional[float]] = mapped_column(Float)
+    price_type: Mapped[str] = mapped_column(String(16), default="fixed")                      # fixed | by_spec | framework
+    fx_clause: Mapped[str] = mapped_column(Text, default="")
+    signed_on: Mapped[Optional[date]] = mapped_column(Date)
+    effective_from: Mapped[Optional[date]] = mapped_column(Date)
+    valid_to: Mapped[Optional[date]] = mapped_column(Date)
+    auto_renew: Mapped[bool] = mapped_column(Boolean, default=False)
+    payment_terms: Mapped[list[dict]] = mapped_column(JSONType, default=list)                 # [{no, share_pct|amount, event, offset_days, offset_kind, via, event_on, day_of_month, note}]
+    performance_terms: Mapped[list[dict]] = mapped_column(JSONType, default=list)             # сроки исполнения: [{code, title, event, offset_days, offset_kind, fixed_on, note}]
+    penalties: Mapped[list[dict]] = mapped_column(JSONType, default=list)                     # [{payer, reason, rate_kind, rate, base, grace_days, cap_kind, cap_value, term, note}]
+    liability_cap_pct: Mapped[Optional[float]] = mapped_column(Float)                         # общий предел ответственности, % цены
+    security: Mapped[dict] = mapped_column(JSONType, default=dict)                            # {kind: bank_guarantee|lc|retention, amount, currency, valid_to, bank, note}
+    warranty: Mapped[dict] = mapped_column(JSONType, default=dict)                            # {months, hours, note}
+    law: Mapped[dict] = mapped_column(JSONType, default=dict)                                 # {law, court, claim_days, pre_trial}
+    sign_method: Mapped[str] = mapped_column(String(8), default="paper")                      # paper | edo
+    edo: Mapped[dict] = mapped_column(JSONType, default=dict)                                 # {operator, doc_id, signed_at}
+    original: Mapped[dict] = mapped_column(JSONType, default=dict)                            # {received_on, by, location}
+    files: Mapped[list[dict]] = mapped_column(JSONType, default=list)                         # [{id, kind, name, size, version, uploaded_by, uploaded_at, note}]
+    history: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    curator_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    lawyer_id: Mapped[Optional[str]] = mapped_column(String(36))
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    source: Mapped[str] = mapped_column(String(16), default="manual")                         # manual | package | deal_import
+
+
 class PowerOfAttorney(TimestampMixin, Base):
     """Доверенность от компании группы (юридический блок): конструктор, реестр, печать, копии, статусы, отзыв.
     Персональные данные представителя (паспорт) видят только юрист, ЗГД, ФД и администратор."""

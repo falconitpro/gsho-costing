@@ -132,6 +132,11 @@ def test_purchase_package_flow():
         assert snap["seller"]["bank"]["account"] == "123456789"
         pkg2 = c.post(f"{base}/purchase/build", headers=H(LAW), json={"factory_id": f1["id"], "own_bank_id": ob["id"], "cp_bank_id": sb["id"]}).json()
         assert pkg2["version_no"] == 2
+        # реестр договоров: пакет создал проект договора с заводом (цена, условия оплаты, типовые неустойки); повторное формирование — тот же договор
+        ctr = [x for x in c.get(f"/api/deals/{d['id']}/contracts", headers=H(MGR)).json()["items"] if x["direction"] == "expense"]
+        assert len(ctr) == 1 and ctr[0]["status"] == "draft" and ctr[0]["amount"] == 5200000.0 and ctr[0]["cp_id"] == f1["id"] and ctr[0]["terms_text"].startswith("30 %")
+        full = c.get(f"/api/legal/contracts/{ctr[0]['id']}", headers=H(LAW)).json()
+        assert full["package_id"] == pkg2["id"] and {p["reason"] for p in full["penalties"]} == {"late_delivery", "late_payment"} and full["liability_cap_pct"] == 10
         lst = c.get(f"{base}/packages", headers=H(MGR)).json()["items"]
         assert next(p for p in lst if p["id"] == pkg["id"])["status"] == "superseded"
 

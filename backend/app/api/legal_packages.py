@@ -283,6 +283,8 @@ def purchase_build(deal_id: str, body: ChoiceIn, db: Session = Depends(get_db), 
     for att_f in files:
         a = db.get(Attachment, att_f["attachment_id"])
         a.entity_id = pkg.id
+    from ..services.legal_contracts import upsert_from_package
+    upsert_from_package(db, pkg, deal, user.id)          # проект договора в реестре: стороны, цена, условия оплаты, типовые неустойки
     for p in prev:
         if p.status not in ("signed", "archived", "superseded"):
             p.status, p.superseded_by = "superseded", pkg.id
@@ -682,6 +684,8 @@ def sale_build(deal_id: str, body: SaleChoiceIn, db: Session = Depends(get_db), 
     db.flush()
     for f in files:
         db.get(Attachment, f["attachment_id"]).entity_id = pkg.id
+    from ..services.legal_contracts import upsert_from_package
+    upsert_from_package(db, pkg, deal, user.id)
     for p in prev:
         if p.status not in ("signed", "archived", "superseded"):
             p.status, p.superseded_by = "superseded", pkg.id
