@@ -19,10 +19,7 @@
 	request_body {
 		max_size 310MB
 	}
-	@protected not path /api/health
-	basic_auth @protected {
-		{$BASIC_AUTH_USER:berghaus} {$BASIC_AUTH_HASH}
-	}
+	# общий пароль стенда (basic_auth) снят 08.11.2026 по решению владельца: доступ закрывает страница входа приложения
 	handle /api/* {
 		reverse_proxy backend:8000
 	}

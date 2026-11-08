@@ -27,8 +27,6 @@ services:
       DOMAIN: ${DOMAIN:?set DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL:-}
       FALLBACK_HOST: ${FALLBACK_HOST:-localhost}
-      BASIC_AUTH_USER: ${BASIC_AUTH_USER:-berghaus}
-      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:?set BASIC_AUTH_HASH (bcrypt)}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./deploy/caddy-tls:/etc/caddy/site-tls:ro
