@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import FloatingScrollbar from "./components/FloatingScrollbar";
 import NotificationBell from "./components/NotificationBell";
+import InfoBar from "./components/InfoBar";
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, setDevUser } from "./api";
 import type { Me } from "./types";
@@ -96,6 +97,7 @@ export default function App() {
           <NavLink to="/" className="brand">
             <img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" />
           </NavLink>
+          <InfoBar />
           <div className="account">
             {devUsers.length > 0 && (
               <label className="dev-switch" title="тестовый стенд: посмотреть систему под другой учётной записью">

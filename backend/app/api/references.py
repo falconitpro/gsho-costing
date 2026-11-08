@@ -1,7 +1,7 @@
 """Справочники и база клиентов (раздел 11)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,7 +13,7 @@ from ..core.auth import CurrentUser, get_current_user, require_roles
 from ..core.roles import Role, filter_payload
 from ..core.workflow import DealStatus
 from ..db import get_db
-from ..models import Client, Deal, DealVersion, EquipmentModel, Factory, FactoryPriceHistory, HsCode, PaymentScheme, Position
+from ..models import Client, Deal, DealVersion, EquipmentModel, Factory, FactoryPriceHistory, FxRate, HsCode, PaymentScheme, Position
 from ..services.deal_service import audit
 from .common import serialize
 
@@ -205,7 +205,7 @@ def clients(q: str = "", stats: bool = False, include_archived: bool = False, db
 
 @router.post("/clients", status_code=201)
 def create_client(body: ClientIn, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN))):
-    from datetime import datetime, timezone
+    from datetime import date, datetime, timezone
     from ..adapters.company_registry import inn_valid
     if not inn_valid(body.inn):
         raise HTTPException(422, "ИНН неверный: проверьте контрольные цифры")
@@ -395,7 +395,7 @@ def restore_client(client_id: str, db: Session = Depends(get_db), user: CurrentU
 @router.post("/clients/{client_id}/refresh-registry")
 def client_refresh_registry(client_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.MANAGER, Role.CD, Role.GD, Role.ADMIN))):
     """Обновить реквизиты клиента из реестра (наименование, КПП, ОГРН, адрес, руководитель, статус)."""
-    from datetime import datetime, timezone
+    from datetime import date, datetime, timezone
     c = db.get(Client, client_id)
     if c is None:
         raise HTTPException(404)
@@ -896,3 +896,25 @@ def create_scheme(body: SchemeIn, db: Session = Depends(get_db), user: CurrentUs
     db.add(p)
     db.commit()
     return serialize(p)
+
+
+@router.get("/fx-today")
+def fx_today(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Курсы ЦБ РФ для информационного блока в шапке: действующий курс на сегодня (или последний загруженный),
+    изменение к предыдущему дню и, если ЦБ уже опубликовал, курс на следующий день. Все курсы — с датой, на которую они установлены."""
+    today = date.today()
+    out = []
+    for cur in ("USD", "EUR", "CNY"):
+        rows = db.scalars(select(FxRate).where(FxRate.currency == cur, FxRate.source == "cbr").order_by(FxRate.on.desc()).limit(40)).all()
+        if not rows:
+            rows = db.scalars(select(FxRate).where(FxRate.currency == cur).order_by(FxRate.on.desc()).limit(40)).all()
+        if not rows:
+            continue
+        current = next((r for r in rows if r.on <= today), rows[-1])
+        prev = next((r for r in rows if r.on < current.on), None)
+        nxt = next((r for r in reversed(rows) if r.on > current.on), None)
+        out.append({"currency": cur, "rate": round(current.rate, 4), "on": current.on.isoformat(),
+                    "prev_rate": round(prev.rate, 4) if prev else None, "prev_on": prev.on.isoformat() if prev else None,
+                    "delta": round(current.rate - prev.rate, 4) if prev else None,
+                    "next_rate": round(nxt.rate, 4) if nxt else None, "next_on": nxt.on.isoformat() if nxt else None, "source": current.source})
+    return {"rates": out, "server_time": datetime.now(timezone.utc).isoformat()}

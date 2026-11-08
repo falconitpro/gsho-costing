@@ -63,3 +63,8 @@ def test_catalog_hub():
         lst = _ok(c.get(f"/api/parts/fleet/other-models?q=ST14-{t}", headers=H(MGR)))
         assert len(lst) == 1 and lst[0]["machines"] == 0 and lst[0]["kits"] == 0
         assert _ok(c.get(f"/api/catalog/search?q=ST14-{t}", headers=H(MGR)))["other"][0]["id"] == om["id"]
+        # курсы ЦБ для шапки: у каждого курса — дата, на которую он установлен
+        fx = _ok(c.get("/api/refs/fx-today", headers=H(MGR)))
+        assert "rates" in fx and all(r["on"] and r["rate"] > 0 and r["currency"] in ("USD", "EUR", "CNY") for r in fx["rates"])
+        c.cookies.clear()
+        assert c.get("/api/refs/fx-today").status_code == 401
