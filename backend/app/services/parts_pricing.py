@@ -28,7 +28,7 @@ _LINE_STAGE = {"new": "request", "rfq": "request", "quoted": "calc", "in_kp": "k
 _STAGE_ORDER = ["request", "calc", "kp", "execution", "closed"]
 
 
-def request_stage(lines: Iterable[Mapping[str, Any]], closed: str = "", approval_needed: bool = False) -> dict[str, Any]:
+def request_stage(lines: Iterable[Mapping[str, Any]], closed: str = "") -> dict[str, Any]:
     """Этап заявки = самый ранний этап среди её открытых строк; блок списка сделок: в работе / выиграно / проиграно."""
     sts = [l.get("status") or "new" for l in lines if (l.get("status") or "new") not in ("cancelled", "unavailable", "replaced")]
     if closed:
@@ -40,8 +40,6 @@ def request_stage(lines: Iterable[Mapping[str, Any]], closed: str = "", approval
         stage = min((_LINE_STAGE.get(s, "request") for s in sts), key=_STAGE_ORDER.index)
         if stage == "closed":
             stage = "execution"                      # всё отгружено, но заявка не закрыта — ещё исполнение
-        if stage == "request" and approval_needed:
-            stage = "calc"
         block = "won" if stage == "execution" else "work"
     return {"stage": stage, "stage_title": STAGE_TITLES[stage], "block": block}
 

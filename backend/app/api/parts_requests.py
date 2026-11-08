@@ -71,7 +71,7 @@ def _payload(db: Session, req: PartRequest, user: CurrentUser) -> dict:
     d["summary"]["approval_needed"] = approvals_pending(req, active)
     d["status"] = request_status(lines)
     d["status_text"] = CLOSE_KINDS.get(req.closed) or d["status"]["text"]
-    d.update(request_stage(lines, req.closed, bool(d["summary"]["approval_needed"])))
+    d.update(request_stage(lines, req.closed))
     d["deal"] = _deal_of_machine(db, req)
     kps = db.scalars(select(PartKp).where(PartKp.request_id == req.id).order_by(PartKp.revision_no.desc())).all()
     d["kps"] = [{**serialize(k), "expired": k.valid_until < date.today()} for k in kps]
