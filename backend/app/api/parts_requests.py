@@ -20,7 +20,7 @@ from ..models import Client, LegalEntity, Part, PartKp, PartRequest, PartRequest
 from ..services import settings_service
 from ..services.deal_service import audit, notify
 from ..services.parts_kp import build_kp_lines, diff_kp, release_expired, render_docx, reserve_soft
-from ..services.parts_pricing import LINE_STATUS, kp_summary, request_status
+from ..services.parts_pricing import LINE_STATUS, kp_summary, request_stage, request_status
 from ..services.parts_requests import approvals_pending, line_payload, match_lines, next_number, parse_lines_text, price_lines
 from .common import serialize
 from .parts_setup import current_policy, latest_fx
@@ -71,9 +71,21 @@ def _payload(db: Session, req: PartRequest, user: CurrentUser) -> dict:
     d["summary"]["approval_needed"] = approvals_pending(req, active)
     d["status"] = request_status(lines)
     d["status_text"] = CLOSE_KINDS.get(req.closed) or d["status"]["text"]
+    d.update(request_stage(lines, req.closed))
+    d["deal"] = _deal_of_machine(db, req)
     kps = db.scalars(select(PartKp).where(PartKp.request_id == req.id).order_by(PartKp.revision_no.desc())).all()
     d["kps"] = [{**serialize(k), "expired": k.valid_until < date.today()} for k in kps]
     return filter_payload(d, user)
+
+
+def _deal_of_machine(db: Session, req: PartRequest) -> Optional[dict]:
+    """Сделка ГШО, по которой поставлена машина заявки (связь ГШО ↔ запчасти в едином списке сделок)."""
+    if not req.machine_id:
+        return None
+    from ..models import ClientMachine, Deal
+    m = db.get(ClientMachine, req.machine_id)
+    d = db.get(Deal, m.deal_id) if m and m.deal_id else None
+    return {"id": d.id, "number": d.number} if d else None
 
 
 @router.get("/meta")
@@ -89,6 +101,7 @@ def requests(open_only: bool = True, q: str = "", db: Session = Depends(get_db),
     if open_only:
         stmt = stmt.where(PartRequest.closed == "")
     clients = {c.id: c.name for c in db.scalars(select(Client)).all()}
+    names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
     out = []
     for r in db.scalars(stmt).all():
         if not _can_see(user, r):
@@ -98,8 +111,9 @@ def requests(open_only: bool = True, q: str = "", db: Session = Depends(get_db),
             continue
         lines = [{"status": l.status, "sum_rub": (l.calc or {}).get("sum_rub")} for l in r.lines]
         st = request_status(lines)
-        out.append({"id": r.id, "number": r.number, "client_name": name, "machine": r.machine, "urgent": r.urgent, "created_at": r.created_at.isoformat(),
-                    "lines": st["total"], "status_text": CLOSE_KINDS.get(r.closed) or st["text"], "closed": r.closed,
+        out.append({"id": r.id, "number": r.number, "client_id": r.client_id, "client_name": name, "machine": r.machine, "urgent": r.urgent, "created_at": r.created_at.isoformat(),
+                    "manager_id": r.manager_id, "manager_name": names.get(r.manager_id or "", ""), "warranty": r.warranty,
+                    "lines": st["total"], "status_text": CLOSE_KINDS.get(r.closed) or st["text"], "closed": r.closed, **request_stage(lines, r.closed),
                     "price_rub": round(sum(l["sum_rub"] or 0 for l in lines if l["status"] not in ("cancelled", "unavailable")), 2)})
     return filter_payload(out, user)
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import FloatingScrollbar from "./components/FloatingScrollbar";
 import NotificationBell from "./components/NotificationBell";
-import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { api, getDevUser, setDevUser } from "./api";
 import type { Me } from "./types";
 import DealsList from "./pages/DealsList";
@@ -15,8 +15,14 @@ import CounterpartiesPage from "./pages/CounterpartiesPage";
 import LegalPage from "./pages/LegalPage";
 import CatalogHub from "./pages/CatalogHub";
 import PartsSetupPage from "./pages/PartsSetupPage";
+import { PartsRequestView } from "./components/PartsRequests";
 
 export const MeContext = { current: null as Me | null };
+
+function PartsRequestRoute({ me }: { me: Me }) {
+  const { id } = useParams();
+  return <PartsRequestView me={me} id={id || ""} />;
+}
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -93,6 +99,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<WorkplacePage me={me} />} />
             <Route path="/deals" element={<DealsList me={me} />} />
+            <Route path="/deals/parts/:id" element={<PartsRequestRoute me={me} />} />
             <Route path="/deals/:id" element={<DealCard me={me} />} />
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/board" element={<BoardPage />} />
