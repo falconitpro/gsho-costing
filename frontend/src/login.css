@@ -153,8 +153,10 @@
 @media (max-width: 767px) {
   .bh-login { background: var(--bh-plane-red); }
   .bh-bg { display: none; }
-  .bh-bg-mobile { display: block; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-    background: linear-gradient(118deg, var(--bh-plane-red) 0 58%, var(--bh-ink) 58% 100%); }
+  .bh-bg-mobile { display: block; position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    background: var(--bh-plane-red) url("/login/plane-red.webp") center / cover no-repeat; }
+  .bh-bg-mobile::before { content: ""; position: absolute; inset: 0; background: var(--bh-ink) url("/login/plane-black.webp") center / cover no-repeat;
+    clip-path: polygon(62% 0, 100% 0, 100% 100%, 38% 100%); }
   .bh-bg-mobile::after { content: ""; position: absolute; right: -40vw; bottom: -30vw; width: 90vw; height: 90vw; background: var(--bh-paper-plane); transform: rotate(45deg); opacity: 0.95; }
   .bh-corner, .bh-vert, .bh-slogan, .bh-foot { display: none; }
   .bh-logo { left: 16px; top: 16px; }
