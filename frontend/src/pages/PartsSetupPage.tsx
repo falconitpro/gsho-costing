@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
-import PartsCatalog from "../components/PartsCatalog";
+import { Link } from "react-router-dom";
 import PartsRequests from "../components/PartsRequests";
 import PartsPurchase from "../components/PartsPurchase";
 import PartsWarehouse from "../components/PartsWarehouse";
@@ -34,23 +34,19 @@ const EMPTY_RULES: Rules = { default: {}, by_group: [], by_supplier: [], min_mar
 const num = (v: string) => (v === "" ? null : Number(v.replace(",", ".")));
 
 export default function PartsSetupPage({ me }: { me: Me }) {
-  const [tab, setTab] = useState<"requests" | "po" | "batches" | "stock" | "fleet" | "claims" | "reports" | "catalog" | "entities" | "routes" | "markups">("requests");
+  const [tab, setTab] = useState<"requests" | "po" | "batches" | "stock" | "fleet" | "claims" | "reports" | "markups">("requests");
   const [meta, setMeta] = useState<Meta | null>(null);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [msg, setMsg] = useState("");
   const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
-  const entityEditor = has("cd", "gd", "admin");
-  const routeEditor = has("cd", "gd", "admin", "logistician");
   const markupReader = can(me, "cost") || has("cd", "fd", "gd");
   const fleetReader = has("manager", "service_head", "cd", "gd", "admin", "fd", "logistician", "purchasing");
   const poReader = has("manager", "purchasing", "cd", "gd", "fd", "logistician", "admin");
-  const setupReader = has("cd", "fd", "gd", "admin", "logistician");
 
   const loadEntities = () => api.get<Entity[]>("/api/parts/entities").then(setEntities);
   const loadRoutes = () => api.get<Route[]>("/api/parts/routes?include_archived=true").then(setRoutes);
   useEffect(() => { api.get<Meta>("/api/parts/meta").then(setMeta); loadEntities(); loadRoutes(); }, []);
-  const name = (id: string | null | undefined) => (id ? entities.find((e) => e.id === id)?.name || "?" : "Поставщик");
 
   return (
     <>
@@ -63,11 +59,9 @@ export default function PartsSetupPage({ me }: { me: Me }) {
         {fleetReader && <button className={`btn ${tab === "fleet" ? "" : "ghost"}`} onClick={() => setTab("fleet")}>Парк машин</button>}
         {fleetReader && <button className={`btn ${tab === "claims" ? "" : "ghost"}`} onClick={() => setTab("claims")}>Гарантия</button>}
         {fleetReader && <button className={`btn ${tab === "reports" ? "" : "ghost"}`} onClick={() => setTab("reports")}>Отчёты</button>}
-        <button className={`btn ${tab === "catalog" ? "" : "ghost"}`} onClick={() => setTab("catalog")}>Каталог</button>
-        {setupReader && <button className={`btn ${tab === "entities" ? "" : "ghost"}`} onClick={() => setTab("entities")}>Компании группы</button>}
-        {setupReader && <button className={`btn ${tab === "routes" ? "" : "ghost"}`} onClick={() => setTab("routes")}>Маршруты поставки</button>}
         {markupReader && <button className={`btn ${tab === "markups" ? "" : "ghost"}`} onClick={() => setTab("markups")}>Наценки между компаниями</button>}
       </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Каталог запчастей, комплекты ТО, компании группы и маршруты поставки — в разделе <Link to="/catalog?s=parts">«Каталог»</Link>.</div>
       {msg && <div className="alert info">{msg}</div>}
       {tab === "requests" && <PartsRequests me={me} />}
       {tab === "po" && <PartsPurchase me={me} />}
@@ -76,9 +70,6 @@ export default function PartsSetupPage({ me }: { me: Me }) {
       {tab === "batches" && <PartsBatches />}
       {tab === "claims" && <PartsClaims me={me} />}
       {tab === "reports" && <PartsReports />}
-      {tab === "catalog" && <PartsCatalog me={me} />}
-      {meta && tab === "entities" && <Entities meta={meta} list={entities} editor={entityEditor} onSaved={() => { loadEntities(); loadRoutes(); }} setMsg={setMsg} />}
-      {meta && tab === "routes" && <RoutesTab meta={meta} list={routes} entities={entities} editor={routeEditor} name={name} onSaved={loadRoutes} setMsg={setMsg} />}
       {meta && tab === "markups" && markupReader && <Markups me={me} meta={meta} entities={entities} routes={routes.filter((r) => r.is_active)} setMsg={setMsg} />}
     </>
   );
@@ -372,4 +363,23 @@ function Simulator({ routes, suppliers, rules, title }: { routes: Route[]; suppl
         </>)}
     </div>
   );
+}
+
+/** Каталог → «Компании группы» и «Маршруты поставки» (перенесены из раздела запчастей). */
+export function GroupSetupBlock({ me, part }: { me: Me; part: "entities" | "routes" }) {
+  const [meta, setMeta] = useState<Meta | null>(null);
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [routes, setRoutes] = useState<Route[]>([]);
+  const [msg, setMsg] = useState("");
+  const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
+  const loadEntities = () => api.get<Entity[]>("/api/parts/entities").then(setEntities);
+  const loadRoutes = () => api.get<Route[]>("/api/parts/routes?include_archived=true").then(setRoutes);
+  useEffect(() => { api.get<Meta>("/api/parts/meta").then(setMeta).catch((e) => setMsg((e as Error).message)); loadEntities(); loadRoutes(); }, []);
+  const name = (id: string | null | undefined) => (id ? entities.find((e) => e.id === id)?.name || "?" : "Поставщик");
+  return (
+    <>
+      {msg && <div className="alert info">{msg}</div>}
+      {meta && part === "entities" && <Entities meta={meta} list={entities} editor={has("cd", "gd", "admin")} onSaved={() => { loadEntities(); loadRoutes(); }} setMsg={setMsg} />}
+      {meta && part === "routes" && <RoutesTab meta={meta} list={routes} entities={entities} editor={has("cd", "gd", "admin", "logistician")} name={name} onSaved={loadRoutes} setMsg={setMsg} />}
+    </>);
 }

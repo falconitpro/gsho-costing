@@ -706,3 +706,25 @@ def create_deal_from_catalog(exec_id: str, body: DealFromCatalogIn, db: Session 
     db.commit()
     db.refresh(deal)
     return {**deal_payload(deal, user), "from_catalog": done, "price_known": h is not None}
+
+
+
+@router.get("/catalog/search")
+def catalog_search(q: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Общий поиск Каталога: модели и исполнения ГШО, запчасти (артикул, OEM, кросс-номер, название), техника других производителей."""
+    from sqlalchemy import or_
+    from ..models import OtherMachineModel, Part, PartCrossRef
+    q = q.strip()
+    if len(q) < 2:
+        return {"models": [], "parts": [], "other": []}
+    like = f"%{q}%"
+    ex_models = select(EquipmentExecution.model_id).where(EquipmentExecution.name.ilike(like))
+    models = db.scalars(select(EquipmentModel).where(EquipmentModel.status != "archived", or_(EquipmentModel.model.ilike(like), EquipmentModel.trademark.ilike(like),
+                                                     EquipmentModel.brand_name.ilike(like), EquipmentModel.id.in_(ex_models))).limit(15)).all()
+    facs = {f.id: (f.short_name or f.name) for f in db.scalars(select(Factory)).all()}
+    sub = select(PartCrossRef.part_id).where(PartCrossRef.number.ilike(like))
+    parts = db.scalars(select(Part).where(Part.status == "active", or_(Part.article.ilike(like), Part.name_ru.ilike(like), Part.oem_number.ilike(like), Part.id.in_(sub))).limit(15)).all()
+    other = db.scalars(select(OtherMachineModel).where(or_(OtherMachineModel.manufacturer.ilike(like), OtherMachineModel.model.ilike(like))).limit(10)).all()
+    return {"models": [{"id": m.id, "title": " ".join(x for x in (m.trademark or facs.get(m.factory_id, ""), m.model) if x), "machine_type": m.machine_type, "status": m.status} for m in models],
+            "parts": [{"id": p.id, "article": p.article, "name_ru": p.name_ru, "manufacturer": p.manufacturer} for p in parts],
+            "other": [{"id": o.id, "title": f"{o.manufacturer} {o.model}", "machine_type": o.machine_type} for o in other]}

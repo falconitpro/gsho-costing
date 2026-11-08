@@ -13,7 +13,7 @@ import BoardPage from "./pages/BoardPage";
 import SettingsHub from "./pages/SettingsHub";
 import CounterpartiesPage from "./pages/CounterpartiesPage";
 import LegalPage from "./pages/LegalPage";
-import CatalogPage from "./pages/CatalogPage";
+import CatalogHub from "./pages/CatalogHub";
 import PartsSetupPage from "./pages/PartsSetupPage";
 
 export const MeContext = { current: null as Me | null };
@@ -103,7 +103,7 @@ export default function App() {
 
             <Route path="/team" element={<Navigate to="/settings?s=team" replace />} />
             <Route path="/settings" element={<SettingsHub me={me} />} />
-            <Route path="/catalog" element={<CatalogPage me={me} />} />
+            <Route path="/catalog" element={<CatalogHub me={me} />} />
             <Route path="/factories" element={<Navigate to="/counterparties?type=suppliers" replace />} />
             <Route path="/parts/setup" element={<PartsSetupPage me={me} />} />
             <Route path="/access" element={<Navigate to="/settings?s=access" replace />} />

@@ -327,14 +327,75 @@ def _kit_lines(db: Session, lines: list[KitLineIn]) -> list[dict]:
     return out
 
 
+def _kit_model_title(db: Session, k: MaintenanceKit) -> str:
+    if k.equipment_model_id:
+        em = db.get(EquipmentModel, k.equipment_model_id)
+        f = db.get(Factory, em.factory_id) if em else None
+        return " ".join(x for x in ((em.trademark if em and em.trademark else (f.short_name or f.name) if f else ""), em.model if em else "") if x)
+    if k.other_model_id:
+        om = db.get(OtherMachineModel, k.other_model_id)
+        return f"{om.manufacturer} {om.model}" if om else ""
+    return ""
+
+
 @router.get("/kits")
 def kits(equipment_model_id: str = "", other_model_id: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
+    """Комплекты ТО (Каталог → Комплекты ТО): все или по модели; с названием модели."""
     stmt = select(MaintenanceKit).order_by(MaintenanceKit.interval_hours)
     if equipment_model_id:
         stmt = stmt.where(MaintenanceKit.equipment_model_id == equipment_model_id)
     if other_model_id:
         stmt = stmt.where(MaintenanceKit.other_model_id == other_model_id)
-    return [serialize(k) for k in db.scalars(stmt).all()]
+    return [{**serialize(k), "model_title": _kit_model_title(db, k)} for k in db.scalars(stmt).all()]
+
+
+# ------------------------------------------------------------------ техника других производителей (Каталог)
+class OtherModelIn(BaseModel):
+    manufacturer: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    machine_type: str = ""
+
+
+@router.get("/other-models")
+def other_models(q: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Модели машин клиентов, которые мы не поставляли: для парка машин, применимости запчастей и комплектов ТО."""
+    rows = db.scalars(select(OtherMachineModel).order_by(OtherMachineModel.manufacturer, OtherMachineModel.model)).all()
+    if q.strip():
+        ql = q.strip().lower()
+        rows = [r for r in rows if ql in f"{r.manufacturer} {r.model} {r.machine_type}".lower()]
+    machines: dict[str, int] = {}
+    for mid in db.scalars(select(ClientMachine.other_model_id).where(ClientMachine.other_model_id.is_not(None))).all():
+        machines[mid] = machines.get(mid, 0) + 1
+    kits_n: dict[str, int] = {}
+    for mid in db.scalars(select(MaintenanceKit.other_model_id).where(MaintenanceKit.other_model_id.is_not(None))).all():
+        kits_n[mid] = kits_n.get(mid, 0) + 1
+    return [{**serialize(r), "machines": machines.get(r.id, 0), "kits": kits_n.get(r.id, 0)} for r in rows]
+
+
+def _dup_other(db: Session, body: OtherModelIn, exclude: Optional[str] = None) -> None:
+    x = db.scalars(select(OtherMachineModel).where(OtherMachineModel.manufacturer.ilike(body.manufacturer.strip()), OtherMachineModel.model.ilike(body.model.strip()))).first()
+    if x is not None and x.id != exclude:
+        raise HTTPException(409, f"Модель {x.manufacturer} {x.model} уже есть")
+
+
+@router.post("/other-models", status_code=201)
+def create_other_model(body: OtherModelIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    _dup_other(db, body)
+    m = OtherMachineModel(manufacturer=body.manufacturer.strip(), model=body.model.strip(), machine_type=body.machine_type.strip())
+    db.add(m)
+    db.commit()
+    return serialize(m)
+
+
+@router.put("/other-models/{mid}")
+def update_other_model(mid: str, body: OtherModelIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    m = db.get(OtherMachineModel, mid)
+    if m is None:
+        raise HTTPException(404, "Модель не найдена")
+    _dup_other(db, body, mid)
+    m.manufacturer, m.model, m.machine_type = body.manufacturer.strip(), body.model.strip(), body.machine_type.strip()
+    db.commit()
+    return serialize(m)
 
 
 @router.post("/kits", status_code=201)
