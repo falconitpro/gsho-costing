@@ -21,7 +21,7 @@ from app.main import app  # noqa: E402
 from scripts.seed import run as seed  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
-MGR, CD, GD = "manager@example.com", "cd@example.com", "gd@example.com"
+MGR, CD, GD = "manager@example.com", "cd@example.com", "evgeniy@dobrov.pro"
 
 
 def _ok(r, code=200):

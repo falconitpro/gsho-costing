@@ -21,7 +21,7 @@ from app.main import app  # noqa: E402
 from scripts.seed import run as seed  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
-MGR, CD, GD, FD, LAW = "manager@example.com", "cd@example.com", "gd@example.com", "fd@example.com", "lawyer@example.com"
+MGR, CD, GD, FD, LAW = "manager@example.com", "cd@example.com", "evgeniy@dobrov.pro", "fd@example.com", "lawyer@example.com"
 
 ATTORNEY = {"full_name": "Петров Пётр Петрович", "position": "Менеджер по продажам", "birth_date": "1990-01-01", "birth_place": "г. Москва",
             "passport": {"series": "4510", "number": "123456", "issued_by": "ОВД района Примерный г. Москвы", "issued_on": "2010-02-01", "code": "770-001"},

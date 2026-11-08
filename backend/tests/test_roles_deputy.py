@@ -23,7 +23,7 @@ from scripts.seed import run as seed  # noqa: E402
 from datetime import date, timedelta  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
-MGR, CD, GD, ADM, OBS, LAW = "manager@example.com", "cd@example.com", "gd@example.com", "admin@example.com", "observer@example.com", "lawyer@example.com"
+MGR, CD, GD, ADM, OBS, LAW = "manager@example.com", "cd@example.com", "evgeniy@dobrov.pro", "admin@example.com", "observer@example.com", "lawyer@example.com"
 
 
 def _ok(r, code=200):

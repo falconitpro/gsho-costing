@@ -22,7 +22,7 @@ from app.main import app  # noqa: E402
 from scripts.seed import run as seed  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
-MGR, CD, GD, FD, LAW, LOG, OBS = "manager@example.com", "cd@example.com", "gd@example.com", "fd@example.com", "lawyer@example.com", "logist@example.com", "observer@example.com"
+MGR, CD, GD, FD, LAW, LOG, OBS = "manager@example.com", "cd@example.com", "evgeniy@dobrov.pro", "fd@example.com", "lawyer@example.com", "logist@example.com", "observer@example.com"
 PDF = ("scan.pdf", b"%PDF-1.4 test", "application/pdf")
 
 

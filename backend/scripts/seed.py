@@ -11,7 +11,8 @@ from sqlalchemy import select
 from app.db import SessionLocal, init_db
 from app.models import Client, Factory, FxRate, HsCode, LegalEntity, MarkupPolicy, PaymentScheme, RouteStep, SupplyRoute, User
 
-TEST_LOGIN = "test@berg-haus.com"
+TEST_LOGIN = "evgeniy@dobrov.pro"
+TEST_PASSWORD = "test2027"          # пароль тестового входа на стенд (только dev)
 
 USERS = [
     ("manager@example.com", "Бочаров Егор (менеджер)", ["manager"]),
@@ -19,11 +20,10 @@ USERS = [
     ("service@example.com", "Шереметьев Дмитрий (сервис)", ["service_head"]),
     ("cd@example.com", "Волохов Сергей (КД)", ["cd"]),
     ("fd@example.com", "Склярова Ирина (ФД)", ["fd"]),
-    ("gd@example.com", "Добров Евгений (ЗГД)", ["gd"]),
+    (TEST_LOGIN, "Добров Евгений (ЗГД)", ["gd"]),            # вход на стенд по логину и паролю; дальше — «Войти как» в шапке
     ("admin@example.com", "Администратор", ["admin"]),
     ("observer@example.com", "Наблюдатель", ["observer"]),
     ("lawyer@example.com", "Земсков Евгений (юрист)", ["lawyer"]),
-    (TEST_LOGIN, "Тестовый вход (ЗГД)", ["gd"]),           # вход на стенд по логину и паролю; дальше — «Войти как» в шапке
 ]
 # прежние демонстрационные имена — при повторном запуске заменяются на актуальные (имена, заданные вручную, не трогаем)
 OLD_NAMES = {"Иванов Иван (менеджер)", "Петров Пётр (логист)", "Сидоров Сергей (сервис)", "Кузнецова Анна (КД)", "Смирнов Олег (ФД)",
@@ -49,6 +49,10 @@ DEV_PASSWORD = "berghaus-demo-2026"
 def run() -> None:
     init_db()
     with SessionLocal() as db:
+        old_gd = db.scalar(select(User).where(User.email == "gd@example.com"))      # стенд: прежний логин ЗГД → тестовый вход
+        if old_gd is not None and not db.scalar(select(User).where(User.email == TEST_LOGIN)):
+            old_gd.email, old_gd.external_id, old_gd.password_hash = TEST_LOGIN, TEST_LOGIN, None
+            db.flush()
         for email, name, roles in USERS:
             u = db.scalar(select(User).where(User.email == email))
             if not u:
@@ -62,7 +66,7 @@ def run() -> None:
         if get_settings().is_dev:
             for u in db.scalars(select(User)).all():
                 if not u.password_hash:
-                    u.password_hash = hash_password(DEV_PASSWORD)
+                    u.password_hash = hash_password(TEST_PASSWORD if u.email == TEST_LOGIN else DEV_PASSWORD)
         mgr = db.scalar(select(User).where(User.email == "manager@example.com"))
         if not db.scalar(select(Client).where(Client.inn == "7701234567")):
             db.add(Client(name="ООО «Рудник Северный»", inn="7701234567", address="г. Норильск", sites=[{"name": "Месторождение Северное", "region": "Красноярский край"}],
