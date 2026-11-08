@@ -13,8 +13,12 @@ type Row = {
   id: string; doc_type: string; doc_type_title: string; kind: string; kind_title: string; direction: string; direction_title: string; number: string; cp_number: string; title: string; subject: string;
   status: string; status_title: string; locked: boolean; own_entity_id: string | null; own_entity_name: string; cp_kind: string; cp_id: string | null; cp_name: string; cp_inn: string;
   deal_id: string | null; deal_number: string; amount: number | null; currency: string; signed_on: string | null; valid_to: string | null; days_to_expiry: number | null; sign_method: string;
-  has_scan: boolean; curator_name: string; terms_text: string; pending: string[];
+  has_scan: boolean; curator_name: string; terms_text: string; pending: string[]; exec?: { overdue: number; pen_in: number; pen_out: number };
 };
+type Ob = { key: string; title: string; debtor: string; amount: number | null; currency: string; due_on: string | null; due_legal: boolean; done_on: string | null; done_source?: string; days_late: number; status: string; no?: number; idx?: number };
+type Pen = { key: string; payer: string; payer_title: string; reason_title: string; obligation: string; days: number; base: number | null; rate_text: string; calc_amount: number | null; amount: number | null;
+  currency: string; capped: boolean; status: string; status_title: string; mark: { comment?: string; on?: string; amount?: number } };
+type Obligations = { payments: Ob[]; performance: Ob[]; penalties: Pen[]; totals: { receivable: number; payable: number; receivable_accruing: number; payable_accruing: number; net: number; currency: string } };
 type Step = { code: string; title: string; decision: string | null; by_name: string; at: string | null; comment: string; pending: boolean };
 type Full = Row & {
   vat_mode: string; vat_rate: number | null; price_type: string; fx_clause: string; effective_from: string | null; auto_renew: boolean; signatory: { name?: string; position?: string; basis?: string };
@@ -24,7 +28,7 @@ type Full = Row & {
   children: Row[]; can_edit: boolean; can_edit_number: boolean; created_by_name: string;
   client_order: boolean; approval: { round?: number; submitted_at?: string; submitted_by_name?: string; steps?: Step[] }; route_preview: string[];
   sign_checklist: { code: string; title: string; ok: boolean; optional?: boolean }[]; amends: { field: string; title: string }[];
-  my_steps: string[]; can_register: boolean; can_sign: boolean;
+  my_steps: string[]; can_register: boolean; can_sign: boolean; obligations: Obligations | null;
 };
 type Catalog = { kinds: Record<string, { title: string; direction: string; cp_kind: string }>; directions: Record<string, string>; statuses: Record<string, string>; file_kinds: Record<string, string>;
   events: Record<string, string>; performance_codes: Record<string, string>; penalty_payers: Record<string, string>; penalty_reasons: Record<string, string>; rate_kinds: Record<string, string>;
@@ -58,7 +62,9 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
         <div>
           <b>{dealId ? "Договоры сделки" : "Реестр договоров"}</b>
           <div className="muted" style={{ fontSize: 12 }}>действуют: <b>{s.active || 0}</b> · проекты: {s.draft || 0}{s.expiring ? <> · <span style={{ color: "var(--warn)" }}>истекают в 30 дней: <b>{s.expiring}</b></span></> : null}
-            {s.no_scan ? <> · <span style={{ color: "var(--bad)" }}>без скана: {s.no_scan}</span></> : null}{s.no_terms ? <> · <span style={{ color: "var(--bad)" }}>без условий оплаты: {s.no_terms}</span></> : null}</div>
+            {s.no_scan ? <> · <span style={{ color: "var(--bad)" }}>без скана: {s.no_scan}</span></> : null}{s.no_terms ? <> · <span style={{ color: "var(--bad)" }}>без условий оплаты: {s.no_terms}</span></> : null}
+            {s.overdue ? <> · <span style={{ color: "var(--bad)" }}>с просрочкой: <b>{s.overdue}</b></span></> : null}
+            {s.penalties_in_rub ? <> · неустойки к получению: <b>{money(s.penalties_in_rub, "₽")}</b></> : null}{s.penalties_out_rub ? <> · к уплате: <b style={{ color: "var(--bad)" }}>{money(s.penalties_out_rub, "₽")}</b></> : null}</div>
         </div>
         <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
           {!compact && <>
@@ -84,7 +90,7 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
                 {!compact && <td className="muted">{r.own_entity_name}</td>}
                 <td className="num" style={{ whiteSpace: "nowrap" }}>{money(r.amount, r.currency)}</td>
                 <td style={{ fontSize: 12, maxWidth: 280 }}>{r.terms_text || (r.direction === "none" ? <span className="muted">—</span> : <span style={{ color: "var(--bad)" }}>не заданы</span>)}</td>
-                <td style={{ whiteSpace: "nowrap" }}>{d(r.signed_on)}{r.locked && !r.has_scan && <div style={{ fontSize: 11, color: "var(--bad)" }}>нет скана</div>}{r.sign_method === "edo" && <div className="muted" style={{ fontSize: 11 }}>ЭДО</div>}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{d(r.signed_on)}{r.locked && !r.has_scan && <div style={{ fontSize: 11, color: "var(--bad)" }}>нет скана</div>}{r.exec?.overdue ? <div style={{ fontSize: 11, color: "var(--bad)" }}>просрочка: {r.exec.overdue}</div> : null}{r.sign_method === "edo" && <div className="muted" style={{ fontSize: 11 }}>ЭДО</div>}</td>
                 <td><span className={`badge ${STATUS_CLASS[r.status] || ""}`}>{r.status_title}</span>{r.pending?.length > 0 && <div className="muted" style={{ fontSize: 11 }}>ждёт: {r.pending.join(", ")}</div>}{r.days_to_expiry != null && r.status === "active" && r.days_to_expiry <= 30 && <div style={{ fontSize: 11, color: "var(--warn)" }}>до {d(r.valid_to)}</div>}</td>
               </tr>))}
           </tbody>
@@ -137,7 +143,7 @@ function CreateDialog({ cat, reg, dealId, onClose, onCreated }: { cat: Catalog; 
 }
 
 // ------------------------------------------------------------------ карточка
-type Tab = "main" | "pay" | "perf" | "files" | "history";
+type Tab = "main" | "pay" | "perf" | "exec" | "files" | "history";
 function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; onClose: () => void; onOpen: (id: string) => void }) {
   const [c, setC] = useState<Full | null>(null);
   const [draft, setDraft] = useState<Partial<Full>>({});
@@ -159,7 +165,7 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
   const act = (path: string, body: object = {}) => api.post<Full>(`/api/legal/contracts/${id}/${path}`, body).then((x) => { setC(x); setDraft({}); setReason(""); setErr([]); setInfo(`Статус: ${x.status_title}`); }).catch(fail);
   const inRoute = ["legal_review", "approval", "approved", "signing"].includes(c.status);
   const pull = () => api.post<Full>(`/api/legal/contracts/${id}/pull-terms`).then((x) => { setC(x); setDraft({}); setInfo("Цена и условия оплаты перенесены из расчёта сделки"); }).catch(fail);
-  const tabs: [Tab, string][] = [["main", "Основное"], ["pay", "Оплата"], ["perf", "Сроки и неустойки"], ["files", `Файлы (${c.files.length})`], ["history", "История"]];
+  const tabs: [Tab, string][] = [["main", "Основное"], ["pay", "Оплата"], ["perf", "Сроки и неустойки"], ...(c.obligations ? [["exec", "Исполнение"] as [Tab, string]] : []), ["files", `Файлы (${c.files.length})`], ["history", "История"]];
   return (
     <Modal title={`${c.doc_type_title} ${c.number}${c.cp_name ? " — " + c.cp_name : ""}`} onClose={() => { if (!dirty || window.confirm("Закрыть без сохранения?")) onClose(); }} wide>
       <div className="poa-steps" style={{ gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}>
@@ -229,6 +235,7 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
         {tab === "pay" && <PayTab v={v} c={c} cat={cat} ro={ro} set={set} pull={pull} />}
         {tab === "perf" && <PerfTab v={v} cat={cat} ro={ro} set={set} />}
 
+        {tab === "exec" && c.obligations && <ExecTab c={c} ob={c.obligations} onSaved={(x) => { setC(x); setErr([]); setInfo("Записано"); }} onErr={fail} />}
         {tab === "files" && (
           <div className="poa-section">
             <div className="poa-section-head" style={{ justifyContent: "space-between" }}>
@@ -407,4 +414,70 @@ function RouteStrip({ c }: { c: Full }) {
         })}
       </div>
     </div>);
+}
+
+const OB_STATUS: Record<string, [string, string]> = { paid: ["оплачено", "ok"], done: ["исполнено", "ok"], overdue: ["просрочено", "bad"], due: ["ожидается", ""], planned: ["по плану", ""] };
+const today = () => new Date().toISOString().slice(0, 10);
+
+function ExecTab({ c, ob, onSaved, onErr }: { c: Full; ob: Obligations; onSaved: (x: Full) => void; onErr: (e: unknown) => void }) {
+  const [dates, setDates] = useState<Record<string, string>>({});
+  const [amt, setAmt] = useState<Record<string, string>>({});
+  const [note, setNote] = useState("");
+  const post = (body: object) => api.post<Full>(`/api/legal/contracts/${c.id}/facts`, body).then(onSaved).catch(onErr);
+  const side = (x: string) => (x === "cp" ? "контрагент" : "мы");
+  const t = ob.totals;
+  const obTable = (rows: Ob[], kind: "pay" | "perf") => (
+    <table className="table" style={{ fontSize: 13 }}>
+      <thead><tr><th>Обязательство</th><th>Кто должен</th><th className="num">Сумма</th><th>Срок</th><th>Исполнено</th><th>Статус</th><th style={{ width: 220 }} /></tr></thead>
+      <tbody>{rows.map((o) => {
+        const k = kind === "pay" ? String(o.no) : String(o.idx);
+        const [st, tone] = OB_STATUS[o.status] || [o.status, ""];
+        return (
+          <tr key={o.key}>
+            <td>{o.title}</td><td>{side(o.debtor)}</td><td className="num" style={{ whiteSpace: "nowrap" }}>{money(o.amount, o.currency)}</td>
+            <td style={{ whiteSpace: "nowrap" }}>{d(o.due_on)}{o.due_on && !o.due_legal && <div className="muted" style={{ fontSize: 11 }}>от плановой даты</div>}</td>
+            <td style={{ whiteSpace: "nowrap" }}>{d(o.done_on)}{o.done_source && <div className="muted" style={{ fontSize: 11 }}>{o.done_source}</div>}</td>
+            <td><span className={`badge ${tone}`}>{st}</span>{o.days_late > 0 && <div style={{ fontSize: 11, color: "var(--bad)" }}>{o.days_late} дн.</div>}</td>
+            <td style={{ textAlign: "right" }}>{o.done_on && (o.done_source === "отмечено вручную" || kind === "pay")
+              ? <button className="btn ghost" style={{ padding: "0 8px" }} onClick={() => post({ kind, key: k, clear: true })}>снять отметку</button>
+              : <span className="row" style={{ gap: 4, justifyContent: "flex-end" }}><input type="date" style={{ width: 130 }} value={dates[o.key] || today()} onChange={(e) => setDates({ ...dates, [o.key]: e.target.value })} />
+                <button className="btn ghost" style={{ padding: "0 8px" }} onClick={() => post(kind === "pay" ? { kind, key: k, paid_on: dates[o.key] || today() } : { kind, key: k, done_on: dates[o.key] || today() })}>{kind === "pay" ? "оплачено" : "исполнено"}</button></span>}</td>
+          </tr>);
+      })}
+        {rows.length === 0 && <tr><td colSpan={7} className="muted">{kind === "pay" ? "Условия оплаты не заданы." : "Сроки исполнения не заданы — неустойку за просрочку поставки не рассчитать."}</td></tr>}</tbody>
+    </table>);
+  return (
+    <>
+      <div className="wp-grid2" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 12 }}>
+        <div className="wp-mini"><b>{money(t.receivable, t.currency)}</b><small>неустойки к получению</small></div>
+        <div className="wp-mini"><b>{money(t.receivable_accruing, t.currency)}</b><small>ещё начисляются нам</small></div>
+        <div className="wp-mini"><b style={{ color: t.payable ? "var(--bad)" : undefined }}>{money(t.payable, t.currency)}</b><small>неустойки к уплате</small></div>
+        <div className="wp-mini"><b style={{ color: t.payable_accruing ? "var(--warn)" : undefined }}>{money(t.payable_accruing, t.currency)}</b><small>ещё начисляются нам к уплате</small></div>
+      </div>
+      <div className="poa-section"><div className="poa-section-head"><b>Оплата</b><span className="muted">просрочка считается от фактической даты события</span></div>{obTable(ob.payments, "pay")}</div>
+      <div className="poa-section" style={{ marginTop: 14 }}><div className="poa-section-head"><b>Сроки исполнения</b><span className="muted">факт поставки, готовности, отгрузки, ПНР берётся из этапов сделки</span></div>{obTable(ob.performance, "perf")}</div>
+      <div className="poa-section" style={{ marginTop: 14 }}>
+        <div className="poa-section-head" style={{ justifyContent: "space-between" }}><span><b>Неустойки</b> <span className="muted">— в себестоимость сделки и денежный поток (предъявленные и признанные)</span></span>
+          <input placeholder="комментарий / причина" value={note} onChange={(e) => setNote(e.target.value)} style={{ width: 240 }} /></div>
+        <div style={{ overflowX: "auto" }}>
+          <table className="table" style={{ fontSize: 13, minWidth: 900 }}>
+            <thead><tr><th>Кто платит</th><th>За что</th><th className="num">Дней</th><th className="num">База</th><th>Ставка</th><th className="num">Сумма</th><th>Статус</th><th style={{ width: 300 }} /></tr></thead>
+            <tbody>{ob.penalties.map((p) => (
+              <tr key={p.key}>
+                <td>{p.payer_title}</td><td>{p.reason_title}<div className="muted" style={{ fontSize: 11 }}>{p.obligation}</div></td><td className="num">{p.days}</td>
+                <td className="num" style={{ whiteSpace: "nowrap" }}>{money(p.base, p.currency)}</td><td style={{ fontSize: 12 }}>{p.rate_text}</td>
+                <td className="num" style={{ whiteSpace: "nowrap" }}><b>{money(p.amount, p.currency)}</b>{p.capped && <div className="muted" style={{ fontSize: 11 }}>ограничено пределом</div>}{p.calc_amount !== p.amount && p.calc_amount != null && <div className="muted" style={{ fontSize: 11 }}>расчёт {money(p.calc_amount)}</div>}</td>
+                <td><span className={`badge ${p.status === "waived" ? "" : p.status === "paid" ? "ok" : p.payer === "us" ? "bad" : "warn"}`}>{p.status_title}</span>{p.mark?.comment && <div className="muted" style={{ fontSize: 11 }}>{p.mark.comment}</div>}</td>
+                <td style={{ textAlign: "right" }}><span className="row" style={{ gap: 4, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                  <input type="number" title="сумма (если отличается от расчёта)" placeholder="сумма" style={{ width: 90 }} value={amt[p.key] ?? ""} onChange={(e) => setAmt({ ...amt, [p.key]: e.target.value })} />
+                  {[["claimed", "предъявлена"], ["recognized", "признана"], ["paid", "оплачена"], ["waived", "не взыскиваем"]].filter(([k]) => k !== p.status).map(([k, tt]) => (
+                    <button key={k} className="btn ghost" style={{ padding: "0 6px", fontSize: 12 }} onClick={() => post({ kind: "pen", key: p.key, status: k, amount: amt[p.key] ? Number(amt[p.key]) : null, comment: note })}>{tt}</button>))}
+                  {p.mark?.on && <button className="btn ghost" style={{ padding: "0 6px", fontSize: 12 }} title="снять решение" onClick={() => post({ kind: "pen", key: p.key, clear: true })}>×</button>}
+                </span></td>
+              </tr>))}
+              {ob.penalties.length === 0 && <tr><td colSpan={8} className="muted">Просрочек нет — неустойки не начислены.</td></tr>}</tbody>
+          </table>
+        </div>
+      </div>
+    </>);
 }

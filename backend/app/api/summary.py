@@ -106,6 +106,14 @@ def money(days: int = 90, db: Session = Depends(get_db), user: CurrentUser = Dep
         if lc is not None:
             guarantees.append({"deal_id": d.id, "deal_number": d.number, "client": d.client.name if d.client else "", "kind": "аккредитив",
                                "amount": None, "currency": "", "until": None, "status": "открыт" if lc.actual_on else f"план {(lc.refined_on or lc.planned_on or today):%d.%m}", "bank": ""})
+    if user.has(Role.FD, Role.GD, Role.CD, Role.LAWYER, Role.ADMIN):
+        from ..services.legal_contracts import money_rows
+        seen = {d.id for d in _deals(db, user)}
+        for r in money_rows(db, today, horizon):
+            if r["deal_id"] is None or r["deal_id"] in seen:
+                rows.append(r)
+                if r["overdue_days"] and r["direction"] == "in":
+                    receivables.append(r)
     rows.sort(key=lambda r: r["on"])
     # кривая по неделям (в рублях — суммы в RUB; валютные суммы показываются отдельно)
     weeks: dict[str, dict[str, float]] = {}

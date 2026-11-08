@@ -284,6 +284,14 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
                 wk = (wk - timedelta(days=wk.weekday())).isoformat()
                 w = weeks.setdefault(wk, {"in": 0.0, "out": 0.0})
                 w[kind] += float(s.amount)
+        from ..services.legal_contracts import money_rows
+        for r in money_rows(db, today, horizon):
+            if r["currency"] != "RUB" or not r["amount"]:
+                continue
+            wk = max(r["on"], today)
+            wk = (wk - timedelta(days=wk.weekday())).isoformat()
+            w = weeks.setdefault(wk, {"in": 0.0, "out": 0.0})
+            w[r["direction"]] += float(r["amount"])
         curve, cum = [], 0.0
         for i in range(8):
             wk = (monday + timedelta(days=7 * i)).isoformat()

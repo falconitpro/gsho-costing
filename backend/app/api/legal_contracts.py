@@ -144,7 +144,20 @@ def contracts_registry(kind: str = "", status: str = "", direction: str = "", en
     if q:
         ql = q.lower()
         items = [x for x in items if ql in f"{x['number']} {x['cp_number']} {x['cp_name']} {x['subject']} {x['title']} {x['deal_number']}".lower()]
-    summary = {"total": len(items), "active": sum(1 for x in items if x["status"] == "active"), "draft": sum(1 for x in items if x["status"] not in svc.LOCKED and x["status"] != "cancelled"),
+    pen_in = pen_out = 0.0
+    overdue = 0
+    by_id = {c.id: c for c in rows}
+    for it in items:
+        c = by_id[it["id"]]
+        if c.status != "active" or c.direction == "none":
+            continue
+        ob = svc.obligations(db, c)
+        t = ob["totals"]
+        it["exec"] = {"overdue": t["overdue_payments"] + t["overdue_performance"], "pen_in": t["receivable"] + t["receivable_accruing"], "pen_out": t["payable"] + t["payable_accruing"]}
+        overdue += 1 if it["exec"]["overdue"] else 0
+        pen_in += svc.to_rub(db, it["exec"]["pen_in"], c.currency) or 0
+        pen_out += svc.to_rub(db, it["exec"]["pen_out"], c.currency) or 0
+    summary = {"total": len(items), "overdue": overdue, "penalties_in_rub": round(pen_in, 2), "penalties_out_rub": round(pen_out, 2), "active": sum(1 for x in items if x["status"] == "active"), "draft": sum(1 for x in items if x["status"] not in svc.LOCKED and x["status"] != "cancelled"),
                "expiring": sum(1 for x in items if x["status"] == "active" and x["days_to_expiry"] is not None and 0 <= x["days_to_expiry"] <= 30),
                "no_scan": sum(1 for x in items if x["status"] in svc.LOCKED and not x["has_scan"]),
                "no_terms": sum(1 for x in items if x["direction"] in ("income", "expense") and not x["terms_text"])}
@@ -435,6 +448,65 @@ def recall(cid: str, body: Optional[CommentIn] = None, db: Session = Depends(get
     c.status = "draft"
     comment = (body.comment.strip() if body else "")
     svc.hist(c, user.id, "recalled", f"{svc.STATUSES.get(before)} → проект" + (f": {comment}" if comment else ""))
+    db.commit()
+    return _out(db, user, c)
+
+
+class FactIn(BaseModel):
+    kind: str                         # pay | perf | pen
+    key: str                          # pay: № платежа; perf: № срока; pen: ключ неустойки
+    paid_on: Optional[date] = None
+    done_on: Optional[date] = None
+    amount: Optional[float] = None
+    status: Optional[str] = None      # pen: claimed | recognized | paid | waived
+    on: Optional[date] = None
+    due_on: Optional[date] = None     # pen: ожидаемая дата оплаты неустойки
+    comment: str = ""
+    clear: bool = False
+
+
+@router.get("/legal/contracts/{cid}/obligations")
+def contract_obligations(cid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    return svc.obligations(db, _get(db, cid, user))
+
+
+@router.post("/legal/contracts/{cid}/facts")
+def contract_fact(cid: str, body: FactIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Исполнение договора: оплата платежа (ФД, юрист, ЗГД, куратор), исполнение срока (куратор, юрист, КД, ФД, ЗГД),
+    решение по неустойке — предъявлена, признана, оплачена, не взыскиваем (юрист, ФД, ЗГД; «не взыскиваем» — с причиной)."""
+    c = _get(db, cid, user)
+    if c.status not in svc.LOCKED:
+        raise HTTPException(409, "Исполнение отмечается по подписанному договору")
+    curator = c.curator_id == user.id or c.created_by == user.id
+    if body.kind == "pay":
+        if not (user.has(Role.FD, Role.LAWYER, Role.GD) or curator):
+            raise HTTPException(403, "Оплату отмечают ФД, юрист, ЗГД или куратор")
+        if not body.clear and not body.paid_on:
+            raise HTTPException(422, "Укажите дату оплаты")
+        data, txt = {"paid_on": body.paid_on.isoformat() if body.paid_on else None, "amount": body.amount, "comment": body.comment.strip(), "by": user.id, "clear": body.clear}, "оплата"
+    elif body.kind == "perf":
+        if not (user.has(Role.FD, Role.LAWYER, Role.GD, Role.CD) or curator):
+            raise HTTPException(403, "Исполнение отмечают куратор, юрист, КД, ФД или ЗГД")
+        if not body.clear and not body.done_on:
+            raise HTTPException(422, "Укажите дату исполнения")
+        data, txt = {"done_on": body.done_on.isoformat() if body.done_on else None, "comment": body.comment.strip(), "by": user.id, "clear": body.clear}, "исполнение"
+    elif body.kind == "pen":
+        if not user.has(Role.FD, Role.LAWYER, Role.GD):
+            raise HTTPException(403, "Решение по неустойке принимают юрист, ФД или ЗГД")
+        if not body.clear and body.status not in svc.PEN_MANUAL:
+            raise HTTPException(422, "Статус неустойки: " + ", ".join(svc.PEN_MANUAL))
+        if body.status == "waived" and len(body.comment.strip()) < 3:
+            raise HTTPException(422, "Укажите, почему неустойку не взыскиваем")
+        if body.amount is not None and body.amount < 0:
+            raise HTTPException(422, "Сумма не может быть отрицательной")
+        data = {"status": body.status, "amount": body.amount, "on": (body.on or date.today()).isoformat(), "due_on": body.due_on.isoformat() if body.due_on else None,
+                "comment": body.comment.strip(), "by": user.id, "clear": body.clear}
+        txt = "неустойка: " + (svc.PEN_STATUS.get(body.status or "", "") if not body.clear else "решение снято")
+    else:
+        raise HTTPException(422, "kind: pay | perf | pen")
+    svc.set_fact(c, body.kind, body.key, data)
+    svc.hist(c, user.id, "fact", f"{txt} · {body.key}" + (" — снято" if body.clear else "") + (f" · {body.comment.strip()}" if body.comment.strip() else ""))
+    audit(db, user.id, c.deal_id, "contract", c.id, "fact", after=body.model_dump(mode="json"))
     db.commit()
     return _out(db, user, c)
 

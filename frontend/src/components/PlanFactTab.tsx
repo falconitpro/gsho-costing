@@ -7,7 +7,8 @@ type Entry = { id: string; kind: string; cost_item_code: string | null; amount: 
 type Form = { open: boolean; closed: boolean; items: Item[]; payments: boolean; can_close: boolean; can_report: boolean; deviation_pct: number; entries: Entry[] };
 type Row = { no: number; code: string; title: string; plan_base: number; plan_pess: number; fact: number | null; deviation_rub: number | null; deviation_pct: number | null; flag: boolean };
 type Tot = { plan_base: number | null; plan_pess: number | null; fact: number | null };
-type Report = { variant: string; rows: Row[]; totals: Record<string, Tot>; closed: boolean };
+type PenRow = { contract_id: string; number: string; cp_name: string; key: string; payer: string; reason_title: string; obligation: string; days: number; amount: number; currency: string; status: string; status_title: string; amount_rub: number };
+type Report = { variant: string; rows: Row[]; totals: Record<string, Tot>; closed: boolean; penalties?: { rows: PenRow[]; receivable_rub: number; payable_rub: number; net_rub: number; receivable_accruing_rub: number; payable_accruing_rub: number } };
 
 const KIND: Record<string, string> = { cost_item: "статья себестоимости", payment_in: "поступление от клиента", payment_out: "оплата заводу / поставщику", delivery: "срок поставки, дней", fx: "курс" };
 const num = (s: string) => Number(String(s).replace(/\s/g, "").replace(",", "."));
@@ -73,11 +74,23 @@ export default function PlanFactTab({ deal }: { deal: Deal }) {
                 <tr><td>Выручка, ₽</td><td className="num">{fmtRub(T.revenue?.plan_base)}</td><td className="num">{fmtRub(T.revenue?.plan_pess)}</td><td className="num">{fmtRub(T.revenue?.fact)}</td></tr>
                 <tr><td>Себестоимость, ₽</td><td className="num">{fmtRub(T.cost_total?.plan_base)}</td><td className="num">{fmtRub(T.cost_total?.plan_pess)}</td><td className="num">{fmtRub(T.cost_total?.fact)}</td></tr>
                 <tr><td>Прибыль, ₽</td><td className="num">{fmtRub(T.profit?.plan_base)}</td><td className="num">{fmtRub(T.profit?.plan_pess)}</td><td className="num">{fmtRub(T.profit?.fact)}</td></tr>
+                {T.penalties && <tr><td>Неустойки по договорам (нетто), ₽<div className="muted" style={{ fontSize: 11 }}>пессим. — с учётом ещё начисляющихся</div></td><td className="num">{fmtRub(T.penalties.plan_base)}</td><td className="num">{fmtRub(T.penalties.plan_pess)}</td><td className="num">{fmtRub(T.penalties.fact)}</td></tr>}
+                {T.profit_after_penalties && <tr><td>Прибыль с учётом неустоек, ₽</td><td className="num">{fmtRub(T.profit_after_penalties.plan_base)}</td><td className="num">{fmtRub(T.profit_after_penalties.plan_pess)}</td><td className="num"><b>{fmtRub(T.profit_after_penalties.fact)}</b></td></tr>}
                 <tr><td>Маржа</td><td className="num">{pct(T.margin_pct?.plan_base)}</td><td className="num">{pct(T.margin_pct?.plan_pess)}</td><td className="num"><b>{pct(T.margin_pct?.fact)}</b></td></tr>
                 <tr><td>Срок поставки, дней</td><td className="num">{T.delivery_days?.plan_base ?? "—"}</td><td className="num">{T.delivery_days?.plan_pess ?? "—"}</td><td className="num">{T.delivery_days?.fact ?? "—"}</td></tr>
                 <tr><td>Средний курс оплат заводу</td><td className="num">{T.weighted_fx?.plan_base ?? "—"}</td><td className="num">{T.weighted_fx?.plan_pess ?? "—"}</td><td className="num">{T.weighted_fx?.fact ?? "—"}</td></tr>
               </tbody>
             </table>)}
+          {rep.penalties && rep.penalties.rows.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <h3 style={{ margin: "4px 0" }}>Неустойки по договорам сделки</h3>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>к получению {fmtRub(rep.penalties.receivable_rub)} ₽ · к уплате {fmtRub(rep.penalties.payable_rub)} ₽ · ещё начисляются: нам {fmtRub(rep.penalties.receivable_accruing_rub)} ₽, с нас {fmtRub(rep.penalties.payable_accruing_rub)} ₽</div>
+              <table style={{ fontSize: 13 }}><thead><tr><th>Договор</th><th>За что</th><th className="num">Дней</th><th className="num">Сумма</th><th className="num">₽</th><th>Статус</th></tr></thead>
+                <tbody>{rep.penalties.rows.map((p) => (
+                  <tr key={p.contract_id + p.key}><td><a href={`/legal?tab=contracts&open=${p.contract_id}`}>{p.number}</a><div className="muted" style={{ fontSize: 11 }}>{p.cp_name}</div></td>
+                    <td>{p.reason_title}<div className="muted" style={{ fontSize: 11 }}>{p.payer === "cp" ? "платит контрагент" : "платим мы"} · {p.obligation}</div></td><td className="num">{p.days}</td>
+                    <td className="num">{fmtRub(p.amount, 2)} {p.currency}</td><td className="num" style={{ color: p.payer === "us" ? "var(--bad)" : undefined }}>{p.payer === "us" ? "−" : "+"}{fmtRub(p.amount_rub)}</td><td>{p.status_title}</td></tr>))}</tbody></table>
+            </div>)}
           <table>
             <thead><tr><th>№</th><th>Статья</th><th className="num">План (базовый), ₽</th><th className="num">План (пессим.), ₽</th><th className="num">Факт, ₽</th><th className="num">Отклонение, ₽</th><th className="num">Отклонение</th></tr></thead>
             <tbody>{rep.rows.filter((r) => r.plan_base || r.fact != null).map((r) => (

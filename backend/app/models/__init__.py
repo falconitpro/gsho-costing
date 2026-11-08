@@ -1042,6 +1042,7 @@ class Contract(TimestampMixin, Base):
     client_order: Mapped[bool] = mapped_column(Boolean, default=False)                        # закупка под заказ клиента (ГШО / запчасти) — в маршруте КД
     approval: Mapped[dict] = mapped_column(JSONType, default=dict)                            # маршрут: {round, submitted_at, submitted_by, steps: [{code, title, decision, by, at, comment}]}
     notified: Mapped[list[str]] = mapped_column(JSONType, default=list)                       # отправленные напоминания: expiring_30, expiring_7, expired
+    facts: Mapped[dict] = mapped_column(JSONType, default=dict)                               # исполнение: {pay: {no: {paid_on, amount}}, perf: {i: {done_on}}, pen: {key: {status, amount, on, comment}}}
 
 
 class PowerOfAttorney(TimestampMixin, Base):
@@ -1070,6 +1071,7 @@ class PowerOfAttorney(TimestampMixin, Base):
     revoked_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     revoke_reason: Mapped[str] = mapped_column(Text, default="")
     notified: Mapped[list[str]] = mapped_column(JSONType, default=list)                       # отправленные напоминания: expiring_30, expiring_7, expired
+    facts: Mapped[dict] = mapped_column(JSONType, default=dict)                               # исполнение: {pay: {no: {paid_on, amount}}, perf: {i: {done_on}}, pen: {key: {status, amount, on, comment}}}
     notes: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
 

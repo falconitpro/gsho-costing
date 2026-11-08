@@ -278,7 +278,7 @@ def payload(db: Session, c: Contract, names: Optional[dict] = None, ents: Option
                 "created_by_name": names.get(c.created_by or "", ""), "created_at": c.created_at.isoformat() if c.created_at else None,
                 "schedule": schedule(db, c), "check": chk, "client_order": bool(c.client_order),
                 "approval": approval_view(db, c, names), "route_preview": [STEP_TITLES[x] for x in route(db, c)], "sign_checklist": sign_checklist(c),
-                "amends": amend_changes(db, c) if c.doc_type == "amendment" else [],
+                "amends": amend_changes(db, c) if c.doc_type == "amendment" else [], "obligations": obligations(db, c, today) if c.status in LOCKED else None,
                 "children": [payload(db, x, names, ents, full=False) for x in db.scalars(select(Contract).where(Contract.parent_id == c.id).order_by(Contract.created_at)).all()]})
     return out
 
@@ -624,3 +624,217 @@ def inbox(db: Session, user) -> dict:
                 out["expiring"].append({**base, "valid_to": c.valid_to.isoformat(), "days": (c.valid_to - today).days, "auto_renew": c.auto_renew})
     out["expiring"].sort(key=lambda x: x["days"])
     return {**out, "counts": {k: len(v) for k, v in out.items()}}
+
+
+
+# ------------------------------------------------------------------ этап 3: обязательства, просрочки, неустойки → себестоимость, план-факт, денежный поток
+PERF_EVENT = {"delivery": "delivery", "readiness": "readiness", "shipment": "shipment", "commissioning": "commissioning"}   # факт исполнения из этапов сделки
+REASON_CODES = {"late_delivery": {"delivery", "readiness", "shipment"}, "late_works": {"works", "commissioning"}, "late_defects": {"defects"}}
+PEN_STATUS = {"accruing": "начисляется (просрочка идёт)", "accrued": "начислена (исполнено с просрочкой)", "claimed": "предъявлена претензией",
+              "recognized": "признана контрагентом", "paid": "оплачена / зачтена", "waived": "не взыскиваем / списана"}
+PEN_MANUAL = ("claimed", "recognized", "paid", "waived")
+
+
+def _d(v) -> Optional[date]:
+    if not v:
+        return None
+    return v if isinstance(v, date) else date.fromisoformat(str(v)[:10])
+
+
+def to_rub(db: Session, amount: Optional[float], currency: str) -> Optional[float]:
+    if amount is None:
+        return None
+    cur = (currency or "RUB").upper()
+    if cur == "RUB":
+        return float(amount)
+    from ..models import FxRate
+    r = db.scalars(select(FxRate).where(FxRate.currency == cur).order_by(FxRate.on.desc()).limit(1)).first()
+    return float(amount) * r.rate if r else None
+
+
+def key_rate(db: Session) -> float:
+    from . import settings_service
+    try:
+        return float(settings_service.get(db, "key_rate_pct") or 16)
+    except (TypeError, ValueError):
+        return 16.0
+
+
+def obligations(db: Session, c: Contract, today: Optional[date] = None) -> dict:
+    """Обязательства договора с фактом исполнения и неустойками.
+    Оплата: должник — контрагент (доходный) или мы (расходный); исполнение (поставка, работы) — наоборот.
+    Неустойка = база × ставка × (дни просрочки − льгота), не больше предела по строке и общего предела ответственности (% цены)."""
+    today = today or date.today()
+    cal = work_calendar(db)
+    ev = event_dates(db, c)
+    facts = dict(c.facts or {})
+    fpay, fperf, fpen = dict(facts.get("pay") or {}), dict(facts.get("perf") or {}), dict(facts.get("pen") or {})
+    payer_of_pay = "cp" if c.direction == "income" else "us"
+    performer = "us" if c.direction == "income" else "cp"
+    pays = []
+    for r in schedule(db, c, today):
+        m = fpay.get(str(r["no"])) or {}
+        paid_on = _d(m.get("paid_on"))
+        due = _d(r["due_on"]) if r["due_legal"] else None
+        late = max(0, ((paid_on or today) - due).days) if due else 0
+        st = "paid" if paid_on else ("overdue" if late else "due" if r["due_on"] else "planned")
+        pays.append({"key": f"pay:{r['no']}", "no": r["no"], "title": f"Платёж {r['no']}: {r['text']}", "debtor": payer_of_pay, "amount": r["amount"], "currency": c.currency,
+                     "due_on": r["due_on"], "due_legal": r["due_legal"], "done_on": paid_on.isoformat() if paid_on else None, "paid_amount": m.get("amount"),
+                     "days_late": late, "status": st, "event_title": r["event_title"]})
+    perfs = []
+    for i, t in enumerate(c.performance_terms or []):
+        code = t.get("code") or "other"
+        if t.get("fixed_on"):
+            base = {"on": _d(t["fixed_on"]), "fact": True}
+        else:
+            base = ev.get(t.get("event") or "contract")
+        due = _plus(cal, base["on"], int(t.get("offset_days") or 0), t.get("offset_kind") or "calendar") if base else None
+        m = fperf.get(str(i)) or {}
+        done = _d(m.get("done_on"))
+        src = "отмечено вручную" if done else ""
+        if not done and PERF_EVENT.get(code) and (ev.get(PERF_EVENT[code]) or {}).get("fact"):
+            done, src = ev[PERF_EVENT[code]]["on"], ev[PERF_EVENT[code]]["source"]
+        legal = bool(base and base.get("fact") and due)
+        late = max(0, ((done or today) - due).days) if legal else 0
+        st = "done" if done else ("overdue" if late else "due" if due else "planned")
+        perfs.append({"key": f"perf:{i}", "idx": i, "code": code, "title": f"{PERFORMANCE_CODES.get(code, code).capitalize()}" + (f" — {t['note']}" if t.get("note") else ""),
+                      "debtor": performer, "amount": float(t["amount"]) if t.get("amount") not in (None, "") else c.amount, "currency": c.currency,
+                      "due_on": due.isoformat() if due else None, "due_legal": legal, "done_on": done.isoformat() if done else None, "done_source": src,
+                      "days_late": late, "status": st})
+    kr = key_rate(db)
+    pens = []
+    for pi, p in enumerate(c.penalties or []):
+        reason = p.get("reason")
+        if reason == "late_payment":
+            obs = [o for o in pays if o["debtor"] == p.get("payer")]
+        elif reason in REASON_CODES:
+            codes = {p["term"]} if p.get("term") in PERFORMANCE_CODES else REASON_CODES[reason]
+            obs = [o for o in perfs if o["debtor"] == p.get("payer") and o["code"] in codes]
+        else:
+            obs = []
+        for o in obs:
+            days = max(0, o["days_late"] - int(p.get("grace_days") or 0))
+            if days <= 0:
+                continue
+            base_kind = p.get("base") or "overdue_amount"
+            if base_kind == "contract_price":
+                base = c.amount
+            else:   # просроченная сумма / стоимость не исполненного в срок
+                base = o["amount"] if o["amount"] is not None else c.amount
+            rate = float(p.get("rate") or 0)
+            rk = p.get("rate_kind") or "pct_day"
+            if rk == "fixed_day":
+                amt = rate * days
+            elif rk == "one_time":
+                amt = rate                                   # разовый штраф — сумма
+            elif base is None:
+                amt = None
+            elif rk == "pct_week":
+                amt = base * rate / 100 * days / 7
+            elif rk == "key_rate":
+                amt = base * kr / 100 / 300 * days        # 1/300 ключевой ставки в день
+            else:
+                amt = base * rate / 100 * days
+            cap = None
+            ck = p.get("cap_kind") or "none"
+            if ck == "pct_base" and base is not None and p.get("cap_value") not in (None, ""):
+                cap = base * float(p["cap_value"]) / 100
+            elif ck == "pct_contract" and c.amount is not None and p.get("cap_value") not in (None, ""):
+                cap = float(c.amount) * float(p["cap_value"]) / 100
+            elif ck == "amount" and p.get("cap_value") not in (None, ""):
+                cap = float(p["cap_value"])
+            capped = amt is not None and cap is not None and amt > cap
+            if capped:
+                amt = cap
+            key = f"{pi}:{o['key']}"
+            m = fpen.get(key) or {}
+            status = m.get("status") if m.get("status") in PEN_MANUAL else ("accrued" if o["status"] in ("paid", "done") else "accruing")
+            final = float(m["amount"]) if m.get("amount") not in (None, "") and status in ("claimed", "recognized", "paid") else (round(amt, 2) if amt is not None else None)
+            pens.append({"key": key, "payer": p.get("payer"), "payer_title": PENALTY_PAYERS.get(p.get("payer"), ""), "reason": reason, "reason_title": PENALTY_REASONS.get(reason, reason),
+                         "obligation": o["title"], "obligation_key": o["key"], "days": days, "base": base, "rate_text": f"{rate:g} {RATE_KINDS.get(rk, rk)}",
+                         "calc_amount": round(amt, 2) if amt is not None else None, "amount": final, "currency": c.currency, "capped": capped, "status": status,
+                         "status_title": PEN_STATUS[status], "mark": m})
+    # общий предел ответственности по каждой стороне (% цены договора)
+    if c.liability_cap_pct and c.amount:
+        lim = float(c.amount) * float(c.liability_cap_pct) / 100
+        for side in ("cp", "us"):
+            rows = [x for x in pens if x["payer"] == side and x["status"] != "waived" and x["amount"]]
+            tot = sum(x["amount"] for x in rows)
+            if tot > lim > 0:
+                k = lim / tot
+                for x in rows:
+                    if not x["mark"].get("amount"):
+                        x["amount"] = round(x["amount"] * k, 2)
+                        x["capped"] = True
+    def s(side: str, sts: tuple) -> float:
+        return round(sum(x["amount"] or 0 for x in pens if x["payer"] == side and x["status"] in sts), 2)
+    final_sts = ("accrued", "claimed", "recognized", "paid")
+    totals = {"receivable": s("cp", final_sts), "payable": s("us", final_sts), "receivable_accruing": s("cp", ("accruing",)), "payable_accruing": s("us", ("accruing",)),
+              "overdue_payments": sum(1 for x in pays if x["status"] == "overdue"), "overdue_performance": sum(1 for x in perfs if x["status"] == "overdue"), "currency": c.currency}
+    totals["net"] = round(totals["receivable"] - totals["payable"], 2)
+    return {"payments": pays, "performance": perfs, "penalties": pens, "totals": totals, "statuses": PEN_STATUS, "key_rate": kr}
+
+
+def set_fact(c: Contract, kind: str, key: str, data: dict) -> None:
+    facts = {k: dict(v) for k, v in (c.facts or {}).items()}
+    bucket = dict(facts.get(kind) or {})
+    if data.get("clear"):
+        bucket.pop(key, None)
+    else:
+        bucket[key] = {k: v for k, v in data.items() if k != "clear" and v not in (None, "")}
+    facts[kind] = bucket
+    c.facts = facts
+
+
+def deal_penalties(db: Session, deal_id: str, today: Optional[date] = None) -> dict:
+    """Неустойки по всем действующим договорам сделки — в рублях, для план-факта и себестоимости сделки."""
+    rows, rec, pay, rec_acc, pay_acc = [], 0.0, 0.0, 0.0, 0.0
+    for c in db.scalars(select(Contract).where(Contract.deal_id == deal_id, Contract.status.in_(("active", "closed", "terminated")))).all():
+        ob = obligations(db, c, today)
+        for x in ob["penalties"]:
+            if x["status"] == "waived" or not x["amount"]:
+                continue
+            rub = to_rub(db, x["amount"], x["currency"]) or 0.0
+            rows.append({"contract_id": c.id, "number": c.number, "cp_name": cp_display(db, c), **{k: x[k] for k in ("key", "payer", "reason_title", "obligation", "days", "amount", "currency", "status", "status_title")}, "amount_rub": round(rub, 2)})
+            if x["status"] == "accruing":
+                rec_acc += rub if x["payer"] == "cp" else 0
+                pay_acc += rub if x["payer"] == "us" else 0
+            else:
+                rec += rub if x["payer"] == "cp" else 0
+                pay += rub if x["payer"] == "us" else 0
+    return {"rows": rows, "receivable_rub": round(rec, 2), "payable_rub": round(pay, 2), "net_rub": round(rec - pay, 2),
+            "receivable_accruing_rub": round(rec_acc, 2), "payable_accruing_rub": round(pay_acc, 2)}
+
+
+def money_rows(db: Session, today: date, horizon: date) -> list[dict]:
+    """Денежный поток по договорам: платежи по договорам без сделки (у сделок платежи уже в этапах исполнения)
+    и неустойки — предъявленные / признанные (к получению и к уплате)."""
+    out = []
+    for c in db.scalars(select(Contract).where(Contract.status == "active")).all():
+        if c.direction not in ("income", "expense"):
+            continue
+        ob = None
+        if not c.deal_id:
+            ob = obligations(db, c, today)
+            for x in ob["payments"]:
+                if x["status"] == "paid" or not x["due_on"] or x["amount"] is None:
+                    continue
+                on = _d(x["due_on"])
+                if on > horizon:
+                    continue
+                out.append({"deal_id": None, "deal_number": c.number, "client": cp_display(db, c), "manager": "", "title": f"Оплата по договору ({x['event_title']})",
+                            "direction": "in" if c.direction == "income" else "out", "on": on, "amount": x["amount"], "currency": c.currency,
+                            "overdue_days": (today - on).days if on < today else 0, "url": f"/legal?tab=contracts&open={c.id}", "source": "contract"})
+        if c.penalties:
+            ob = ob or obligations(db, c, today)
+            claim_days = int((c.law or {}).get("claim_days") or 30)
+            for x in ob["penalties"]:
+                if x["status"] not in ("claimed", "recognized") or not x["amount"]:
+                    continue
+                on = _d(x["mark"].get("due_on")) or ((_d(x["mark"].get("on")) or today) + timedelta(days=claim_days if x["status"] == "claimed" else 10))
+                if on > horizon:
+                    continue
+                out.append({"deal_id": c.deal_id, "deal_number": c.number, "client": cp_display(db, c), "manager": "", "title": f"Неустойка: {x['reason_title']} ({x['status_title']})",
+                            "direction": "in" if x["payer"] == "cp" else "out", "on": max(on, today), "amount": x["amount"], "currency": c.currency,
+                            "overdue_days": 0, "url": f"/legal?tab=contracts&open={c.id}", "source": "penalty"})
+    return out
