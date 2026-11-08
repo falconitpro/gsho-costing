@@ -18,25 +18,20 @@ const Ic = {
   check: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 12.5l5 5L20 7" /></svg>,
 };
 
-/** Фон: плоскости макета (SVG) + локальная сцена (рельеф, ПДМ, фактура ромба). Эталон 1920 × 1200, обрезка по центру. */
+/** Фон: плоскости макета с фактурой породы из эталона (локальные assets plane-red / plane-black, без элементов интерфейса),
+ *  поверх — локальная сцена (рельеф, ПДМ, тёплый ромб). Эталон 1920 × 1200, обрезка по центру. Геометрия плоскостей — как в макете. */
+const BLACK_PLANE = "1139,0 1920,0 1920,572 1635,300 1063,871 732,458";
 function Background() {
   return (
     <>
       <svg className="bh-bg" viewBox="0 0 1920 1200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
-        <defs>
-          <filter id="bh-grain" x="0" y="0" width="100%" height="100%">
-            <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" />
-            <feColorMatrix type="saturate" values="0" />
-            <feComponentTransfer><feFuncA type="linear" slope="0.09" /></feComponentTransfer>
-          </filter>
-          <linearGradient id="bh-red-shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity="0.22" /></linearGradient>
-        </defs>
+        <defs><clipPath id="bh-black-clip"><polygon points={BLACK_PLANE} /></clipPath></defs>
         <rect width="1920" height="1200" fill="#c40303" />
-        <rect width="1920" height="1200" fill="url(#bh-red-shade)" />
-        <polygon points="1139,0 1920,0 1920,572 1635,300 1063,871 732,458" fill="#060606" />
-        <polygon points="1635,300 1920,572 1920,1200 1310,1200 1066,871" fill="#f4ebe2" />
+        <image href="/login/plane-red.webp" x="0" y="0" width="1920" height="1200" preserveAspectRatio="none" />
+        <polygon points={BLACK_PLANE} fill="#060606" stroke="#060606" strokeWidth="2" strokeLinejoin="miter" />
+        <image href="/login/plane-black.webp" x="732" y="0" width="1188" height="871" preserveAspectRatio="none" clipPath="url(#bh-black-clip)" />
+        <polygon points="1635,300 1920,572 1920,1200 1310,1200 1058,871" fill="#f4ebe2" />
         <image href="/login/scene.webp" x="0" y="280" width="1920" height="920" preserveAspectRatio="none" />
-        <rect width="1920" height="1200" filter="url(#bh-grain)" />
       </svg>
       <div className="bh-bg-mobile" aria-hidden="true" />
     </>
@@ -99,7 +94,7 @@ export default function LoginPage({ onLoggedIn, devUsers = [], onDevPick }: { on
               <span>Логин</span>
               <div className={`bh-input${loginEmpty ? " bad" : ""}`}>
                 <span className="ic">{Ic.user}</span>
-                <input ref={loginRef} id={ids.login} name="username" type="text" inputMode="email" autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="name@berghaus.pro"
+                <input ref={loginRef} id={ids.login} name="username" type="text" inputMode="email" autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="name@berg-haus.com"
                   value={login} onChange={(e) => setLogin(e.target.value)} aria-invalid={loginEmpty || undefined} aria-describedby={loginEmpty ? ids.lerr : undefined} disabled={busy} />
               </div>
               {loginEmpty && <div className="bh-field-err" id={ids.lerr}>{Ic.warn}Укажите логин</div>}
