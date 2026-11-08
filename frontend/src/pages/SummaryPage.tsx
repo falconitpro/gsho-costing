@@ -95,7 +95,7 @@ function Shipments({ data, t }: { data: Record<string, unknown>; t: Record<strin
   );
 }
 
-type Pay = { deal_id: string; deal_number: string; client: string; manager: string; title: string; direction: "in" | "out"; on: string; amount: number | null; currency: string; overdue_days: number };
+type Pay = { deal_id: string | null; url?: string; deal_number: string; client: string; manager: string; title: string; direction: "in" | "out"; on: string; amount: number | null; currency: string; overdue_days: number };
 type Guar = { deal_id: string; deal_number: string; client: string; kind: string; amount: number | null; currency: string; until: string | null; status: string; bank: string };
 type Curve = { week: string; in: number; out: number; cum: number };
 
@@ -113,7 +113,7 @@ function Money({ data, t }: { data: Record<string, unknown>; t: Record<string, n
         <div className="card" style={{ marginTop: 10, borderLeft: "4px solid var(--accent)" }}>
           <b>Просроченная дебиторка</b>
           <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{rec.map((p, i) => (
-            <tr key={i}><td><Link to={`/deals/${p.deal_id}?tab=planfact`}>{p.deal_number}</Link></td><td>{p.client}</td><td>{p.title}</td><td style={{ whiteSpace: "nowrap" }}>{d(p.on)}{late(p.overdue_days)}</td><td className="num"><b>{money(p)}</b></td><td>{p.manager}</td></tr>))}</tbody></table>
+            <tr key={i}><td><Link to={p.url || `/deals/${p.deal_id}?tab=planfact`}>{p.deal_number}</Link></td><td>{p.client}</td><td>{p.title}</td><td style={{ whiteSpace: "nowrap" }}>{d(p.on)}{late(p.overdue_days)}</td><td className="num"><b>{money(p)}</b></td><td>{p.manager}</td></tr>))}</tbody></table>
         </div>)}
       {curve.length > 0 && (
         <div className="card" style={{ marginTop: 10 }}>
@@ -132,7 +132,7 @@ function Money({ data, t }: { data: Record<string, unknown>; t: Record<string, n
           <thead><tr><th>Дата</th><th>Сделка</th><th>Клиент</th><th>Платёж</th><th className="num">Сумма</th><th>Менеджер</th></tr></thead>
           <tbody>{rows.map((p, i) => (
             <tr key={i} style={p.overdue_days > 0 ? { boxShadow: "inset 3px 0 0 var(--bad)" } : undefined}>
-              <td style={{ whiteSpace: "nowrap" }}>{d(p.on)}{late(p.overdue_days)}</td><td><Link to={`/deals/${p.deal_id}?tab=planfact`}>{p.deal_number}</Link></td><td>{p.client}</td>
+              <td style={{ whiteSpace: "nowrap" }}>{d(p.on)}{late(p.overdue_days)}</td><td><Link to={p.url || `/deals/${p.deal_id}?tab=planfact`}>{p.deal_number}</Link></td><td>{p.client}</td>
               <td>{p.direction === "in" ? <span className="badge ok">получить</span> : <span className="badge bad">заплатить</span>} {p.title}</td>
               <td className="num" style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{money(p)}</td><td>{p.manager}</td></tr>))}
           {rows.length === 0 && <tr><td colSpan={6} className="muted" style={{ padding: 16 }}>Платежей на горизонте нет</td></tr>}</tbody>

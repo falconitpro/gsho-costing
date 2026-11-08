@@ -330,7 +330,15 @@ def plan_fact(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = D
         "weighted_fx": {"plan_base": _weighted_fx(ver.calc_result, "base"), "plan_pess": _weighted_fx(ver.calc_result, "pessimistic"),
                         "fact": _fact_fx(facts)},
     }
-    return {"variant": won_variant.name, "rows": rows, "totals": totals, "entries": [serialize(f) for f in facts], "closed": deal.plan_fact_closed}
+    # неустойки по договорам сделки: к получению уменьшают, к уплате увеличивают себестоимость сделки
+    from ..services.legal_contracts import deal_penalties
+    pen = deal_penalties(db, deal.id)
+    if pen["rows"]:
+        net = pen["net_rub"]
+        totals["penalties"] = {"plan_base": 0.0, "plan_pess": round(pen["receivable_accruing_rub"] - pen["payable_accruing_rub"], 2), "fact": net}
+        pf = totals["profit"]["fact"]
+        totals["profit_after_penalties"] = {"plan_base": base["profit_rub"], "plan_pess": pess["profit_rub"], "fact": None if pf is None else round(pf + net, 2)}
+    return {"variant": won_variant.name, "rows": rows, "totals": totals, "entries": [serialize(f) for f in facts], "closed": deal.plan_fact_closed, "penalties": pen}
 
 
 def _weighted_fx(res: dict, scen: str) -> Optional[float]:
