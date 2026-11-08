@@ -177,10 +177,10 @@ function Service({ data, t }: { data: Record<string, unknown>; t: Record<string,
       {table(pnr, "Пусконаладка (ПНР)")}
       <div className="grid cols-2" style={{ marginTop: 10 }}>
         <div className="card"><b>Напоминания о ТО</b>
-          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{rem.map((r, i) => <tr key={i}><td><Link to="/parts/setup">{r.machine || "машина"}</Link></td><td>{r.client}</td><td>{r.to_hours} м·ч</td><td style={{ whiteSpace: "nowrap" }}>{d(r.due_on)}{late(r.overdue_days)}</td></tr>)}
+          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{rem.map((r, i) => <tr key={i}><td><Link to="/counterparties?type=clients">{r.machine || "машина"}</Link></td><td>{r.client}</td><td>{r.to_hours} м·ч</td><td style={{ whiteSpace: "nowrap" }}>{d(r.due_on)}{late(r.overdue_days)}</td></tr>)}
             {rem.length === 0 && <tr><td className="muted">Напоминаний нет</td></tr>}</tbody></table></div>
         <div className="card"><b>Открытые претензии заводам</b>
-          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{claims.map((c) => <tr key={c.id}><td><Link to="/parts/setup">{c.number}</Link></td><td>{c.factory}</td><td>{c.status}</td><td>{d(c.created_at)}</td></tr>)}
+          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{claims.map((c) => <tr key={c.id}><td><Link to="/supply?tab=claims">{c.number}</Link></td><td>{c.factory}</td><td>{c.status}</td><td>{d(c.created_at)}</td></tr>)}
             {claims.length === 0 && <tr><td className="muted">Претензий нет</td></tr>}</tbody></table></div>
       </div>
     </>
@@ -213,10 +213,10 @@ function Purchasing({ data, t }: { data: Record<string, unknown>; t: Record<stri
       </div>
       <div className="grid cols-2" style={{ marginTop: 10 }}>
         <div className="card"><b>Заявки на запчасти без заказа</b>
-          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{reqs.map((r) => <tr key={r.id}><td><Link to="/parts/setup">{r.number}</Link>{r.urgent && <span className="badge bad" style={{ marginLeft: 4 }}>машина стоит</span>}</td><td>{r.client}</td><td>{r.unordered} из {r.lines} строк</td><td>{d(r.created_at)}</td></tr>)}
+          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{reqs.map((r) => <tr key={r.id}><td><Link to={`/deals/parts/${r.id}`}>{r.number}</Link>{r.urgent && <span className="badge bad" style={{ marginLeft: 4 }}>машина стоит</span>}</td><td>{r.client}</td><td>{r.unordered} из {r.lines} строк</td><td>{d(r.created_at)}</td></tr>)}
             {reqs.length === 0 && <tr><td className="muted">Нет</td></tr>}</tbody></table></div>
         <div className="card"><b>Заказы поставщикам</b>
-          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{pos.map((p) => <tr key={p.id} style={p.overdue ? { boxShadow: "inset 3px 0 0 var(--bad)" } : undefined}><td><Link to="/parts/setup">{p.number}</Link></td><td>{p.supplier}</td><td>{p.received} из {p.lines} принято</td><td style={{ whiteSpace: "nowrap" }}>ETA {d(p.eta)}{p.overdue ? <span style={{ color: "var(--bad)" }}> · просрочено {p.overdue}</span> : ""}</td></tr>)}
+          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{pos.map((p) => <tr key={p.id} style={p.overdue ? { boxShadow: "inset 3px 0 0 var(--bad)" } : undefined}><td><Link to="/supply?tab=po">{p.number}</Link></td><td>{p.supplier}</td><td>{p.received} из {p.lines} принято</td><td style={{ whiteSpace: "nowrap" }}>ETA {d(p.eta)}{p.overdue ? <span style={{ color: "var(--bad)" }}> · просрочено {p.overdue}</span> : ""}</td></tr>)}
             {pos.length === 0 && <tr><td className="muted">Нет</td></tr>}</tbody></table></div>
       </div>
     </>

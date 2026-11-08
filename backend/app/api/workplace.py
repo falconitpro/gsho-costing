@@ -413,7 +413,7 @@ def _quick(user: CurrentUser) -> list[dict]:
     if user.has(Role.MANAGER, Role.CD, Role.GD):
         q += [{"title": "Новый расчёт", "url": "/deals?new=1"}, {"title": "Новый клиент", "url": "/counterparties?type=clients&new=1"}]
     if user.has(Role.MANAGER, Role.SERVICE_HEAD, Role.PURCHASING, Role.CD, Role.GD):
-        q.append({"title": "Запасные части", "url": "/parts/setup"})
+        q.append({"title": "Заявка на запчасти", "url": "/deals?new=1&new_type=parts"})
     if user.has(Role.LOGISTICIAN):
         q.append({"title": "Отгрузки", "url": "/summary?kind=shipments"})
     if user.has(Role.FD, Role.GD):

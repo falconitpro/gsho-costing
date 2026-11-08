@@ -17,21 +17,22 @@ type Ref = { id: string; name: string };
 
 const EMPTY = { client_id: "", equipment_model_id: "", other_manufacturer: "", other_model: "", serial: "", commissioned_on: "", site: "", hours_per_day: "", comment: "" };
 
-export default function PartsFleet({ me }: { me: Me }) {
+export default function PartsFleet({ me, fixedClient }: { me: Me; fixedClient?: string }) {
   const edit = me.roles.some((r) => ["manager", "service_head", "cd", "gd", "admin"].includes(r.code));
   const [list, setList] = useState<Machine[]>([]);
   const [rem, setRem] = useState<Reminder[]>([]);
   const [clients, setClients] = useState<Ref[]>([]);
   const [models, setModels] = useState<Models>({ gsho: [], other: [] });
   const [q, setQ] = useState("");
-  const [clientId, setClientId] = useState("");
+  const [clientId, setClientId] = useState(fixedClient || "");
+  useEffect(() => { if (fixedClient) setClientId(fixedClient); }, [fixedClient]);
   const [soon, setSoon] = useState(false);
   const [cur, setCur] = useState<Machine | null>(null);
   const [form, setForm] = useState<typeof EMPTY | null>(null);
   const [msg, setMsg] = useState("");
   const load = () => {
     api.get<Machine[]>(`/api/parts/fleet/machines?client_id=${clientId}&q=${encodeURIComponent(q)}${soon ? "&due_days=30" : ""}`).then(setList).catch((e) => setMsg((e as Error).message));
-    api.get<Reminder[]>("/api/parts/fleet/reminders").then(setRem).catch(() => setRem([]));
+    api.get<Reminder[]>("/api/parts/fleet/reminders").then((rs) => setRem(fixedClient ? rs.filter((r) => r.machine.client_id === fixedClient) : rs)).catch(() => setRem([]));
   };
   useEffect(() => { api.get<Ref[]>("/api/refs/clients").then(setClients).catch(() => setClients([])); api.get<Models>("/api/parts/fleet/models").then(setModels).catch(() => undefined); }, []);
   useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [q, clientId, soon]);
@@ -42,7 +43,7 @@ export default function PartsFleet({ me }: { me: Me }) {
   }
   async function kitRequest(m: Machine, reminderId?: string) {
     const r = await act(() => api.post<{ number: string }>(`/api/parts/fleet/machines/${m.id}/kit-request`, { reminder_id: reminderId || null }));
-    if (r) setMsg(`Создана заявка ${r.number} на ТО-комплект — откройте её во вкладке «Заявки», проверьте строки и сформируйте КП`);
+    if (r) setMsg(`Создана заявка ${r.number} на ТО-комплект — она в разделе «Сделки» (тип «Запчасти»): проверьте строки и сформируйте КП`);
   }
   function save() {
     if (!form) return;
@@ -74,7 +75,7 @@ export default function PartsFleet({ me }: { me: Me }) {
       <div className="card">
         <div className="row" style={{ flexWrap: "wrap" }}>
           <input placeholder="клиент, модель, зав. №, место" value={q} onChange={(e) => setQ(e.target.value)} />
-          <select value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">все клиенты</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          {!fixedClient && <select value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">все клиенты</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
           <label className="row"><input type="checkbox" checked={soon} onChange={(e) => setSoon(e.target.checked)} /> ТО в ближайшие 30 дней</label>
           {edit && <><button className="btn add" style={{ marginLeft: "auto" }} onClick={() => { setCur(null); setEditingId(null); setForm({ ...EMPTY, client_id: clientId }); }}>Машина</button>
             <button className="btn ghost" onClick={() => act(() => api.post<{ created: number }>("/api/parts/fleet/sync-deals"), "").then((r) => r && setMsg(`Из закрытых сделок ГШО добавлено машин: ${r.created}`))}>из сделок ГШО</button></>}

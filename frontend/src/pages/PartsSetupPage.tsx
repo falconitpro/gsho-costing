@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
-import { Link } from "react-router-dom";
-import PartsRequests from "../components/PartsRequests";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import PartsPurchase from "../components/PartsPurchase";
 import PartsWarehouse from "../components/PartsWarehouse";
-import PartsFleet from "../components/PartsFleet";
 import PartsBatches from "../components/PartsBatches";
 import PartsClaims from "../components/PartsClaims";
 import PartsReports from "../components/PartsReports";
@@ -33,46 +31,47 @@ const EMPTY_STEP = (buyer = ""): Step => ({ seller_entity_id: null, buyer_entity
 const EMPTY_RULES: Rules = { default: {}, by_group: [], by_supplier: [], min_margin_pct: null };
 const num = (v: string) => (v === "" ? null : Number(v.replace(",", ".")));
 
-export default function PartsSetupPage({ me }: { me: Me }) {
-  const [tab, setTab] = useState<"requests" | "po" | "batches" | "stock" | "fleet" | "claims" | "reports" | "markups">("requests");
+export default function SupplyPage({ me }: { me: Me }) {
+  // «Снабжение и склад» (решение владельца 08.11.2026): заказы поставщикам, партии, склад, гарантия, отчёты.
+  // Заявки клиентов — в «Сделках», каталог и справочники — в «Каталоге», наценки между компаниями — в Настройках.
+  const loc = useLocation();
+  const nav = useNavigate();
+  type T = "po" | "batches" | "stock" | "claims" | "reports";
+  const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
+  const poReader = has("manager", "purchasing", "cd", "gd", "fd", "logistician", "admin");
+  const fleetReader = has("manager", "service_head", "cd", "gd", "admin", "fd", "logistician", "purchasing");
+  const TABS: [T, string, boolean][] = [["po", "Заказы поставщикам", poReader], ["batches", "Партии", poReader], ["stock", "Склад", poReader], ["claims", "Гарантия", fleetReader], ["reports", "Отчёты", fleetReader]];
+  const visible = TABS.filter((t) => t[2]);
+  const asked = new URLSearchParams(loc.search).get("tab") as T;
+  const tab: T | undefined = visible.some(([k]) => k === asked) ? asked : visible[0]?.[0];
+  return (
+    <>
+      <div className="page-head"><h1>Снабжение и склад</h1>
+        <div className="tabs" style={{ margin: 0 }}>{visible.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => nav(`/supply?tab=${k}`, { replace: true })}>{t}</button>)}</div>
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Заявки клиентов на запчасти — в <Link to="/deals?type=parts">Сделках</Link>, каталог запчастей и справочники — в <Link to="/catalog?s=parts">Каталоге</Link>, парк машин — в карточке клиента.</div>
+      {tab === "po" && <PartsPurchase me={me} />}
+      {tab === "batches" && <PartsBatches />}
+      {tab === "stock" && <PartsWarehouse />}
+      {tab === "claims" && <PartsClaims me={me} />}
+      {tab === "reports" && <PartsReports />}
+      {!tab && <div className="card muted">Нет доступа к разделу.</div>}
+    </>
+  );
+}
+
+/** Настройки → «Ставки и нормативы»: наценки между компаниями группы (визы ЗГД и ФД). */
+export function MarkupsBlock({ me }: { me: Me }) {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [msg, setMsg] = useState("");
-  const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
-  const markupReader = can(me, "cost") || has("cd", "fd", "gd");
-  const fleetReader = has("manager", "service_head", "cd", "gd", "admin", "fd", "logistician", "purchasing");
-  const poReader = has("manager", "purchasing", "cd", "gd", "fd", "logistician", "admin");
-
-  const loadEntities = () => api.get<Entity[]>("/api/parts/entities").then(setEntities);
-  const loadRoutes = () => api.get<Route[]>("/api/parts/routes?include_archived=true").then(setRoutes);
-  useEffect(() => { api.get<Meta>("/api/parts/meta").then(setMeta); loadEntities(); loadRoutes(); }, []);
-
+  useEffect(() => { api.get<Meta>("/api/parts/meta").then(setMeta).catch((e) => setMsg((e as Error).message)); api.get<Entity[]>("/api/parts/entities").then(setEntities); api.get<Route[]>("/api/parts/routes").then(setRoutes); }, []);
   return (
     <>
-      <div className="page-head"><h1>Запасные части</h1></div>
-      <div className="row" style={{ marginBottom: 10, flexWrap: "wrap" }}>
-        <button className={`btn ${tab === "requests" ? "" : "ghost"}`} onClick={() => setTab("requests")}>Заявки</button>
-        {poReader && <button className={`btn ${tab === "po" ? "" : "ghost"}`} onClick={() => setTab("po")}>Заказы поставщикам</button>}
-        {poReader && <button className={`btn ${tab === "batches" ? "" : "ghost"}`} onClick={() => setTab("batches")}>Партии</button>}
-        {poReader && <button className={`btn ${tab === "stock" ? "" : "ghost"}`} onClick={() => setTab("stock")}>Склад</button>}
-        {fleetReader && <button className={`btn ${tab === "fleet" ? "" : "ghost"}`} onClick={() => setTab("fleet")}>Парк машин</button>}
-        {fleetReader && <button className={`btn ${tab === "claims" ? "" : "ghost"}`} onClick={() => setTab("claims")}>Гарантия</button>}
-        {fleetReader && <button className={`btn ${tab === "reports" ? "" : "ghost"}`} onClick={() => setTab("reports")}>Отчёты</button>}
-        {markupReader && <button className={`btn ${tab === "markups" ? "" : "ghost"}`} onClick={() => setTab("markups")}>Наценки между компаниями</button>}
-      </div>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Каталог запчастей, комплекты ТО, компании группы и маршруты поставки — в разделе <Link to="/catalog?s=parts">«Каталог»</Link>.</div>
       {msg && <div className="alert info">{msg}</div>}
-      {tab === "requests" && <PartsRequests me={me} />}
-      {tab === "po" && <PartsPurchase me={me} />}
-      {tab === "stock" && <PartsWarehouse />}
-      {tab === "fleet" && <PartsFleet me={me} />}
-      {tab === "batches" && <PartsBatches />}
-      {tab === "claims" && <PartsClaims me={me} />}
-      {tab === "reports" && <PartsReports />}
-      {meta && tab === "markups" && markupReader && <Markups me={me} meta={meta} entities={entities} routes={routes.filter((r) => r.is_active)} setMsg={setMsg} />}
-    </>
-  );
+      {meta && <Markups me={me} meta={meta} entities={entities} routes={routes.filter((r) => r.is_active)} setMsg={setMsg} />}
+    </>);
 }
 
 function Entities({ meta, list, editor, onSaved, setMsg }: { meta: Meta; list: Entity[]; editor: boolean; onSaved: () => void; setMsg: (s: string) => void }) {

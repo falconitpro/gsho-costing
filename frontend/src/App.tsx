@@ -14,7 +14,7 @@ import SettingsHub from "./pages/SettingsHub";
 import CounterpartiesPage from "./pages/CounterpartiesPage";
 import LegalPage from "./pages/LegalPage";
 import CatalogHub from "./pages/CatalogHub";
-import PartsSetupPage from "./pages/PartsSetupPage";
+import SupplyPage from "./pages/PartsSetupPage";
 import { PartsRequestView } from "./components/PartsRequests";
 
 export const MeContext = { current: null as Me | null };
@@ -87,7 +87,7 @@ export default function App() {
             {has("cd", "fd", "gd", "lawyer", "admin", "manager") ? <NavLink to="/legal">Юридический блок</NavLink> : !has("observer") && <NavLink to="/legal?tab=contracts">Договоры</NavLink>}
 
             <NavLink to="/catalog">Каталог</NavLink>
-            {has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head") && <NavLink to="/parts/setup">Запасные части</NavLink>}
+            {has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head") && <NavLink to="/supply">Снабжение и склад</NavLink>}
             <NavLink to="/settings">Настройки</NavLink>
           </nav>
         )}
@@ -112,7 +112,8 @@ export default function App() {
             <Route path="/settings" element={<SettingsHub me={me} />} />
             <Route path="/catalog" element={<CatalogHub me={me} />} />
             <Route path="/factories" element={<Navigate to="/counterparties?type=suppliers" replace />} />
-            <Route path="/parts/setup" element={<PartsSetupPage me={me} />} />
+            <Route path="/supply" element={<SupplyPage me={me} />} />
+            <Route path="/parts/setup" element={<Navigate to="/supply" replace />} />
             <Route path="/access" element={<Navigate to="/settings?s=access" replace />} />
             <Route path="/admin" element={<Navigate to="/settings?s=admin" replace />} />
           </Routes>
