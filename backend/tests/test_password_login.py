@@ -81,3 +81,29 @@ def test_password_login_flow():
         assert c.post("/api/auth/password-login", json={"login": LOG, "password": "Reset12345"}).status_code == 200
         c.cookies.clear()
         c.post("/api/auth/password", headers=H(LOG), json={"current_password": "Reset12345", "new_password": DEV_PASSWORD})
+
+
+def test_password_change_revokes_sessions():
+    """Смена или сброс пароля отзывает прежние сессии сотрудника; при смене своего пароля текущая сессия продолжается."""
+    seed()
+    SRV = "service@example.com"
+    new_pw, reset_pw = "Changed12345", "Reset12345"
+    with TestClient(app, base_url="http://testserver") as c1, TestClient(app, base_url="http://testserver") as c2, TestClient(app, base_url="http://testserver") as gd:
+        for c in (c1, c2):
+            assert c.post("/api/auth/password-login", json={"login": SRV, "password": DEV_PASSWORD}).status_code == 200
+            assert c.get("/api/auth/me").status_code == 200
+        # сотрудник меняет пароль в первом браузере: там вход продолжается, во втором — отозван
+        assert c1.post("/api/auth/password", json={"current_password": DEV_PASSWORD, "new_password": new_pw}).status_code == 200
+        assert c1.get("/api/auth/me").json()["email"] == SRV
+        r = c2.get("/api/auth/me")
+        assert r.status_code == 401 and "войдите заново" in r.json()["detail"]
+        assert c2.post("/api/auth/password-login", json={"login": SRV, "password": new_pw}).status_code == 200
+        assert c2.get("/api/auth/me").status_code == 200
+        # ЗГД сбрасывает пароль — обе сессии сотрудника отозваны
+        uid = next(u for u in gd.get("/api/team", headers=H(GD)).json()["users"] if u["email"] == SRV)["id"]
+        assert gd.put(f"/api/auth/users/{uid}/password", headers=H(GD), json={"new_password": reset_pw}).status_code == 200
+        assert c1.get("/api/auth/me").status_code == 401 and c2.get("/api/auth/me").status_code == 401
+        assert c1.post("/api/auth/password-login", json={"login": SRV, "password": reset_pw}).status_code == 200
+        assert c1.get("/api/auth/me").status_code == 200
+        # возвращаем демо-пароль
+        assert gd.put(f"/api/auth/users/{uid}/password", headers=H(GD), json={"new_password": DEV_PASSWORD}).status_code == 200

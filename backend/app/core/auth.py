@@ -128,14 +128,30 @@ class OidcClient:
 REMEMBER_DAYS = 30
 
 
+def password_version(user: User) -> int:
+    """Версия пароля — момент его последней смены (мс). Лежит в токене сессии: смена или сброс пароля отзывает все прежние сессии."""
+    at = user.password_set_at
+    return int(at.timestamp() * 1000) if at else 0
+
+
 def issue_session(user: User, s: Settings, remember: bool = False) -> str:
     """Сессия: 8 ч скользящего срока; «Запомнить меня» — 30 дней (пароль нигде не хранится, только подписанный JWT)."""
     now = int(time.time())
     ttl = REMEMBER_DAYS * 86400 if remember else s.session_ttl_hours * 3600
-    claims = {"sub": user.id, "iat": now, "exp": now + ttl, "nonce": secrets.token_hex(4)}
+    claims = {"sub": user.id, "iat": now, "exp": now + ttl, "nonce": secrets.token_hex(4), "pv": password_version(user)}
     if remember:
         claims["rem"] = 1
     return jwt.encode(claims, s.secret_key, algorithm="HS256")
+
+
+def reissue_session(request: Request, resp: Response, user: User, s: Settings) -> None:
+    """Выдать сотруднику новую сессию после смены им своего пароля (сохраняя «Запомнить меня»), чтобы текущий вход не прервался."""
+    remember = False
+    try:
+        remember = bool(jwt.decode(request.cookies.get(SESSION_COOKIE, ""), s.secret_key, algorithms=["HS256"]).get("rem"))
+    except jwt.PyJWTError:
+        pass
+    set_session_cookie(resp, issue_session(user, s, remember), s, remember)
 
 
 def set_session_cookie(resp: Response, token: str, s: Settings, remember: bool = False) -> None:
@@ -209,6 +225,8 @@ async def get_current_user(request: Request, response: Response, db: Session = D
         user = db.get(User, claims["sub"])
         if user is None or not user.is_active:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Учётная запись отключена")
+        if claims.get("pv", 0) != password_version(user):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Пароль изменён — войдите заново")
         remember = bool(claims.get("rem"))
         set_session_cookie(response, issue_session(user, s, remember), s, remember)   # скользящий срок: 8 ч или 30 дней («Запомнить меня»)
     from ..services.access_service import acting_for, perms_for
