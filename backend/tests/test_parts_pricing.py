@@ -41,3 +41,13 @@ def test_kp_summary_handling_fee():
 def test_request_status_text():
     st = request_status([{"status": "quoted"}, {"status": "in_kp"}, {"status": "shipped"}, {"status": "new"}])
     assert st["text"] == "КП: 2 из 4 строк, отгружено 1"
+
+
+def test_supplier_currency():
+    from app.services.parts_pricing import supplier_currency as sc
+    assert sc("GRP Group", "", "DE", "CNY") == "EUR"
+    assert sc("ООО Деталь", "GRP", "RU", "") == "EUR"          # GRP — евро независимо от страны
+    assert sc("Xingtai", "", "CN", "") == "CNY"
+    assert sc("Поставщик РФ", "", "RU", "CNY") == "RUB"
+    assert sc("Kyrgyz", "", "KG", "") == "KGS"
+    assert sc("X", "", "TR", "USD") == "USD" and sc("X", "", "", "ZZZ") == "RUB"

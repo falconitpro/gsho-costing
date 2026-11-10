@@ -168,3 +168,37 @@ def test_kp_partial_revisions_reserve(client):
     assert d.status_code == 200 and d.headers["content-type"].startswith("application/vnd.openxmlformats") and len(d.content) > 1000
     r = _ok(client.post(f"/api/parts/requests/kp/{kp2['id']}/sent", headers=H(MGR)))
     assert next(k for k in r["kps"] if k["id"] == kp2["id"])["sent_at"]
+
+
+def test_line_currency_by_supplier_and_delete(client):
+    """Валюта строки выбирается (раньше не менялась с рублей), по умолчанию — по поставщику; ошибочную строку можно удалить."""
+    t = uuid.uuid4().hex[:5].upper()
+    cl = _ok(client.get("/api/refs/clients", headers=H(MGR)))[0]
+    grp = _ok(client.post("/api/refs/factories", headers=H(CD), json={"name": f"GRP {t}", "country": "DE", "default_currency": "CNY",
+                                                                     "supplies": ["parts"]}), 201)
+    cn = _ok(client.post("/api/refs/factories", headers=H(CD), json={"name": f"Китай {t}", "country": "CN", "supplies": ["parts"]}), 201)
+    ru = _ok(client.post("/api/refs/factories", headers=H(CD), json={"name": f"Россия {t}", "country": "RU", "default_currency": "CNY",
+                                                                    "supplies": ["parts"]}), 201)
+    eff = {f["id"]: f["effective_currency"] for f in _ok(client.get("/api/refs/factories?supplies=parts", headers=H(MGR)))}
+    assert (eff[grp["id"]], eff[cn["id"]], eff[ru["id"]]) == ("EUR", "CNY", "RUB")
+    r = _ok(client.post("/api/parts/requests", headers=H(MGR), json={"client_id": cl["id"], "lines_text": f"NO-{t}-1\tДеталь\t1\nNO-{t}-2\tОшибка\t1"}), 201)
+    base = f"/api/parts/requests/{r['id']}"
+    l1, l2 = r["lines"][0], r["lines"][1]
+    # валюта у строки без цены сохраняется
+    r = _ok(client.patch(f"{base}/lines/{l1['id']}", headers=H(MGR), json={"currency": "EUR"}))
+    assert next(l for l in r["lines"] if l["id"] == l1["id"])["currency"] == "EUR"
+    assert client.patch(f"{base}/lines/{l1['id']}", headers=H(MGR), json={"currency": "XXX"}).status_code == 422
+    # поставщик задаёт валюту по умолчанию
+    for sup, cur in ((cn, "CNY"), (grp, "EUR"), (ru, "RUB")):
+        r = _ok(client.patch(f"{base}/lines/{l1['id']}", headers=H(MGR), json={"supplier_id": sup["id"]}))
+        assert next(l for l in r["lines"] if l["id"] == l1["id"])["currency"] == cur
+    # цена вводится в выбранной валюте
+    r = _ok(client.patch(f"{base}/lines/{l1['id']}", headers=H(MGR), json={"price": 12.5, "currency": "EUR"}))
+    x = next(l for l in r["lines"] if l["id"] == l1["id"])
+    assert (x["price"], x["currency"], x["price_source"]) == (12.5, "EUR", "manual")
+    # удаление ошибочной строки
+    assert client.delete(f"{base}/lines/{l2['id']}", headers=H(LOG)).status_code == 403
+    r = _ok(client.delete(f"{base}/lines/{l2['id']}", headers=H(MGR)))
+    assert [l["id"] for l in r["lines"]] == [l1["id"]]
+    assert client.delete(f"{base}/lines/{l1['id']}", headers=H(MGR)).status_code == 409       # единственная строка
+    assert client.delete(f"{base}/lines/nope", headers=H(MGR)).status_code == 404
