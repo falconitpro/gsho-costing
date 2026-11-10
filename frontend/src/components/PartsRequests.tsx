@@ -1,3 +1,5 @@
+import PartsRequestCreate from "./PartsRequestCreate";
+import NewSupplierInline from "./NewSupplierInline";
 import { MeContext } from "../App";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -12,7 +14,7 @@ type Line = {
   source: string; lead_days: number | null; price: number | null; currency: string; price_source: string; price_rub: number | null; sum_rub: number | null;
   available: number | null; status: string; comment: string; threshold_pct: number | null; approval: string | null;
   cost?: number | null; margin_pct?: number | null; profit_rub?: number | null; cost_note?: string;
-  eta?: string | null; shipped_qty?: number; supplier_id?: string | null; rfq_line_id?: string | null; quote_price?: number | null; quote_currency?: string;
+  eta?: string | null; shipped_qty?: number; warehouses?: { warehouse_id: string; warehouse: string; available: number; reserved: number }[]; supplier_id?: string | null; rfq_line_id?: string | null; quote_price?: number | null; quote_currency?: string;
 };
 type Req = {
   id: string; number: string; client_id: string; client_name: string; manager_name: string; machine: string; urgent: boolean; warranty: boolean;
@@ -69,33 +71,8 @@ export default function PartsRequests({ me }: { me: Me }) {
             {rows.length === 0 && <tr><td colSpan={7} className="muted">Заявок нет</td></tr>}</tbody>
         </table>
       </div>
-      {creating && meta && <CreateForm meta={meta} clients={clients} onCreated={(r) => { setCreating(false); nav(`/deals/parts/${r.id}`); }} onCancel={() => setCreating(false)} setMsg={setMsg} />}
+      {creating && meta && <PartsRequestCreate meta={meta} clients={clients} onCreated={(r) => { setCreating(false); nav(`/deals/parts/${r.id}`); }} onCancel={() => setCreating(false)} />}
     </>
-  );
-}
-
-export function CreateForm({ meta, clients, onCreated, onCancel, setMsg }: { meta: Meta; clients: Ref[]; onCreated: (r: Req) => void; onCancel: () => void; setMsg: (s: string) => void }) {
-  const [f, setF] = useState({ client_id: "", contact: "", channel: "email", machine: "", urgent: false, warranty: false, comment: "", lines_text: "" });
-  async function save() {
-    try { onCreated(await api.post<Req>("/api/parts/requests", f)); setMsg("Заявка создана, строки подобраны по каталогу"); }
-    catch (e) { setMsg((e as Error).message); }
-  }
-  return (
-    <div className="card">
-      <h2 style={{ marginTop: 0 }}>Новая заявка</h2>
-      <div className="grid cols-3">
-        <label className="f">Клиент *<select value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })}><option value="">— выберите —</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-        <label className="f">Контакт<input value={f.contact} onChange={(e) => setF({ ...f, contact: e.target.value })} /></label>
-        <label className="f">Канал<select value={f.channel} onChange={(e) => setF({ ...f, channel: e.target.value })}>{Object.entries(meta.channels).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
-        <label className="f">Машина клиента<input value={f.machine} onChange={(e) => setF({ ...f, machine: e.target.value })} placeholder="напр. Sandvik LH410, зав. № …" /></label>
-        <label className="f">Машина стоит<div className="row"><input type="checkbox" checked={f.urgent} onChange={(e) => setF({ ...f, urgent: e.target.checked })} /> аварийная заявка</div></label>
-        <label className="f">Гарантия<div className="row"><input type="checkbox" checked={f.warranty} onChange={(e) => setF({ ...f, warranty: e.target.checked })} /> гарантийная замена</div></label>
-      </div>
-      <label className="f" style={{ marginTop: 6 }}>Строки заявки — вставьте из письма или Excel: артикул, наименование, количество (через Tab или «;»)
-        <textarea rows={8} value={f.lines_text} onChange={(e) => setF({ ...f, lines_text: e.target.value })} placeholder={"554831\tВедущий мост\t1\n522608\tТопливный фильтр\t12"} /></label>
-      <label className="f">Комментарий<input value={f.comment} onChange={(e) => setF({ ...f, comment: e.target.value })} /></label>
-      <div className="row" style={{ marginTop: 8 }}><button className="btn" onClick={save} disabled={!f.client_id || !f.lines_text.trim()}>Создать и подобрать</button><button className="btn ghost" onClick={onCancel}>отмена</button></div>
-    </div>
   );
 }
 
@@ -153,7 +130,8 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
                     {pick.items.length === 0 && <div className="muted">ничего не найдено — заведите карточку в «Каталоге»</div>}
                   </div>)}</td>
               <td className="num"><input type="number" style={{ width: 60 }} defaultValue={l.qty} disabled={closed} onBlur={(e) => Number(e.target.value) !== l.qty && patch(l, { qty: Number(e.target.value) })} /> {l.unit}
-                {l.available != null && <div className="muted" style={{ fontSize: 11 }}>на складе {l.available}</div>}</td>
+                {l.available != null && <div style={{ fontSize: 11 }}><span className={`badge ${l.available >= l.qty ? "ok" : l.available > 0 ? "warn" : ""}`}>{l.available >= l.qty ? "есть на складах" : l.available > 0 ? `на складах ${l.available} из ${l.qty}` : "нет на складах"}</span>
+                  {(l.warehouses || []).filter((w) => w.available > 0 || w.reserved > 0).map((w) => <div key={w.warehouse_id} className="muted">{w.warehouse}: <b style={{ color: "var(--ink)" }}>{w.available}</b>{w.reserved ? ` (резерв ${w.reserved})` : ""}</div>)}</div>}</td>
               <td><select value={l.source} disabled={closed || !l.part} onChange={(e) => patch(l, { source: e.target.value })}><option value="">—</option><option value="stock">со склада</option><option value="order">под заказ</option></select>
                 {!closed && l.qty > 1 && <div><a href="#" style={{ fontSize: 11 }} onClick={(e) => { e.preventDefault(); const v = prompt("Сколько отделить в новую строку?", "1"); if (v) act(() => api.post<Req>(`${base}/lines/${l.id}/split`, { qty: Number(v) })); }}>разделить</a></div>}</td>
               <td className="num"><input type="number" style={{ width: 60 }} defaultValue={l.lead_days ?? ""} disabled={closed} onBlur={(e) => patch(l, { lead_days: e.target.value ? Number(e.target.value) : null })} /></td>
@@ -276,6 +254,7 @@ const AVAIL: Record<string, string> = { available: "в наличии", on_order
 function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: () => Promise<T>, ok?: string) => Promise<void> }) {
   const [sups, setSups] = useState<{ id: string; name: string; short_name: string; country: string; supplier_status: string; approval_status?: string }[]>([]);
   const [pickSup, setPickSup] = useState<string[]>([]);
+  const [addingSup, setAddingSup] = useState(false);
   const [viaGroup, setViaGroup] = useState<Record<string, string[]>>({});
   const [due, setDue] = useState(3);
   const [rfqs, setRfqs] = useState<Rfq[]>([]);
@@ -305,8 +284,16 @@ function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: ()
       {err && <div className="muted" style={{ marginBottom: 4 }}>{err}</div>}
       <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
         <span className="muted">Отмечено строк: {sel.length}</span>
-        <select multiple size={4} style={{ minWidth: 260 }} value={pickSup} onChange={(e) => setPickSup(Array.from(e.target.selectedOptions as ArrayLike<HTMLOptionElement>).map((o: HTMLOptionElement) => o.value))}>
-          {sups.filter((s) => fdGd || s.supplier_status !== "group_company").map((s) => <option key={s.id} value={s.id} disabled={s.approval_status === "pending"}>{s.short_name || s.name} · {s.country}{s.approval_status === "pending" ? " — на утверждении" : ""}</option>)}</select>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 280 }}>
+          <select value="" aria-label="Поставщик для запроса" onChange={(e) => { const v = e.target.value; if (v === "__new") setAddingSup(true); else if (v) setPickSup([...pickSup, v]); }}>
+            <option value="">{pickSup.length ? "+ ещё поставщик…" : "— выберите поставщика —"}</option>
+            {sups.filter((s) => (fdGd || s.supplier_status !== "group_company") && !pickSup.includes(s.id)).map((s) => <option key={s.id} value={s.id} disabled={s.approval_status === "pending"}>{s.short_name || s.name} · {s.country}{s.approval_status === "pending" ? " — на утверждении" : ""}</option>)}
+            <option value="__new">＋ Добавить нового поставщика…</option></select>
+          {pickSup.length > 0 && <div className="row" style={{ flexWrap: "wrap", gap: 4 }}>{pickSup.map((id) => { const s_ = sups.find((x) => x.id === id);
+            return <span key={id} className={"badge" + (s_?.approval_status === "pending" ? " warn" : "")}>{s_ ? (s_.short_name || s_.name) : id}{s_?.approval_status === "pending" ? " · на утверждении" : ""}
+              <button className="btn ghost" style={{ padding: "0 4px" }} title="убрать" onClick={() => setPickSup(pickSup.filter((x) => x !== id))}>×</button></span>; })}</div>}
+          {addingSup && <NewSupplierInline supplies="parts" onCancel={() => setAddingSup(false)} onCreated={(x, m) => { setSups([...sups, x]); if (x.approval_status !== "pending") setPickSup([...pickSup, x.id]); setAddingSup(false); setErr(m); }} />}
+        </div>
         {groups.map((g) => (
           <label key={g.id} style={{ display: "flex", flexDirection: "column", fontSize: 12 }}>через «{g.short_name || g.name}» — конечные поставщики
             <select multiple size={4} style={{ minWidth: 220 }} value={viaGroup[g.id] || []}
@@ -320,7 +307,7 @@ function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: ()
           setErr(via.length ? `По правилам цепочек: ${via.map(([id, t]) => `${sups.find((q) => q.id === id)?.short_name || sups.find((q) => q.id === id)?.name || ""} — ${t}`).join("; ")}. Запрос поставщику уходит от имени компании группы — отправьте из её предложения` : "");
           return x.request;
         }, "Запросы созданы — скачайте файл или отправьте поставщику")}>Запросить цены</button>
-        <span className="muted" style={{ fontSize: 11 }}>Ctrl/⌘ — несколько поставщиков; файл — на языке поставщика. Нет нужного — в разделе «Поставщики» отметьте у него «Запасные части»</span>
+        <span className="muted" style={{ fontSize: 11 }}>можно выбрать несколько поставщиков; файл — на языке поставщика. Нет в списке — «Добавить нового поставщика» (поставщика ГШО — отметьте в «Поставщиках» «Запасные части»)</span>
       </div>
       {chain && chain.rows.length > 0 && <div className={"alert " + (chain.needed ? "warn" : "info")} style={{ fontSize: 13, marginTop: 6 }}>
         <b>Цепочка:</b> {chain.rows.map((x) => `строка ${x.no}: ${x.end_supplier} → ${x.group_company}${x.route ? ` (${x.route})` : ""}`).join("; ")}.{" "}
@@ -480,6 +467,7 @@ function ClaimFromRequest({ r }: { r: Req }) {
 
 /** Карточка заявки на запчасти по своему адресу /deals/parts/:id — единый раздел «Сделки». */
 export function PartsRequestView({ me, id }: { me: Me; id: string }) {
+  const nav = useNavigate();
   const [meta, setMeta] = useState<Meta | null>(null);
   const [cur, setCur] = useState<Req | null>(null);
   const [msg, setMsg] = useState("");
@@ -493,7 +481,11 @@ export function PartsRequestView({ me, id }: { me: Me; id: string }) {
   }
   return (
     <>
-      <div className="page-head"><Link to="/deals?type=parts" className="muted">← Сделки</Link><h1 style={{ margin: 0 }}>Заявка на запчасти {cur?.number || ""}</h1></div>
+      <div className="page-head"><Link to="/deals?type=parts" className="muted">← Сделки</Link><h1 style={{ margin: 0 }}>Заявка на запчасти {cur?.number || ""}</h1>
+        {cur && (has("cd", "gd") || (has("manager", "purchasing") && (cur as Req & { manager_id?: string }).manager_id === me.id)) && !cur.kps?.length && (
+          <button className="btn ghost push" style={{ color: "var(--bad)" }} title="заявка заведена по ошибке — удалить; снимок останется в журнале"
+            onClick={() => { if (window.confirm(`Удалить заявку ${cur.number}${cur.client_name ? ` (${cur.client_name})` : ""}? Восстановить из системы нельзя, снимок останется в журнале.`))
+              api.del<{ deleted: string }>(`/api/parts/requests/${cur.id}`).then(() => nav("/deals?type=parts")).catch((e) => setMsg((e as Error).message)); }}>Удалить заявку</button>)}</div>
       {msg && <div className="alert info" onClick={() => setMsg("")}>{msg}</div>}
       {cur && meta ? <RequestCard r={cur} meta={meta} seesCost={seesCost} approver={has("cd", "fd", "gd")} act={act} /> : !msg && <div className="card">Загрузка…</div>}
     </>);

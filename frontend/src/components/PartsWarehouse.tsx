@@ -17,7 +17,7 @@ const KIND: Record<string, string> = { receipt: "приёмка", shipment: "о�
 
 export default function PartsWarehouse() {
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [tab, setTab] = useState<"receipt" | "dev" | "inv" | "repl" | "moves">("receipt");
+  const [tab, setTab] = useState<"balances" | "receipt" | "dev" | "inv" | "repl" | "moves">("balances");
   const [msg, setMsg] = useState("");
   useEffect(() => { api.get<Meta>("/api/parts/stock/meta").then(setMeta).catch((e) => setMsg((e as Error).message)); }, []);
   if (!meta) return msg ? <div className="alert info">{msg}</div> : null;
@@ -25,12 +25,14 @@ export default function PartsWarehouse() {
     <>
       {msg && <div className="alert info">{msg}</div>}
       <div className="row" style={{ marginBottom: 8 }}>
+        <button className={`btn ${tab === "balances" ? "" : "ghost"}`} onClick={() => setTab("balances")}>Остатки по складам</button>
         <button className={`btn ${tab === "receipt" ? "" : "ghost"}`} onClick={() => setTab("receipt")}>Приёмка</button>
         <button className={`btn ${tab === "dev" ? "" : "ghost"}`} onClick={() => setTab("dev")}>Отклонения</button>
         <button className={`btn ${tab === "inv" ? "" : "ghost"}`} onClick={() => setTab("inv")}>Инвентаризация</button>
         <button className={`btn ${tab === "repl" ? "" : "ghost"}`} onClick={() => setTab("repl")}>Пополнение</button>
         <button className={`btn ${tab === "moves" ? "" : "ghost"}`} onClick={() => setTab("moves")}>Движения</button>
       </div>
+      {tab === "balances" && <Balances />}
       {tab === "receipt" && <Receipt meta={meta} setMsg={setMsg} />}
       {tab === "dev" && <Deviations meta={meta} setMsg={setMsg} />}
       {tab === "inv" && <Inventory meta={meta} setMsg={setMsg} />}
@@ -273,4 +275,103 @@ function Replenish({ meta, setMsg }: { meta: Meta; setMsg: (s: string) => void }
         </div>))}
     </div>
   );
+}
+
+
+// Остатки по складам (D-174): строка — запчасть, колонки — склады (свободно; в подсказке — всего и резерв), итог
+type BalCell = { qty: number; reserved: number; available: number; in_transit: number; min_qty: number | null; below_min: boolean };
+type BalWh = { id: string; name: string; kind: string; positions: number; qty: number; reserved: number; available: number; in_transit: number; below_min: number; value_rub?: number; unpriced?: number };
+type BalRow = { part_id: string; article: string; oem_number: string; name_ru: string; manufacturer: string; part_group: string; unit: string; qty: number; reserved: number;
+  available: number; in_transit: number; below_min: boolean; value_rub?: number | null; cells: Record<string, BalCell> };
+type Bal = { warehouses: BalWh[]; total: number; as_of: string | null; groups: string[]; costs: boolean; rows: BalRow[] };
+const n0 = (v: number | null | undefined) => (v == null ? "—" : v.toLocaleString("ru-RU", { maximumFractionDigits: 3 }));
+const rub0 = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v).toLocaleString("ru-RU")} ₽`);
+
+// «Склад → Остатки по складам» (D-175): карточки складов с итогами, отборы, таблица с колонками складов, выгрузка в Excel.
+function Balances() {
+  const [q, setQ] = useState("");
+  const [wh, setWh] = useState("");
+  const [pos, setPos] = useState(true);
+  const [low, setLow] = useState(false);
+  const [group, setGroup] = useState("");
+  const [sort, setSort] = useState("article");
+  const [d, setD] = useState<Bal | null>(null);
+  const [limit, setLimit] = useState(100);
+  const params = () => new URLSearchParams({ q, warehouse_id: wh, only_positive: String(pos), below_min: String(low), group, sort });
+  useEffect(() => {
+    const t = setTimeout(() => api.get<Bal>(`/api/parts/stock/balances?${params()}&limit=${limit}`).then(setD).catch(() => setD(null)), 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, wh, pos, low, group, sort, limit]);
+  if (!d) return <div className="card muted">Загрузка…</div>;
+  const cols = wh ? d.warehouses.filter((w) => w.id === wh) : d.warehouses;
+  const all = d.warehouses.reduce((a, w) => ({ positions: a.positions + w.positions, qty: a.qty + w.qty, reserved: a.reserved + w.reserved, available: a.available + w.available,
+    below: a.below + w.below_min, value: a.value + (w.value_rub || 0) }), { positions: 0, qty: 0, reserved: 0, available: 0, below: 0, value: 0 });
+  const single = cols.length === 1;
+  return (
+    <>
+      <div className="wh-cards">
+        <button className={"wh-card" + (wh === "" ? " active" : "")} onClick={() => setWh("")}>
+          <div className="wh-card-name">Все склады</div>
+          <div className="wh-card-big">{n0(all.available)}<span> свободно</span></div>
+          <div className="wh-card-meta">позиций с остатком: <b>{all.positions}</b> · всего {n0(all.qty)} · резерв {n0(all.reserved)}</div>
+          {d.costs && <div className="wh-card-meta">по закупке: <b>{all.value ? rub0(all.value) : "нет цен"}</b></div>}
+          {all.below > 0 && <div className="wh-card-warn">ниже минимума: {all.below}</div>}
+        </button>
+        {d.warehouses.map((w) => (
+          <button key={w.id} className={"wh-card" + (wh === w.id ? " active" : "")} onClick={() => setWh(wh === w.id ? "" : w.id)}>
+            <div className="wh-card-name">{w.name}{w.kind === "virtual" && <span className="badge" style={{ marginLeft: 6 }}>виртуальный</span>}</div>
+            <div className="wh-card-big">{n0(w.available)}<span> свободно</span></div>
+            <div className="wh-card-meta">позиций: <b>{w.positions}</b> · всего {n0(w.qty)} · резерв {n0(w.reserved)}{w.in_transit ? ` · в пути ${n0(w.in_transit)}` : ""}</div>
+            {d.costs && <div className="wh-card-meta">по закупке: <b>{w.value_rub || !w.unpriced ? rub0(w.value_rub) : "нет цен"}</b>{w.unpriced ? <span className="muted"> · без закупочной цены {w.unpriced}</span> : null}</div>}
+            {w.below_min > 0 && <div className="wh-card-warn">ниже минимума: {w.below_min}</div>}
+          </button>))}
+      </div>
+      <div className="card">
+        <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+          <h2 style={{ margin: 0 }}>{wh ? `Остатки: ${cols[0]?.name || ""}` : "Остатки по складам"}</h2>
+          <div className="row" style={{ gap: 8 }}>
+            <span className="muted" style={{ fontSize: 12 }}>{d.as_of ? `данные на ${fmtDate(d.as_of)}` : ""} · найдено позиций: <b>{d.total}</b></span>
+            <a className="btn ghost" href={`/api/parts/stock/balances/xlsx?${params()}`}>⇩ Excel</a>
+          </div>
+        </div>
+        <div className="row" style={{ flexWrap: "wrap", gap: 8, margin: "8px 0" }}>
+          <input placeholder="🔍 артикул, OEM, наименование, производитель" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: "1 1 260px" }} />
+          {d.groups.length > 0 && <select value={group} onChange={(e) => setGroup(e.target.value)} style={{ maxWidth: 220 }}><option value="">все группы</option>{d.groups.map((g) => <option key={g}>{g}</option>)}</select>}
+          <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Сортировка"><option value="article">по артикулу</option><option value="name">по наименованию</option>
+            <option value="group">по группе</option><option value="qty">больше остаток — выше</option></select>
+          <label className="row" style={{ gap: 4 }}><input type="checkbox" checked={pos} onChange={(e) => setPos(e.target.checked)} /> только с остатком</label>
+          <label className="row" style={{ gap: 4 }}><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> ниже минимума</label>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table className="bal-table">
+            <thead>
+              <tr><th rowSpan={single ? 1 : 2}>Артикул</th><th rowSpan={single ? 1 : 2}>Наименование</th><th rowSpan={single ? 1 : 2}>Ед.</th>
+                {single ? <><th className="num">Всего</th><th className="num">Резерв</th><th className="num">Свободно</th><th className="num">В пути</th><th className="num">Мин.</th></>
+                  : <>{cols.map((w) => <th key={w.id} className="num bal-wh">{w.name}</th>)}<th className="num bal-total">Итого свободно</th></>}
+                {d.costs && <th className="num" rowSpan={single ? 1 : 2}>По закупке</th>}</tr>
+              {!single && <tr>{cols.map((w) => <th key={w.id} className="num bal-sub">свободно / всего</th>)}<th className="num bal-sub">резерв</th></tr>}
+            </thead>
+            <tbody>{d.rows.map((r) => (
+              <tr key={r.part_id} className={r.below_min ? "bal-low" : ""}>
+                <td style={{ whiteSpace: "nowrap" }}><b>{r.article}</b>{r.oem_number && <div className="muted" style={{ fontSize: 11 }}>OEM {r.oem_number}</div>}</td>
+                <td>{r.name_ru}<div className="muted" style={{ fontSize: 11 }}>{[r.manufacturer, r.part_group].filter(Boolean).join(" · ")}</div></td>
+                <td className="muted" style={{ fontSize: 12 }}>{r.unit}</td>
+                {single ? (() => { const c = r.cells[cols[0].id]; return <>
+                  <td className="num">{n0(c?.qty)}</td><td className="num">{c?.reserved ? n0(c.reserved) : "—"}</td>
+                  <td className="num"><b style={{ color: c?.below_min ? "var(--bad)" : undefined }}>{n0(c?.available)}</b></td>
+                  <td className="num">{c?.in_transit ? n0(c.in_transit) : "—"}</td><td className="num">{c?.min_qty ? n0(c.min_qty) : "—"}</td></>; })()
+                  : <>{cols.map((w) => { const c = r.cells[w.id]; return <td key={w.id} className="num bal-wh" title={c ? `всего ${c.qty}, резерв ${c.reserved}${c.min_qty ? `, минимум ${c.min_qty}` : ""}` : ""}>
+                    {c && (c.qty || c.reserved) ? <><b style={{ color: c.below_min ? "var(--bad)" : undefined }}>{n0(c.available)}</b>{c.qty !== c.available && <span className="muted"> / {n0(c.qty)}</span>}</> : <span className="muted">—</span>}</td>; })}
+                    <td className="num bal-total"><b>{n0(r.available)}</b>{r.reserved ? <div className="muted" style={{ fontSize: 11 }}>резерв {n0(r.reserved)}</div> : null}</td></>}
+                {d.costs && <td className="num" style={{ fontSize: 12 }}>{rub0(r.value_rub)}</td>}
+              </tr>))}
+              {d.rows.length === 0 && <tr><td colSpan={cols.length + 6} className="muted">Ничего не найдено</td></tr>}</tbody>
+          </table>
+        </div>
+        {d.rows.length < d.total && <button className="btn ghost" style={{ marginTop: 6 }} onClick={() => setLimit(limit + 100)}>показать ещё ({d.total - d.rows.length})</button>}
+        <p className="muted" style={{ fontSize: 11 }}>Свободно = всего минус резерв под заявки клиентов; красным — ниже минимального остатка склада. Остатки перенесены из МойСклад отчётом «Остатки по складам»;
+          приходы и отгрузки в системе меняют их сразу.{d.costs ? " Стоимость — по последней закупочной цене карточки, по курсу ЦБ." : ""}</p>
+      </div>
+    </>);
 }

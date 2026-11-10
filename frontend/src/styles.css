@@ -302,3 +302,37 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 @media (max-width: 1024px) {
   main .card { overflow-x: auto; }
 }
+
+/* «Сделки»: крупные вкладки вида сделок слева — ГШО и запасные части */
+.deals-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 14px; align-items: start; }
+.deals-main { min-width: 0; }
+.deals-kinds { display: flex; flex-direction: column; gap: 8px; position: sticky; top: 8px; }
+.deals-kind { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "t c" "s c"; align-items: center; text-align: left; padding: 12px 14px;
+  border: 1px solid var(--line); border-left: 4px solid transparent; border-radius: 10px; background: #fff; cursor: pointer; color: var(--ink); }
+.deals-kind:hover { border-color: var(--accent); }
+.deals-kind.active { border-left-color: var(--accent); background: var(--accent-soft, #fff1f1); }
+.deals-kind-title { grid-area: t; font-size: 17px; font-weight: 700; }
+.deals-kind-sub { grid-area: s; font-size: 12px; color: var(--muted); }
+.deals-kind-count { grid-area: c; font-size: 20px; font-weight: 700; color: var(--accent); padding-left: 8px; }
+.deals-kind.small { display: block; padding: 6px 14px; font-size: 12px; color: var(--muted); border-style: dashed; }
+.deals-kind.small.active { color: var(--ink); }
+@media (max-width: 900px) {
+  .deals-layout { grid-template-columns: 1fr; }
+  .deals-kinds { flex-direction: row; flex-wrap: wrap; position: static; }
+  .deals-kind { flex: 1 1 140px; }
+  .deals-kind.small { flex: 0 0 auto; }
+}
+
+/* «Склад → Остатки по складам»: карточки складов */
+.wh-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.wh-card { text-align: left; padding: 12px 14px; border: 1px solid var(--line); border-top: 4px solid #d7dbe0; border-radius: 10px; background: #fff; cursor: pointer; color: var(--ink); }
+.wh-card:hover { border-color: var(--accent); }
+.wh-card.active { border-top-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.wh-card-name { font-weight: 700; font-size: 15px; }
+.wh-card-big { font-size: 24px; font-weight: 700; margin: 4px 0 2px; }
+.wh-card-big span { font-size: 12px; font-weight: 400; color: var(--muted); }
+.wh-card-meta { font-size: 12px; color: var(--muted); }
+.wh-card-warn { font-size: 12px; color: var(--bad); margin-top: 2px; font-weight: 600; }
+.bal-table th.bal-sub { font-weight: 400; font-size: 11px; }
+.bal-table td.bal-total { background: #fafafa; }
+.bal-table tr.bal-low td:first-child { box-shadow: inset 3px 0 0 var(--bad); }

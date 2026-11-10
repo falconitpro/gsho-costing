@@ -5,7 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, STATUS_TITLES, type Deal, type Me } from "../types";
 import ColleaguesDeals from "../components/ColleaguesDeals";
-import { CreateForm as PartsCreateForm } from "../components/PartsRequests";
+import PartsCreateForm from "../components/PartsRequestCreate";
 
 type Exec = { done: number; total: number; overdue: number; next: { title: string; on: string } | null; delay_days: number | null };
 type Row = Deal & { group?: string; parent_number?: string; related_count?: number; manager_name?: string; machines?: number; equipment?: string; equipment_lines?: { qty: number; name: string }[]; equipment_more?: number;
@@ -135,7 +135,7 @@ export default function DealsList({ me }: { me: Me }) {
   const [block, setBlockState] = useState<Block>(() => (urlBlock && ["work", "won", "lost", "archive"].includes(urlBlock) ? urlBlock : load<Block>("gsho.dealsBlock", "work")));
   const setBlock = (b: Block) => { setBlockState(b); save("gsho.dealsBlock", b); setF({ ...f, statuses: [] }); };
   const urlType = new URLSearchParams(window.location.search).get("type") as DealType | null;
-  const [f, setFState] = useState<Filters>(() => ({ ...EMPTY_F, ...load<Partial<Filters>>("gsho.dealsFilters", {}), ...(urlType === "gsho" || urlType === "parts" ? { type: urlType } : {}) }));
+  const [f, setFState] = useState<Filters>(() => ({ ...EMPTY_F, type: "gsho", ...load<Partial<Filters>>("gsho.dealsFilters", {}), ...(urlType === "gsho" || urlType === "parts" ? { type: urlType } : {}) }));
   const setF = (x: Filters) => { setFState(x); save("gsho.dealsFilters", x); };
   const urlSort = new URLSearchParams(window.location.search).get("sort") as SortKey | null;
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(() => (urlSort ? { key: urlSort, dir: 1 as 1 | -1 } : load("gsho.dealsSort2", { key: "date" as SortKey, dir: -1 as 1 | -1 })));
@@ -172,7 +172,7 @@ export default function DealsList({ me }: { me: Me }) {
   const chipTone = (st: string) => toneOf(st.startsWith("stage:") ? PARTS_TONE_STATUS[st.slice(6) as Stage] : st);
   const mgrs = [...new Map(inBlock.filter((d) => d.manager_id).map((d) => [d.manager_id, d.manager_name || "—"])).entries()].sort((a, b) => a[1].localeCompare(b[1], "ru"));
   const cls = [...new Map(inBlock.filter((d) => d.client_id).map((d) => [d.client_id, d.client_name || "—"])).entries()].sort((a, b) => a[1].localeCompare(b[1], "ru"));
-  const anyFilter = JSON.stringify({ ...f, q: f.q.trim() }) !== JSON.stringify(EMPTY_F);
+  const anyFilter = JSON.stringify({ ...f, q: f.q.trim(), type: "" }) !== JSON.stringify(EMPTY_F);
   const fin = can(me, "finance_analytics");   // суммы и портфель — только ФД, КД, ЗГД
   const kpis = block === "work" ? [
     ["В обработке", shown.length, ""], ["Срок КП просрочен", shown.filter(kpOverdue).length, "bad"],
@@ -217,14 +217,20 @@ export default function DealsList({ me }: { me: Me }) {
             <button key={k} className={block === k ? "active" : ""} onClick={() => setBlock(k)}>{t}{n != null && <span className="badge" style={{ marginLeft: 6 }}>{n}</span>}</button>))}
         </div>
         <div className="push row" style={{ gap: 8 }}>
-          {partsReader && <div className="tabs" style={{ margin: 0 }}>
-            {([["", "Все"], ["gsho", `ГШО · ${typeCounts.gsho}`], ["parts", `Запчасти · ${typeCounts.parts}`]] as const).map(([k, t]) => (
-              <button key={k} className={f.type === k ? "active" : ""} onClick={() => setF({ ...f, type: k, statuses: [] })}>{t}</button>))}
-          </div>}
-          {(isManager || partsCreator) && <button className="btn add" onClick={() => setShowNew(!showNew)}>Новая сделка</button>}
+          {f.type === "parts" ? (partsCreator && <button className="btn add" onClick={() => { setNewKind("parts"); setShowNew(!(showNew && newKind === "parts")); }}>Новая заявка на запчасти</button>)
+            : f.type === "gsho" ? (isManager && <button className="btn add" onClick={() => { setNewKind("gsho"); setShowNew(!(showNew && newKind === "gsho")); }}>Новая сделка ГШО</button>)
+            : (isManager || partsCreator) && <button className="btn add" onClick={() => setShowNew(!showNew)}>Новая сделка</button>}
         </div>
       </div>
-      {showNew && (isManager || partsCreator) && (
+      <div className="deals-layout">
+      {partsReader && <nav className="deals-kinds" aria-label="Вид сделок">
+        {([["gsho", "ГШО", "оборудование", typeCounts.gsho], ["parts", "Запасные части", "заявки клиентов", typeCounts.parts]] as const).map(([k, t, sub, n]) => (
+          <button key={k} className={"deals-kind" + (f.type === k ? " active" : "")} onClick={() => { setF({ ...f, type: k, statuses: [] }); setNewKind(k); }}>
+            <span className="deals-kind-title">{t}</span><span className="deals-kind-sub">{sub}</span><span className="deals-kind-count">{n}</span></button>))}
+        <button className={"deals-kind small" + (f.type === "" ? " active" : "")} onClick={() => setF({ ...f, type: "", statuses: [] })}>все сделки вместе</button>
+      </nav>}
+      <div className="deals-main">
+      {showNew && (isManager || partsCreator) && !f.type && (
         <div className="row" style={{ gap: 8, marginBottom: 8 }}>
           <span className="muted" style={{ fontSize: 13 }}>Тип сделки:</span>
           <div className="tabs" style={{ margin: 0 }}>
@@ -233,7 +239,7 @@ export default function DealsList({ me }: { me: Me }) {
           </div>
         </div>)}
       {showNew && newKind === "parts" && partsMeta && (
-        <PartsCreateForm meta={partsMeta} clients={clients} onCreated={(r) => nav(`/deals/parts/${r.id}`)} onCancel={() => setShowNew(false)} setMsg={setErr} />)}
+        <PartsCreateForm meta={partsMeta} clients={clients} onCreated={(r) => nav(`/deals/parts/${r.id}`)} onCancel={() => setShowNew(false)} />)}
       {showNew && newKind === "gsho" && isManager && (
         <div className="card">
           <div className="grid cols-3">
@@ -289,7 +295,7 @@ export default function DealsList({ me }: { me: Me }) {
             <button className={f.flag === "" ? "active" : ""} onClick={() => setF({ ...f, flag: "" })}>все</button>
             <button className={f.flag === "mine" ? "active" : ""} onClick={() => setF({ ...f, flag: "mine" })}>мои</button>
             <button className={f.flag === "overdue" ? "active" : ""} onClick={() => setF({ ...f, flag: "overdue" })}>с просрочкой</button></div>
-          {anyFilter && <button className="btn ghost" onClick={() => setF(EMPTY_F)}>сбросить фильтры</button>}
+          {anyFilter && <button className="btn ghost" onClick={() => setF({ ...EMPTY_F, type: f.type })}>сбросить фильтры</button>}
         </div>
         {statusChips.length > 1 && <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 8 }}>
           <span className="muted" style={{ fontSize: 12 }}>Этап:</span>
@@ -334,11 +340,13 @@ export default function DealsList({ me }: { me: Me }) {
                   <td className="muted">{d.kind === "parts" ? "" : d.current_version_no || ""}</td>
                 </tr>);
             })}
-            {sorted.length === 0 && <tr><td colSpan={10} className="muted" style={{ padding: 16 }}>{inBlock.length ? "Нет сделок по выбранным фильтрам" : block === "archive" ? "В архиве сделок нет" : f.type === "parts" ? "Заявок на запчасти нет — нажмите «Новая сделка» и выберите «Запасные части»" : "Сделок нет"}</td></tr>}
+            {sorted.length === 0 && <tr><td colSpan={10} className="muted" style={{ padding: 16 }}>{inBlock.length ? "Нет сделок по выбранным фильтрам" : block === "archive" ? "В архиве сделок нет" : f.type === "parts" ? "Заявок на запчасти нет — нажмите «Новая заявка на запчасти»" : "Сделок нет"}</td></tr>}
           </tbody>
         </table>
       </div>
       {me.roles.some((r) => r.code === "manager") && !me.roles.some((r) => ["cd", "fd", "gd"].includes(r.code)) && <ColleaguesDeals />}
+      </div>
+      </div>
     </>
   );
 }

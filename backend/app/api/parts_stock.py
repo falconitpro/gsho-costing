@@ -443,3 +443,136 @@ def moves(part_id: str = "", warehouse_id: str = "", limit: int = 200, db: Sessi
         out.append({**serialize(m), "article": p.article if p else "", "name": p.name_ru if p else "", "warehouse": whs.get(m.warehouse_id, ""),
                     "user": users.get(m.user_id, "")})
     return out
+
+
+# ------------------------------------------------------------------ остатки по складам (D-174)
+
+def _balances(db: Session, user: CurrentUser, q: str, warehouse_id: str, only_positive: bool, group: str, below_min: bool, sort: str,
+              limit: Optional[int], offset: int) -> dict:
+    """Остатки (D-175): строка — запчасть, колонки — склады (всего, резерв, свободно, в пути, минимум), итоги по складам.
+    Стоимость по закупочной цене — только с правом «Себестоимость»."""
+    from sqlalchemy import func, or_
+    from ..core.roles import READ, can
+    from ..models import PartStock
+    from .parts_setup import latest_fx
+    whs = db.scalars(select(Warehouse).where(Warehouse.is_active.is_(True)).order_by(Warehouse.name)).all()
+    stmt = select(PartStock.part_id).group_by(PartStock.part_id)
+    if warehouse_id:
+        stmt = stmt.where(PartStock.warehouse_id == warehouse_id)
+    if only_positive:
+        stmt = stmt.having(func.sum(PartStock.qty) > 0)
+    if below_min:
+        below = select(PartStock.part_id).where(PartStock.min_qty.is_not(None), PartStock.min_qty > 0, (PartStock.qty - PartStock.reserved) < PartStock.min_qty)
+        if warehouse_id:
+            below = below.where(PartStock.warehouse_id == warehouse_id)
+        stmt = select(PartStock.part_id).where(PartStock.part_id.in_(below)).group_by(PartStock.part_id)
+    ids = select(Part.id).where(Part.id.in_(stmt))
+    if q.strip():
+        like = f"%{q.strip()}%"
+        ids = ids.where(or_(Part.article.ilike(like), Part.oem_number.ilike(like), Part.name_ru.ilike(like), Part.manufacturer.ilike(like)))
+    if group:
+        ids = ids.where(Part.part_group == group)
+    total = db.scalar(select(func.count()).select_from(ids.subquery()))
+    order = {"name": (Part.name_ru, Part.article), "group": (Part.part_group, Part.name_ru)}.get(sort, (Part.article,))
+    query = select(Part).where(Part.id.in_(ids)).order_by(*order)
+    if limit is not None:
+        query = query.limit(min(max(limit, 1), 500)).offset(max(offset, 0))
+    parts = db.scalars(query).all()
+    costs = can(user, "cost", READ)
+    fx = latest_fx(db) if costs else {}
+    prices: dict[str, Optional[float]] = {}
+
+    def rub(p: Part) -> Optional[float]:
+        if p.id in prices:
+            return prices[p.id]
+        v = None
+        if p.purchase_price:
+            cur = (p.purchase_currency or "RUB").upper()
+            r = 1.0 if cur == "RUB" else fx.get(cur)
+            v = float(p.purchase_price) * r if r else None
+        prices[p.id] = v
+        return v
+
+    rows = []
+    for p in parts:
+        cells = {}
+        for st in p.stock:
+            if warehouse_id and st.warehouse_id != warehouse_id:
+                continue
+            avail = round((st.qty or 0) - (st.reserved or 0), 3)
+            cells[st.warehouse_id] = {"qty": st.qty or 0, "reserved": st.reserved or 0, "available": avail, "in_transit": st.in_transit or 0,
+                                      "min_qty": st.min_qty, "below_min": bool(st.min_qty and avail < st.min_qty), "as_of": st.as_of}
+        qty = round(sum(c["qty"] for c in cells.values()), 3)
+        row = {"part_id": p.id, "article": p.article, "oem_number": p.oem_number, "name_ru": p.name_ru, "manufacturer": p.manufacturer,
+               "part_group": p.part_group, "unit": p.unit, "cells": cells, "qty": qty,
+               "reserved": round(sum(c["reserved"] for c in cells.values()), 3), "available": round(sum(c["available"] for c in cells.values()), 3),
+               "in_transit": round(sum(c["in_transit"] for c in cells.values()), 3), "below_min": any(c["below_min"] for c in cells.values())}
+        if costs:
+            u = rub(p)
+            row["value_rub"] = round(u * qty, 2) if u is not None else None
+        rows.append(row)
+    if sort == "qty":
+        rows.sort(key=lambda r: -r["available"])
+    summary = []
+    for w in whs:
+        agg = db.execute(select(func.count(PartStock.id).filter(PartStock.qty > 0), func.coalesce(func.sum(PartStock.qty), 0),
+                                func.coalesce(func.sum(PartStock.reserved), 0), func.coalesce(func.sum(PartStock.in_transit), 0),
+                                func.count(PartStock.id).filter(PartStock.min_qty > 0, (PartStock.qty - PartStock.reserved) < PartStock.min_qty))
+                         .where(PartStock.warehouse_id == w.id)).one()
+        item = {"id": w.id, "name": w.name, "kind": w.kind, "positions": int(agg[0] or 0), "qty": round(float(agg[1] or 0), 3), "reserved": round(float(agg[2] or 0), 3),
+                "available": round(float(agg[1] or 0) - float(agg[2] or 0), 3), "in_transit": round(float(agg[3] or 0), 3), "below_min": int(agg[4] or 0)}
+        if costs:
+            val, unpriced = 0.0, 0
+            for pid, q_ in db.execute(select(PartStock.part_id, PartStock.qty).where(PartStock.warehouse_id == w.id, PartStock.qty > 0)).all():
+                u = rub(db.get(Part, pid))
+                if u is None:
+                    unpriced += 1
+                else:
+                    val += u * (q_ or 0)
+            item["value_rub"], item["unpriced"] = round(val, 2), unpriced
+        summary.append(item)
+    last = db.scalar(select(func.max(PartStock.as_of)))
+    groups = list(db.scalars(select(Part.part_group).where(Part.part_group != "", Part.id.in_(select(PartStock.part_id).where(PartStock.qty > 0))).distinct().order_by(Part.part_group)).all())
+    return {"warehouses": summary, "rows": rows, "total": total, "as_of": last, "groups": groups, "costs": costs}
+
+
+@router.get("/balances")
+def balances(q: str = "", warehouse_id: str = "", only_positive: bool = True, group: str = "", below_min: bool = False, sort: str = "article",
+             limit: int = 200, offset: int = 0, db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
+    """Остатки по складам: итоги по каждому складу и таблица запчастей с колонками складов. Поиск — артикул, OEM, наименование, производитель."""
+    return _balances(db, user, q, warehouse_id, only_positive, group, below_min, sort, limit, offset)
+
+
+@router.get("/balances/xlsx")
+def balances_xlsx(q: str = "", warehouse_id: str = "", only_positive: bool = True, group: str = "", below_min: bool = False, sort: str = "article",
+                  db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
+    """Выгрузка остатков в Excel с теми же отборами: лист «Остатки» и лист «Склады»."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    d = _balances(db, user, q, warehouse_id, only_positive, group, below_min, sort, None, 0)
+    whs = [w for w in d["warehouses"] if not warehouse_id or w["id"] == warehouse_id]
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Остатки"
+    head = ["Артикул", "OEM", "Наименование", "Производитель", "Группа", "Ед."] + [f"{w['name']} — свободно" for w in whs] + ["Всего", "Резерв", "Свободно", "В пути"]
+    if d["costs"]:
+        head.append("Стоимость по закупке, ₽")
+    ws.append(head)
+    for r in d["rows"]:
+        line = [r["article"], r["oem_number"], r["name_ru"], r["manufacturer"], r["part_group"], r["unit"]] + [(r["cells"].get(w["id"]) or {}).get("available") for w in whs] + \
+               [r["qty"], r["reserved"], r["available"], r["in_transit"]]
+        if d["costs"]:
+            line.append(r.get("value_rub"))
+        ws.append(line)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    s2 = wb.create_sheet("Склады")
+    s2.append(["Склад", "Позиций с остатком", "Всего", "Резерв", "Свободно", "В пути", "Ниже минимума"] + (["Стоимость по закупке, ₽"] if d["costs"] else []))
+    for w in d["warehouses"]:
+        s2.append([w["name"], w["positions"], w["qty"], w["reserved"], w["available"], w["in_transit"], w["below_min"]] + ([w.get("value_rub")] if d["costs"] else []))
+    for c in s2[1]:
+        c.font = Font(bold=True)
+    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    wb.save(path)
+    return FileResponse(path, filename=f"ostatki-{date.today():%Y%m%d}.xlsx", background=BackgroundTask(os.unlink, path))
