@@ -4,7 +4,7 @@ import { api, fmtDate } from "../api";
 
 // Уведомления «в системе»: значок с числом непрочитанных в шапке, список за 30 дней, отметка «прочитано».
 
-type Item = { id: string; at: string | null; event_title: string; text: string; deal_id: string | null; deal_number: string; read: boolean };
+type Item = { id: string; at: string | null; event_title: string; text: string; deal_id: string | null; deal_number: string; url?: string | null; read: boolean };
 
 export default function NotificationBell() {
   const [unread, setUnread] = useState(0);
@@ -23,7 +23,7 @@ export default function NotificationBell() {
   }, [open]);
   const read = (ids?: string[]) => api.post<{ unread: number }>("/api/notifications/read", { ids: ids || null }).then((r) => {
     setUnread(r.unread); setItems(items.map((x) => (!ids || ids.includes(x.id) ? { ...x, read: true } : x))); }).catch(() => undefined);
-  const go = (x: Item) => { if (!x.read) read([x.id]); setOpen(false); if (x.deal_id) nav(`/deals/${x.deal_id}`); };
+  const go = (x: Item) => { if (!x.read) read([x.id]); setOpen(false); if (x.deal_id) nav(`/deals/${x.deal_id}`); else if (x.url) nav(x.url); };
   const when = (iso: string | null) => (iso ? `${fmtDate(iso)} ${iso.slice(11, 16)}` : "");
   return (
     <div ref={box} style={{ position: "relative" }}>
@@ -40,7 +40,7 @@ export default function NotificationBell() {
           </div>
           {items.length === 0 && <div className="muted" style={{ padding: 12 }}>За 30 дней уведомлений нет.</div>}
           {items.map((x) => (
-            <div key={x.id} onClick={() => go(x)} style={{ padding: "8px 12px", borderBottom: "1px solid #f0f0f0", cursor: x.deal_id ? "pointer" : "default",
+            <div key={x.id} onClick={() => go(x)} style={{ padding: "8px 12px", borderBottom: "1px solid #f0f0f0", cursor: x.deal_id || x.url ? "pointer" : "default",
               background: x.read ? "#fff" : "var(--accent-soft)" }}>
               <div style={{ fontSize: 11 }} className="muted">{when(x.at)} · {x.event_title}{x.deal_number && ` · ${x.deal_number}`}</div>
               <div style={{ fontSize: 13, fontWeight: x.read ? 400 : 600 }}>{x.text}</div>

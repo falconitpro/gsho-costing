@@ -336,3 +336,13 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .bal-table th.bal-sub { font-weight: 400; font-size: 11px; }
 .bal-table td.bal-total { background: #fafafa; }
 .bal-table tr.bal-low td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+/* Настройки → Резервные копии (docs/operations/10 §8) */
+.backup-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 6px 0 12px; }
+.backup-kpis .kpi .v { font-size: 16px; }
+.backup-cmd { border-top: 1px solid var(--line); padding-top: 10px; }
+.backup-code { background: #f4f4f4; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; font-size: 13px; overflow-wrap: anywhere; }
+.backup-table { overflow-x: auto; }
+.backup-table table { min-width: 760px; }
+@media (max-width: 900px) { .backup-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .backup-kpis { grid-template-columns: 1fr; } .backup-status .row > h2 { font-size: 18px; } }
+.backup-status .alert, .backup-status code { overflow-wrap: anywhere; }

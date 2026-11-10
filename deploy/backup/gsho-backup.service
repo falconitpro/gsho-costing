@@ -1,0 +1,22 @@
+[Unit]
+Description=Encrypted GSHO CRM backup to Yandex Object Storage (restic)
+Documentation=file:///opt/gsho-costing/deploy/backup/install.md
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/gsho/backup.env
+ExecStart=/usr/local/sbin/gsho-backup.sh --reason=daily
+# 75 — уже выполняется другой запуск (lock); это не ошибка копии
+SuccessExitStatus=75
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+# Доступ к Docker socket и /opt/gsho-costing нужен — более жёсткий sandbox (ProtectSystem=strict и т.п.) включать только после проверки
+StandardOutput=journal
+StandardError=journal

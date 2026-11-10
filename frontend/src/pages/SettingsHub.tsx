@@ -6,12 +6,13 @@ import SettingsPage from "./SettingsPage";
 import TeamPage from "./TeamPage";
 import AccessPage from "./AccessPage";
 import AdminPage from "./AdminPage";
+import BackupStatusBlock from "../components/BackupStatusBlock";
 import { WorkplaceSettings } from "./WorkplacePage";
 
 // «Настройки» одним разделом: ставки и нормативы, сотрудники, уровни доступа, администрирование.
 // Доступ к каждому блоку — как и раньше (уровни доступа и администрирование — ЗГД / админ / ФД); блок виден только тем, кому он доступен.
 
-type Sec = "workplace" | "rates" | "team" | "access" | "admin";
+type Sec = "workplace" | "rates" | "team" | "access" | "admin" | "backup";
 
 export default function SettingsHub({ me }: { me: Me }) {
   const loc = useLocation();
@@ -24,6 +25,7 @@ export default function SettingsHub({ me }: { me: Me }) {
     ["team", "Сотрудники", true],
     ["access", "Уровни доступа", perm("access_admin", 2)],
     ["admin", "Администрирование", has("admin", "gd", "fd")],
+    ["backup", "Резервные копии", perm("backup_status", 1)],
   ];
   const visible = sections.filter(([, , ok]) => ok);
   const want = new URLSearchParams(loc.search).get("s") as Sec | null;
@@ -44,6 +46,7 @@ export default function SettingsHub({ me }: { me: Me }) {
       {cur === "team" && <TeamPage me={me} embedded />}
       {cur === "access" && <AccessPage me={me} embedded />}
       {cur === "admin" && <AdminPage me={me} embedded />}
+      {cur === "backup" && <BackupStatusBlock />}
     </>
   );
 }
