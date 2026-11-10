@@ -153,9 +153,14 @@ def obligation_explanation(oid: str, as_of: Optional[date] = None, db: Session =
 def sync(dry_run: bool = True, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Пересборка проекции подписанных договоров. По умолчанию dry-run — только отчёт, без изменений."""
     access.require_edit(user)
-    rep = obl.rebuild(db, user.id, dry_run=dry_run)
+    # dry-run: вся пересборка (обязательства → признание → старые отметки) выполняется целиком и откатывается одним rollback,
+    # чтобы отчёт пробного прогона совпадал с настоящей сборкой (связь старой отметки с только что собранной строкой — D-147)
+    rep = obl.rebuild(db, user.id, dry_run=False)
+    rep["dry_run"] = dry_run
     from ..services.finance import recognition as rec   # старые факты по статьям план/факта → события признания (один раз)
     rep["recognition_migrated"] = rec.migrate_planfact(db, user.id)
+    from ..services.finance import legacy as leg   # отметки оплаты, сделанные до включения раздела → «требует сверки» (D-147)
+    rep["legacy_marks"] = leg.inventory(db, user.id)
     if not dry_run:
         _commit(db)
     else:

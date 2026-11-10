@@ -1,0 +1,401 @@
+{
+ "schema_after_sql": {
+  "missing_tables": [],
+  "missing_columns": [],
+  "finance_indexes": {
+   "finance_obligations": [
+    "ix_fin_obl_deal_forecast",
+    "ix_fin_obl_entity_dir",
+    "ix_finance_obligations_contract_id",
+    "ix_finance_obligations_deal_id",
+    "ix_finance_obligations_forecast_on",
+    "ix_finance_obligations_is_active",
+    "ix_finance_obligations_legal_due_on",
+    "ix_finance_obligations_legal_entity_id",
+    "ix_finance_obligations_source_id",
+    "uq_fin_obligation_source"
+   ],
+   "finance_questions": [
+    "ix_fin_question_assignee_status",
+    "ix_fin_question_subject",
+    "ix_finance_questions_deal_id"
+   ],
+   "finance_recognition_events": [
+    "finance_recognition_events_idempotency_key_key",
+    "ix_fin_recognition_deal",
+    "ix_finance_recognition_events_cost_item_code",
+    "ix_finance_recognition_events_deal_id",
+    "uq_fin_recognition_source"
+   ],
+   "finance_accounts": [
+    "ix_finance_accounts_bank_profile_id",
+    "ix_finance_accounts_legal_entity_id",
+    "uq_fin_account_active_bank"
+   ],
+   "finance_balance_snapshots": [
+    "finance_balance_snapshots_idempotency_key_key",
+    "ix_fin_snapshot_account_asof"
+   ],
+   "finance_import_batches": [
+    "finance_import_batches_idempotency_key_key",
+    "ix_finance_import_batches_account_id",
+    "ix_finance_import_batches_file_sha256"
+   ],
+   "finance_transactions": [
+    "finance_transactions_idempotency_key_key",
+    "ix_fin_tx_account_booked",
+    "ix_finance_transactions_external_ref",
+    "ix_finance_transactions_status",
+    "uq_fin_tx_account_extref"
+   ],
+   "finance_allocations": [
+    "finance_allocations_idempotency_key_key",
+    "ix_fin_alloc_obligation_status",
+    "ix_fin_alloc_tx_status"
+   ],
+   "finance_fx_operations": [
+    "finance_fx_operations_buy_transaction_id_key",
+    "finance_fx_operations_fee_transaction_id_key",
+    "finance_fx_operations_idempotency_key_key",
+    "finance_fx_operations_sell_transaction_id_key",
+    "ix_finance_fx_operations_buy_account_id",
+    "ix_finance_fx_operations_sell_account_id"
+   ]
+  },
+  "ok": true
+ },
+ "schema_after_app_start": {
+  "missing_tables": [],
+  "missing_columns": [],
+  "finance_indexes": {
+   "finance_obligations": [
+    "ix_fin_obl_deal_forecast",
+    "ix_fin_obl_entity_dir",
+    "ix_finance_obligations_contract_id",
+    "ix_finance_obligations_deal_id",
+    "ix_finance_obligations_forecast_on",
+    "ix_finance_obligations_is_active",
+    "ix_finance_obligations_legal_due_on",
+    "ix_finance_obligations_legal_entity_id",
+    "ix_finance_obligations_source_id",
+    "uq_fin_obligation_source"
+   ],
+   "finance_questions": [
+    "ix_fin_question_assignee_status",
+    "ix_fin_question_subject",
+    "ix_finance_questions_deal_id"
+   ],
+   "finance_recognition_events": [
+    "finance_recognition_events_idempotency_key_key",
+    "ix_fin_recognition_deal",
+    "ix_finance_recognition_events_cost_item_code",
+    "ix_finance_recognition_events_deal_id",
+    "uq_fin_recognition_source"
+   ],
+   "finance_accounts": [
+    "ix_finance_accounts_bank_profile_id",
+    "ix_finance_accounts_legal_entity_id",
+    "uq_fin_account_active_bank"
+   ],
+   "finance_balance_snapshots": [
+    "finance_balance_snapshots_idempotency_key_key",
+    "ix_fin_snapshot_account_asof"
+   ],
+   "finance_import_batches": [
+    "finance_import_batches_idempotency_key_key",
+    "ix_finance_import_batches_account_id",
+    "ix_finance_import_batches_file_sha256"
+   ],
+   "finance_transactions": [
+    "finance_transactions_idempotency_key_key",
+    "ix_fin_tx_account_booked",
+    "ix_finance_transactions_external_ref",
+    "ix_finance_transactions_status",
+    "uq_fin_tx_account_extref"
+   ],
+   "finance_allocations": [
+    "finance_allocations_idempotency_key_key",
+    "ix_fin_alloc_obligation_status",
+    "ix_fin_alloc_tx_status"
+   ],
+   "finance_fx_operations": [
+    "finance_fx_operations_buy_transaction_id_key",
+    "finance_fx_operations_fee_transaction_id_key",
+    "finance_fx_operations_idempotency_key_key",
+    "finance_fx_operations_sell_transaction_id_key",
+    "ix_finance_fx_operations_buy_account_id",
+    "ix_finance_fx_operations_sell_account_id"
+   ]
+  },
+  "ok": true
+ },
+ "guarded_changed": [],
+ "sums_changed": {},
+ "table_counts_changed": {
+  "audit_log": [
+   523,
+   548
+  ],
+  "integration_log": [
+   40,
+   44
+  ]
+ },
+ "idempotent": true,
+ "reconciliation_queues": {
+  "unallocated": 0,
+  "manual_marks": 2,
+  "provisional": 1,
+  "source_conflict": 0,
+  "duplicates": 0,
+  "no_date": 1,
+  "stale_balance": 0,
+  "pnl_vs_cash": 0,
+  "questions": 0
+ },
+ "overview": {
+  "unallocated": [],
+  "reconciliation": {
+   "transactions_needs_reconciliation": 2,
+   "obligation_conflicts": 0,
+   "provisional_allocations": 1
+  },
+  "no_date": 1
+ },
+ "dry_run": {
+  "dry_run": true,
+  "contracts": 20,
+  "created": 21,
+  "updated": 0,
+  "unchanged": 8,
+  "conflicts": 0,
+  "orphaned": 0,
+  "recognition_migrated": 1,
+  "legacy_marks": {
+   "contract_marks": 1,
+   "stage_marks": 1,
+   "planfact_marks": 0,
+   "created": 2,
+   "linked": 0,
+   "existing": 0,
+   "skipped": []
+  },
+  "active_counts": {
+   "purchase_order:CNY": 1,
+   "contract:RUB": 5,
+   "contract:CNY": 4,
+   "penalty:RUB": 1
+  },
+  "active_sums": {
+   "purchase_order:CNY": "240.00",
+   "contract:RUB": "3450000.00",
+   "contract:CNY": "12058979.00",
+   "penalty:RUB": "15000.00"
+  },
+  "skipped_count": 6
+ },
+ "build": {
+  "dry_run": false,
+  "contracts": 20,
+  "created": 21,
+  "updated": 0,
+  "unchanged": 8,
+  "conflicts": 0,
+  "orphaned": 0,
+  "recognition_migrated": 1,
+  "legacy_marks": {
+   "contract_marks": 1,
+   "stage_marks": 1,
+   "planfact_marks": 0,
+   "created": 2,
+   "linked": 1,
+   "existing": 0,
+   "skipped": []
+  },
+  "active_counts": {
+   "purchase_order:CNY": 1,
+   "contract:RUB": 5,
+   "contract:CNY": 4,
+   "penalty:RUB": 1
+  },
+  "active_sums": {
+   "purchase_order:CNY": "240.00",
+   "contract:RUB": "3450000.00",
+   "contract:CNY": "12058979.00",
+   "penalty:RUB": "15000.00"
+  },
+  "skipped_count": 6
+ },
+ "repeat_dry_run": {
+  "dry_run": true,
+  "contracts": 20,
+  "created": 0,
+  "updated": 0,
+  "unchanged": 29,
+  "conflicts": 0,
+  "orphaned": 0,
+  "recognition_migrated": 0,
+  "legacy_marks": {
+   "contract_marks": 1,
+   "stage_marks": 1,
+   "planfact_marks": 0,
+   "created": 0,
+   "linked": 0,
+   "existing": 2,
+   "skipped": []
+  },
+  "active_counts": {
+   "purchase_order:CNY": 1,
+   "contract:RUB": 5,
+   "contract:CNY": 4,
+   "penalty:RUB": 1
+  },
+  "active_sums": {
+   "purchase_order:CNY": "240.00",
+   "contract:RUB": "3450000.00",
+   "contract:CNY": "12058979.00",
+   "penalty:RUB": "15000.00"
+  },
+  "skipped_count": 6
+ },
+ "repeat_build": {
+  "dry_run": false,
+  "contracts": 20,
+  "created": 0,
+  "updated": 0,
+  "unchanged": 29,
+  "conflicts": 0,
+  "orphaned": 0,
+  "recognition_migrated": 0,
+  "legacy_marks": {
+   "contract_marks": 1,
+   "stage_marks": 1,
+   "planfact_marks": 0,
+   "created": 0,
+   "linked": 0,
+   "existing": 2,
+   "skipped": []
+  },
+  "active_counts": {
+   "purchase_order:CNY": 1,
+   "contract:RUB": 5,
+   "contract:CNY": 4,
+   "penalty:RUB": 1
+  },
+  "active_sums": {
+   "purchase_order:CNY": "240.00",
+   "contract:RUB": "3450000.00",
+   "contract:CNY": "12058979.00",
+   "penalty:RUB": "15000.00"
+  },
+  "skipped_count": 6
+ },
+ "build_finance": {
+  "obligations_by_source": [
+   [
+    "calculation",
+    "False",
+    "4",
+    "98091954.28"
+   ],
+   [
+    "contract",
+    "False",
+    "6",
+    "0.00"
+   ],
+   [
+    "contract",
+    "True",
+    "9",
+    "15508979.00"
+   ],
+   [
+    "penalty",
+    "True",
+    "1",
+    "15000.00"
+   ],
+   [
+    "purchase_order",
+    "True",
+    "1",
+    "240.00"
+   ]
+  ],
+  "obligations_by_sync": [
+   [
+    "ok",
+    "21"
+   ]
+  ],
+  "transactions_by_status_origin": [
+   [
+    "needs_reconciliation",
+    "contract_legacy",
+    "1",
+    "1000000.00"
+   ],
+   [
+    "needs_reconciliation",
+    "execution_legacy",
+    "1",
+    "28021786.28"
+   ]
+  ],
+  "allocations_by_status": [
+   [
+    "provisional",
+    "1"
+   ]
+  ],
+  "recognition_by_source": [
+   [
+    "planfact",
+    "expense",
+    "posted",
+    "1",
+    "2000000.00"
+   ]
+  ]
+ },
+ "repeat_build_finance_equal": true,
+ "before": {
+  "guarded": {
+   "deal_versions": {
+    "count": 9,
+    "sha256": "1b49d4e76e5185516b1d0ffca4391768ce9ede737f92b155604a00615a3e555d"
+   },
+   "deals": {
+    "count": 26,
+    "sha256": "e0e6dda3b74491dd62549b49b05259a8837f9a0d4a454d422792c88bfab3416b"
+   },
+   "contracts": {
+    "count": 15,
+    "sha256": "eeb773a8bfb39b22483877fd03a183972e122a3689fa55c600ee919501e0402e"
+   },
+   "execution_stages": {
+    "count": 31,
+    "sha256": "bb0dfa2fd1e4fa93b4ce8513dd88a478189112202a9d896efa2f74396d408673"
+   },
+   "plan_fact_entries": {
+    "count": 2,
+    "sha256": "f35fe1b7dae60438f9087e3a6f67108684406ea667dcb2d872ee6fb5988e2003"
+   },
+   "contract_claims": {
+    "count": 2,
+    "sha256": "92f92042db60bd2155595a2d41e41abba0334247c82b9e802c1eb367a5135eea"
+   },
+   "tasks": {
+    "count": 51,
+    "sha256": "a52c0e92a95759b2a69c756aa3e9cc649fde2b3a3dac42e812a4b3f8a2f1e78c"
+   }
+  },
+  "sums": {
+   "contracts.amount": "21608979.0",
+   "plan_fact_entries.amount": "30021786.28",
+   "execution_stages.actual_amount": "28021786.28"
+  },
+  "finance_tables": []
+ }
+}
