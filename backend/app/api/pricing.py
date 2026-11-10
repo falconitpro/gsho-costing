@@ -262,6 +262,8 @@ def submit(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     deal = get_deal_or_404(db, deal_id, user)
     if any(v.price_rub is None for v in deal.variants if v.in_kp):
         raise HTTPException(422, "Задайте цену по каждому предложению")
+    from ..services.mirror_offers import require_chain_visa
+    require_chain_visa(db, deal)        # внутренняя цепочка утверждена ФД/ЗГД до КП (D-166)
     errors = cd_checks(_cd_deal_dict(deal))
     if errors:
         raise HTTPException(422, {"message": "Перед утверждением задайте условия оплаты и оцените опции РФ", "errors": errors})
@@ -646,6 +648,8 @@ def kp_build(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     """«Сформировать КП»: пересобрать файл по утверждённой версии (после правки подачи КП, изображений, реквизитов)."""
     deal = get_deal_or_404(db, deal_id, user)
     _kp_access(deal, user)
+    from ..services.mirror_offers import require_chain_visa
+    require_chain_visa(db, deal)
     ver = _approved_version(db, deal)
     _kp_local(db, deal, ver, rebuild=True)
     audit(db, user.id, deal.id, "kp", ver.id, "kp_rebuilt")
@@ -700,6 +704,8 @@ def kp_send(deal_id: str, body: KpSendIn, db: Session = Depends(get_db), user: C
     from .deals import mark_kp_sent
     deal = get_deal_or_404(db, deal_id, user)
     _kp_access(deal, user)
+    from ..services.mirror_offers import require_chain_visa
+    require_chain_visa(db, deal)
     ver = _approved_version(db, deal)
     if _mail_provider() == "console":
         raise HTTPException(409, "Почта не подключена — выгрузите КП и отправьте из своей почты, затем отметьте «КП отправлено вручную»")

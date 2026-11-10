@@ -85,15 +85,16 @@ def test_mirror_request_answer_select():
     with TestClient(app) as c:
         did, pos_id = _deal(c)
         url = f"/api/deals/{did}/positions/{pos_id}/tech-params/request"
-        assert c.post(url, headers=H(MGR), json={"factory_ids": [ai_id]}).status_code == 422             # не выбран конечный поставщик
-        assert c.post(url, headers=H(MGR), json={"factory_ids": [ai_id], "via_group": {ai_id: [ai_id]}}).status_code == 422   # компания группы сама себе
-        r = c.post(url, headers=H(MGR), json={"factory_ids": [ai_id], "via_group": {ai_id: [x_id, y_id]}})
+        assert c.post(url, headers=H(MGR), json={"factory_ids": [ai_id], "via_group": {ai_id: [x_id]}}).status_code == 422   # менеджер компанию группы не выбирает (D-164)
+        assert c.post(url, headers=H(GD), json={"factory_ids": [ai_id]}).status_code == 422              # не выбран конечный поставщик
+        assert c.post(url, headers=H(GD), json={"factory_ids": [ai_id], "via_group": {ai_id: [ai_id]}}).status_code == 422   # компания группы сама себе
+        r = c.post(url, headers=H(GD), json={"factory_ids": [ai_id], "via_group": {ai_id: [x_id, y_id]}})
         assert r.status_code == 200, r.text
         sent = r.json()["sent"]
         assert [s["end_supplier"] for s in sent] == [f"Завод X {RUN}", f"Завод Y {RUN}"] and all(s["sender"] == "Компания в Китае" or s["sender"] for s in sent)
         assert sent[0]["mail"].startswith("console") and sent[1]["mail"].startswith("console")      # консольная почта стенда, от имени компании группы
         assert sent[0]["route"] == "Поставщик КНР → компания в Китае → РФ"
-        again = c.post(url, headers=H(MGR), json={"factory_ids": [ai_id], "via_group": {ai_id: [x_id]}}).json()["sent"]
+        again = c.post(url, headers=H(GD), json={"factory_ids": [ai_id], "via_group": {ai_id: [x_id]}}).json()["sent"]
         assert again[0]["offer_id"] == sent[0]["offer_id"]                                                 # повторный запрос — та же пара
         ux, lx, uy, ly = sent[0]["offer_id"], sent[0]["lower_offer_id"], sent[1]["offer_id"], sent[1]["lower_offer_id"]
 
@@ -185,7 +186,7 @@ def test_no_route_and_entity_channels():
             db.commit()
             gid, xid = g.id, x.id
         did, pos_id = _deal(c)
-        r = c.post(f"/api/deals/{did}/positions/{pos_id}/tech-params/request", headers=H(MGR), json={"factory_ids": [gid], "via_group": {gid: [xid]}})
+        r = c.post(f"/api/deals/{did}/positions/{pos_id}/tech-params/request", headers=H(GD), json={"factory_ids": [gid], "via_group": {gid: [xid]}})
         assert r.status_code == 409 and "Нет маршрута" in r.json()["detail"]
         with SessionLocal() as db:
             for r_ in db.scalars(select(SupplyRoute)).all():

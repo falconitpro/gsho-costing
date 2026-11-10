@@ -77,7 +77,7 @@ def test_mirror_contract_and_group_margin():
             db.add(Variant(deal_id=did, name="Основное", position_ids=[pos.id], price_rub=5_000_000, is_default=True))
             db.commit()
             pos_id = pos.id
-        r = c.post(f"/api/deals/{did}/positions/{pos_id}/tech-params/request", headers=H(MGR), json={"factory_ids": [ai_id], "via_group": {ai_id: [x_id]}})
+        r = c.post(f"/api/deals/{did}/positions/{pos_id}/tech-params/request", headers=H("evgeniy@dobrov.pro"), json={"factory_ids": [ai_id], "via_group": {ai_id: [x_id]}})
         assert r.status_code == 200, r.text
         ux, lx = r.json()["sent"][0]["offer_id"], r.json()["sent"][0]["lower_offer_id"]
         pay = [{"event": "factory_contract", "share_pct": 40}, {"event": "readiness", "share_pct": 60}]

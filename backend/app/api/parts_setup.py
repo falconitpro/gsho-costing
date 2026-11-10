@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
 from ..db import get_db
-from ..models import FxRate, LegalEntity, MarkupPolicy, RouteStep, SupplyRoute, User
+from ..models import Factory, FxRate, LegalEntity, MarkupPolicy, RouteStep, SupplyRoute, User
 from ..services.deal_service import audit, notify
 from ..services.markup_chain import ChainError, simulate, validate_steps
 from .common import serialize
@@ -422,3 +422,34 @@ def simulate_policy(body: SimulateIn, db: Session = Depends(get_db), user: Curre
     res["fx"] = fx
     res["policy_version"] = policy.version_no if policy else None
     return res
+
+
+# ------------------------------------------------------------------ правила внутригрупповых цепочек по умолчанию (D-164)
+
+class ChainRulesIn(BaseModel):
+    rules: list[dict] = Field(default_factory=list)
+
+
+@router.get("/intragroup-rules")
+def chain_rules_get(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Через какую компанию группы идёт закупка у поставщика: по виду сделки, стране или поставщику. Ведут ФД и ЗГД."""
+    from ..services import chain_rules as cr
+    if not user.has(Role.CD, Role.FD, Role.GD, Role.LOGISTICIAN, Role.ADMIN):
+        raise HTTPException(403, "Правила цепочек видят КД, ФД, ЗГД и логист")
+    rows = cr.rules(db)
+    names = {f.id: (f.short_name or f.name) for f in db.scalars(select(Factory)).all()}
+    routes = {r.id: r.name for r in db.scalars(select(SupplyRoute)).all()}
+    return {"rules": [{**r, "supplier_name": names.get(r["supplier_id"], ""), "route_name": routes.get(r["route_id"] or "", "")} for r in rows],
+            "kinds": cr.KINDS, "can_edit": user.has(Role.FD, Role.GD)}
+
+
+@router.put("/intragroup-rules")
+def chain_rules_put(body: ChainRulesIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from ..services import chain_rules as cr
+    if not user.has(Role.FD, Role.GD):
+        raise HTTPException(403, "Правила цепочек утверждают ФД или ЗГД")
+    before = cr.rules(db)
+    rows = cr.save(db, body.rules, user.id)
+    audit(db, user.id, None, "settings", cr.KEY, "update", before=before, after=rows)
+    db.commit()
+    return chain_rules_get(db, user)

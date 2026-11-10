@@ -745,6 +745,8 @@ class KpSentIn(BaseModel):
 def kp_sent_ep(deal_id: str, body: KpSentIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
     _editable_by_manager(deal, user)
+    from ..services.mirror_offers import require_chain_visa
+    require_chain_visa(db, deal)
     mark_kp_sent(db, deal, user, body.recipients, body.sent_via)
     db.commit()
     return {"status": deal.status.value}

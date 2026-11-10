@@ -1,3 +1,4 @@
+import { MeContext } from "../App";
 import { Fragment, useEffect, useState } from "react";
 import { lbl, IMAGE_KIND, IMAGE_SOURCE } from "../labels";
 import { api, ApiError, designation, ru } from "../api";
@@ -25,6 +26,7 @@ const COLS: { key: keyof TechParamRow; title: string; w?: number }[] = [
 
 /** Таблица технических характеристик позиции (задача 4): ручной ввод, импорт файла с предпросмотром, запрос заводу (задача 9), отметки «обязательно»/«в России». */
 export default function TechParamsTable({ dealId, position, canEdit, canDelete = false, onChanged }: { dealId: string; position: Position; canEdit: boolean; canDelete?: boolean; onChanged: () => void }) {
+  const fdGd = (MeContext.current?.roles || []).some((r) => ["fd", "gd"].includes(r.code));   // компания группы вручную — ФД/ЗГД (D-164)
   const base = `/api/deals/${dealId}/positions/${position.id}/tech-params`;
   const [rows, setRows] = useState<TechParamRow[]>([]);
   const [missing, setMissing] = useState<string[]>([]);
@@ -114,7 +116,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
     try {
       const r = await api.post<{ sent: { factory: string; wecom: string | null; mail: string | null; machine_translations: unknown[] }[] }>(`${base}/request`,
         { factory_ids: reqFactories, image_ids: reqImages, via_wecom: true, via_mail: true, request_images: true, client_files_checked: clientChecked, via_group: viaGroup });
-      setMsg("Запрос отправлен: " + r.sent.map((s) => `${(s as { end_supplier?: string }).end_supplier ? `${s.factory} → ${(s as { end_supplier?: string }).end_supplier}` : s.factory} (WeCom: ${s.wecom || "—"}, почта: ${s.mail || "—"}${s.machine_translations.length ? `, машинный перевод: ${s.machine_translations.length} строк — проверьте глоссарий` : ""})`).join("; "));
+      setMsg("Запрос отправлен: " + r.sent.map((s) => `${(s as { end_supplier?: string }).end_supplier ? `${s.factory} → ${(s as { end_supplier?: string }).end_supplier}` : s.factory}${(s as { rule?: string }).rule ? ` [${(s as { rule?: string }).rule}]` : ""} (WeCom: ${s.wecom || "—"}, почта: ${s.mail || "—"}${s.machine_translations.length ? `, машинный перевод: ${s.machine_translations.length} строк — проверьте глоссарий` : ""})`).join("; "));
       setErr(""); api.get<typeof offers>(`/api/deals/${dealId}/offers`).then(setOffers); onChanged();
     } catch (e) { setErr((e as ApiError).message); } finally { setSending(false); }
   }
@@ -151,10 +153,11 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
           {canEdit && (
             <select value="" onChange={(e) => e.target.value && setReqFactories([...reqFactories, e.target.value])} style={{ minWidth: 280 }}>
               <option value="">{reqFactories.length ? "+ добавить ещё завод…" : "— выбрать завод —"}</option>
-              {factories.filter((f) => !reqFactories.includes(f.id)).map((f) => { const na = (f as { approval_status?: string }).approval_status === "pending";
+              {factories.filter((f) => !reqFactories.includes(f.id) && (fdGd || f.supplier_status !== "group_company")).map((f) => { const na = (f as { approval_status?: string }).approval_status === "pending";
                 return <option key={f.id} value={f.id} disabled={na}>{fname(f)}{na ? " — на утверждении" : ""}</option>; })}
             </select>)}
           {reqFactories.length === 0 && <span className="badge warn">завод не выбран</span>}
+          {canEdit && <span className="muted" style={{ fontSize: 11 }}>выбирайте конечного поставщика — закупку через компанию группы (Китай, Киргизия) подставят правила цепочек{fdGd ? "; ФД и ЗГД могут выбрать компанию группы вручную" : ""}</span>}
         </div>
         <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 8 }}>
           {reqFactories.map((id) => {

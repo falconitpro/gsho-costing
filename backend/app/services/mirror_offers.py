@@ -136,7 +136,8 @@ def send_from_entity(db: Session, deal: Deal, pos: Position, entity: LegalEntity
 
 
 def request_via_group(db: Session, deal: Deal, pos: Position, group_factory: Factory, supplier_ids: list[str], user_id: Optional[str],
-                      image_paths: list[str], via_wecom: bool, via_mail: bool, request_images: bool) -> list[dict]:
+                      image_paths: list[str], via_wecom: bool, via_mail: bool, request_images: bool, route: Optional[SupplyRoute] = None,
+                      rule_note: str = "") -> list[dict]:
     """Запрос в компанию группы с выбранными конечными поставщиками: пара U/L на каждого поставщика, запрос L — от имени компании группы."""
     from . import tech_params_service as tps
     from .suppliers import require_approved
@@ -153,15 +154,15 @@ def request_via_group(db: Session, deal: Deal, pos: Position, group_factory: Fac
         if group_entity(db, sup) is not None:
             raise HTTPException(422, f"«{sup.name}» — компания группы; конечным поставщиком должна быть внешняя компания")
         require_approved(sup, "отправить ему запрос")
-        route = pick_route(db, entity, sup)
+        route_ = route or pick_route(db, entity, sup)
         up = db.scalar(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id, FactoryOffer.source_position_id == pos.id,
                                                   FactoryOffer.factory_id == group_factory.id, FactoryOffer.end_supplier_id == sup.id))
         if up is None:
             up = FactoryOffer(deal_id=deal.id, source_position_id=pos.id, factory_id=group_factory.id, end_supplier_id=sup.id,
-                              currency=route.steps[-1].currency, basis=route.steps[-1].incoterms or "", mirror_state="waiting")
+                              currency=route_.steps[-1].currency, basis=route_.steps[-1].incoterms or "", mirror_state="waiting")
             db.add(up)
             db.flush()
-        up.route_id = up.route_id or route.id
+        up.route_id = up.route_id or route_.id
         lo = lower_of(db, up)
         if lo is None:
             lo = FactoryOffer(deal_id=deal.id, source_position_id=pos.id, factory_id=sup.id, mirror_of_id=up.id, currency=sup.default_currency or "CNY")
@@ -171,9 +172,10 @@ def request_via_group(db: Session, deal: Deal, pos: Position, group_factory: Fac
         sent = send_from_entity(db, deal, pos, entity, sup, path, image_paths, user_id, via_wecom, via_mail)
         up.request_sent_at = lo.request_sent_at = _now()
         db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"Запрос в {entity.name}", body=f"{pos.designation}: конечный поставщик {sup.name}", user_id=user_id))
-        audit(db, user_id, deal.id, "factory_offer", up.id, "request_via_group", after={"entity": entity.id, "supplier": sup.id, "route": route.id, "lower": lo.id})
+        audit(db, user_id, deal.id, "factory_offer", up.id, "request_via_group", after={"entity": entity.id, "supplier": sup.id, "route": route_.id, "lower": lo.id,
+                                                                                         "rule": rule_note})
         out.append({"factory_id": group_factory.id, "factory": entity.name, "offer_id": up.id, "lower_offer_id": lo.id, "end_supplier": sup.name,
-                    "route": route.name, "file": sent.get("file"), "wecom": sent.get("wecom"), "mail": sent.get("mail"), "sender": entity.name,
+                    "route": route_.name, "rule": rule_note, "file": sent.get("file"), "wecom": sent.get("wecom"), "mail": sent.get("mail"), "sender": entity.name,
                     "machine_translations": machine})
     return out
 
@@ -290,6 +292,11 @@ def on_selected(db: Session, selected: list[FactoryOffer], deal_id: str, user_id
             lo.status = "rejected"
 
 
+def _route_ref(db: Session, o: FactoryOffer) -> Optional[dict]:
+    r = db.get(SupplyRoute, o.route_id) if o.route_id else None
+    return {"id": r.id, "name": r.name} if r else (o.chain or {}).get("route")
+
+
 def view(db: Session, o: FactoryOffer, can_chain: bool) -> dict:
     """Что показать о зеркальной паре: компания группы и конечный поставщик — всем; цена поставщика, наценки, маржа — с правом цепочки."""
     if not o.end_supplier_id:
@@ -300,7 +307,7 @@ def view(db: Session, o: FactoryOffer, can_chain: bool) -> dict:
     out: dict[str, Any] = {"group_company": entity.name if entity else "", "end_supplier": sup.name if sup else "", "end_supplier_id": o.end_supplier_id,
                            "end_supplier_country": sup.country if sup else "", "state": o.mirror_state, "revision": o.revision or 0,
                            "lower_offer_id": lo.id if lo else None, "lower_status": lo.status if lo else None,
-                           "lower_answered": bool(lo and lo.answer_received_at), "route": (o.chain or {}).get("route")}
+                           "lower_answered": bool(lo and lo.answer_received_at), "route": _route_ref(db, o)}
     if can_chain:
         c = dict(o.chain or {})
         out.update({"supplier_price": lo.unit_price if lo else None, "supplier_currency": lo.currency if lo else None, "steps": c.get("steps"),
@@ -409,3 +416,80 @@ def can_see_mirror_docs(user) -> bool:
     он проверяет договор (решение владельца); менеджер их не видит (D-160)."""
     from ..core.roles import READ, Role, can
     return can(user, "intragroup_chain", READ) or user.has(Role.LAWYER)
+
+
+
+# ------------------------------------------------------------------ цепочка сделки: правка и виза ФД/ЗГД до КП (D-165, D-166)
+
+def deal_chain(db: Session, deal: Deal) -> list[dict]:
+    """Внутренняя цепочка сделки: позиции, взятые из предложения компании группы (компания, маршрут, трансфертная цена)."""
+    out = []
+    for pos in deal.positions:
+        up = db.get(FactoryOffer, pos.offer_id) if pos.offer_id else None
+        if up is None or not up.end_supplier_id:
+            continue
+        out.append({"position_id": pos.id, "offer_id": up.id, "group_factory_id": up.factory_id, "end_supplier_id": up.end_supplier_id,
+                    "route_id": up.route_id, "transfer_price": up.transfer_price})
+    return out
+
+
+def chain_view(db: Session, deal: Deal) -> dict:
+    from .chain_rules import approval_state
+    rows = []
+    for r in deal_chain(db, deal):
+        pos = db.get(Position, r["position_id"])
+        route = db.get(SupplyRoute, r["route_id"]) if r["route_id"] else None
+        g, x = db.get(Factory, r["group_factory_id"]), db.get(Factory, r["end_supplier_id"])
+        rows.append({**r, "designation": pos.designation if pos else "", "group_company": (g.short_name or g.name) if g else "",
+                     "end_supplier": (x.short_name or x.name) if x else "", "route": route.name if route else ""})
+    return {"rows": rows, **approval_state(deal.chain_approval or None, deal_chain(db, deal))}
+
+
+def require_chain_visa(db: Session, deal: Deal) -> None:
+    """КП клиенту — только с утверждённой ФД или ЗГД внутренней цепочкой (решение владельца)."""
+    from .chain_rules import approval_state
+    st = approval_state(deal.chain_approval or None, deal_chain(db, deal))
+    if st["needed"]:
+        raise HTTPException(409, "Внутренняя цепочка (закупка через компанию группы) не утверждена — нужна виза ФД или ЗГД"
+                                 + (" (цепочка изменилась после визы)" if st["stale"] else "") + ": «Заводы и ответы» → «Цепочка»")
+
+
+def set_chain(db: Session, deal: Deal, offer: FactoryOffer, route_id: Optional[str], user_id: Optional[str]) -> FactoryOffer:
+    """Правка цепочки ФД/ЗГД до отбора: другой маршрут (и компания группы), напрямую от Берг-Хауса или через компанию группы.
+    Возвращает предложение, которое теперь сравнивается и отбирается (U или прямое предложение поставщика)."""
+    from .chain_rules import group_factory_for
+    if offer.mirror_of_id:                       # правят из предложения компании группы
+        offer = db.get(FactoryOffer, offer.mirror_of_id)
+    if offer.status == "selected":
+        raise HTTPException(409, "Предложение уже отобрано — снимите отбор (повторный отбор), затем меняйте цепочку")
+    route = db.get(SupplyRoute, route_id) if route_id else None
+    if route_id and (route is None or not route.is_active):
+        raise HTTPException(422, "Маршрут не найден или не активен")
+    if offer.end_supplier_id:                    # сейчас через компанию группы
+        lo = lower_of(db, offer)
+        if route is None:                        # напрямую: запрос поставщику становится обычным ответом поставщика
+            if lo is not None:
+                lo.mirror_of_id = None
+            audit(db, user_id, deal.id, "factory_offer", offer.id, "chain_direct", after={"lower": lo.id if lo else None})
+            db.delete(offer)
+            db.flush()
+            return lo
+        g = group_factory_for(db, route)
+        before = {"factory": offer.factory_id, "route": offer.route_id}
+        offer.factory_id, offer.route_id = g.id, route.id
+        offer.currency, offer.basis = route.steps[-1].currency, route.steps[-1].incoterms or offer.basis
+        audit(db, user_id, deal.id, "factory_offer", offer.id, "chain_route", before=before, after={"factory": g.id, "route": route.id})
+        db.flush()
+        return refresh(db, offer, user_id)
+    if route is None:
+        return offer                             # уже напрямую
+    g = group_factory_for(db, route)             # было напрямую → через компанию группы: ответ поставщика становится запросом L
+    up = FactoryOffer(deal_id=deal.id, source_position_id=offer.source_position_id, factory_id=g.id, end_supplier_id=offer.factory_id,
+                      route_id=route.id, currency=route.steps[-1].currency, basis=route.steps[-1].incoterms or "", mirror_state="waiting",
+                      request_sent_at=offer.request_sent_at)
+    db.add(up)
+    db.flush()
+    offer.mirror_of_id = up.id
+    audit(db, user_id, deal.id, "factory_offer", up.id, "chain_via_group", after={"lower": offer.id, "route": route.id})
+    db.flush()
+    return refresh(db, up, user_id)
