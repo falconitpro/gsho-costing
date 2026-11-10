@@ -50,10 +50,10 @@ export default function CatalogHub({ me }: { me: Me }) {
     <>
       <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 12, marginBottom: 6 }}>
         <h1 style={{ margin: 0 }}>Каталог</h1>
-        <div style={{ position: "relative" }}>
-          <input placeholder="Поиск: модель, исполнение, артикул, OEM, кросс-номер…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 340 }} />
+        <div style={{ position: "relative", maxWidth: "100%" }}>
+          <input placeholder="Поиск: модель, исполнение, артикул, OEM, кросс-номер…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 340, maxWidth: "100%" }} />
           {found && (
-            <div className="card" style={{ position: "absolute", right: 0, top: "100%", zIndex: 20, width: 420, maxHeight: 420, overflow: "auto", marginTop: 4, padding: 10, fontSize: 13 }}>
+            <div className="card" style={{ position: "absolute", right: 0, top: "100%", zIndex: 20, width: 420, maxWidth: "calc(100vw - 20px)", maxHeight: 420, overflow: "auto", marginTop: 4, padding: 10, fontSize: 13 }}>
               {nothing && <div className="muted">Ничего не найдено</div>}
               {found.models.length > 0 && <><div className="muted" style={{ fontSize: 11, margin: "2px 0" }}>Оборудование ГШО</div>
                 {found.models.map((m) => <div key={m.id}><a href="#" onClick={(e) => { e.preventDefault(); pick("equipment", `&model=${m.id}`); }}><b>{m.title}</b></a> <span className="muted">{m.machine_type}</span></div>)}</>}

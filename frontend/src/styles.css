@@ -51,6 +51,19 @@ header.top .me .who { display: flex; flex-direction: column; line-height: 1.2; m
 header.top .me .who b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 header.top .me .who small { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 900px) { header.top .brand span, header.top .dev-switch > span { display: none; } header.top .me .who { display: none; } header.top .me { padding: 3px; } header.top .dev-switch select { max-width: 160px; } }
+/* телефон: строка шапки (логотип, «Войти как», уведомления, аватар, «Выйти») не шире экрана — иначе вся страница прокручивается вбок */
+@media (max-width: 520px) {
+  header.top { padding: 6px 10px 0; }
+  header.top .top-row { gap: 8px; min-width: 0; }
+  header.top .brand { flex: 0 1 auto; min-width: 0; }
+  header.top .brand img { height: 30px; }
+  header.top .account { gap: 6px; flex: 1 1 auto; justify-content: flex-end; }
+  header.top .dev-switch { min-width: 0; flex: 0 1 auto; }
+  header.top .dev-switch select { max-width: 120px; min-width: 0; padding: 4px 6px; }
+  header.top .me .avatar { width: 28px; height: 28px; font-size: 12px; }
+  header.top .account > .btn { padding: 4px 8px !important; }
+  header.top nav { min-width: 0; }
+}
 main { padding: 16px; max-width: 1400px; margin: 0 auto; }
 h1 { font-size: 20px; margin: 0 0 12px; }
 h2 { font-size: 16px; margin: 18px 0 8px; }
@@ -284,3 +297,8 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 /* «Объяснить цифру» — компактный значок рядом со значением */
 .fin-i { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 0 0 4px; font-size: 12px; line-height: 1; }
 .fin-i:hover, .fin-i:focus-visible { color: var(--text, #111); outline: none; text-decoration: underline; }
+
+/* планшет и телефон: широкие таблицы прокручиваются внутри своей карточки, а не растягивают страницу вбок */
+@media (max-width: 1024px) {
+  main .card { overflow-x: auto; }
+}
