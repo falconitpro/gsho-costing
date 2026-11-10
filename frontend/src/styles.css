@@ -280,3 +280,7 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 
 /* «Финансы → Экономика сделок»: на узком экране таблицы карточек прокручиваются внутри карточки */
 .fin-eco .card { overflow-x: auto; }
+
+/* «Объяснить цифру» — компактный значок рядом со значением */
+.fin-i { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 0 0 4px; font-size: 12px; line-height: 1; }
+.fin-i:hover, .fin-i:focus-visible { color: var(--text, #111); outline: none; text-decoration: underline; }

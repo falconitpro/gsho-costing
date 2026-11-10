@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtMoney } from "../api";
+import FinanceExportButton from "./FinanceExportButton";
 
 // «Финансы → Сверка и уточнения» (docs/finance/05, раздел 13). Очереди проблем со ссылкой на место исправления
 // и «Запросить уточнение»: ответственный получает только показанный перед отправкой контекст.
@@ -40,6 +41,7 @@ export default function FinanceReconciliation({ sp, go, stamp, canEdit }: { sp: 
         <button className={!queue ? "active" : ""} onClick={() => go({ queue: null })}>Все · {d.queues.reduce((a, q) => a + q.count, 0)}</button>
         {d.queues.map((q) => <button key={q.code} className={queue === q.code ? "active" : ""} onClick={() => go({ queue: q.code })} disabled={!q.count && queue !== q.code}
           style={!q.count ? { opacity: 0.5 } : undefined}>{q.title} · {q.count}</button>)}
+        <span style={{ marginLeft: "auto" }}><FinanceExportButton kind="reconciliation" params={{ queue }} /></span>
       </div>
       {d.items.length === 0 ? <div className="card muted">{queue ? "В этой очереди проблем нет." : "Расхождений нет: всё разнесено, подтверждено и с датами."}</div> : (
         <div className="card" style={{ padding: 0, overflowX: "auto" }}>

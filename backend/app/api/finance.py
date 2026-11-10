@@ -70,7 +70,7 @@ def meta(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_
     ents = [{"id": e.id, "code": e.code, "name": e.name, "currency": e.currency} for e in db.scalars(select(LegalEntity).order_by(LegalEntity.name)).all()]
     currencies = sorted({c for (c,) in db.execute(select(FinanceObligation.currency).distinct()).all()} | {a.currency for a in db.scalars(select(FinanceAccount)).all()})
     return {"can_edit": access.can_edit(user), "entities": ents, "currencies": currencies, "today": date.today().isoformat(),
-            "tabs": ["overview", "calendar", "liquidity"] + (["economy"] if (user.can("finance_analytics", 1) and user.can("cost", 1)) else []) + ["exposure", "reconciliation"], "import_fields": imp_fields.FIELD_TITLES, "statuses": obl.STATUS_TITLES}
+            "tabs": ["overview", "calendar", "debt", "liquidity"] + (["economy"] if (user.can("finance_analytics", 1) and user.can("cost", 1)) else []) + ["exposure", "reconciliation"], "import_fields": imp_fields.FIELD_TITLES, "statuses": obl.STATUS_TITLES}
 
 
 @router.get("/overview")
@@ -565,6 +565,17 @@ def deal_economy(deal_id: str, as_of: Optional[date] = None, db: Session = Depen
     return economy.build(db, access.Visibility(db, user), deal, as_of or date.today())
 
 
+@router.get("/deals/{deal_id}/economy/explanation")
+def deal_economy_explanation(deal_id: str, metric: str, scenario: str = "base", cost_item_code: Optional[str] = None,
+                             db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Трассировка показателя экономики: формула, значение, включённые/исключённые строки, курсы, версия, ссылки (D-144)."""
+    _require_economy(user)
+    from .common import get_deal_or_404
+    from ..services.finance import economy
+    deal = get_deal_or_404(db, deal_id, user)
+    return economy.explain(db, access.Visibility(db, user), deal, metric, scenario, cost_item_code)
+
+
 class RecognitionIn(BaseModel):
     kind: str = Field(pattern="^(revenue|expense)$")
     amount: Decimal
@@ -630,6 +641,15 @@ def recognition_reverse(eid: str, body: ReasonIn, db: Session = Depends(get_db),
 
 
 # ------------------------------------------------------------------ обеспечение и неустойки (этап 5)
+
+@router.get("/debt")
+def debt(as_of: Optional[date] = None, direction: Optional[str] = Query(None, pattern="^(in|out)$"), group_by: str = Query("counterparty", pattern="^(counterparty|deal)$"),
+         currency: Optional[str] = None, legal_entity_id: Optional[str] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Дебиторка и кредиторка: остатки по валютам, ageing от юридического срока, группы, отдельно — без согласованной даты (D-143)."""
+    access.require_read(user)
+    from ..services.finance import debt as dbt
+    return dbt.build(db, user, access.Visibility(db, user), as_of or date.today(), direction, group_by, _ccy(currency) if currency else None, legal_entity_id)
+
 
 @router.get("/legal-exposure")
 def legal_exposure(deal_id: Optional[str] = None, contract_id: Optional[str] = None, direction: Optional[str] = Query(None, pattern="^(receivable|payable)$"),
@@ -831,3 +851,40 @@ def question_close(qid: str, body: ReasonIn, db: Session = Depends(get_db), user
     qs.close(db, user, q, body.reason)
     _commit(db)
     return qs.full_dto(db, user, access.Visibility(db, user), q)
+
+
+# ------------------------------------------------------------------ экспорт XLSX (этап 6)
+
+@router.get("/export")
+def export_xlsx(kind: str = Query(..., pattern="^(obligations|debt|liquidity|economy|reconciliation)$"), format: str = Query("xlsx", pattern="^xlsx$"),
+                as_of: Optional[date] = None, direction: Optional[str] = Query(None, pattern="^(in|out)$"), currency: Optional[str] = None,
+                legal_entity_id: Optional[str] = None, deal_id: Optional[str] = None, contract_id: Optional[str] = None, status: Optional[str] = None,
+                source_type: Optional[str] = Query(None, pattern="^(contract|purchase_order|batch|calculation|penalty)$"), date_from: Optional[date] = None,
+                date_to: Optional[date] = None, search: str = "", include_inactive: bool = False, reconciliation: bool = False,
+                group_by: Optional[str] = Query(None, pattern="^(counterparty|deal|day|week)$"), horizon_days: int = Query(90, ge=7, le=730), queue: Optional[str] = None,
+                db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """XLSX из тех же read-сервисов и с теми же правами, что и экран (D-145). Клиент передаёт только фильтры; выгрузка записывается в журнал."""
+    from urllib.parse import quote
+    from fastapi.responses import Response
+    from ..services.deal_service import audit as _audit
+    from ..services.finance import export as ex
+    if kind == "economy":
+        _require_economy(user)
+        access.require_read(user)
+    else:
+        access.require_read(user)
+    vis = access.Visibility(db, user)
+    if deal_id and not vis.deal(deal_id):
+        raise HTTPException(404, "Сделка не найдена")
+    params = {"as_of": as_of or date.today(), "direction": direction, "currency": _ccy(currency) if currency else None, "legal_entity_id": legal_entity_id,
+              "deal_id": deal_id, "contract_id": contract_id, "status": status, "source_type": source_type, "date_from": date_from, "date_to": date_to,
+              "search": search.strip(), "include_inactive": include_inactive, "reconciliation": reconciliation, "horizon_days": horizon_days, "queue": queue,
+              "group_by": group_by if kind != "liquidity" or group_by in ("day", "week") else "week"}
+    if kind == "debt" and group_by not in (None, "counterparty", "deal"):
+        raise HTTPException(422, "group_by для задолженности: counterparty | deal")
+    data, name, n, did = ex.build(db, user, vis, kind, params)
+    _audit(db, user.id, did or deal_id, "finance_export", kind, "export",
+           after={"kind": kind, "rows": n, "filters": {k: (v.isoformat() if isinstance(v, date) else v) for k, v in params.items() if v not in (None, "", False)}})
+    db.commit()
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtMoney, fmtPct, fmtRub, newKey } from "../api";
+import FinanceExportButton from "./FinanceExportButton";
 
 // «Финансы → Экономика сделок» (docs/finance/05, раздел 11). План — утверждённая версия расчёта (без второго калькулятора),
 // текущий прогноз, факт P&L (признание) и факт денег — разными блоками. Признание вводится здесь и в карточке сделки.
@@ -50,7 +51,8 @@ export default function FinanceEconomy({ sp, go, stamp }: { sp: URLSearchParams;
             {(deals || []).map((d) => <option key={d.id} value={d.id}>{d.number}{d.site ? ` · ${d.site}` : ""}{d.plan_fact_closed ? " · план/факт закрыт" : ""}</option>)}
           </select></label>
         {deals && deals.length === 0 && <span className="muted">Нет выигранных сделок с утверждённым расчётом.</span>}
-        <span className="muted" style={{ fontSize: 12 }}>План — утверждённая версия расчёта; признание выручки и расхода — по документам; деньги — по проведённым и подтверждённым операциям.</span>
+        <span className="muted" style={{ fontSize: 12, flex: "1 1 300px" }}>План — утверждённая версия расчёта; признание выручки и расхода — по документам; деньги — по проведённым и подтверждённым операциям. Значок ⓘ — как получена цифра.</span>
+        {dealId && <FinanceExportButton kind="economy" params={{ deal_id: dealId }} />}
       </div>
       {err && <div className="alert error">{err}</div>}
       {dealId && !eco && !err && <div className="muted">Загружаю…</div>}
@@ -59,11 +61,21 @@ export default function FinanceEconomy({ sp, go, stamp }: { sp: URLSearchParams;
   );
 }
 
+type Ex = { metric: string; scenario?: string; code?: string } | null;
+const ExplainCtx = createContext<(x: Ex) => void>(() => undefined);
+/** Значок «как получена цифра» рядом со значением. */
+function I({ m, s, c }: { m: string; s?: string; c?: string }) {
+  const open = useContext(ExplainCtx);
+  return <button className="fin-i" title="Объяснить цифру" aria-label="Объяснить цифру" onClick={() => open({ metric: m, scenario: s, code: c })}>ⓘ</button>;
+}
+
 function EconomyView({ e, onChanged }: { e: Economy; onChanged: () => void }) {
   const p = e.plan.base;
   const cf = e.cash_fact;
+  const [ex, setEx] = useState<Ex>(null);
   return (
-    <>
+    <ExplainCtx.Provider value={setEx}>
+      {ex && <Explain dealId={e.deal.id} x={ex} onClose={() => setEx(null)} />}
       <div className="row" style={{ gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         <Box label="Выручка: план · прогноз · признано">{fmtRub(p?.revenue)} · {fmtRub(e.forecast.revenue)} · <b>{fmtRub(e.pnl_fact.revenue)}</b></Box>
         <Box label="Себестоимость: план · прогноз · признано">{fmtRub(p?.cost)} · {fmtRub(e.forecast.cost)} · <b>{fmtRub(e.pnl_fact.cost)}</b></Box>
@@ -88,8 +100,8 @@ function EconomyView({ e, onChanged }: { e: Economy; onChanged: () => void }) {
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Выручка и расходы признаются по документам (УПД, акт, накладная) или хозяйственному событию. Поступление денег выручкой не считается.</div>
           <table><thead><tr><th /><th className="num">План</th><th className="num">Прогноз</th><th className="num">Признано</th></tr></thead>
             <tbody>
-              <tr><td>Выручка, ₽</td><td className="num">{fmtRub(p?.revenue)}</td><td className="num">{fmtRub(e.forecast.revenue)}{e.forecast.revenue_source === "plan" && <div className="muted" style={{ fontSize: 11 }}>по плану</div>}</td><td className="num"><b>{fmtRub(e.pnl_fact.revenue)}</b></td></tr>
-              <tr><td>Себестоимость, ₽</td><td className="num">{fmtRub(p?.cost)}</td><td className="num">{fmtRub(e.forecast.cost)}</td><td className="num"><b>{fmtRub(e.pnl_fact.cost)}</b></td></tr>
+              <tr><td>Выручка, ₽</td><td className="num">{fmtRub(p?.revenue)}</td><td className="num">{fmtRub(e.forecast.revenue)}<I m="forecast_revenue" />{e.forecast.revenue_source === "plan" && <div className="muted" style={{ fontSize: 11 }}>по плану</div>}</td><td className="num"><b>{fmtRub(e.pnl_fact.revenue)}</b><I m="revenue_fact" /></td></tr>
+              <tr><td>Себестоимость, ₽</td><td className="num">{fmtRub(p?.cost)}<I m="plan" /></td><td className="num">{fmtRub(e.forecast.cost)}</td><td className="num"><b>{fmtRub(e.pnl_fact.cost)}</b><I m="cost_fact" /></td></tr>
               <tr><td>Прибыль, ₽</td><td className="num">{fmtRub(p?.profit)}</td><td className="num">{fmtRub(e.forecast.profit)}</td><td className="num"><b>{fmtRub(e.pnl_fact.profit)}</b></td></tr>
               <tr><td>Маржа</td><td className="num">{fmtPct(p?.margin_pct)}</td><td className="num">{fmtPct(e.forecast.margin_pct)}</td><td className="num"><b>{fmtPct(e.pnl_fact.margin_pct)}</b></td></tr>
               <tr><td>Стоимость денег, ₽</td><td className="num">{fmtRub(p?.money_cost)}</td><td /><td /></tr>
@@ -101,15 +113,16 @@ function EconomyView({ e, onChanged }: { e: Economy; onChanged: () => void }) {
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>Только проведённые банковские операции с подтверждённым разнесением на обязательства сделки.</div>
           {cf.status === "insufficient" ? <div className="muted">Недостаточно подтверждённых операций — фактический кассовый разрыв не считается.</div> : (
             <table><tbody>
-              <tr><td>Поступило, ₽</td><td className="num">{fmtMoney(cf.in_rub)}</td></tr>
-              <tr><td>Оплачено, ₽</td><td className="num">{fmtMoney(cf.out_rub)}</td></tr>
+              <tr><td>Поступило, ₽</td><td className="num">{fmtMoney(cf.in_rub)}<I m="cash_in" /></td></tr>
+              <tr><td>Оплачено, ₽</td><td className="num">{fmtMoney(cf.out_rub)}<I m="cash_out" /></td></tr>
               <tr><td>Сальдо, ₽</td><td className="num"><b>{fmtMoney(cf.net_rub)}</b></td></tr>
               {Object.entries(cf.by_currency).filter(([c]) => c !== "RUB").map(([c, v]) => <tr key={c}><td>в {c}</td><td className="num">+{fmtMoney(v.in, c)} / −{fmtMoney(v.out, c)}</td></tr>)}
             </tbody></table>)}
           <h3 style={{ margin: "10px 0 4px" }}>Кассовый разрыв</h3>
           <table><tbody>
             {[["План, базовый", e.cash_gap.plan_base], ["План, пессимистичный", e.cash_gap.plan_pess], ["План, оптимистичный", e.cash_gap.plan_opt], ["Текущий прогноз", e.cash_gap.forecast], ["Факт", e.cash_gap.fact]].map(([t, g]) => (
-              <tr key={t as string}><td>{t as string}</td><td className="num">{g ? gapTxt(g as Gap) : t === "Факт" ? <span className="muted">недостаточно данных</span> : "—"}</td>
+              <tr key={t as string}><td>{t as string}</td><td className="num">{g ? gapTxt(g as Gap) : t === "Факт" ? <span className="muted">недостаточно данных</span> : "—"}
+                {t === "Факт" && <I m="cash_gap_fact" />}{t === "Текущий прогноз" && <I m="cash_gap_forecast" />}</td>
                 <td className="muted" style={{ fontSize: 12 }}>{g && (g as NonNullable<Gap>).starts_on ? `с ${fmtDate((g as NonNullable<Gap>).starts_on)}` : ""}</td></tr>))}
           </tbody></table>
           <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Прогноз: фактические операции + непогашенные остатки обязательств по их срокам.</div>
@@ -120,8 +133,8 @@ function EconomyView({ e, onChanged }: { e: Economy; onChanged: () => void }) {
         <table style={{ minWidth: 920 }}>
           <thead><tr><th>№</th><th>Статья себестоимости</th>{SC.map(([k, t]) => <th key={k} className="num">План, {t}</th>)}<th className="num">Прогноз</th><th className="num">Признано</th><th className="num">Отклонение</th></tr></thead>
           <tbody>{e.items.map((i) => (
-            <tr key={i.code}><td>{i.no}</td><td>{i.title}</td>{SC.map(([k]) => <td key={k} className="num">{fmtRub(i.plan[k])}</td>)}
-              <td className="num">{i.forecast === 0 && i.fact == null ? "—" : fmtRub(i.forecast)}</td><td className="num">{i.fact == null ? <span className="muted">—</span> : <b>{fmtRub(i.fact)}</b>}</td>
+            <tr key={i.code}><td>{i.no}</td><td>{i.title}</td>{SC.map(([k]) => <td key={k} className="num">{fmtRub(i.plan[k])}{i.plan[k] ? <I m="plan" s={k} c={i.code} /> : null}</td>)}
+              <td className="num">{i.forecast === 0 && i.fact == null ? "—" : <>{fmtRub(i.forecast)}<I m="forecast_item" c={i.code} /></>}</td><td className="num">{i.fact == null ? <span className="muted">—</span> : <><b>{fmtRub(i.fact)}</b><I m="cost_fact" c={i.code} /></>}</td>
               <td className="num">{i.deviation_rub == null ? "—" : <>{i.deviation_rub > 0 ? "+" : ""}{fmtRub(i.deviation_rub)}{i.deviation_pct != null && <div className="muted" style={{ fontSize: 11 }}>{i.deviation_pct > 0 ? "+" : ""}{fmtPct(i.deviation_pct)}</div>}</>}</td></tr>))}</tbody>
         </table>
         <div className="muted" style={{ fontSize: 12, padding: "6px 10px" }}>Прогноз статьи = признанное + ещё не признанный остаток базового плана (при перерасходе — признанное).</div>
@@ -150,7 +163,47 @@ function EconomyView({ e, onChanged }: { e: Economy; onChanged: () => void }) {
       </div>
 
       <Recognition e={e} onChanged={onChanged} />
-    </>
+    </ExplainCtx.Provider>
+  );
+}
+
+type Trace = { metric_title: string; value: string | number | null; formula: string; as_of: string; version_no: number; variant: { name: string };
+  included: Record<string, string | number | null>[]; excluded: (Record<string, string | number | null> & { reason: string })[]; rates: { currency: string; rate: string; source: string; on: string }[];
+  series?: { on: string; net: string; balance: string }[] };
+
+function Explain({ dealId, x, onClose }: { dealId: string; x: NonNullable<Ex>; onClose: () => void }) {
+  const [t, setT] = useState<Trace | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    setT(null); setErr("");
+    const q = new URLSearchParams({ metric: x.metric, scenario: x.scenario || "base" });
+    if (x.code) q.set("cost_item_code", x.code);
+    api.get<Trace>(`/api/finance/deals/${dealId}/economy/explanation?${q}`).then(setT).catch((e) => setErr(errText(e)));
+  }, [dealId, x.metric, x.scenario, x.code]);
+  const v = (r: Record<string, string | number | null>) => (r.amount_rub != null ? fmtMoney(String(r.amount_rub)) : r.amount != null ? fmtMoney(String(r.amount), String(r.currency || "")) : "—");
+  return (
+    <div className="card" style={{ borderLeft: "4px solid var(--info, #3a6ea5)" }}>
+      <div className="section-head"><h2 style={{ margin: 0 }}>Как получена цифра{t ? `: ${t.metric_title}` : ""}</h2><button className="btn ghost" onClick={onClose}>Закрыть</button></div>
+      {err && <div className="alert error">{err}</div>}
+      {!t && !err && <div className="muted">Считаю…</div>}
+      {t && <>
+        <div style={{ fontSize: 18, margin: "4px 0" }}><b>{t.value == null ? "нет данных" : typeof t.value === "number" ? fmtRub(t.value) : fmtMoney(t.value)}</b> ₽</div>
+        <div className="muted" style={{ fontSize: 13 }}>{t.formula}</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>на {fmtDate(t.as_of)} · утверждённая версия {t.version_no} · вариант «{t.variant.name}»</div>
+        <h3 style={{ margin: "10px 0 4px" }}>Учтено ({t.included.length})</h3>
+        {t.included.length === 0 ? <div className="muted">Ничего.</div> : (
+          <table style={{ fontSize: 13 }}><tbody>{t.included.map((r, n) => (
+            <tr key={n}><td>{fmtDate(String(r.on || "")) !== "—" ? fmtDate(String(r.on)) : ""}</td>
+              <td>{r.url ? <Link to={String(r.url)}>{String(r.title || r.type)}</Link> : String(r.title || r.type)}{r.direction ? <span className="muted"> · {r.direction === "in" ? "поступление" : "оплата"}</span> : null}</td>
+              <td className="num">{r.amount_rub != null && r.currency && r.currency !== "RUB" ? <span className="muted" style={{ fontSize: 11 }}>{fmtMoney(String(r.amount), String(r.currency))} → </span> : null}{v(r)}</td></tr>))}</tbody></table>)}
+        {t.excluded.length > 0 && <>
+          <h3 style={{ margin: "10px 0 4px" }}>Не учтено ({t.excluded.length})</h3>
+          <table style={{ fontSize: 13 }}><tbody>{t.excluded.map((r, n) => <tr key={n}><td>{String(r.title || r.type || "")}</td><td className="num">{v(r)}</td><td className="muted">{r.reason}</td></tr>)}</tbody></table></>}
+        {t.rates.length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Курсы: {t.rates.map((r) => `${r.currency} ${r.rate} (${r.source || "—"}, ${fmtDate(r.on)})`).join("; ")}</div>}
+        {t.series && t.series.length > 0 && <details style={{ marginTop: 6 }}><summary className="muted">Накопленное сальдо по дням ({t.series.length})</summary>
+          <table style={{ fontSize: 12 }}><tbody>{t.series.map((p) => <tr key={p.on}><td>{fmtDate(p.on)}</td><td className="num">{fmtMoney(p.net)}</td><td className="num"><b>{fmtMoney(p.balance)}</b></td></tr>)}</tbody></table></details>}
+      </>}
+    </div>
   );
 }
 
