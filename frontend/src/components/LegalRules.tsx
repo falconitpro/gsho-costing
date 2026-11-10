@@ -3,7 +3,7 @@ import { api } from "../api";
 
 // Юридический блок: правила анализа договоров (версия, группы проверок) и ИИ-провайдер (выбор — ЗГД; ключи только в backend/.env).
 
-type Ai = { provider: string; model: string; providers: Record<string, string>; default_models: Record<string, string>; configured: Record<string, boolean>; can_edit: boolean;
+type Ai = { provider: string; model: string; providers: Record<string, string>; default_models: Record<string, string>; configured: Record<string, boolean>; can_edit: boolean; yandex_key_source?: string;
   rules_version: string; rules_count: number; groups: Record<string, string>; env_hint: Record<string, string> };
 
 export default function LegalRules() {
@@ -24,6 +24,9 @@ export default function LegalRules() {
           {Object.entries(ai.providers).map(([k, t]) => <option key={k} value={k}>{t}{k !== "none" ? (ai.configured[k] ? " — настроен" : " — ключ не задан") : ""}</option>)}</select></label>
         {provider !== "none" && <label className="f" style={{ marginTop: 6 }}>Модель<input value={model} disabled={!ai.can_edit} placeholder={ai.default_models[provider] || ""} onChange={(e) => setModel(e.target.value)} />
           <span className="muted" style={{ fontSize: 11 }}>пусто — модель по умолчанию ({ai.default_models[provider]}); для YandexGPT можно указать yandexgpt-lite/latest или gpt://&lt;folder&gt;/…</span></label>}
+        {provider === "yandexgpt" && ai.yandex_key_source === "YANDEX_TRANSLATE_API_KEY" && <div className="alert warn" style={{ fontSize: 12 }}>YandexGPT работает с ключом переводчика
+          (<code>YANDEX_TRANSLATE_API_KEY</code>) — у него обычно нет доступа к модели (ошибка 403). Создайте API-ключ сервисного аккаунта с ролью <code>ai.languageModels.user</code> в каталоге
+          и задайте его в <code>LLM_YANDEX_API_KEY</code>. Кнопка «Проверить соединение» покажет ответ провайдера.</div>}
         {provider !== "none" && !ai.configured[provider] && <div className="alert warn" style={{ fontSize: 12 }}>Ключ не задан. На сервере в <code>backend/.env</code> нужны: {ai.env_hint[provider]}; затем <code>docker compose … up -d backend</code>.</div>}
         <div className="row" style={{ marginTop: 8, gap: 6, flexWrap: "wrap" }}>
           {ai.can_edit && <button className="btn" onClick={() => api.put<Ai>("/api/legal/ai", { provider, model }).then((r) => { setAi(r); setMsg("Сохранено"); }).catch((e) => setMsg((e as Error).message))}>Сохранить</button>}
