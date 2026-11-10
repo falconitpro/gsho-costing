@@ -217,8 +217,9 @@ def test_timer_is_19_moscow_daily_persistent():
     s = SERVICE.read_text()
     assert "EnvironmentFile=/etc/gsho/backup.env" in s and "--reason=daily" in s and "Type=oneshot" in s
     if shutil.which("systemd-analyze"):
-        p = subprocess.run(["systemd-analyze", "calendar", "*-*-* 19:00:00 Europe/Moscow"], capture_output=True, text=True)
-        assert p.returncode == 0 and "19:00:00 MSK" in p.stdout
+        # вывод зависит от пояса машины — считаем в UTC: 19:00 МСК = 16:00 UTC (летнего времени в Москве нет)
+        p = subprocess.run(["systemd-analyze", "calendar", "*-*-* 19:00:00 Europe/Moscow"], capture_output=True, text=True, env={**os.environ, "TZ": "UTC"})
+        assert p.returncode == 0 and "16:00:00 UTC" in p.stdout, p.stdout
         d = tempfile.mkdtemp()
         Path(d, "x.service").write_text("[Service]\nType=oneshot\nExecStart=/bin/true\n")
         Path(d, "x.timer").write_text(t.replace("Unit=gsho-backup.service", "Unit=x.service"))

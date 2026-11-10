@@ -65,3 +65,16 @@ def test_summary_money_and_workplace_use_finance_service():
         if wcd.get("money"):
             assert wcd["money"]["url"] == "/summary?kind=money"
         assert c.get("/api/summary/money", headers=H(MGR)).status_code == 403
+
+
+def test_summary_money_uses_moscow_date_like_workplace(monkeypatch):
+    """D-031: с 00:00 до 03:00 МСК дата по UTC ещё вчерашняя — сводка «Деньги» должна считать по Москве, как рабочее место."""
+    from datetime import datetime as real_dt, timezone as tz
+    from app.services.finance import cashview
+
+    class Frozen(real_dt):
+        @classmethod
+        def now(cls, tzinfo=None):
+            return real_dt(2026, 11, 10, 22, 30, tzinfo=tz.utc)   # 01:30 МСК 11.11
+    monkeypatch.setattr(cashview, "datetime", Frozen)
+    assert cashview.moscow_today().isoformat() == "2026-11-11"

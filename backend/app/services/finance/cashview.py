@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -70,8 +70,14 @@ def curve(db: Session, user, today: date, days: int) -> dict:
             "minimum": _f(rub["minimum"]) if rub else None, "minimum_on": rub["minimum_on"] if rub else None, "by_currency": by_ccy, "rub_consolidated": liq["rub"]}
 
 
+def moscow_today() -> date:
+    """«Сегодня» по Москве — как на рабочем месте (api/workplace.py). По UTC сервера с 00:00 до 03:00 МСК была бы вчерашняя дата,
+    и «Сводка → Деньги» расходилась бы с рабочим местом в просроченной дебиторке (docs/operations/15, D-031)."""
+    return (datetime.now(timezone.utc) + timedelta(hours=3)).date()
+
+
 def summary_money(db: Session, user, days: int = 90) -> dict:
-    today = date.today()
+    today = moscow_today()
     horizon = today + timedelta(days=days)
     rs = rows(db, user, today, horizon)
     receivables = [r for r in rs if r["direction"] == "in" and r["overdue_days"] > 0]

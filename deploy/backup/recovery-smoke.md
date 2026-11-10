@@ -5,7 +5,7 @@
 ## 1. Recovery-ВМ
 
 - Отдельная ВМ (Yandex Compute, Ubuntu 24.04, 2 vCPU / 4 ГБ, диск ≥ 3× размера копии), без доступа сотрудников; входящий трафик — только SSH владельца.
-- Установить: `restic` (≥ 0.16), `postgresql-16` (или `postgresql-client-16` + контейнер `postgres:16`), `python3`.
+- Установить: `restic` (≥ 0.16), `postgresql-16` (или `postgresql-client-16` + контейнер `postgres:16`), `python3`. Версия `pg_restore` — та же, что у сервера (16): клиент 17+ добавляет в восстановление `SET transaction_timeout`, и PostgreSQL 16 его отвергает; `gsho-restore-verify.sh` это проверяет.
 - Секреты: пароль restic и ключ **sa-gsho-restore** (только чтение). Ключа sa-gsho-backup здесь быть не должно.
 
 ```bash
