@@ -5,6 +5,8 @@ import { can, type Me } from "../types";
 import FinanceEconomy from "../components/FinanceEconomy";
 import FinanceExposure from "../components/FinanceExposure";
 import FinanceReconciliation from "../components/FinanceReconciliation";
+import FinanceDebt from "../components/FinanceDebt";
+import FinanceExportButton from "../components/FinanceExportButton";
 
 // Раздел «Финансы», вариант Б (docs/finance/05_UI_UX_в_стилистике_CRM.md). Первый вертикальный срез:
 // «Обзор», «Платёжный календарь», «Ликвидность и валюта» (счета, остатки, операции, разнесение), «Экономика сделок», «Обеспечение и неустойки», «Сверка и уточнения».
@@ -34,7 +36,7 @@ type Tx = { id: string; account_id: string | null; account_title: string; direct
   withdrawn: boolean; withdrawn_reason: string; origin_title: string };
 type List<T> = { total: number; items: T[]; totals?: Record<string, Record<string, string>>; can_edit?: boolean };
 
-const TABS = [["overview", "Обзор"], ["calendar", "Платёжный календарь"], ["liquidity", "Ликвидность и валюта"], ["economy", "Экономика сделок"], ["exposure", "Обеспечение и неустойки"], ["reconciliation", "Сверка и уточнения"]] as const;
+const TABS = [["overview", "Обзор"], ["calendar", "Платёжный календарь"], ["debt", "Дебиторка и кредиторка"], ["liquidity", "Ликвидность и валюта"], ["economy", "Экономика сделок"], ["exposure", "Обеспечение и неустойки"], ["reconciliation", "Сверка и уточнения"]] as const;
 type Tab = (typeof TABS)[number][0];
 const STATUS_BADGE: Record<string, string> = { paid: "ok", partially_paid: "info", overdue: "bad", due_soon: "warn", no_date: "", planned: "", superseded: "", excluded: "" };
 const TX_STATUS: Record<Tx["status"], [string, string]> = { draft: ["черновик", ""], needs_reconciliation: ["требует сверки", "warn"], posted: ["проведена", "ok"], reversed: ["сторнирована", "bad"] };
@@ -88,6 +90,7 @@ export default function FinancePage({ me }: { me: Me }) {
       <div className="tabs">{tabs.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => go({ tab: k })}>{t}</button>)}</div>
       {!meta && !err && <div className="muted">Загружаю…</div>}
       {meta && tab === "overview" && <Overview stamp={stamp} go={go} />}
+      {meta && tab === "debt" && <FinanceDebt sp={sp} go={go} stamp={stamp} />}
       {meta && tab === "calendar" && <Calendar meta={meta} sp={sp} go={go} stamp={stamp} onChanged={() => setStamp((x) => x + 1)} />}
       {meta && tab === "liquidity" && <Liquidity meta={meta} sp={sp} go={go} stamp={stamp} onChanged={() => setStamp((x) => x + 1)} />}
       {meta && tab === "economy" && <FinanceEconomy sp={sp} go={go} stamp={stamp} />}
@@ -256,6 +259,7 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
           {f.deal_id && <span className="badge info">отбор по сделке {data?.items[0]?.deal?.number ?? ""} <button className="btn ghost" style={{ padding: "0 6px", minHeight: 0, marginLeft: 4 }} onClick={() => go({ deal_id: null })} aria-label="Снять отбор по сделке">×</button></span>}
           {f.contract_id && <span className="badge info">отбор по договору {data?.items[0]?.contract?.number ?? ""} <button className="btn ghost" style={{ padding: "0 6px", minHeight: 0, marginLeft: 4 }} onClick={() => go({ contract_id: null })} aria-label="Снять отбор по договору">×</button></span>}
           {active > 0 && <button className="btn ghost" style={{ padding: "2px 10px", marginLeft: "auto" }} onClick={() => { setQ(""); go({ direction: null, status: null, currency: null, entity: null, q: null, contract_id: null, deal_id: null, from: null, to: null, reconciliation: null, inactive: null, source: null }); }}>Сбросить фильтры ({active})</button>}
+          <span style={{ marginLeft: active > 0 ? 0 : "auto" }}><FinanceExportButton kind="obligations" params={{ ...Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v === true ? "true" : v || null])) }} /></span>
         </div>
       </div>
       {err && <div className="alert error">{err}</div>}
@@ -817,6 +821,7 @@ function Forecast({ sp, go, stamp }: { sp: URLSearchParams; go: (p: Record<strin
         <div className="row">
           {curList.length > 1 && <div className="tabs" style={{ margin: 0, border: 0 }}>{curList.map((c) => <button key={c} className={c === curCode ? "active" : ""} onClick={() => go({ ccy: c })}>{c}</button>)}</div>}
           <select value={groupBy} onChange={(e) => go({ group: e.target.value })} aria-label="Шаг"><option value="week">по неделям</option><option value="day">по дням</option></select>
+          <FinanceExportButton kind="liquidity" params={{ group_by: groupBy, horizon_days: horizon }} />
           <select value={horizon} onChange={(e) => go({ horizon: e.target.value })} aria-label="Горизонт"><option value="30">30 дней</option><option value="90">90 дней</option><option value="180">180 дней</option><option value="365">год</option></select>
           <form onSubmit={(e) => { e.preventDefault(); go({ min: threshold.replace(",", ".") || null }); }} className="row" style={{ gap: 4 }}>
             <label className="muted" style={{ fontSize: 12 }}>порог разрыва</label><input value={threshold} onChange={(e) => setThreshold(e.target.value)} style={{ width: 110 }} inputMode="decimal" onBlur={() => go({ min: threshold.replace(",", ".") || null })} />

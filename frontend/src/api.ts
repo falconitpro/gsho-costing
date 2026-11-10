@@ -46,6 +46,22 @@ export const api = {
     Object.entries(extra || {}).forEach(([k, v]) => fd.append(k, v));
     return request<T>("POST", url, undefined, fd);
   },
+  /** Скачать файл (экспорт XLSX): те же заголовки, что у запросов API; ошибка сервера — ApiError с его текстом. */
+  download: async (url: string, fallbackName = "export.xlsx") => {
+    const headers: Record<string, string> = {};
+    const dev = getDevUser();
+    if (dev) headers["X-Dev-User"] = dev;
+    const res = await fetch(url, { headers, credentials: "include" });
+    if (!res.ok) { const d = await res.json().catch(() => null); throw new ApiError(res.status, d?.detail ?? d); }
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename\*=UTF-8''([^;]+)/.exec(cd);
+    const name = m ? decodeURIComponent(m[1]) : fallbackName;
+    const href = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = href; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 1000);
+    return name;
+  },
 };
 
 /** Обозначение оборудования: торговая марка + модель (SHILI FL-0.5(C)); марка не дублируется, если уже входит в модель. */

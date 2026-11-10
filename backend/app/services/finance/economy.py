@@ -94,6 +94,7 @@ def cash(db: Session, vis, deal_id: str, today: date) -> dict:
     by_ccy: dict[str, dict[str, Decimal]] = defaultdict(lambda: {"in": ZERO, "out": ZERO})
     rub_in, rub_out, provisional, no_rate = ZERO, ZERO, [], []
     confirmed_paid: dict[str, Decimal] = defaultdict(lambda: ZERO)
+    fact_rows: list[dict] = []   # трассировка для «Объяснить цифру»
     for a, tx in allocs:
         o = by_id[a.obligation_id]
         if a.status != "confirmed" or tx.status != "posted":
@@ -113,6 +114,10 @@ def cash(db: Session, vis, deal_id: str, today: date) -> dict:
                 continue
             rub = dec(a.amount_tx * r)
         fact_pts.append((on, rub if tx.direction == "in" else -rub))
+        fact_rows.append({"transaction_id": tx.id, "allocation_id": a.id, "obligation_id": o.id, "title": o.title, "on": on.isoformat(), "direction": tx.direction,
+                          "amount": s(a.amount_tx), "currency": tx.currency, "amount_rub": s(rub), "external_ref": tx.external_ref,
+                          "rate": "1" if tx.currency == "RUB" else (f"по сумме обязательства в RUB" if o.currency == "RUB" else f"ЦБ РФ на {on:%d.%m.%Y}"),
+                          "url": f"/finance?tab=liquidity&tx={tx.id}"})
         if tx.direction == "in":
             rub_in += rub
         else:
@@ -140,6 +145,7 @@ def cash(db: Session, vis, deal_id: str, today: date) -> dict:
     # текущий прогноз: факт + непогашенные остатки активных обязательств по их сроку (юридическому, иначе прогнозному)
     fc_pts = list(fact_pts)
     fc_missing = []
+    fc_rows: list[dict] = []
     for o in obs:
         if not o.is_active or o.nature == "penalty":
             continue
@@ -156,7 +162,9 @@ def cash(db: Session, vis, deal_id: str, today: date) -> dict:
             fc_missing.append(o.title)
             continue
         fc_pts.append((on, rub if o.direction == "in" else -rub))
-    return {"fact": {"status": fact_status, "in_rub": s(rub_in) if fact_pts else None, "out_rub": s(rub_out) if fact_pts else None,
+        fc_rows.append({"obligation_id": o.id, "title": o.title, "on": on.isoformat(), "direction": o.direction, "amount": s(rest), "currency": o.currency,
+                        "amount_rub": s(rub), "url": f"/finance?tab=calendar&open={o.id}"})
+    return {"fact_rows": fact_rows, "forecast_rows": fc_rows, "provisional_rows": provisional, "no_rate_rows": no_rate,"fact": {"status": fact_status, "in_rub": s(rub_in) if fact_pts else None, "out_rub": s(rub_out) if fact_pts else None,
                      "net_rub": s(rub_in - rub_out) if fact_pts else None, "by_currency": {c: {"in": s(v["in"]), "out": s(v["out"])} for c, v in sorted(by_ccy.items())},
                      "gap": fact_gap},
             "forecast_gap": _gap(fc_pts) if fc_pts else None, "forecast_missing": fc_missing[:20], "data_gaps": gaps, "obligations": obs,
@@ -273,3 +281,124 @@ def list_deals(db: Session, user, vis) -> list[dict]:
             continue
         out.append({"id": d.id, "number": d.number, "site": d.site or "", "status": d.status, "plan_fact_closed": bool(d.plan_fact_closed)})
     return out
+
+
+# ------------------------------------------------------------------ «Объяснить цифру» (01, раздел 11; 04 — /economy/explanation; D-144)
+
+METRICS = {"plan": "план (утверждённая версия)", "revenue_fact": "признанная выручка", "cost_fact": "признанные расходы", "forecast_item": "прогноз статьи",
+           "forecast_revenue": "прогноз выручки", "cash_in": "поступило (факт денег)", "cash_out": "оплачено (факт денег)", "cash_gap_fact": "кассовый разрыв — факт",
+           "cash_gap_forecast": "кассовый разрыв — текущий прогноз"}
+
+
+def _series(rows: list[dict]) -> list[dict]:
+    """Накопленное сальдо по дням — та же арифметика, что в `_gap`."""
+    by_day: dict[str, Decimal] = defaultdict(lambda: ZERO)
+    for r in rows:
+        v = Decimal(r["amount_rub"])
+        by_day[r["on"]] += v if r["direction"] == "in" else -v
+    bal, out = ZERO, []
+    for on in sorted(by_day):
+        bal += by_day[on]
+        out.append({"on": on, "net": s(by_day[on]), "balance": s(bal)})
+    return out
+
+
+def explain(db: Session, vis, deal, metric: str, scenario: str = "base", cost_item_code: Optional[str] = None, today: Optional[date] = None) -> dict:
+    """Детерминированная трассировка показателя: формула, значение, включённые и исключённые строки, курсы, версия, ссылки. Формулу от клиента не принимает."""
+    if metric not in METRICS:
+        raise HTTPException(422, "Показатель: " + ", ".join(METRICS))
+    if scenario not in SCEN:
+        raise HTTPException(422, "Сценарий: " + ", ".join(SCEN))
+    codes = {k for _, k, _ in COST_ITEMS}
+    if cost_item_code and cost_item_code not in codes:
+        raise HTTPException(422, "Неизвестная статья себестоимости")
+    today = today or date.today()
+    e = build(db, vis, deal, today)
+    title = next((t for _, k, t in COST_ITEMS if k == cost_item_code), "")
+    out = {"metric": metric, "metric_title": METRICS[metric] + (f" — {title}" if title else ""), "scenario": scenario, "cost_item_code": cost_item_code, "as_of": today.isoformat(),
+           "deal": e["deal"], "deal_version_id": e["deal_version_id"], "version_no": e["version_no"], "variant": e["variant"],
+           "filters": {"deal_id": deal.id, "scenario": scenario, "cost_item_code": cost_item_code}, "included": [], "excluded": [], "rates": [], "links": e["links"]}
+    if metric == "plan":
+        ver = db.get(DealVersion, deal.approved_version_id)
+        res = ver.calc_result["variants"][e["variant"]["id"]].get(scenario) or {}
+        val = (res.get("items_rub") or {}).get(cost_item_code) if cost_item_code else res.get("cost_total_rub")
+        out.update({"value": val, "formula": f"значение из утверждённой версии {ver.version_no}, сценарий «{scenario}», вариант «{e['variant']['name']}»; "
+                                             "расчётный движок не перезапускается, версия не меняется",
+                    "included": [{"type": "deal_version", "id": ver.id, "title": f"версия {ver.version_no} ({ver.reason})", "amount_rub": val, "url": e["links"]["versions"]}]})
+        return out
+    evs = db.scalars(select(FinanceRecognitionEvent).where(FinanceRecognitionEvent.deal_id == deal.id).order_by(FinanceRecognitionEvent.recognized_on)).all()
+
+    def ev_row(x: FinanceRecognitionEvent) -> dict:
+        return {"type": "recognition", "id": x.id, "on": x.recognized_on.isoformat(), "title": (f"{x.document_type} № {x.document_number}".strip() if x.document_number else BASIS_TITLE.get(x.basis_type, x.basis_type)),
+                "amount": s(x.amount), "currency": x.currency, "amount_rub": s(x.amount_rub), "rate": str(x.fx_rate) if x.fx_rate is not None else None,
+                "rate_source": x.fx_source, "source": x.source_type, "url": e["links"]["plan_fact"] if x.source_type == "planfact" else f"/finance?tab=economy&deal={deal.id}"}
+    if metric in ("revenue_fact", "cost_fact", "forecast_item"):
+        kind = "revenue" if metric == "revenue_fact" else "expense"
+        sel = [x for x in evs if x.kind == kind and (metric == "revenue_fact" or not cost_item_code or x.cost_item_code == cost_item_code)]
+        inc = [ev_row(x) for x in sel if x.status == "posted"]
+        exc = [{**ev_row(x), "reason": f"сторно: {x.reversal_reason}"} for x in sel if x.status != "posted"]
+        legacy = []
+        if kind == "expense":
+            linked = {x.source_id for x in evs if x.source_type == "planfact"}
+            for p in db.scalars(select(PlanFactEntry).where(PlanFactEntry.deal_id == deal.id, PlanFactEntry.kind == "cost_item")).all():
+                if p.id in linked or (cost_item_code and p.cost_item_code != cost_item_code):
+                    continue
+                rub = dec(p.amount) if (p.currency or "RUB") == "RUB" else dec(Decimal(str(p.amount)) * Decimal(str(p.fx_rate or 1)))
+                legacy.append({"type": "planfact", "id": p.id, "on": p.on.isoformat(), "title": "старый факт план/факта (ещё не перенесён в событие)", "amount": s(dec(p.amount)),
+                               "currency": p.currency, "amount_rub": s(rub), "rate": str(p.fx_rate) if p.fx_rate else None, "url": e["links"]["plan_fact"]})
+        total = sum((Decimal(r["amount_rub"]) for r in inc + legacy), ZERO)
+        if metric == "forecast_item":
+            item = next((i for i in e["items"] if i["code"] == cost_item_code), None)
+            if item is None:
+                raise HTTPException(422, "Для прогноза статьи укажите cost_item_code")
+            pb = Decimal(str(item["plan"].get("base") or 0))
+            out.update({"value": item["forecast"], "formula": f"прогноз = признанное ({s(total)}) + max(базовый план ({s(pb)}) − признанное, 0)",
+                        "included": inc + legacy, "excluded": exc})
+            return out
+        out.update({"value": s(total) if (inc or legacy) else None, "formula": "Σ amount_rub проведённых событий признания" + (" + старые факты план/факта без события (один раз)" if kind == "expense" else "")
+                    + "; поступления и оплаты денег признанием не являются", "included": inc + legacy, "excluded": exc,
+                    "rates": [{"currency": r["currency"], "rate": r["rate"], "source": r.get("rate_source", ""), "on": r["on"]} for r in inc if r["rate"]]})
+        return out
+    cv = cash(db, vis, deal.id, today)
+    if metric == "forecast_revenue":
+        inc, exc = [], []
+        for o in cv["obligations"]:
+            row = {"type": "obligation", "id": o.id, "title": o.title, "amount": s(o.amount), "currency": o.currency, "url": f"/finance?tab=calendar&open={o.id}"}
+            if o.direction != "in":
+                continue
+            if not o.is_active:
+                exc.append({**row, "reason": o.excluded_reason or "неактивно (замещено договором)"})
+            elif o.nature == "penalty":
+                exc.append({**row, "reason": "неустойка — не выручка"})
+            elif o.currency != "RUB" and _rub_rate(db, o.currency, today) is None:
+                exc.append({**row, "reason": f"нет курса {o.currency}"})
+            else:
+                r = Decimal("1") if o.currency == "RUB" else _rub_rate(db, o.currency, today)
+                inc.append({**row, "amount_rub": s(dec(o.amount * r)), "rate": str(r) if o.currency != "RUB" else None})
+                if o.currency != "RUB":
+                    out["rates"].append({"currency": o.currency, "rate": str(r), "source": "ЦБ РФ / ручной курс", "on": today.isoformat()})
+        out.update({"value": e["forecast"]["revenue"], "formula": "Σ активных обязательств клиента (договор, иначе прогноз расчёта) в RUB по курсу на дату отчёта; "
+                                                                 "если обязательств нет — цена базового плана", "included": inc, "excluded": exc})
+        return out
+    exc = [{"type": "allocation", "title": r["title"], "amount": r["amount"], "currency": r["currency"], "reason": "временное разнесение или операция не проведена"} for r in cv["provisional_rows"]] \
+        + [{"type": "transaction", "id": r["transaction_id"], "currency": r["currency"], "on": r["on"], "reason": "нет курса ЦБ на дату операции"} for r in cv["no_rate_rows"]]
+    if metric in ("cash_in", "cash_out"):
+        d = "in" if metric == "cash_in" else "out"
+        inc = [{"type": "transaction", "id": r["transaction_id"], **{k: r[k] for k in ("title", "on", "amount", "currency", "amount_rub", "rate", "external_ref", "url")}}
+               for r in cv["fact_rows"] if r["direction"] == d]
+        out.update({"value": cv["fact"]["in_rub" if d == "in" else "out_rub"], "formula": "Σ подтверждённых разнесений проведённых операций на обязательства сделки, в RUB",
+                    "included": inc, "excluded": exc})
+        return out
+    rows = cv["fact_rows"] if metric == "cash_gap_fact" else cv["fact_rows"] + cv["forecast_rows"]
+    gap = cv["fact"]["gap"] if metric == "cash_gap_fact" else cv["forecast_gap"]
+    out.update({"value": gap["amount_rub"] if gap else None,
+                "formula": "минимум накопленного сальдо (поступления − оплаты) по датам; " + ("только проведённые операции с подтверждённым разнесением" if metric == "cash_gap_fact"
+                                                                                         else "факт + непогашенные остатки активных обязательств по срокам (просроченное — сегодня)"),
+                "included": [{"type": "obligation" if "allocation_id" not in r else "transaction", "id": r.get("transaction_id") or r.get("obligation_id"),
+                              **{k: r.get(k) for k in ("title", "on", "direction", "amount", "currency", "amount_rub", "url")}} for r in rows],
+                "excluded": exc + ([{"type": "obligation", "title": t, "reason": "нет даты или курса"} for t in cv["forecast_missing"]] if metric == "cash_gap_forecast" else []),
+                "series": _series(rows), "status": cv["fact"]["status"] if metric == "cash_gap_fact" else "forecast"})
+    return out
+
+
+BASIS_TITLE = {"primary_document": "первичный документ", "business_event": "хозяйственное событие", "legacy_business_event": "старый факт план/факта (без документа)"}
