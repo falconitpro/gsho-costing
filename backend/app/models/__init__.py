@@ -14,7 +14,7 @@ from datetime import date, datetime
 from typing import Any, Optional
 
 from sqlalchemy import (
-    JSON, Boolean, Date, DateTime, Enum as SAEnum, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func,
+    JSON, BigInteger, Boolean, CheckConstraint, Date, DateTime, Enum as SAEnum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -859,6 +859,38 @@ class ImportMapping(TimestampMixin, Base):
     header_sig: Mapped[list] = mapped_column(JSONType, default=list)   # нормализованные заголовки — по ним узнаём «тот же формат»
     mapping: Mapped[dict] = mapped_column(JSONType, default=dict)      # {header_row, first_row, columns}
     updated_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+
+class BackupRun(Base):
+    """Запуск резервного копирования на хосте (docs/operations/02 §4, D-024…D-027).
+
+    Источник — host-side `last-run.json` и `runs/*.json` systemd-контура restic → Yandex Object Storage; таблица — история для UI.
+    Только безопасные поля: ни ключей, ни пароля restic, ни путей с секретами, ни вывода команд."""
+    __tablename__ = "backup_runs"
+    __table_args__ = (Index("ix_backup_runs_status_started", "status", "started_at"),
+                      CheckConstraint("reason IN ('daily', 'pre_deploy', 'manual', 'restore_check')", name="ck_backup_runs_reason"),
+                      CheckConstraint("status IN ('running', 'success', 'failed')", name="ck_backup_runs_status"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    run_key: Mapped[str] = mapped_column(String(36), unique=True)            # UUID, сгенерированный скриптом на хосте
+    reason: Mapped[str] = mapped_column(String(16))                          # daily | pre_deploy | manual | restore_check
+    status: Mapped[str] = mapped_column(String(16))                          # running | success | failed
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    snapshot_id: Mapped[Optional[str]] = mapped_column(String(16))           # короткий ID снимка restic
+    git_commit: Mapped[Optional[str]] = mapped_column(String(40))
+    schema_revision: Mapped[Optional[str]] = mapped_column(String(64))       # последний SQL change set в каталоге проекта
+    storage_provider: Mapped[str] = mapped_column(String(16), default="unknown")   # local | s3 | unknown
+    database_bytes: Mapped[Optional[int]] = mapped_column(BigInteger)
+    files_bytes: Mapped[Optional[int]] = mapped_column(BigInteger)
+    files_count: Mapped[Optional[int]] = mapped_column(Integer)
+    manifest_sha256: Mapped[Optional[str]] = mapped_column(String(64))
+    check_status: Mapped[str] = mapped_column(String(16), default="")       # ok | failed | skipped
+    checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    retention_status: Mapped[str] = mapped_column(String(16), default="")   # ok | failed | skipped — ошибка prune не скрывается (03 §11)
+    error_code: Mapped[str] = mapped_column(String(32), default="")
+    error_summary: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class IntegrationLog(Base):

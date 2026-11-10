@@ -23,6 +23,8 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -r backend/requirements.txt
+      - name: restic, shellcheck, pg_dump 16 — для тестов резервного копирования (docs/operations/03)
+        run: sudo apt-get update -q && sudo apt-get install -y -q restic shellcheck postgresql-client
       - name: pytest
         run: |
           set -o pipefail

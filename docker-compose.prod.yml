@@ -20,6 +20,10 @@ services:
       # backend доступен только из сети compose (наружу смотрит Caddy) — адрес клиента берём из X-Forwarded-For, который выставляет Caddy;
       # иначе все сотрудники для приложения «на одном адресе» и 30 ошибок входа у кого угодно блокируют вход всем
       FORWARDED_ALLOW_IPS: "*"
+      # статус резервного копирования (deploy/backup): только безопасные поля, каталог хоста смонтирован только для чтения
+      BACKUP_STATUS_DIR: /backup-status
+    volumes:
+      - ${BACKUP_STATUS_HOST_DIR:-/var/lib/gsho-backup/status}:/backup-status:ro
     restart: unless-stopped
   db:
     restart: unless-stopped

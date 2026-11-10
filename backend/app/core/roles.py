@@ -97,6 +97,8 @@ FIELD_GROUPS: dict[str, tuple[str, set[str]]] = {
     "execution_close": ("Закрытие сделки после исполнения", set()),
     "settings": ("Ставки и нормативы", set()),
     "access_admin": ("Уровни доступа", set()),
+    # эксплуатация (docs/operations/09 §2): статус и история резервных копий без секретов; не даёт восстановления и настройки
+    "backup_status": ("Резервные копии: статус и история", set()),
     "legal_docs": ("Документы клиента и юридические (тендерная документация, договор, протокол разногласий)", set()),
     "legal_profiles": ("Юридические профили контрагентов и БЕРГ-ХАУС, банковские реквизиты", set()),
 }
@@ -117,8 +119,9 @@ DEFAULT_MATRIX: dict[Role, dict[str, int]] = {
     Role.GD: {"cost": READ, "price": EDIT, "logistics_input": EDIT, "service_input": EDIT, "factory_price_history": EDIT,
               "client_price_history": READ, "finance_analytics": READ, "finance_section": READ, "payment_terms": EDIT, "local_options": EDIT, "tech_params": EDIT, "images": EDIT,
               "kp_images_select": EDIT, "catalog": EDIT, "glossary": EDIT, "factory_offers": EDIT, "cost_files": READ, "intragroup_chain": EDIT,
-              "execution": EDIT, "execution_payments": EDIT, "execution_close": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_docs": EDIT, "legal_profiles": EDIT},
-    Role.ADMIN: {"tech_params": READ, "images": READ, "catalog": READ, "glossary": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_profiles": EDIT},
+              "execution": EDIT, "execution_payments": EDIT, "execution_close": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_docs": EDIT, "legal_profiles": EDIT, "backup_status": READ},
+    Role.ADMIN: {"tech_params": READ, "images": READ, "catalog": READ, "glossary": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_profiles": EDIT,
+                 "backup_status": READ},
     Role.OBSERVER: {"price": READ, "payment_terms": READ, "tech_params": READ, "images": READ, "execution": READ},
     Role.PURCHASING: {"local_options": EDIT, "tech_params": READ, "images": READ, "execution": READ, "legal_profiles": READ},
     Role.LAWYER: {"price": READ, "payment_terms": READ, "tech_params": READ, "images": READ, "execution": READ, "legal_docs": EDIT, "legal_profiles": EDIT},

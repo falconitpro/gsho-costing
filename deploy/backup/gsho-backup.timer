@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily encrypted GSHO CRM backup to Yandex Object Storage
+
+[Timer]
+OnCalendar=*-*-* 19:00:00 Europe/Moscow
+Persistent=true
+RandomizedDelaySec=0
+AccuracySec=1min
+Unit=gsho-backup.service
+
+[Install]
+WantedBy=timers.target
