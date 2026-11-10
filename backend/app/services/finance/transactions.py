@@ -301,7 +301,8 @@ def alloc_dto(al: FinanceAllocation, tx: Optional[FinanceTransaction] = None, ob
     return out
 
 
-LEGACY_TITLES = {"execution_legacy": "старая отметка: этап исполнения", "contract_legacy": "старая отметка: договор", "planfact_legacy": "старая отметка: план/факт"}
+LEGACY_TITLES = {"execution_legacy": "старая отметка: этап исполнения", "contract_legacy": "старая отметка: договор", "planfact_legacy": "старая отметка: план/факт",
+                 "purchase_order_legacy": "старая отметка: заказ поставщику", "batch_legacy": "старая отметка: партия"}
 
 
 def tx_dto(tx: FinanceTransaction, used: Decimal, account_title: str = "") -> dict:

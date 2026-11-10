@@ -26,7 +26,8 @@ from .money import ZERO, dec, s
 from .obligations import paid_map
 
 MSK = ZoneInfo("Europe/Moscow")
-ORIGINS = {"execution_legacy": "этап исполнения", "contract_legacy": "отметка в договоре", "planfact_legacy": "план/факт"}
+ORIGINS = {"execution_legacy": "этап исполнения", "contract_legacy": "отметка в договоре", "planfact_legacy": "план/факт",
+           "purchase_order_legacy": "отметка в заказе поставщику", "batch_legacy": "отметка в партии"}
 
 
 def _key(origin_type: str, origin_id: str) -> str:
@@ -42,15 +43,15 @@ def _booked(on: date) -> datetime:
     return datetime.combine(on, time(12, 0), tzinfo=MSK).astimezone(timezone.utc)
 
 
-def _unique_obligation(db: Session, *, deal_id: Optional[str], contract_id: Optional[str], line_key: Optional[str],
+def _unique_obligation(db: Session, *, deal_id: Optional[str], source: Optional[tuple],
                        direction: str, currency: str, amount: Decimal) -> Optional[FinanceObligation]:
     """Однозначное соответствие: явная строка договора, либо единственная активная строка сделки того же направления
     и валюты с точно такой же суммой и достаточным остатком. Иначе — None (ручная сверка, D-118)."""
     stmt = select(FinanceObligation).where(FinanceObligation.is_active.is_(True), FinanceObligation.sync_status == "ok",
                                            FinanceObligation.direction == direction, FinanceObligation.currency == currency)
-    if contract_id and line_key:
-        o = db.scalar(stmt.where(FinanceObligation.source_type == "contract", FinanceObligation.source_id == contract_id,
-                                 FinanceObligation.source_line_key == line_key))
+    if source and source[2]:
+        o = db.scalar(stmt.where(FinanceObligation.source_type == source[0], FinanceObligation.source_id == source[1],
+                                 FinanceObligation.source_line_key == source[2]))
         cands = [o] if o else []
     elif deal_id:
         cands = [o for o in db.scalars(stmt.where(FinanceObligation.deal_id == deal_id)).all() if o.amount == amount]
@@ -75,8 +76,9 @@ def _reverse_allocs(db: Session, user_id: Optional[str], tx: FinanceTransaction,
 
 
 def record(db: Session, user_id: Optional[str], *, origin_type: str, origin_id: str, deal_id: Optional[str], direction: str,
-           amount, currency: str, on: Optional[date], note: str = "", contract_id: Optional[str] = None, line_key: Optional[str] = None,
+           amount, currency: str, on: Optional[date], note: str = "", source: Optional[tuple] = None,
            counterparty_name: str = "") -> dict:
+    """source — явная строка источника (тип, id, ключ строки): тогда авто-разнесение идёт только на неё."""
     """Записать/обновить/снять старую отметку оплаты. Возвращает статус для ответа старого endpoint."""
     tx = claim_for(db, origin_type, origin_id)
     amt = dec(amount) if amount not in (None, "") else None
@@ -113,7 +115,7 @@ def record(db: Session, user_id: Optional[str], *, origin_type: str, origin_id: 
             if a is None or a.currency != currency:   # счёт, выбранный ФД, больше не подходит по валюте
                 tx.account_id = None
         audit(db, user_id, deal_id, "finance_transaction", tx.id, "legacy_update", before=before, after={"amount": s(amt), "currency": currency, "on": on})
-    o = _unique_obligation(db, deal_id=deal_id, contract_id=contract_id, line_key=line_key, direction=direction, currency=currency, amount=amt)
+    o = _unique_obligation(db, deal_id=deal_id, source=source, direction=direction, currency=currency, amount=amt)
     if o is not None:
         n = db.query(FinanceAllocation).filter(FinanceAllocation.transaction_id == tx.id).count()
         al = FinanceAllocation(transaction_id=tx.id, obligation_id=o.id, amount_tx=amt, amount_obligation=amt, status="provisional", allocated_on=date.today(),
@@ -152,7 +154,7 @@ def from_contract_pay(db: Session, user_id: Optional[str], c: Contract, key: str
     on = None if data.get("clear") else (date.fromisoformat(data["paid_on"]) if data.get("paid_on") else None)
     from ..legal_contracts import cp_display
     return record(db, user_id, origin_type="contract_legacy", origin_id=f"{c.id}:pay:{key}", deal_id=c.deal_id, direction=DIRECTION[c.direction],
-                  amount=amount, currency=c.currency, on=on, note=data.get("comment") or "", contract_id=c.id, line_key=line_key,
+                  amount=amount, currency=c.currency, on=on, note=data.get("comment") or "", source=("contract", c.id, line_key),
                   counterparty_name=cp_display(db, c))
 
 

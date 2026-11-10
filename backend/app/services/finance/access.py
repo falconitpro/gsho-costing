@@ -65,4 +65,6 @@ class Visibility:
     def obligation(self, o: FinanceObligation) -> bool:
         if o.direction == "out" and o.counterparty_kind == "factory" and not self.user.can("payment_terms", READ):
             return False
+        if o.source_type == "purchase_order" and not self.user.can("factory_price_history", READ):
+            return False   # график оплат заказа поставщику видят те, кому открыты цены завода (как в «Снабжении»)
         return self.deal(o.deal_id) and self.contract(o.contract_id)

@@ -451,7 +451,7 @@ def confirm(pid: str, body: ConfirmIn, db: Session = Depends(get_db), user: Curr
     po.total = round(sum(l.price * l.qty for l in po.lines if l.status != "cancelled"), 2)
     po.confirmed_at = po.confirmed_at or datetime.now(timezone.utc)
     po.status = po_status("confirmed" if po.status in ("draft", "sent") else po.status, [l.status for l in po.lines])
-    _sync(db, po)
+    _sync(db, po, user.id)
     audit(db, user.id, None, "purchase_order", po.id, "confirm", None, body.model_dump(mode="json"))
     db.commit()
     return _payload(db, po, user)
@@ -465,7 +465,7 @@ class LinesStatusIn(BaseModel):
     comment: str = ""
 
 
-def _sync(db: Session, po: PurchaseOrder) -> None:
+def _sync(db: Session, po: PurchaseOrder, user_id: Optional[str] = None) -> None:
     """Статусы строк → внутригрупповые строки и строки заявок клиентов; статус заказа — по строкам."""
     for pl in po.lines:
         for c in db.scalars(select(PoLine).where(PoLine.parent_line_id == pl.id)).all():
@@ -479,6 +479,14 @@ def _sync(db: Session, po: PurchaseOrder) -> None:
     for c in db.scalars(select(PurchaseOrder).where(PurchaseOrder.parent_po_id == po.id)).all():
         c.status = po.status if po.status in ("closed", "cancelled", "in_progress") else c.status
         c.total = round(sum(l.price * l.qty for l in c.lines if l.status != "cancelled"), 2)
+    _finance_sync(db, po, user_id)
+
+
+def _finance_sync(db: Session, po: PurchaseOrder, user_id: Optional[str] = None) -> None:
+    """Раздел «Финансы»: график оплат заказа — строки обязательств в той же транзакции (D-121)."""
+    from ..services.finance.sources import sync_purchase_order
+    db.flush()
+    sync_purchase_order(db, po, user_id)
 
 
 @router.post("/{pid}/lines/status")
@@ -509,7 +517,7 @@ def lines_status(pid: str, body: LinesStatusIn, db: Session = Depends(get_db), u
             _set_eta(db, pl, body.eta, user, body.comment)
     if body.actual_date and body.status == "shipped":
         po.actual_ship_date = body.actual_date
-    _sync(db, po)
+    _sync(db, po, user.id)
     audit(db, user.id, None, "purchase_order", po.id, "lines_status", None, body.model_dump(mode="json"))
     db.commit()
     return _payload(db, po, user)
@@ -525,10 +533,11 @@ def cancel(pid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(
         raise HTTPException(409, "Часть строк уже отгружена поставщиком — отменяйте строки по отдельности")
     for pl in po.lines:
         pl.status = "cancelled"
-    _sync(db, po)
+    _sync(db, po, user.id)
     po.status = "cancelled"
     for c in db.scalars(select(PurchaseOrder).where(PurchaseOrder.parent_po_id == po.id)).all():
         c.status = "cancelled"
+    _finance_sync(db, po, user.id)
     audit(db, user.id, None, "purchase_order", po.id, "cancel", None, None)
     db.commit()
     return _payload(db, po, user)
