@@ -182,3 +182,23 @@ class FinanceAllocation(Base):
     reversed_by: Mapped[Optional[str]] = mapped_column(String(36))
     reversed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     reverse_reason: Mapped[str] = mapped_column(Text, default="")
+
+
+class FinanceImportBatch(_Stamp, Base):
+    """Пакет импорта банковской выписки: preview ничего не проводит; confirm создаёт проведённые операции, повтор не дублирует."""
+    __tablename__ = "finance_import_batches"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(ForeignKey("finance_accounts.id"), index=True)
+    file_name: Mapped[str] = mapped_column(String(255), default="")
+    file_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    mapping: Mapped[dict] = mapped_column(JSONType, default=dict)
+    rows: Mapped[list] = mapped_column(JSONType, default=list)        # разобранные строки: {n, status, booked_on, direction, amount, ..., errors}
+    rows_total: Mapped[int] = mapped_column(default=0)
+    rows_valid: Mapped[int] = mapped_column(default=0)
+    rows_duplicates: Mapped[int] = mapped_column(default=0)
+    rows_errors: Mapped[int] = mapped_column(default=0)
+    status: Mapped[str] = mapped_column(String(16), default="preview")   # preview | confirmed | cancelled
+    result: Mapped[dict] = mapped_column(JSONType, default=dict)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), unique=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

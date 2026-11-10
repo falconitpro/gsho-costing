@@ -9,7 +9,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +19,7 @@ from ..core.auth import CurrentUser, get_current_user
 from ..db import get_db
 from ..models import AuditLog, FinanceAccount, FinanceAllocation, FinanceBalanceSnapshot, FinanceObligation, FinanceTransaction, LegalEntity
 from ..services.finance import access, accounts as acc, obligations as obl, overview as ov, transactions as txs
+from ..services.finance import imports as imp_fields
 from ..services.finance.money import ccy, dec, s
 
 router = APIRouter(prefix="/api/finance", tags=["finance"])
@@ -69,7 +70,7 @@ def meta(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_
     ents = [{"id": e.id, "code": e.code, "name": e.name, "currency": e.currency} for e in db.scalars(select(LegalEntity).order_by(LegalEntity.name)).all()]
     currencies = sorted({c for (c,) in db.execute(select(FinanceObligation.currency).distinct()).all()} | {a.currency for a in db.scalars(select(FinanceAccount)).all()})
     return {"can_edit": access.can_edit(user), "entities": ents, "currencies": currencies, "today": date.today().isoformat(),
-            "tabs": ["overview", "calendar", "liquidity"], "statuses": obl.STATUS_TITLES}
+            "tabs": ["overview", "calendar", "liquidity"], "import_fields": imp_fields.FIELD_TITLES, "statuses": obl.STATUS_TITLES}
 
 
 @router.get("/overview")
@@ -158,6 +159,73 @@ def sync(dry_run: bool = True, db: Session = Depends(get_db), user: CurrentUser 
     else:
         db.rollback()
     return rep
+
+
+# ------------------------------------------------------------------ ликвидность
+
+@router.get("/liquidity")
+def liquidity(as_of: Optional[date] = None, horizon_days: int = Query(90, ge=7, le=730), group_by: str = Query("week", pattern="^(day|week)$"),
+              currency: Optional[str] = None, legal_entity_id: Optional[str] = None, account_id: Optional[str] = None, threshold: Decimal = Decimal(0),
+              db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Прогноз остатков по валютам от подтверждённого остатка; неизвестный остаток — null, не ноль."""
+    access.require_read(user)
+    from ..services.finance import liquidity as liq
+    return liq.build(db, access.Visibility(db, user), as_of or date.today(), horizon_days, group_by, currency, legal_entity_id, account_id, _money(threshold, "Порог"))
+
+
+@router.get("/liquidity/explanation")
+def liquidity_explanation(currency: str, on: date, as_of: Optional[date] = None, group_by: str = Query("week", pattern="^(day|week)$"),
+                          horizon_days: int = Query(90, ge=7, le=730), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    access.require_read(user)
+    from ..services.finance import liquidity as liq
+    return liq.explain_point(db, access.Visibility(db, user), as_of or date.today(), _ccy(currency), on, group_by, horizon_days)
+
+
+# ------------------------------------------------------------------ импорт выписки
+
+@router.post("/imports/preview", status_code=201)
+async def import_preview(account_id: str = Form(...), file: UploadFile = File(...), mapping: str = Form(""),
+                         db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Разбор CSV/XLSX: строки, ошибки, дубли, итоги. Ничего не проводит."""
+    access.require_edit(user)
+    import json
+    from ..services.finance import imports as imp
+    try:
+        m = json.loads(mapping) if mapping.strip() else None
+    except ValueError:
+        raise HTTPException(422, "Сопоставление колонок — JSON")
+    b = imp.preview(db, user, _account(db, account_id), file.filename or "", await file.read(), m)
+    _commit(db)
+    return imp.dto(b)
+
+
+class ImportConfirmIn(BaseModel):
+    rows: Optional[list[int]] = None   # номера строк файла; пусто — все валидные
+
+
+def _import(db: Session, iid: str):
+    from ..models import FinanceImportBatch
+    b = db.get(FinanceImportBatch, iid)
+    if b is None:
+        raise HTTPException(404, "Импорт не найден")
+    return b
+
+
+@router.get("/imports/{iid}")
+def import_get(iid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    access.require_edit(user)
+    from ..services.finance import imports as imp
+    return imp.dto(_import(db, iid))
+
+
+@router.post("/imports/{iid}/confirm")
+def import_confirm(iid: str, body: ImportConfirmIn, idem: Optional[str] = Header(None, alias="Idempotency-Key"),
+                   db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    access.require_edit(user)
+    from ..services.finance import imports as imp
+    b = imp.confirm(db, user, _import(db, iid), body.rows, _key(idem))
+    _commit(db)
+    return imp.dto(b)
 
 
 # ------------------------------------------------------------------ счета и остатки
