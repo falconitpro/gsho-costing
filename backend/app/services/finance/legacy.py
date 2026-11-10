@@ -175,3 +175,52 @@ def stage_status(db: Session, stage_ids: list[str]) -> dict[str, dict]:
         st = "withdrawn" if tx.withdrawn_at else tx.status
         out[keys[tx.idempotency_key]] = {"status": st, "transaction_id": tx.id, "url": f"/finance?tab=liquidity&tx={tx.id}"}
     return out
+
+
+# ------------------------------------------------------------------ инвентаризация отметок, сделанных до включения «Финансов» (02, раздел 10; D-147)
+
+def inventory(db: Session, user_id: Optional[str]) -> dict:
+    """Старые отметки оплаты без записи в «Финансах» → по одной записи «требует сверки» (+ временное разнесение только при однозначном соответствии).
+    Уже существующие записи не трогаются — в том числе отозванные ФД как дубль и проведённые. Повторный запуск — 0 новых."""
+    from ...models import Deal, ExecutionStage, PlanFactEntry
+    from ..execution_service import STAGE_DEFS
+    from .obligations import DIRECTION
+    stats = {"contract_marks": 0, "stage_marks": 0, "planfact_marks": 0, "created": 0, "linked": 0, "existing": 0, "skipped": []}
+
+    def run(origin_type: str, origin_id: str, fn) -> None:
+        if claim_for(db, origin_type, origin_id) is not None:
+            stats["existing"] += 1
+            return
+        r = fn()
+        if r.get("status") == "needs_reconciliation":
+            stats["created"] += 1
+            if r.get("linked_obligation_id"):
+                stats["linked"] += 1
+
+    for c in db.scalars(select(Contract).where(Contract.status.in_(("active", "closed", "terminated")))).all():
+        if c.direction not in DIRECTION:
+            continue
+        for key, m in ((c.facts or {}).get("pay") or {}).items():
+            if not (m or {}).get("paid_on"):
+                continue
+            stats["contract_marks"] += 1
+            run("contract_legacy", f"{c.id}:pay:{key}", lambda c=c, key=key, m=m: from_contract_pay(db, user_id, c, str(key), dict(m)))
+    for st in db.scalars(select(ExecutionStage).where(ExecutionStage.actual_on.is_not(None))).all():
+        kind = (STAGE_DEFS.get(st.code) or {}).get("kind")
+        if kind not in ("payment_in", "payment_out"):
+            continue
+        if not st.actual_amount:
+            stats["skipped"].append({"stage_id": st.id, "reason": "факт этапа без суммы"})
+            continue
+        deal = db.get(Deal, st.deal_id)
+        if deal is None:
+            continue
+        stats["stage_marks"] += 1
+        run("execution_legacy", f"stage:{st.id}", lambda deal=deal, st=st, kind=kind: from_stage(db, user_id, deal, st, kind))
+    for e in db.scalars(select(PlanFactEntry).where(PlanFactEntry.kind.in_(("payment_in", "payment_out")))).all():
+        if (e.ref or "").startswith("stage:"):
+            continue   # платёж этапа учтён записью этапа (FIN-PNL-005)
+        stats["planfact_marks"] += 1
+        run("planfact_legacy", e.id, lambda e=e: from_planfact(db, user_id, e))
+    stats["skipped"] = stats["skipped"][:50]
+    return stats
