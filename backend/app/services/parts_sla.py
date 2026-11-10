@@ -49,6 +49,8 @@ def check(db, today: Optional[date] = None) -> int:
             req.sla_notified = [*(req.sla_notified or []), "kp"]
 
     for rfq in db.scalars(select(SupplierRfq).where(SupplierRfq.status.in_(("sent", "partial")))).all():
+        if rfq.end_supplier_id and not rfq.mirror_of_id:   # предложение компании группы — ждём ответ её поставщика (напоминание по нему)
+            continue
         if "overdue" in (rfq.sla_notified or []) or not rfq.due_date or today <= rfq.due_date:
             continue
         left = sum(1 for l in rfq.lines if not l.availability)

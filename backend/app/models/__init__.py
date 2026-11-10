@@ -1397,6 +1397,13 @@ class SupplierRfq(TimestampMixin, Base):
     send_log: Mapped[list[dict]] = mapped_column(JSONType, default=list)  # [{at, via, to, ok, error}]
     comment: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    # зеркальный запрос через компанию группы (D-156): U — предложение компании группы (supplier_id = она, end_supplier_id = X),
+    # L — её запрос поставщику X (mirror_of_id = U); строки U считаются из ответа X по маршруту и наценкам группы
+    mirror_of_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    end_supplier_id: Mapped[Optional[str]] = mapped_column(String(36))
+    route_id: Mapped[Optional[str]] = mapped_column(String(36))
+    mirror_state: Mapped[str] = mapped_column(String(24), default="")    # waiting | ok | no_policy | error | changed_after_select
+    chain: Mapped[dict] = mapped_column(JSONType, default=dict)          # политика, курсы, маршрут на момент расчёта
     lines: Mapped[list["SupplierRfqLine"]] = relationship(cascade="all, delete-orphan", order_by="SupplierRfqLine.no")
 
 
@@ -1423,6 +1430,7 @@ class SupplierRfqLine(Base):
     analog_number: Mapped[str] = mapped_column(String(128), default="")
     comment: Mapped[str] = mapped_column(Text, default="")
     answered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    chain: Mapped[dict] = mapped_column(JSONType, default=dict)          # строка U: цена поставщика, ступени, маржа группы, ожидающее изменение
 
 
 class PurchaseOrder(TimestampMixin, Base):

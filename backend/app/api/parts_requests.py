@@ -65,6 +65,8 @@ def _payload(db: Session, req: PartRequest, user: CurrentUser) -> dict:
     d["client_name"] = client.name if client else ""
     d["manager_name"] = mgr.display_name if mgr else ""
     lines = [line_payload(l, db.get(Part, l.part_id) if l.part_id else None) for l in req.lines]
+    from ..services import mirror_parts
+    mirror_parts.mask_lines(db, lines, user)
     d["lines"] = lines
     active = [l for l in lines if l["status"] not in ("cancelled", "unavailable")]
     d["summary"] = kp_summary(active, settings_service.get(db, "parts_min_margin_kp_rub"))
@@ -246,6 +248,9 @@ def patch_line(rid: str, line_id: str, body: LinePatch, db: Session = Depends(ge
         if data["source"] not in ("stock", "order"):
             raise HTTPException(422, "Источник: со склада или под заказ")
         line.source = data["source"]
+    if "supplier_id" in data:
+        from ..services import mirror_parts
+        data = mirror_parts.on_supplier_change(db, line, data)
     for k in ("route_id", "supplier_id", "lead_days", "comment"):
         if k in data:
             setattr(line, k, data[k])
