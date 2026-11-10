@@ -59,7 +59,8 @@ def _paid_in_balance(db: Session, ids: list[str]) -> dict[str, Decimal]:
 
 
 def build(db: Session, vis, as_of: date, horizon_days: int = 90, group_by: str = "week", currency: Optional[str] = None,
-          legal_entity_id: Optional[str] = None, account_id: Optional[str] = None, threshold: Decimal = ZERO) -> dict:
+          legal_entity_id: Optional[str] = None, account_id: Optional[str] = None, threshold: Decimal = ZERO,
+          exclude_intragroup: bool = False) -> dict:
     horizon = as_of + timedelta(days=horizon_days)
     now = datetime.now(timezone.utc)
     at = min(now, datetime.combine(as_of, time.max, tzinfo=timezone.utc))
@@ -86,6 +87,8 @@ def build(db: Session, vis, as_of: date, horizon_days: int = 90, group_by: str =
     if legal_entity_id:
         stmt = stmt.where(FinanceObligation.legal_entity_id == legal_entity_id)
     obs = [o for o in db.scalars(stmt).all() if vis.obligation(o)]
+    intra = _intragroup_filter(db, obs, exclude_intragroup and not legal_entity_id and not account_id)
+    obs = intra["kept"]
     paid = _paid_in_balance(db, [o.id for o in obs])
     flows: dict[str, dict[date, dict]] = defaultdict(lambda: defaultdict(lambda: {"in": ZERO, "out": ZERO, "items": []}))
     undated: dict[str, dict] = defaultdict(lambda: {"in": ZERO, "out": ZERO, "count": 0})
@@ -201,19 +204,39 @@ def build(db: Session, vis, as_of: date, horizon_days: int = 90, group_by: str =
            "points": [{"on": k, "balance": s(v)} for k, v in sorted(cons_points.items())] if included else [],
            "note": "RUB-эквивалент — по курсу на дату отчёта; для будущих дат это оценка, не прогноз курса."}
     return {"as_of": as_of.isoformat(), "horizon_days": horizon_days, "group_by": group_by, "currencies": out_cur, "rub": rub,
+            "intragroup_excluded": intra["excluded"],
             "formula": "остаток на конец периода = подтверждённый входящий остаток + прогнозные поступления − прогнозные списания; "
                        "просроченное и ожидаемое сегодня — в первой точке; без даты, «требует сверки» и неразнесённое — вне кривой"}
 
 
-def explain_point(db: Session, vis, as_of: date, currency: str, on: date, group_by: str = "week", horizon_days: int = 90) -> dict:
+def _intragroup_filter(db: Session, obs: list, exclude: bool) -> dict:
+    """Сводная ликвидность группы без внутригрупповых обязательств (D-163): платёж одной компании группы другой
+    не уходит из группы. Применяется только к сводному прогнозу (без отбора по компании или счёту)."""
+    if not exclude:
+        return {"kept": obs, "excluded": None}
+    from .intragroup import group_map, is_intragroup
+    gm = group_map(db)
+    kept, ex = [], defaultdict(lambda: {"in": ZERO, "out": ZERO, "count": 0})
+    for o in obs:
+        if is_intragroup(gm, o):
+            e = ex[o.currency]
+            e[o.direction] += o.amount
+            e["count"] += 1
+        else:
+            kept.append(o)
+    return {"kept": kept, "excluded": {c: {k: (s(v) if k != "count" else v) for k, v in x.items()} for c, x in ex.items()}}
+
+
+def explain_point(db: Session, vis, as_of: date, currency: str, on: date, group_by: str = "week", horizon_days: int = 90,
+                  exclude_intragroup: bool = False) -> dict:
     """Состав одной точки кривой: какие строки обязательств вошли и откуда входящий остаток."""
-    data = build(db, vis, as_of, horizon_days, group_by, currency)
+    data = build(db, vis, as_of, horizon_days, group_by, currency, exclude_intragroup=exclude_intragroup)
     cur = next((c for c in data["currencies"] if c["currency"] == currency.upper()), None)
     if cur is None:
         return {"currency": currency.upper(), "items": [], "opening": None}
     key = _bucket(on, group_by)
     stmt = select(FinanceObligation).where(FinanceObligation.is_active.is_(True), FinanceObligation.currency == currency.upper())
-    obs = [o for o in db.scalars(stmt).all() if vis.obligation(o)]
+    obs = _intragroup_filter(db, [o for o in db.scalars(stmt).all() if vis.obligation(o)], exclude_intragroup)["kept"]
     paid = _paid_in_balance(db, [o.id for o in obs])
     items = []
     for o in obs:

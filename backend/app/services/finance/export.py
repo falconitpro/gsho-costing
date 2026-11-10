@@ -133,7 +133,8 @@ def build(db, user, vis, kind: str, params: dict) -> tuple[bytes, str, int, Opti
         n = len(rows)
         name = f"finance-debt-{today:%Y%m%d}.xlsx"
     elif kind == "liquidity":
-        res = liquidity.build(db, vis, today, int(params.get("horizon_days") or 90), params.get("group_by") or "week", params.get("currency"))
+        res = liquidity.build(db, vis, today, int(params.get("horizon_days") or 90), params.get("group_by") or "week", params.get("currency"),
+                              exclude_intragroup=str(params.get("exclude_intragroup") or "").lower() in ("1", "true", "yes"))
         rows = [{"currency": c["currency"], "status": c["balance_status"], **p} for c in res["currencies"] for p in c["points"]]
         b.sheet("Прогноз остатков", [("Валюта", lambda r: r["currency"], 8), ("Дата", lambda r: r["on"], 12), ("Поступления", lambda r: num(r["inflow"]), 16),
                                      ("Списания", lambda r: num(r["outflow"]), 16), ("Остаток", lambda r: num(r["balance"]) if r["balance"] is not None else "неизвестен", 16),
