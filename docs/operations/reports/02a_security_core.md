@@ -6,7 +6,7 @@
 - Дата: 11.11.2026.
 - Исполнитель: Claude (песочница, синтетические данные).
 - Актуальный main перед работой: `6966f37` (merge #142).
-- Ветка: `feat/security-core`; PR в `main` — номер в `16`.
+- Ветка: `feat/security-core`; PR #143 → `main`.
 - Production deploy и migrations: не выполнялись.
 
 ## 2. Объём
