@@ -6,6 +6,7 @@ import FinanceEconomy from "../components/FinanceEconomy";
 import FinanceExposure from "../components/FinanceExposure";
 import FinanceReconciliation from "../components/FinanceReconciliation";
 import FinanceDebt from "../components/FinanceDebt";
+import FinanceIntragroup from "../components/FinanceIntragroup";
 import FinanceExportButton from "../components/FinanceExportButton";
 
 // Раздел «Финансы», вариант Б (docs/finance/05_UI_UX_в_стилистике_CRM.md). Первый вертикальный срез:
@@ -36,7 +37,7 @@ type Tx = { id: string; account_id: string | null; account_title: string; direct
   withdrawn: boolean; withdrawn_reason: string; origin_title: string };
 type List<T> = { total: number; items: T[]; totals?: Record<string, Record<string, string>>; can_edit?: boolean };
 
-const TABS = [["overview", "Обзор"], ["calendar", "Платёжный календарь"], ["debt", "Дебиторка и кредиторка"], ["liquidity", "Ликвидность и валюта"], ["economy", "Экономика сделок"], ["exposure", "Обеспечение и неустойки"], ["reconciliation", "Сверка и уточнения"]] as const;
+const TABS = [["overview", "Обзор"], ["calendar", "Платёжный календарь"], ["debt", "Дебиторка и кредиторка"], ["liquidity", "Ликвидность и валюта"], ["intragroup", "Внутригрупповые расчёты"], ["economy", "Экономика сделок"], ["exposure", "Обеспечение и неустойки"], ["reconciliation", "Сверка и уточнения"]] as const;
 type Tab = (typeof TABS)[number][0];
 const STATUS_BADGE: Record<string, string> = { paid: "ok", partially_paid: "info", overdue: "bad", due_soon: "warn", no_date: "", planned: "", superseded: "", excluded: "" };
 const TX_STATUS: Record<Tx["status"], [string, string]> = { draft: ["черновик", ""], needs_reconciliation: ["требует сверки", "warn"], posted: ["проведена", "ok"], reversed: ["сторнирована", "bad"] };
@@ -94,6 +95,7 @@ export default function FinancePage({ me }: { me: Me }) {
       {meta && tab === "calendar" && <Calendar meta={meta} sp={sp} go={go} stamp={stamp} onChanged={() => setStamp((x) => x + 1)} />}
       {meta && tab === "liquidity" && <Liquidity meta={meta} sp={sp} go={go} stamp={stamp} onChanged={() => setStamp((x) => x + 1)} />}
       {meta && tab === "economy" && <FinanceEconomy sp={sp} go={go} stamp={stamp} />}
+      {meta && tab === "intragroup" && <FinanceIntragroup stamp={stamp} />}
       {meta && tab === "exposure" && <FinanceExposure sp={sp} go={go} stamp={stamp} />}
       {meta && tab === "reconciliation" && <FinanceReconciliation sp={sp} go={go} stamp={stamp} canEdit={meta.can_edit} />}
     </>
@@ -793,27 +795,30 @@ type LiqCur = { currency: string; opening_balance: string | null; balance_status
   points: LiqPoint[]; minimum: string | null; minimum_on: string | null; threshold: string; cash_gaps: { from: string; to: string; min: string; min_on: string }[];
   undated: Bucket; beyond_horizon: Bucket; needs_reconciliation: Bucket; unallocated: Bucket; fx: { rate: string; on: string; source: string } | null };
 type Liq = { as_of: string; group_by: "day" | "week"; horizon_days: number; currencies: LiqCur[]; formula: string;
+  intragroup_excluded: Record<string, { in: string; out: string; count: number }> | null;
   rub: { included: string[]; excluded: { currency: string; reason: string }[]; fx: { currency: string; rate: string; on: string; source: string }[]; points: { on: string; balance: string }[]; note: string } };
 type LiqExpl = { on: string; items: { id: string; title: string; direction: "in" | "out"; amount: string; on: string; late: boolean; nature: string; counterparty: string }[] };
 
 function Forecast({ sp, go, stamp }: { sp: URLSearchParams; go: (p: Record<string, string | null>) => void; stamp: number }) {
   const groupBy = sp.get("group") === "day" ? "day" : "week";
   const horizon = sp.get("horizon") || "90";
+  const nointra = sp.get("nointra") === "1";            // сводный прогноз группы без платежей между компаниями группы (D-163)
+  const ig = nointra ? "&exclude_intragroup=true" : "";
   const [data, setData] = useState<Liq | null>(null);
   const [err, setErr] = useState("");
   const [threshold, setThreshold] = useState(sp.get("min") || "0");
   const [expl, setExpl] = useState<LiqExpl | null>(null);
   useEffect(() => {
     setErr(""); setExpl(null);
-    api.get<Liq>(`/api/finance/liquidity?group_by=${groupBy}&horizon_days=${horizon}&threshold=${encodeURIComponent(sp.get("min") || "0")}`).then(setData).catch((e) => setErr(errText(e)));
+    api.get<Liq>(`/api/finance/liquidity?group_by=${groupBy}&horizon_days=${horizon}&threshold=${encodeURIComponent(sp.get("min") || "0")}${ig}`).then(setData).catch((e) => setErr(errText(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupBy, horizon, sp.get("min"), stamp]);
+  }, [groupBy, horizon, sp.get("min"), stamp, nointra]);
   if (err) return <div className="alert error">{err}</div>;
   if (!data) return <div className="card muted">Загружаю прогноз…</div>;
   const curList = data.currencies.map((c) => c.currency);
   const curCode = sp.get("ccy") && curList.includes(sp.get("ccy")!) ? sp.get("ccy")! : curList.includes("RUB") ? "RUB" : curList[0];
   const cur = data.currencies.find((c) => c.currency === curCode);
-  const explain = (on: string) => api.get<LiqExpl>(`/api/finance/liquidity/explanation?currency=${curCode}&on=${on}&group_by=${groupBy}&horizon_days=${horizon}`).then(setExpl).catch((e) => setErr(errText(e)));
+  const explain = (on: string) => api.get<LiqExpl>(`/api/finance/liquidity/explanation?currency=${curCode}&on=${on}&group_by=${groupBy}&horizon_days=${horizon}${ig}`).then(setExpl).catch((e) => setErr(errText(e)));
   const outside = (b: Bucket | undefined, label: string) => b && b.count > 0 ? <tr><td>{label}</td><td className="num">{Number(b.in) ? `+${fmtMoney(b.in)}` : "—"}</td><td className="num">{Number(b.out) ? `−${fmtMoney(b.out)}` : "—"}</td><td className="num">{b.count}</td></tr> : null;
   return (
     <div className="card">
@@ -821,13 +826,17 @@ function Forecast({ sp, go, stamp }: { sp: URLSearchParams; go: (p: Record<strin
         <div className="row">
           {curList.length > 1 && <div className="tabs" style={{ margin: 0, border: 0 }}>{curList.map((c) => <button key={c} className={c === curCode ? "active" : ""} onClick={() => go({ ccy: c })}>{c}</button>)}</div>}
           <select value={groupBy} onChange={(e) => go({ group: e.target.value })} aria-label="Шаг"><option value="week">по неделям</option><option value="day">по дням</option></select>
-          <FinanceExportButton kind="liquidity" params={{ group_by: groupBy, horizon_days: horizon }} />
+          <label className="row muted" style={{ fontSize: 12, gap: 4 }} title="Сводный прогноз группы без платежей одной компании группы другой (например, Берг-Хаус → Альянс-Импекс)">
+            <input type="checkbox" checked={nointra} onChange={(e) => go({ nointra: e.target.checked ? "1" : null })} /> без внутригрупповых</label>
+          <FinanceExportButton kind="liquidity" params={{ group_by: groupBy, horizon_days: horizon, ...(nointra ? { exclude_intragroup: "true" } : {}) }} />
           <select value={horizon} onChange={(e) => go({ horizon: e.target.value })} aria-label="Горизонт"><option value="30">30 дней</option><option value="90">90 дней</option><option value="180">180 дней</option><option value="365">год</option></select>
           <form onSubmit={(e) => { e.preventDefault(); go({ min: threshold.replace(",", ".") || null }); }} className="row" style={{ gap: 4 }}>
             <label className="muted" style={{ fontSize: 12 }}>порог разрыва</label><input value={threshold} onChange={(e) => setThreshold(e.target.value)} style={{ width: 110 }} inputMode="decimal" onBlur={() => go({ min: threshold.replace(",", ".") || null })} />
           </form>
         </div>
       </div>
+      {nointra && data.intragroup_excluded && <div className="alert info" style={{ fontSize: 13 }}>Без внутригрупповых: исключено обязательств между компаниями группы —
+        {" "}{Object.entries(data.intragroup_excluded).map(([c, x]) => `${c}: ${x.count} (−${fmtMoney(x.out)} / +${fmtMoney(x.in)})`).join("; ") || "нет"}. Подробно — вкладка «Внутригрупповые расчёты».</div>}
       {!cur ? <div className="muted">Нет счетов и обязательств для прогноза.</div> : <>
         {cur.balance_status !== "confirmed" && <div className="alert warn" style={{ fontSize: 13 }}>
           {cur.balance_status === "unknown" ? `Входящий остаток в ${cur.currency} не подтверждён — кривая не строится от нуля. Подтвердите остаток счёта в блоке «Счета и остатки».`

@@ -173,19 +173,30 @@ def sync(dry_run: bool = True, db: Session = Depends(get_db), user: CurrentUser 
 @router.get("/liquidity")
 def liquidity(as_of: Optional[date] = None, horizon_days: int = Query(90, ge=7, le=730), group_by: str = Query("week", pattern="^(day|week)$"),
               currency: Optional[str] = None, legal_entity_id: Optional[str] = None, account_id: Optional[str] = None, threshold: Decimal = Decimal(0),
-              db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Прогноз остатков по валютам от подтверждённого остатка; неизвестный остаток — null, не ноль."""
+              exclude_intragroup: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Прогноз остатков по валютам от подтверждённого остатка; неизвестный остаток — null, не ноль.
+    exclude_intragroup — сводный прогноз группы без платежей между компаниями группы (D-163)."""
     access.require_read(user)
     from ..services.finance import liquidity as liq
-    return liq.build(db, access.Visibility(db, user), as_of or date.today(), horizon_days, group_by, currency, legal_entity_id, account_id, _money(threshold, "Порог"))
+    return liq.build(db, access.Visibility(db, user), as_of or date.today(), horizon_days, group_by, currency, legal_entity_id, account_id, _money(threshold, "Порог"),
+                     exclude_intragroup=exclude_intragroup)
 
 
 @router.get("/liquidity/explanation")
 def liquidity_explanation(currency: str, on: date, as_of: Optional[date] = None, group_by: str = Query("week", pattern="^(day|week)$"),
-                          horizon_days: int = Query(90, ge=7, le=730), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+                          horizon_days: int = Query(90, ge=7, le=730), exclude_intragroup: bool = False,
+                          db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     access.require_read(user)
     from ..services.finance import liquidity as liq
-    return liq.explain_point(db, access.Visibility(db, user), as_of or date.today(), _ccy(currency), on, group_by, horizon_days)
+    return liq.explain_point(db, access.Visibility(db, user), as_of or date.today(), _ccy(currency), on, group_by, horizon_days, exclude_intragroup)
+
+
+@router.get("/intragroup")
+def intragroup(as_of: Optional[date] = None, currency: Optional[str] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Внутригрупповые расчёты: кто из компаний группы кому должен — по парам и валютам, сальдо пар (D-162)."""
+    access.require_read(user)
+    from ..services.finance import intragroup as ig
+    return ig.build(db, access.Visibility(db, user), as_of or date.today(), _ccy(currency) if currency else None)
 
 
 # ------------------------------------------------------------------ импорт выписки

@@ -107,7 +107,8 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
   const [building, setBuilding] = useState(false);
   const [openPkg, setOpenPkg] = useState<string | null>(null);
   const loadOpt = () => api.get<Options>(`/api/deals/${deal.id}/legal/purchase/options`).then(setOpt).catch((e) => setMsg((e as Error).message));
-  const loadPkgs = () => api.get<{ items: Pkg[] }>(`/api/deals/${deal.id}/legal/packages`).then((r) => setPkgs(r.items)).catch(() => setPkgs([]));
+  const [pkgStamp, setPkgStamp] = useState(0);        // договоры сделки перечитываются вместе с пакетами: пакет создаёт проект договора
+  const loadPkgs = () => api.get<{ items: Pkg[] }>(`/api/deals/${deal.id}/legal/packages`).then((r) => { setPkgs(r.items); setPkgStamp((x) => x + 1); }).catch(() => setPkgs([]));
   useEffect(() => { loadOpt(); loadPkgs(); }, [deal.id]);
   useEffect(() => { if (opt && !ch.factory_id && opt.suppliers.length) start(opt.suppliers[0].id); }, [opt]);
   const start = (factoryId: string) => {
@@ -149,7 +150,7 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
   return (
     <>
       {msg && <div className="alert info" onClick={() => setMsg("")} style={{ cursor: "pointer" }}>{msg}</div>}
-      <ContractsBlock dealId={deal.id} compact />
+      <ContractsBlock key={pkgStamp} dealId={deal.id} compact />
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
           <h2 style={{ margin: 0 }}>Юридические документы <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· пакетов: {pkgs.length}</span></h2>
