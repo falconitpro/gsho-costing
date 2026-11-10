@@ -1,0 +1,55 @@
+import json
+from playwright.sync_api import sync_playwright, expect
+P=json.load(open("prep.json")); U="http://127.0.0.1:5173"; S="shots/"
+issues=[]
+def watch(page, who):
+    page.on("console", lambda m: m.type=="error" and issues.append(f"[{who}] console: {m.text[:200]}"))
+    page.on("response", lambda r: (r.status>=400 and "/api/" in r.url and not r.url.endswith("/api/auth/me")) and issues.append(f"[{who}] {r.status} {r.request.method} {r.url}"))
+    page.on("pageerror", lambda e: issues.append(f"[{who}] pageerror: {e}"))
+def as_user(b, email, w=1440):
+    ctx=b.new_context(viewport={"width":w,"height":1000}, locale="ru-RU", timezone_id="Europe/Moscow")
+    assert ctx.request.get(U+"/api/auth/me", headers={"X-Dev-User": email}).ok
+    p=ctx.new_page(); watch(p, email); return p
+with sync_playwright() as pw:
+    b=pw.chromium.launch(executable_path="/usr/bin/google-chrome", args=["--no-sandbox"])
+    m=as_user(b,"manager@example.com")
+    m.goto(U+f"/deals/{P['deal_id']}?tab=positions"); m.get_by_text("Завод для запроса:").wait_for()
+    m.locator("select", has=m.locator("option", has_text="+ добавить ещё завод")).select_option(label="Альянс-Импекс")
+    m.get_by_text("Компания группы: запрос уйдёт от её имени").wait_for()
+    expect(m.get_by_role("button", name="Отправить запрос 2 заводам")).to_be_disabled()
+    sup=m.get_by_label("Конечный поставщик")
+    sup.select_option(label="Shandong Lingong Heavy · CN"); sup.select_option(label="Henan Yuchai Machinery · CN")
+    m.screenshot(path=S+"01_request_via_group.png", full_page=False)
+    m.get_by_role("button", name="Отправить запрос 2 заводам").click()
+    m.get_by_text("Альянс-Импекс → Shandong Lingong Heavy").first.wait_for()
+    m.goto(U+f"/deals/{P['deal_id']}?tab=offers"); m.get_by_text("конечный поставщик: Shandong Lingong Heavy").wait_for()
+    expect(m.get_by_role("button", name="ответ поставщика")).to_have_count(0)        # менеджер цену поставщика не вносит
+    m.screenshot(path=S+"02_offers_manager.png", full_page=True)
+    c=as_user(b,"cd@example.com")
+    c.goto(U+f"/deals/{P['deal_id']}?tab=offers"); c.get_by_text("конечный поставщик: Shandong Lingong Heavy").wait_for()
+    head=c.locator("th", has_text="Shandong Lingong Heavy")
+    head.get_by_role("button", name="ответ поставщика").click()
+    head.get_by_placeholder("цена Shandong Lingong Heavy").fill("100000"); head.get_by_placeholder("срок, дн.").fill("60"); head.get_by_placeholder("модель").fill("LG-90")
+    head.get_by_role("button", name="Сохранить").click()
+    c.get_by_text("рассчитано по наценкам группы").first.wait_for()
+    expect(head.get_by_text("маржа группы")).to_be_visible()
+    c.screenshot(path=S+"03_offers_cd_chain.png", full_page=True)
+    f=as_user(b,"fd@example.com")
+    f.goto(U+f"/deals/{P['deal_id']}?tab=offers"); f.get_by_text("рассчитано по наценкам группы").first.wait_for()
+    h2=f.locator("th", has_text="Shandong Lingong Heavy")
+    h2.get_by_role("button", name="трансфертная цена").click()
+    h2.get_by_placeholder("цена Альянс-Импекс").fill("107500"); h2.get_by_placeholder("основание").fill("рамочная договорённость")
+    h2.get_by_role("button", name="Зафиксировать").click()
+    f.get_by_text("трансфертная цена: рамочная договорённость").wait_for()
+    f.screenshot(path=S+"04_transfer_fd.png", full_page=True)
+    m.reload(); m.get_by_text("конечный поставщик: Shandong Lingong Heavy").wait_for()
+    expect(m.get_by_text("маржа группы")).to_have_count(0); expect(m.get_by_text("поставщик 100")).to_have_count(0)
+    c.reload(); c.get_by_text("рассчитано по наценкам группы").first.wait_for()
+    c.locator("th", has_text="Shandong Lingong Heavy").locator("input[type=checkbox]").check()
+    c.get_by_role("button", name="Отобрать для КП (1)").click(); c.get_by_text("Отобрано.").wait_for()
+    c.screenshot(path=S+"05_selected.png", full_page=True)
+    g=as_user(b,"evgeniy@dobrov.pro")
+    g.goto(U+"/supply?tab=settings"); g.wait_for_load_state("networkidle")
+    g.screenshot(path=S+"06_settings.png", full_page=True)
+    b.close()
+print("ISSUES:", issues or "none")

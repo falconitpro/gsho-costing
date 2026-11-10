@@ -599,6 +599,16 @@ class FactoryOffer(TimestampMixin, Base):
     selected_deal_id: Mapped[Optional[str]] = mapped_column(String(36))      # заявка, в которую перенесён ответ
     selected_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     comment: Mapped[str] = mapped_column(Text, default="")
+    # зеркальные запросы через компанию группы (D-150): предложение компании группы (U) видно в сделке, запрос компании группы
+    # конечному поставщику (L) — внутри него. U: end_supplier_id, route_id, chain; L: mirror_of_id → U.
+    mirror_of_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)       # L → U
+    end_supplier_id: Mapped[Optional[str]] = mapped_column(String(36))                # U: конечный поставщик (завод в другой стране)
+    route_id: Mapped[Optional[str]] = mapped_column(String(36))                       # U: маршрут поставки через компанию группы
+    chain: Mapped[dict] = mapped_column(JSONType, default=dict)                       # U: снимок цепочки (ступени, наценки, маржа группы, курсы, версия политики)
+    mirror_state: Mapped[str] = mapped_column(String(24), default="")                 # U: waiting | ok | no_policy | error | changed_after_select
+    revision: Mapped[int] = mapped_column(Integer, default=0)                         # U: редакция зеркального предложения
+    transfer_price: Mapped[Optional[float]] = mapped_column(Float)                    # U: трансфертная цена, зафиксированная ФД/ЗГД (вместо наценки)
+    transfer_note: Mapped[str] = mapped_column(Text, default="")
 
 
 class ExecutionStage(TimestampMixin, Base):
@@ -873,6 +883,9 @@ class LegalEntity(TimestampMixin, Base):
     currency: Mapped[str] = mapped_column(String(3), default="RUB")       # валюта учёта компании
     warehouse: Mapped[str] = mapped_column(String(16), default="none")    # physical | virtual | none
     sells_to_clients: Mapped[bool] = mapped_column(Boolean, default=False)   # продаёт клиентам (компания в РФ)
+    # каналы компании для запросов от её имени (D-151): {"mail_profile": "alliance", "mail_from": "...", "wecom_profile": "alliance"};
+    # секреты — в переменных окружения профиля (MAIL_PROFILE_<P>_*, WECOM_PROFILE_<P>_*), не в БД
+    channels: Mapped[dict] = mapped_column(JSONType, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str] = mapped_column(Text, default="")
 

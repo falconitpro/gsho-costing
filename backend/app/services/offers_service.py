@@ -96,6 +96,9 @@ def duplicate_deal(db: Session, deal: Deal, user_id: str, offer_id: Optional[str
     ensure_default_variant(db, new)
     if offer:
         offer.status, offer.selected_deal_id, offer.selected_by = "selected", new.id, user_id
+        if offer.end_supplier_id:
+            from . import mirror_offers as mirror
+            mirror.on_selected(db, [offer], deal.id, user_id)
     if copy_calcs and (deal.batches or any(p.logistics for p in deal.positions)):
         new.logistics_done = new.service_done = False
         for role, flag, title in ((Role.LOGISTICIAN, True, "Проверить скопированный расчёт логистики (другой завод — маршрут, вес, габариты)"),
@@ -144,17 +147,22 @@ def req_status(val: str, req: str) -> str:
     return "match" if abs(v - r) < 1e-9 else "mismatch"
 
 
-def compare(db: Session, deal: Deal, source_position: Optional[Position]) -> dict:
-    """Таблица «параметр × завод»: соответствие требованиям заказчика (match / mismatch / empty), цена, срок, условия оплаты."""
-    offers = db.scalars(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id).order_by(FactoryOffer.created_at)).all()
+def compare(db: Session, deal: Deal, source_position: Optional[Position], can_chain: bool = False) -> dict:
+    """Таблица «параметр × завод»: соответствие требованиям заказчика (match / mismatch / empty), цена, срок, условия оплаты.
+    Запросы компании группы конечным поставщикам (L) не сравниваются — сравнивается её предложение (U), D-150."""
+    from . import mirror_offers as mirror
+    offers = db.scalars(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id, FactoryOffer.mirror_of_id.is_(None)).order_by(FactoryOffer.created_at)).all()
     factories = {f.id: f for f in db.scalars(select(Factory)).all()}
     base_rows = [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in sorted(source_position.tech_param_rows or [], key=lambda r: r.no)] if source_position else []
     cols = []
     for o in offers:
         f = factories.get(o.factory_id)
-        cols.append({"offer_id": o.id, "factory_id": o.factory_id, "factory": f.name if f else o.factory_id, "model": o.model, "unit_price": o.unit_price,
-                     "currency": o.currency, "basis": o.basis, "production_term": o.production_term, "factory_payments": o.factory_payments, "status": o.status,
-                     "answered": o.answer_received_at is not None, "images": len(o.images or []), "selected_deal_id": o.selected_deal_id})
+        col = {"offer_id": o.id, "factory_id": o.factory_id, "factory": f.name if f else o.factory_id, "model": o.model, "unit_price": o.unit_price,
+               "currency": o.currency, "basis": o.basis, "production_term": o.production_term, "factory_payments": o.factory_payments, "status": o.status,
+               "answered": o.answer_received_at is not None, "images": len(o.images or []), "selected_deal_id": o.selected_deal_id}
+        if o.end_supplier_id:
+            col["mirror"] = mirror.view(db, o, can_chain)
+        cols.append(col)
     by_offer = {o.id: {(_norm(r.get("name_ru")) or str(r.get("no"))): r for r in (o.params or [])} for o in offers}
     rows = []
     for r in base_rows:
@@ -212,9 +220,11 @@ def select_offers(db: Session, deal: Deal, offer_ids: list[str], user_id: str, c
     first.status, first.selected_deal_id, first.selected_by = "selected", deal.id, user_id
     for o in rest:
         created.append(duplicate_deal(db, deal, user_id, offer_id=o.id, copy_calcs=copy_calcs))
-    for o in db.scalars(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id)).all():
+    for o in db.scalars(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id, FactoryOffer.mirror_of_id.is_(None))).all():
         if o.id not in offer_ids and o.status in ("requested", "answered"):
             o.status = "rejected"
+    from . import mirror_offers as mirror   # запросы конечным поставщикам — вслед за предложениями компании группы
+    mirror.on_selected(db, offers, deal.id, user_id)
     for t in db.scalars(select(Task).where(Task.deal_id == deal.id, Task.block == "offers", Task.done_at.is_(None))).all():
         t.done_at = datetime.now(timezone.utc)
     notify(db, deal, deal.manager_id, "offers_selected", ["app", "outlook"], f"{deal.number}: заводы для КП отобраны" + (f", созданы заявки {', '.join(d.number for d in created)}" if created else ""))
@@ -253,10 +263,15 @@ def offer_from_position(db: Session, deal: Deal, pos: Position, user_id: Optiona
     отклонённый ответ не меняется."""
     if not pos.factory_id:
         return None
+    if pos.offer_id:   # позиция взята из предложения компании группы — его меняет только ответ конечного поставщика (D-150)
+        linked = db.get(FactoryOffer, pos.offer_id)
+        if linked is not None and linked.end_supplier_id:
+            return linked
     rows = sorted(pos.tech_param_rows or [], key=lambda r: r.no or 0)
     filled = [r for r in rows if (r.value_ru or r.value_zh) and not r.local_ru]
     o = db.scalar(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id, FactoryOffer.factory_id == pos.factory_id,
-                                             FactoryOffer.source_position_id == pos.id))
+                                             FactoryOffer.source_position_id == pos.id, FactoryOffer.mirror_of_id.is_(None),
+                                             FactoryOffer.end_supplier_id.is_(None)))
     if o is None:
         if not filled and not pos.unit_price:
             return None

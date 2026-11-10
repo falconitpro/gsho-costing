@@ -74,9 +74,15 @@ class EntityIn(BaseModel):
     sells_to_clients: bool = False
     is_active: bool = True
     notes: str = ""
+    channels: Optional[dict] = None   # {"mail_profile", "mail_from", "wecom_profile"} — запросы от имени компании (D-151); секреты — в окружении
 
 
 def _check_entity(body: EntityIn) -> None:
+    if body.channels is not None:
+        bad = set(body.channels) - {"mail_profile", "mail_from", "wecom_profile"}
+        if bad:
+            raise HTTPException(422, "Каналы компании: mail_profile, mail_from, wecom_profile (пароли и ключи — только в настройках сервера)")
+        body.channels = {k: str(v or "").strip()[:255] for k, v in body.channels.items()}
     if body.warehouse not in WAREHOUSE_KINDS:
         raise HTTPException(422, "Вид склада: физический, виртуальный или нет склада")
     if body.currency not in CURRENCIES:
@@ -93,7 +99,7 @@ def create_entity(body: EntityIn, db: Session = Depends(get_db), user: CurrentUs
     _check_entity(body)
     if db.scalar(select(LegalEntity).where(func.lower(LegalEntity.code) == body.code.strip().lower())):
         raise HTTPException(409, f"Компания с кодом «{body.code}» уже есть")
-    e = LegalEntity(**{**body.model_dump(), "code": body.code.strip().lower()})
+    e = LegalEntity(**{**body.model_dump(exclude={"channels"}), "code": body.code.strip().lower(), "channels": body.channels or {}})
     db.add(e)
     db.flush()
     audit(db, user.id, None, "legal_entity", e.id, "create", None, body.model_dump())
@@ -111,8 +117,10 @@ def update_entity(entity_id: str, body: EntityIn, db: Session = Depends(get_db),
     if clash:
         raise HTTPException(409, f"Код «{body.code}» уже занят компанией «{clash.name}»")
     before = serialize(e)
-    for k, v in {**body.model_dump(), "code": body.code.strip().lower()}.items():
+    for k, v in {**body.model_dump(exclude={"channels"}), "code": body.code.strip().lower()}.items():
         setattr(e, k, v)
+    if body.channels is not None:
+        e.channels = body.channels
     audit(db, user.id, None, "legal_entity", e.id, "update", before, body.model_dump())
     db.commit()
     return serialize(e)
@@ -216,6 +224,10 @@ class RulesIn(BaseModel):
     by_group: list[dict] = Field(default_factory=list)             # {entity_id, part_group, pct}
     by_supplier: list[dict] = Field(default_factory=list)          # {entity_id, supplier_id, pct}
     min_margin_pct: Optional[float] = None
+    # ГШО через компанию группы (D-153): ставка по умолчанию и исключения по поставщику и типу машины
+    gsho_default: dict[str, float] = Field(default_factory=dict)            # entity_id → %
+    gsho_by_supplier: list[dict] = Field(default_factory=list)              # {entity_id, supplier_id, pct}
+    gsho_by_machine_type: list[dict] = Field(default_factory=list)          # {entity_id, machine_type, pct}
 
 
 class PolicyIn(BaseModel):
@@ -373,6 +385,8 @@ class SimulateIn(BaseModel):
     client_price_rub: Optional[float] = None
     extra_costs_rub: float = 0.0
     fx: dict[str, float] = Field(default_factory=dict)   # ручные курсы поверх курсов ЦБ (напр. KGS)
+    mode: str = Field("parts", pattern="^(parts|gsho)$")   # gsho — наценки на технику (D-153)
+    machine_type: str = ""
 
 
 def latest_fx(db: Session) -> dict[str, float]:
@@ -401,7 +415,8 @@ def simulate_policy(body: SimulateIn, db: Session = Depends(get_db), user: Curre
               "incoterms": s.incoterms} for s in r.steps]
     try:
         res = simulate(body.purchase_price, steps, rules, fx=fx, part_group=body.part_group or None, supplier_id=body.supplier_id,
-                       client_price_rub=body.client_price_rub, extra_costs_rub=body.extra_costs_rub, entity_names=_names(db))
+                       client_price_rub=body.client_price_rub, extra_costs_rub=body.extra_costs_rub, entity_names=_names(db),
+                       mode=body.mode, machine_type=body.machine_type or None)
     except ChainError as e:
         raise HTTPException(422, str(e))
     res["fx"] = fx

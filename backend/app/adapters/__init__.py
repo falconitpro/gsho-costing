@@ -52,3 +52,43 @@ def translator(s: Settings | None = None) -> TranslatorAdapter:
 def company_registry(s: Settings | None = None) -> CompanyRegistry:
     s = s or get_settings()
     return make_registry(s.company_registry_provider, s.dadata_api_key)
+
+
+# ------------------------------------------------------------------ каналы компании группы (D-151)
+
+def _profile_settings(kind: str, profile: str) -> "Settings | None":
+    """Копия настроек с SMTP/WeCom профиля компании: MAIL_PROFILE_<P>_SMTP_HOST|PORT|USER|PASSWORD|FROM,
+    WECOM_PROFILE_<P>_CORP_ID|AGENT_ID|SECRET. Нет пользователя/секрета — профиль не настроен (None)."""
+    import dataclasses
+    import os
+    s = get_settings()
+    p = (profile or "").strip().upper().replace("-", "_")
+    if not p:
+        return None
+    env = lambda k: os.environ.get(f"{kind}_PROFILE_{p}_{k}", "")   # noqa: E731
+    if kind == "MAIL":
+        if not env("SMTP_USER") or not env("SMTP_PASSWORD"):
+            return None
+        return dataclasses.replace(s, smtp_host=env("SMTP_HOST") or s.smtp_host, smtp_port=int(env("SMTP_PORT") or s.smtp_port), smtp_user=env("SMTP_USER"),
+                                   smtp_password=env("SMTP_PASSWORD"), smtp_from=env("SMTP_FROM") or env("SMTP_USER"))
+    if not env("CORP_ID") or not env("SECRET"):
+        return None
+    return dataclasses.replace(s, wecom_corp_id=env("CORP_ID"), wecom_agent_id=env("AGENT_ID"), wecom_secret=env("SECRET"))
+
+
+def mail_for(profile: str) -> MailAdapter | None:
+    """Почта от имени компании группы. На стенде без реальной почты (MAIL_PROVIDER=console) — консоль, как и общая почта.
+    В рабочем режиме чужой ящик не подставляется: профиль не настроен → None, запрос не уходит, файл можно скачать."""
+    s = get_settings()
+    if s.mail_provider == "console":
+        return ConsoleMail()
+    ps = _profile_settings("MAIL", profile)
+    return YandexSmtpMail(ps) if ps else None
+
+
+def messenger_for(profile: str) -> MessengerAdapter | None:
+    s = get_settings()
+    if s.messenger_provider == "console":
+        return ConsoleMessenger()
+    ps = _profile_settings("WECOM", profile)
+    return WeComMessenger(ps) if ps else None

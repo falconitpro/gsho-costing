@@ -196,6 +196,8 @@ async def import_apply(deal_id: str, pos_id: str, file: UploadFile = File(...), 
             offer = db.get(FactoryOffer, offer_id)
             if offer is None or offer.deal_id != deal.id:
                 raise HTTPException(404, "Ответ завода не найден")
+            if offer.end_supplier_id:
+                raise HTTPException(409, "Предложение компании группы формируется из ответа конечного поставщика — загрузите его ответ")
             # ответ стороннего завода пишем в кандидата, не трогая строки позиции: временная копия строк
             snapshot = [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in pos.tech_param_rows]
             res = tps.apply_import(db, pos, path, file.filename or "", mp, user.id, target="factory_answer", selected_rows=sel, add_unmatched=add_unmatched)
@@ -230,6 +232,10 @@ async def import_apply(deal_id: str, pos_id: str, file: UploadFile = File(...), 
             offer.params = [{**p_, "value_ru": normalize_country(p_.get("value_ru") or p_.get("value_zh"))}
                             if is_country_row(p_.get("code") or "", p_.get("name_ru") or "") and (p_.get("value_ru") or p_.get("value_zh")) else p_
                             for p_ in (offer.params or [])]
+        if offer_id and res.get("offer_id") and offer.mirror_of_id:   # ответ конечного поставщика → предложение компании группы (D-150)
+            from ..services import mirror_offers as mirror
+            db.flush()
+            mirror.on_lower_changed(db, offer, user.id)
         # запоминаем сопоставление для следующих файлов этого клиента/завода
         try:
             sheets = tps.read_table(path, file.filename or "")
@@ -262,6 +268,7 @@ class RequestIn(BaseModel):
     via_mail: bool = True
     request_images: bool = True
     client_files_checked: bool = False                     # задача 10: менеджер проверил файлы клиента на его данные
+    via_group: dict[str, list[str]] = Field(default_factory=dict)   # компания группы → конечные поставщики (зеркальный запрос, D-150)
 
 
 @router.post("/positions/{pos_id}/tech-params/request")
@@ -287,17 +294,25 @@ def send_request(deal_id: str, pos_id: str, body: RequestIn, db: Session = Depen
                     image_paths.append(s.download(att.storage_path, os.path.join(tempfile.mkdtemp(), att.file_name)))
                 except Exception:
                     pass
+    from ..services import mirror_offers as mirror
     from ..services.suppliers import require_approved
-    for fid in ids:
-        require_approved(db.get(Factory, fid), "отправить ему запрос")
     out = []
+    plain = []
     for fid in ids:
-        factory = db.get(Factory, fid)
-        if factory is None:
+        f_ = db.get(Factory, fid)
+        if f_ is None:
             raise HTTPException(404, f"Завод {fid} не найден")
+        if mirror.group_entity(db, f_) is not None:   # компания группы: запрос от её имени конечным поставщикам
+            out += mirror.request_via_group(db, deal, pos, f_, body.via_group.get(fid) or [], user.id, image_paths, body.via_wecom, body.via_mail, body.request_images)
+        else:
+            require_approved(f_, "отправить ему запрос")
+            plain.append(fid)
+    for fid in plain:
+        factory = db.get(Factory, fid)
         path, machine = tps.build_request_xlsx(db, pos, factory, deal.number, user.id, body.request_images)
         res = tps.send_request(db, deal, pos, factory, path, image_paths, user.id, body.via_wecom, body.via_mail)
-        offer = db.scalar(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id, FactoryOffer.factory_id == fid, FactoryOffer.source_position_id == pos.id))
+        offer = db.scalar(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id, FactoryOffer.factory_id == fid, FactoryOffer.source_position_id == pos.id,
+                                                     FactoryOffer.mirror_of_id.is_(None), FactoryOffer.end_supplier_id.is_(None)))
         if offer is None:
             offer = FactoryOffer(deal_id=deal.id, source_position_id=pos.id, factory_id=fid, model=pos.model if fid == pos.factory_id else "", currency=pos.currency)
             db.add(offer)
@@ -305,7 +320,7 @@ def send_request(deal_id: str, pos_id: str, body: RequestIn, db: Session = Depen
         db.flush()
         out.append({"factory_id": fid, "factory": factory.name, "offer_id": offer.id, "file": res.get("file"), "wecom": res.get("wecom"), "mail": res.get("mail"),
                     "machine_translations": machine})
-    audit(db, user.id, deal.id, "tech_params", pos.id, "request_sent", after={"factories": ids, "images": len(image_paths)})
+    audit(db, user.id, deal.id, "tech_params", pos.id, "request_sent", after={"factories": ids, "via_group": body.via_group, "images": len(image_paths)})
     db.commit()
     return {"sent": out}
 
@@ -369,6 +384,17 @@ class OfferIn(BaseModel):
     params: list[dict] = Field(default_factory=list)
     comment: str = ""
     source_position_id: Optional[str] = None
+    offer_id: Optional[str] = None          # конкретный ответ — в т.ч. ответ конечного поставщика на запрос компании группы (D-150)
+
+
+def _price_visible(user: CurrentUser, o: FactoryOffer) -> bool:
+    """Цена ответа: обычный завод — «История цен завода»; конечный поставщик через компанию группы — «Цепочка компаний группы»;
+    предложение компании группы — любое из двух (логист видит цепочку целиком, D-152)."""
+    if o.mirror_of_id:
+        return user.can("intragroup_chain")
+    if o.end_supplier_id:
+        return user.can("factory_price_history") or user.can("intragroup_chain")
+    return user.can("factory_price_history")
 
 
 @router.get("/offers")
@@ -376,11 +402,20 @@ def offers(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     deal = get_deal_or_404(db, deal_id, user)
     rows = db.scalars(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id).order_by(FactoryOffer.created_at)).all()
     factories = {f.id: f.name for f in db.scalars(select(Factory)).all()}
+    from ..services import mirror_offers as mirror
+    chain_ok = user.can("intragroup_chain")
     out = []
     for o in rows:
         d = serialize(o)
         d["factory"] = factories.get(o.factory_id, o.factory_id)
-        if not user.can("factory_price_history"):
+        if o.end_supplier_id:
+            d["factory"] = f"{d['factory']} ← {factories.get(o.end_supplier_id, '')}"
+            d["mirror"] = mirror.view(db, o, chain_ok)
+        if o.mirror_of_id:
+            d["lower_of"] = o.mirror_of_id
+        if not chain_ok:
+            d.pop("chain", None); d.pop("transfer_price", None); d.pop("transfer_note", None)
+        if not _price_visible(user, o):
             d.pop("unit_price", None); d.pop("factory_payments", None)
         out.append(d)
     return out
@@ -389,31 +424,53 @@ def offers(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
 @router.post("/offers", status_code=201)
 def upsert_offer(deal_id: str, body: OfferIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Ручной ввод ответа завода (цена, срок, условия, параметры) — без файла."""
+    from ..services import mirror_offers as mirror
     deal = get_deal_or_404(db, deal_id, user)
     _can_edit(user, deal)
     pos_id = body.source_position_id or (deal.positions[0].id if deal.positions else None)
-    o = db.scalar(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id, FactoryOffer.factory_id == body.factory_id, FactoryOffer.source_position_id == pos_id))
+    if body.offer_id:
+        o = db.get(FactoryOffer, body.offer_id)
+        if o is None or o.deal_id != deal.id:
+            raise HTTPException(404, "Ответ завода не найден")
+    else:
+        o = db.scalar(select(FactoryOffer).where(FactoryOffer.deal_id == deal.id, FactoryOffer.factory_id == body.factory_id, FactoryOffer.source_position_id == pos_id,
+                                                 FactoryOffer.mirror_of_id.is_(None), FactoryOffer.end_supplier_id.is_(None)))
+    if o is not None and o.end_supplier_id:
+        raise HTTPException(409, "Предложение компании группы формируется из ответа конечного поставщика — внесите его ответ")
+    if o is not None and o.mirror_of_id and not user.can("intragroup_chain", 2) and ({"unit_price", "factory_payments"} & body.model_fields_set):
+        raise HTTPException(403, "Цену конечного поставщика вносят КД, ФД, ЗГД или логист")
+    if o is not None and o.status in ("selected", "rejected") and o.mirror_of_id:
+        pass   # изменение ответа после отбора — помечается в предложении компании группы (D-154)
     if o is None:
         o = FactoryOffer(deal_id=deal.id, source_position_id=pos_id, factory_id=body.factory_id)
         db.add(o)
-    for k, v in body.model_dump(exclude_unset=True, exclude={"source_position_id"}).items():
+    for k, v in body.model_dump(exclude_unset=True, exclude={"source_position_id", "offer_id", "factory_id"}).items():
         if k == "params" and not v:
             continue
         setattr(o, k, v)
-    o.answer_received_at, o.status = datetime.now(timezone.utc), "answered"
+    o.answer_received_at = datetime.now(timezone.utc)
+    if o.status not in ("selected", "rejected"):
+        o.status = "answered"
     db.flush()
+    if o.mirror_of_id:
+        mirror.on_lower_changed(db, o, user.id)
     audit(db, user.id, deal.id, "factory_offer", o.id, "upsert", after=body.model_dump())
     db.commit()
-    return serialize(o)
+    d = serialize(o)
+    if not _price_visible(user, o):
+        d.pop("unit_price", None); d.pop("factory_payments", None)
+    d.pop("chain", None)
+    return d
 
 
 @router.get("/offers/compare")
 def offers_compare(deal_id: str, position_id: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
     pos = _pos(db, deal, position_id) if position_id else (deal.positions[0] if deal.positions else None)
-    data = offers_service.compare(db, deal, pos)
-    if not user.can("factory_price_history"):
-        for c in data["offers"]:
+    data = offers_service.compare(db, deal, pos, can_chain=user.can("intragroup_chain"))
+    for c in data["offers"]:
+        o = db.get(FactoryOffer, c["offer_id"])
+        if not _price_visible(user, o):
             c.pop("unit_price", None); c.pop("factory_payments", None)
     return data
 
@@ -440,6 +497,8 @@ def offers_select(deal_id: str, body: SelectIn, db: Session = Depends(get_db), u
         raise HTTPException(403, "Заводы для КП отбирает КД или ЗГД")
     if deal.status not in (DealStatus.DRAFT, DealStatus.REWORK, DealStatus.LOGISTICS_CALC, DealStatus.SERVICE_CALC, DealStatus.CALC_READY):
         raise HTTPException(409, "Отбор заводов выполняется до утверждения КП")
+    if any((o := db.get(FactoryOffer, i)) is not None and o.mirror_of_id for i in body.offer_ids):
+        raise HTTPException(422, "Отбирается предложение компании группы, а не её запрос конечному поставщику")
     try:
         created = offers_service.select_offers(db, deal, body.offer_ids, user.id, body.copy_calcs)
     except ValueError as e:
@@ -447,3 +506,38 @@ def offers_select(deal_id: str, body: SelectIn, db: Session = Depends(get_db), u
     audit(db, user.id, deal.id, "deal", deal.id, "select_offers", after={"offer_ids": body.offer_ids, "created": [d.number for d in created]})
     db.commit()
     return {"selected": body.offer_ids, "created_deals": [{"id": d.id, "number": d.number} for d in created]}
+
+
+# ------------------------------------------------------------------ зеркальные предложения компании группы (D-150…D-155)
+
+class TransferPriceIn(BaseModel):
+    price: Optional[float] = None       # None — снять фиксацию, вернуться к наценке политики
+    note: str = ""
+
+
+@router.get("/offers/{offer_id}/chain")
+def offer_chain(deal_id: str, offer_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Цепочка предложения компании группы: цена конечного поставщика, ступени маршрута, наценки, маржа группы."""
+    from ..services import mirror_offers as mirror
+    deal = get_deal_or_404(db, deal_id, user)
+    o = db.get(FactoryOffer, offer_id)
+    if o is None or o.deal_id != deal.id or not o.end_supplier_id:
+        raise HTTPException(404, "Предложение компании группы не найдено")
+    if not user.can("intragroup_chain"):
+        raise HTTPException(403, "Цепочка компаний группы доступна КД, ФД, ЗГД и логисту")
+    return {"offer_id": o.id, "unit_price": o.unit_price, "currency": o.currency, "basis": o.basis, **mirror.view(db, o, True)}
+
+
+@router.post("/offers/{offer_id}/transfer-price")
+def offer_transfer_price(deal_id: str, offer_id: str, body: TransferPriceIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """ФД или ЗГД фиксирует цену компании группы Берг-Хаусу вместо наценки политики (с основанием) или снимает фиксацию."""
+    from ..services import mirror_offers as mirror
+    deal = get_deal_or_404(db, deal_id, user)
+    if not user.has(Role.FD, Role.GD):
+        raise HTTPException(403, "Трансфертную цену фиксируют ФД или ЗГД")
+    o = db.get(FactoryOffer, offer_id)
+    if o is None or o.deal_id != deal.id or not o.end_supplier_id:
+        raise HTTPException(404, "Предложение компании группы не найдено")
+    mirror.set_transfer_price(db, o, body.price, body.note, user.id)
+    db.commit()
+    return {"offer_id": o.id, "unit_price": o.unit_price, "currency": o.currency, **mirror.view(db, o, True)}
