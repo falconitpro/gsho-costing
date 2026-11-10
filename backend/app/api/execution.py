@@ -49,6 +49,13 @@ def stages(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
         r["can_set"] = st is not None and ex.can_set(user, st)
         if not user.can("cost"):
             r.pop("amount", None); r.pop("actual_amount", None)
+    from ..services.finance import legacy
+    from ..services.finance.access import can_read as fin_read
+    fin_ok = fin_read(user)
+    marks = legacy.stage_status(db, [r["id"] for r in rows]) if fin_ok else {}
+    for r in rows:
+        if r["id"] in marks:
+            r["finance"] = marks[r["id"]]
     related = []
     if deal.request_group_id:
         for d in db.scalars(select(Deal).where(Deal.request_group_id == deal.request_group_id, Deal.id != deal.id)).all():
@@ -57,6 +64,7 @@ def stages(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     client = db.get(Client, deal.client_id)
     options = client_requisites_options(client) if client else []
     return {"stages": rows, "status": deal.status.value, "contract_number": deal.contract_number, "contract_signed_at": deal.contract_signed_at,
+            "finance_url": f"/finance?tab=calendar&deal_id={deal.id}" if fin_ok else None,
             "factory_contract_signed_at": deal.factory_contract_signed_at, "factory_contract_number": deal.factory_contract_number, "won_variant_id": deal.won_variant_id, "related": related,
             "contract_steps": ex.contract_steps(db, deal), "status_detail": ex.status_detail(deal),
             "client_requisites_id": deal.client_requisites_id, "client_requisites": deal.client_requisites or {},
@@ -283,10 +291,20 @@ def set_actual(deal_id: str, stage_id: str, body: ActualIn, db: Session = Depend
         raise HTTPException(422, "Укажите фактическую сумму платежа")
     ex.set_actual(db, deal, st, body.actual_on, body.actual_amount, body.note, user)
     ex.push_history(st, "actual", body.actual_on, body.note or ("" if body.actual_on else "факт снят"), user.id)
+    fin = None
+    kind = ex.STAGE_DEFS[st.code]["kind"]
+    if kind in ("payment_in", "payment_out"):   # «Финансы»: факт платёжного этапа — запись «требует сверки», не банковский факт (D-117)
+        from ..services.finance import legacy
+        fin = legacy.from_stage(db, user.id, deal, st, kind)
     if deal.status == DealStatus.EXECUTION:
         ex.create_stage_tasks(db, deal, user.id)
     db.commit()
-    return {"ok": True, "stages": ex.stage_rows(db, deal)}
+    out = {"ok": True, "stages": ex.stage_rows(db, deal)}
+    if fin and fin.get("status") != "none":
+        from ..services.finance.access import can_read
+        out["finance"] = {"status": fin["status"], "warning": fin.get("warning", ""),
+                          "url": f"/finance?tab=liquidity&tx={fin['transaction_id']}" if can_read(user) and fin.get("transaction_id") else None}
+    return out
 
 
 class RefineIn(BaseModel):

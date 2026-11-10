@@ -279,6 +279,7 @@ def _tx_out(db: Session, vis: access.Visibility, tx: FinanceTransaction) -> dict
 @router.get("/transactions")
 def transactions_list(account_id: Optional[str] = None, status: Optional[str] = None, direction: Optional[str] = Query(None, pattern="^(in|out)$"),
                       currency: Optional[str] = None, unallocated: bool = False, date_from: Optional[date] = None, date_to: Optional[date] = None, search: str = "",
+                      include_withdrawn: bool = False, origin: Optional[str] = Query(None, pattern="^(manual|legacy|reversal)$"),
                       limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
                       db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     access.require_read(user)
@@ -287,6 +288,12 @@ def transactions_list(account_id: Optional[str] = None, status: Optional[str] = 
                      (FinanceTransaction.currency, currency.upper() if currency else None)):
         if val:
             stmt = stmt.where(col == val)
+    if not include_withdrawn:
+        stmt = stmt.where(FinanceTransaction.withdrawn_at.is_(None))
+    if origin == "legacy":
+        stmt = stmt.where(FinanceTransaction.origin_type.like("%_legacy"))
+    elif origin:
+        stmt = stmt.where(FinanceTransaction.origin_type == origin)
     if date_from:
         stmt = stmt.where(FinanceTransaction.booked_at >= datetime.combine(date_from, datetime.min.time()).astimezone())
     if date_to:
@@ -341,6 +348,29 @@ def transaction_reverse(tid: str, body: ReverseIn, idem: Optional[str] = Header(
     _commit(db)
     vis = access.Visibility(db, user)
     return {"reversal": _tx_out(db, vis, rev), "original": _tx_out(db, vis, db.get(FinanceTransaction, tid))}
+
+
+class AssignIn(BaseModel):
+    account_id: str
+    external_ref: Optional[str] = None
+
+
+@router.post("/transactions/{tid}/assign-account")
+def transaction_assign_account(tid: str, body: AssignIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Сверка: указать реальный счёт (и банковский номер) для записи «требует сверки». Проведение — отдельно."""
+    access.require_edit(user)
+    tx = txs.assign_account(db, user, tid, body.account_id, body.external_ref)
+    _commit(db)
+    return _tx_out(db, access.Visibility(db, user), tx)
+
+
+@router.post("/transactions/{tid}/withdraw")
+def transaction_withdraw(tid: str, body: ReasonIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Отозвать непроведённую запись (дубль, не платёж). Запись и история остаются."""
+    access.require_edit(user)
+    tx = txs.withdraw(db, user, tid, body.reason)
+    _commit(db)
+    return _tx_out(db, access.Visibility(db, user), tx)
 
 
 @router.post("/transactions/{tid}/allocations", status_code=201)

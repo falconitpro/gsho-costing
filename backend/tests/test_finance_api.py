@@ -58,10 +58,12 @@ def _own_bank(c: TestClient, entity_id: str, currency: str) -> str:
 def test_finance_vertical_slice():
     seed()
     with TestClient(app) as c:
-        # --- права на раздел: менеджер и логист не видят; КД — только чтение
+        # --- права на раздел: по умолчанию ФД и ЗГД; менеджер, логист и КД не видят (D-116)
         assert c.get("/api/finance/obligations", headers=H(MGR)).status_code == 403
         assert c.get("/api/finance/overview", headers=H(LOG)).status_code == 403
-        assert c.get("/api/finance/meta", headers=H(CD)).json()["can_edit"] is False
+        assert c.get("/api/finance/meta", headers=H(CD)).status_code == 403
+        assert c.get("/api/finance/obligations", headers=H(CD)).status_code == 403
+        assert c.get("/api/finance/meta", headers=H(GD)).json()["can_edit"] is True
         assert c.get("/api/finance/meta", headers=H(FD)).json()["can_edit"] is True
 
         # --- подписанный договор → каждая строка графика — отдельное обязательство (два аванса не объединяются)
@@ -214,7 +216,7 @@ def test_finance_vertical_slice():
         assert post_rec["before"]["status"] == "draft" and post_rec["after"]["status"] == "posted" and post_rec["after"]["idempotency_key"] == f"post2-{RUN}"
         al_aud = c.get("/api/admin/audit?entity=finance_allocation&limit=50", headers=H(GD)).json()
         assert any(x["action"] == "reverse" for x in al_aud) and any(x["action"] == "confirm" for x in al_aud)
-        ov = c.get("/api/finance/overview", headers=H(CD)).json()
+        ov = c.get("/api/finance/overview", headers=H(GD)).json()
         rub = next(x for x in ov["available"] if x["currency"] == "RUB")
         assert rub["status"] in ("confirmed", "partial") and ov["reconciliation"]["obligation_conflicts"] >= 1
         assert c.get("/api/finance/overview", headers=H(MGR)).status_code == 403
@@ -262,3 +264,24 @@ def test_finance_allocation_race_does_not_overpay():
     with TestClient(app) as c:
         row = c.get(f"/api/finance/obligations/{ob['id']}", headers=H(FD)).json()
         assert row["confirmed_paid"] == "80000.00" and row["remaining"] == "20000.00"
+
+
+def test_finance_section_closed_for_cd_by_default_and_grantable():
+    """D-116: раздел «Финансы» по умолчанию закрыт КД; администратор/ЗГД выдаёт право исключением — тогда КД читает,
+    но банковский факт не вводит (execution_payments у КД нет). Суммы в сделках и «Сводка → Деньги» у КД остаются."""
+    seed()
+    with TestClient(app) as c:
+        me = c.get("/api/auth/me", headers=H(CD)).json()
+        assert me["perms"]["finance_section"] == 0 and me["perms"]["finance_analytics"] >= 1
+        assert c.get("/api/summary/money", headers=H(CD)).status_code == 200           # старая сводка КД не затронута
+        assert c.get("/api/finance/meta", headers=H(CD)).status_code == 403
+        ov = c.post("/api/admin/access/overrides", headers=H(GD), json={"user_id": me["id"], "group": "finance_section", "level": 1, "comment": "доступ к разделу Финансы"})
+        assert ov.status_code == 201, ov.text
+        try:
+            meta = c.get("/api/finance/meta", headers=H(CD))
+            assert meta.status_code == 200 and meta.json()["can_edit"] is False
+            assert c.post("/api/finance/transactions", headers=H(CD, f"cd-{RUN}"), json={"direction": "in", "amount": "1", "currency": "RUB",
+                                                                                         "booked_at": _iso(datetime.now(timezone.utc))}).status_code == 403
+        finally:
+            assert c.delete(f"/api/admin/access/overrides/{ov.json()['id']}", headers=H(GD)).status_code == 204
+        assert c.get("/api/finance/meta", headers=H(CD)).status_code == 403

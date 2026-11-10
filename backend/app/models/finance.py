@@ -148,6 +148,10 @@ class FinanceTransaction(_Stamp, Base):
     created_by: Mapped[Optional[str]] = mapped_column(String(36))
     posted_by: Mapped[Optional[str]] = mapped_column(String(36))
     posted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # отзыв непроведённой записи (старая отметка снята, дубль, не платёж) — запись остаётся для истории, из сверки уходит
+    withdrawn_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    withdrawn_by: Mapped[Optional[str]] = mapped_column(String(36))
+    withdrawn_reason: Mapped[str] = mapped_column(Text, default="")
 
 
 class FinanceAllocation(Base):

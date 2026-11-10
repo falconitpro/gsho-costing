@@ -277,9 +277,15 @@ def add_fact(deal_id: str, body: FactIn, db: Session = Depends(get_db), user: Cu
     thr = settings_service.get(db, "plan_fact_deviation_pct")
     e = PlanFactEntry(deal_id=deal.id, entered_by=user.id, **body.model_dump())
     db.add(e)
+    db.flush()
     audit(db, user.id, deal.id, "fact", "new", "create", after=body.model_dump(mode="json"))
+    from ..services.finance import legacy   # «Финансы»: ручной платёж план/факта — запись «требует сверки» (D-117)
+    fin = legacy.from_planfact(db, user.id, e)
     db.commit()
-    return {"entry": serialize(e), "deviation_threshold_pct": thr}
+    out = {"entry": serialize(e), "deviation_threshold_pct": thr}
+    if fin.get("status") != "none":
+        out["finance"] = {"status": fin["status"], "warning": fin.get("warning", "")}
+    return out
 
 
 @router.delete("/deals/{deal_id}/fact/{entry_id}")
@@ -294,6 +300,10 @@ def delete_fact(deal_id: str, entry_id: str, db: Session = Depends(get_db), user
     if e.entered_by != user.id and not user.has(Role.FD, Role.GD):
         raise HTTPException(403, "Удалить запись может её автор, ФД или ЗГД")
     audit(db, user.id, deal.id, "fact", str(e.id)[:128], "delete", before=serialize(e))
+    if e.kind in ("payment_in", "payment_out") and not (e.ref or "").startswith("stage:"):
+        from ..services.finance import legacy   # запись удалена — непроведённая запись сверки отзывается, история остаётся
+        legacy.record(db, user.id, origin_type="planfact_legacy", origin_id=e.id, deal_id=deal.id, direction="in" if e.kind == "payment_in" else "out",
+                      amount=None, currency=(e.currency or "RUB").upper(), on=None)
     db.delete(e)
     db.commit()
     return {"deleted": True}

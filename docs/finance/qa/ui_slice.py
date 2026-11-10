@@ -44,6 +44,7 @@ with sync_playwright() as pw:
     p.get_by_role("button", name="Сторнировать").wait_for()
     p.get_by_text("11 000 000,00 RUB").first.wait_for()   # остаток счёта обновился
     p.get_by_role("button", name="Разнести на обязательства").click()
+    p.get_by_placeholder("🔍 найти строку: договор, сделка, контрагент").fill(P["number"]); p.wait_for_timeout(800)
     adds=p.get_by_role("button", name="Добавить"); adds.first.wait_for(); adds.nth(0).click(); adds.nth(1).click()
     amt=p.locator("table input[inputmode=decimal]"); expect(amt).to_have_count(2)
     amt.nth(0).fill("2500000"); amt.nth(1).fill("600000")
@@ -72,12 +73,28 @@ with sync_playwright() as pw:
     p.get_by_role("button", name="Обзор").click(); p.get_by_text("Ближайшие платежи").wait_for(); p.screenshot(path=S+"10_overview_after.png", full_page=True)
     # браузерное «назад» возвращает вкладку
     p.go_back(); p.get_by_text("Банковские операции").wait_for()
+    # старая отметка оплаты этапа → «требует сверки» → счёт → проведение → подтверждение (D-117)
+    p.goto(U+f"/deals/{P['deal_id']}?tab=execution"); row=p.locator("tr").filter(has_text="Аванс от клиента").first; row.wait_for()
+    expect(p.get_by_role("link", name="Платежи сделки в «Финансах» →")).to_be_visible()
+    row.locator("input[type=date]").last.fill("2026-11-06"); row.locator("input[type=number]").fill("4000000")
+    row.get_by_role("button", name="отметить").click()
+    p.get_by_text("в подтверждённые остатки она не входит").wait_for()
+    badge=p.get_by_role("link", name="требует сверки в «Финансах»"); badge.wait_for(); p.screenshot(path=S+"14_execution_legacy_mark.png", full_page=True)
+    badge.click(); p.wait_for_url(re.compile("tab=liquidity")); p.get_by_text("Сверка: счёт и банковский документ").wait_for()
+    p.screenshot(path=S+"15_legacy_reconcile.png", full_page=True)
+    box=p.locator(".card").filter(has_text="Сверка: счёт и банковский документ").last
+    box.locator("select").select_option(index=1); box.locator("input").fill("п/п 7781"); box.get_by_role("button", name="Сохранить").click()
+    p.get_by_role("button", name="Провести").wait_for(); p.wait_for_timeout(500); p.get_by_role("button", name="Провести").click()
+    p.get_by_role("button", name="Сторнировать").wait_for()
+    p.get_by_role("button", name="Подтвердить", exact=True).first.click(); p.wait_for_timeout(600)
+    p.goto(U+f"/finance?tab=calendar&deal_id={P['deal_id']}"); p.get_by_text("отбор по сделке").wait_for()
+    p.locator("td > .badge", has_text=re.compile("^оплачено$")).first.wait_for(); p.screenshot(path=S+"16_deal_calendar_paid.png", full_page=True)
     # мобильная ширина
     m=ctx.new_page(); watch(m,"fd-mobile"); m.set_viewport_size({"width":390,"height":844}); m.goto(U+"/finance?tab=calendar"); m.get_by_text("АО «Алданзолото»").first.wait_for(); m.screenshot(path=S+"11_mobile_calendar.png", full_page=False)
-    # КД: видит, но не редактирует
-    cd=as_user(b.new_context(viewport={"width":1440,"height":900}),"cd@example.com"); cd.goto(U+"/finance?tab=liquidity"); cd.get_by_text("Банковские операции").wait_for()
-    assert cd.get_by_role("button", name="Подтвердить остаток").count()==0 and cd.get_by_role("button", name="Операция").count()==0
-    cd.screenshot(path=S+"12_cd_readonly.png", full_page=True)
+    # КД: раздел по умолчанию закрыт (D-116) — пункта меню нет, на странице пояснение, запросов к API нет
+    cd=as_user(b.new_context(viewport={"width":1440,"height":900}),"cd@example.com"); cd.goto(U+"/finance"); cd.get_by_text("доступен при праве").wait_for()
+    assert cd.locator("header nav").get_by_text("Финансы").count()==0
+    cd.screenshot(path=S+"12_cd_denied.png")
     # менеджер: пункта нет, страница — сообщение
     mg=as_user(b.new_context(viewport={"width":1440,"height":900}),"manager@example.com"); mg.goto(U+"/finance"); mg.get_by_text("доступен при праве").wait_for()
     assert mg.locator("header nav").get_by_text("Финансы").count()==0

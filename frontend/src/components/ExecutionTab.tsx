@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { lbl, STATUS } from "../labels";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Deal, type Me, type Stage } from "../types";
@@ -8,9 +9,12 @@ import { reqSummary, type ReqSet } from "./ClientRequisites";
 type Resp = { stages: Stage[]; status: string; contract_number: string; contract_signed_at: string | null; factory_contract_signed_at: string | null; factory_contract_number?: string | null; won_variant_id: string | null;
   related: { id: string; number: string; status: string }[]; contract_steps: CStep[]; status_detail: string;
   client_locked?: boolean; factory_locked?: boolean; can_amend?: boolean; contract_history?: Amend[];
-  client_requisites_id?: string | null; client_requisites?: Partial<ReqSet>; client_requisites_options?: { id: string; title: string; is_default: boolean; legal_name: string; inn: string; kpp: string }[] };
+  client_requisites_id?: string | null; client_requisites?: Partial<ReqSet>; finance_url?: string | null; client_requisites_options?: { id: string; title: string; is_default: boolean; legal_name: string; inn: string; kpp: string }[] };
 type Amend = { side: "client" | "factory"; action: "amended" | "unsigned"; old_number: string; old_date: string; number: string; date: string; reason: string; by_name: string; at: string };
 type CStep = { code: string; title: string; roles: string[]; hint: string; state: "done" | "current" | "pending"; on: string | null; by: string; comment: string };
+// «Финансы»: статус сверки старой отметки оплаты этапа (D-117)
+const FIN_MARK: Record<string, [string, string]> = { needs_reconciliation: ["требует сверки в «Финансах»", "warn"], posted: ["подтверждено в «Финансах»", "ok"],
+  reversed: ["сторнировано в «Финансах»", "bad"], withdrawn: ["отметка снята", ""] };
 const ROLE_T: Record<string, string> = { manager: "менеджер", logistician: "логист", service_head: "сервис", fd: "ФД", cd: "КД", gd: "ЗГД", purchasing: "закупки", lawyer: "юрист" };
 
 /** Задача 2: стадия «Заключение и исполнение контракта» — реквизиты контракта, лента этапов с плановыми и фактическими датами,
@@ -31,7 +35,13 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
   const load = () => api.get<Resp>(`/api/deals/${deal.id}/execution/stages`).then(setData).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, [deal.id, deal.status]);
   const [ver, setVer] = useState(0);
-  async function act(fn: () => Promise<unknown>) { try { await fn(); setErr(""); reload(); load(); setVer((v) => v + 1); } catch (e) { setErr((e as Error).message); } }
+  const [notice, setNotice] = useState("");
+  async function act(fn: () => Promise<unknown>) {
+    try {
+      const r = await fn() as { finance?: { warning?: string } } | undefined;
+      setNotice(r?.finance?.warning || ""); setErr(""); reload(); load(); setVer((v) => v + 1);
+    } catch (e) { setErr((e as Error).message); }
+  }
   if (!data) return <div className="muted">{err || "Загрузка…"}</div>;
   const groups: Record<string, Stage[]> = {};
   for (const s of data.stages) { const k = s.batch ? `Партия: ${s.batch}` : s.position ? `Позиция: ${s.position}` : "Сделка"; (groups[k] ||= []).push(s); }
@@ -173,7 +183,9 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
           {data.related.length > 0 && <div className="muted" style={{ marginTop: 8 }}>Связанные заявки: {data.related.map((r) => `${r.number} (${lbl(STATUS, r.status)})`).join(", ")}</div>}
         </div>
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Ход исполнения</h2>
+          <div className="row" style={{ justifyContent: "space-between" }}><h2 style={{ marginTop: 0 }}>Ход исполнения</h2>
+            {data.finance_url && <Link to={data.finance_url}>Платежи сделки в «Финансах» →</Link>}</div>
+          {notice && <div className="alert warn" style={{ fontSize: 13 }}>{notice}</div>}
           <div className="row" style={{ gap: 24 }}>
             <div className="kpi"><span className="v">{done} / {data.stages.length}</span><span className="l">этапов выполнено</span></div>
             <div className="kpi"><span className="v">{data.stages.filter((s) => s.overdue).length}</span><span className="l">просрочено</span></div>
@@ -210,7 +222,8 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
                         <button className="btn ghost" style={{ padding: "2px 6px" }} onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/stages/${s.id}/refine`, { refined_on: r.on || null, note: r.note }))}>{s.factory_date ? "дата завода" : "уточнить"}</button>
                       </div>; })()}</td>
                   <td>{s.done ? <span className="muted">—</span> : fmtDate(s.planned_on)}</td>
-                  <td>{s.done ? <b>{fmtDate(s.actual_on)}</b> : s.overdue ? <span className="badge bad">просрочен</span> : <span className="muted">—</span>}</td>
+                  <td>{s.done ? <b>{fmtDate(s.actual_on)}</b> : s.overdue ? <span className="badge bad">просрочен</span> : <span className="muted">—</span>}
+                    {s.finance && <div style={{ marginTop: 2 }}><Link to={s.finance.url} className={`badge ${FIN_MARK[s.finance.status]?.[1] ?? ""}`} style={{ textDecoration: "none", fontSize: 11 }}>{FIN_MARK[s.finance.status]?.[0] ?? s.finance.status}</Link></div>}</td>
                   <td className="num"><Dev d={s.deviation_days} /></td>
                   {can(me, "cost") && <td className="num">{s.amount != null ? `${fmtRub(s.amount)} ${s.currency}` : ""}{s.actual_amount != null && <div className="muted">факт {fmtRub(s.actual_amount)}</div>}</td>}
                   <td className="muted">{s.responsible_roles.map((r) => ROLE_T[r] || r).join(", ")}</td>
