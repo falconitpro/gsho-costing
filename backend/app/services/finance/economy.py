@@ -237,7 +237,7 @@ def build(db: Session, vis, deal, today: Optional[date] = None) -> dict:
         gaps.append({"code": "costs_incomplete", "text": f"Расход признан не по всем статьям плана ({len(open_items)}) — фактическая прибыль и маржа предварительные",
                      "rows": open_items})
     if fact["legacy_not_migrated"]:
-        gaps.append({"code": "legacy_planfact", "text": f"Старых фактов по статьям без события признания: {fact['legacy_not_migrated']} — учтены в факте, перенос — «Финансы → Пересобрать»"})
+        gaps.append({"code": "legacy_planfact", "text": f"Старых фактов по статьям без события признания: {fact['legacy_not_migrated']} — учтены в факте один раз; в события их переносит пересборка раздела (POST /api/finance/sync)"})
     if rev_miss:
         gaps.append({"code": "forecast_rate", "text": "Прогноз выручки неполный: " + "; ".join(rev_miss[:5])})
     if cv["forecast_missing"]:
