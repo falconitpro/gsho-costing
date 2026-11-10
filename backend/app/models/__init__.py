@@ -1058,6 +1058,7 @@ class Contract(TimestampMixin, Base):
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     source: Mapped[str] = mapped_column(String(16), default="manual")                         # manual | package | deal_import
     mirror_kind: Mapped[str] = mapped_column(String(16), default="")                          # via_group — договор компании группы с конечным поставщиком (D-160)
+    is_framework: Mapped[bool] = mapped_column(Boolean, default=False)                        # рамочный: сделки оформляются спецификациями к нему; amount — лимит (D-168)
     client_order: Mapped[bool] = mapped_column(Boolean, default=False)                        # закупка под заказ клиента (ГШО / запчасти) — в маршруте КД
     approval: Mapped[dict] = mapped_column(JSONType, default=dict)                            # маршрут: {round, submitted_at, submitted_by, steps: [{code, title, decision, by, at, comment}]}
     notified: Mapped[list[str]] = mapped_column(JSONType, default=list)                       # отправленные напоминания: expiring_30, expiring_7, expired

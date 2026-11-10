@@ -9,10 +9,11 @@ import ContractsBlock from "./ContractsBlock";
 
 type Bank = { id: string; title: string; currency: string; bank_name: string; account: string; swift?: string; verified: boolean };
 type Prof = { id: string; title: string; is_default: boolean; summary: string; check_status: string; banks: Bank[] };
+type Fw = { id: string; number: string; cp_number: string; signed_on: string | null; status: string; specs: number; limit: number | null; remaining: number | null; currency: string };
 type Options = { suppliers: { id: string; name: string; short_name: string; country: string; positions: number; units: number; currency: string; amount: number;
   group_company?: boolean; via_group?: { group_name: string; entity_id: string | null; entity_name: string } | null }[];
   entities: { id: string; name: string; code: string; default: boolean; currency: string; profiles: Prof[] }[];
-  supplier_profiles: Record<string, { profiles: Prof[]; default_language: string; contract_kind: string; zip_set: { confirmed: boolean; lines: number; selected: number } }>;
+  supplier_profiles: Record<string, { profiles: Prof[]; default_language: string; contract_kind: string; zip_set: { confirmed: boolean; lines: number; selected: number }; frameworks?: Fw[] }>;
   templates: { id: string; kind: string; title: string; version: number; language: string; country: string; unknown: string[] }[]; languages: Record<string, string>; doc_titles: Record<string, string>;
   can_choose_entity: boolean; can_build: boolean; deal_version: { id: string | null }; contract_number: string; contract_date: string | null };
 type ZipLine = { id: string; position_id?: string; position?: string; article: string; name: string; name_zh?: string; assembly?: string; unit: string; qty: number; unit_price: number | null; currency: string;
@@ -101,8 +102,8 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
   const [msg, setMsg] = useState("");
   const [wizard, setWizard] = useState(false);
   const [saleWizard, setSaleWizard] = useState(false);
-  const [ch, setCh] = useState<{ factory_id: string; own_entity_id: string; own_profile_id: string; own_bank_id: string; cp_profile_id: string; cp_bank_id: string; language: string; templates: Record<string, string>; contract_number: string; contract_date: string; place: string; notes: string }>(
-    { factory_id: "", own_entity_id: "", own_profile_id: "", own_bank_id: "", cp_profile_id: "", cp_bank_id: "", language: "", templates: {}, contract_number: "", contract_date: "", place: "" , notes: "" });
+  const [ch, setCh] = useState<{ factory_id: string; own_entity_id: string; own_profile_id: string; own_bank_id: string; cp_profile_id: string; cp_bank_id: string; language: string; templates: Record<string, string>; contract_number: string; contract_date: string; place: string; notes: string; framework_contract_id?: string }>(
+    { factory_id: "", own_entity_id: "", own_profile_id: "", own_bank_id: "", cp_profile_id: "", cp_bank_id: "", language: "", templates: {}, contract_number: "", contract_date: "", place: "" , notes: "", framework_contract_id: "" });
   const [preview, setPreview] = useState<Preview | null>(null);
   const [building, setBuilding] = useState(false);
   const [openPkg, setOpenPkg] = useState<string | null>(null);
@@ -124,7 +125,7 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
       contract_number: via ? "" : opt.contract_number, contract_date: !via && opt.contract_date ? String(opt.contract_date).slice(0, 10) : "", place: "", notes: "" });
     setPreview(null);
   };
-  const body = () => ({ ...ch, own_entity_id: ch.own_entity_id || null, own_profile_id: ch.own_profile_id || null, own_bank_id: ch.own_bank_id || null, cp_profile_id: ch.cp_profile_id || null, cp_bank_id: ch.cp_bank_id || null, contract_date: ch.contract_date || null,
+  const body = () => ({ ...ch, framework_contract_id: ch.framework_contract_id || null, own_entity_id: ch.own_entity_id || null, own_profile_id: ch.own_profile_id || null, own_bank_id: ch.own_bank_id || null, cp_profile_id: ch.cp_profile_id || null, cp_bank_id: ch.cp_bank_id || null, contract_date: ch.contract_date || null,
     templates: Object.fromEntries(Object.entries(ch.templates).filter(([, v]) => v !== "auto").map(([k, v]) => [k, v === "builtin" ? "" : v])) });
   const doPreview = () => api.post<Preview>(`/api/deals/${deal.id}/legal/purchase/preview`, body()).then(setPreview).catch((e) => setMsg((e as Error).message));
   const doBuild = async () => {
@@ -183,7 +184,11 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
               {(sp?.profiles || []).map((p) => <option key={p.id} value={p.id}>{p.title} · {p.summary.slice(0, 60)}</option>)}</select></label>
             <label className="f">Банковский профиль поставщика *<select value={ch.cp_bank_id} onChange={(e) => { setCh({ ...ch, cp_bank_id: e.target.value }); setPreview(null); }}>
               <option value="">— выберите —</option>{(cpP?.banks || []).map((b) => <option key={b.id} value={b.id}>{b.title} · {b.currency} · {b.bank_name}{b.swift ? " · " + b.swift : ""}{b.verified ? " ✓" : " (не подтверждён)"}</option>)}</select></label>
-            <label className="f">Номер договора<input value={ch.contract_number} placeholder="из реквизитов контракта" onChange={(e) => { setCh({ ...ch, contract_number: e.target.value }); setPreview(null); }} /></label>
+            <label className="f">Оформление<select value={ch.framework_contract_id || ""} onChange={(e) => { setCh({ ...ch, framework_contract_id: e.target.value }); setPreview(null); }}>
+              <option value="">новый договор на сделку</option>
+              {(sp?.frameworks || []).map((f) => <option key={f.id} value={f.id}>спецификация к рамочному {f.cp_number || f.number}{f.signed_on ? ` от ${String(f.signed_on).slice(0, 10)}` : " (проект)"} · спецификаций {f.specs}{f.remaining != null ? ` · остаток ${f.remaining.toLocaleString("ru-RU")} ${f.currency}` : ""}</option>)}</select>
+              {!(sp?.frameworks || []).length && <span className="muted" style={{ fontSize: 11 }}>рамочных договоров с поставщиком нет — отметьте договор «рамочный» в его карточке</span>}</label>
+            {!ch.framework_contract_id && <label className="f">Номер договора<input value={ch.contract_number} placeholder="из реквизитов контракта" onChange={(e) => { setCh({ ...ch, contract_number: e.target.value }); setPreview(null); }} /></label>}
             <label className="f">Дата / место<div className="row"><input type="date" value={ch.contract_date} onChange={(e) => { setCh({ ...ch, contract_date: e.target.value }); setPreview(null); }} /><input value={ch.place} placeholder="г. Москва" style={{ width: 120 }} onChange={(e) => { setCh({ ...ch, place: e.target.value }); setPreview(null); }} /></div></label>
           </div>
           <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Банковские профили подсказаны по валюте договора ({sup?.currency}) и подтверждению — выбор виден и подтверждается вами. В документ записывается снимок реквизитов.</div>

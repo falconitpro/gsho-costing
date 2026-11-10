@@ -13,6 +13,7 @@ type Sched = { no: number; amount: number | null; currency: string; event_title:
 type CFile = { id: string; kind: string; kind_title: string; name: string; size: number; version: number; uploaded_by_name: string; uploaded_at: string; note: string };
 type Row = {
   id: string; doc_type: string; doc_type_title: string; kind: string; kind_title: string; direction: string; direction_title: string; number: string; cp_number: string; title: string; subject: string;
+  is_framework?: boolean; framework?: { specs: number; signed: number; by_currency: Record<string, number>; limit: number | null; currency: string; remaining: number | null; exceeded: boolean } | null;
   status: string; status_title: string; locked: boolean; own_entity_id: string | null; own_entity_name: string; cp_kind: string; cp_id: string | null; cp_name: string; cp_inn: string;
   deal_id: string | null; deal_number: string; amount: number | null; currency: string; signed_on: string | null; valid_to: string | null; days_to_expiry: number | null; sign_method: string;
   has_scan: boolean; curator_name: string; terms_text: string; pending: string[]; exec?: { overdue: number; pen_in: number; pen_out: number };
@@ -194,6 +195,17 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
         {!c.check.ok && !c.locked && <div className="alert warn"><b>Не готов к согласованию:</b> {c.check.errors.join("; ")}</div>}
         {inRoute && !c.locked && <div className="alert info">Договор на маршруте: условия меняют юрист или ЗГД, после виз — согласование заново. Чтобы поправить самому — «Вернуть в проект».</div>}
         {c.doc_type === "amendment" && <div className="alert info">{c.amends.length ? <>После подписания в основном договоре изменится: <b>{c.amends.map((x) => x.title).join(", ")}</b>.</> : "Заполните только то, что меняется: цену, условия оплаты, сроки, неустойки или срок действия — после подписания это перейдёт в основной договор."}</div>}
+        {c.doc_type === "contract" && <div className="alert info" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <label className="row" style={{ gap: 4 }}><input type="checkbox" checked={!!c.is_framework} disabled={!(c.can_edit || c.can_correct)}
+            onChange={(e) => api.put<Full>(`/api/legal/contracts/${id}`, { is_framework: e.target.checked }).then((y) => setC({ ...c, ...y })).catch(fail)} />
+            <b>Рамочный договор</b></label>
+          <span className="muted" style={{ fontSize: 12 }}>{c.is_framework ? "сделки оформляются спецификациями к нему; сумма договора — лимит" : "разовый договор — можно сделать рамочным и во время исполнения"}</span>
+          {c.is_framework && c.framework && <span style={{ fontSize: 13 }}>спецификаций: <b>{c.framework.specs}</b> (подписано {c.framework.signed}) ·{" "}
+            {Object.entries(c.framework.by_currency).map(([k, x]) => money(x, k)).join(" + ") || "сумм нет"}
+            {c.framework.limit != null && <> · лимит {money(c.framework.limit, c.framework.currency)}, остаток <b style={{ color: c.framework.exceeded ? "var(--bad)" : undefined }}>{money(c.framework.remaining, c.framework.currency)}</b></>}
+            {c.framework.exceeded && <span className="badge bad" style={{ marginLeft: 4 }}>лимит превышен</span>}</span>}
+          {c.is_framework && c.can_edit && <button className="btn ghost add" onClick={() => api.post<Full>("/api/legal/contracts", { parent_id: c.id, doc_type: "specification" }).then((x) => onOpen(x.id)).catch(fail)}>Спецификация</button>}
+        </div>}
         <RouteStrip c={c} />
 
         {tab === "main" && (

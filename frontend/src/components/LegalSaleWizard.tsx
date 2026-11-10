@@ -8,7 +8,8 @@ type Bank = { id: string; title: string; currency: string; bank_name: string; ac
 type Prof = { id: string; title: string; is_default: boolean; summary: string; check_status?: string; banks?: Bank[]; selected_in_contract?: boolean };
 type Options = { sources: { id: string; file_name: string; uploaded_at: string; comment: string }[]; own_entity: { id: string; name: string } | null; own_profiles: Prof[]; client_profiles: Prof[];
   templates: { id: string; kind: string; title: string; version: number; language: string; unknown: string[] }[]; doc_titles: Record<string, string>;
-  ai: { provider: string; model: string; configured: boolean; title: string }; can_build: boolean; brand_company: boolean };
+  ai: { provider: string; model: string; configured: boolean; title: string }; can_build: boolean; brand_company: boolean;
+  frameworks?: { id: string; number: string; cp_number: string; signed_on: string | null; specs: number; remaining: number | null; currency: string }[] };
 type Rep = { id: string; kind: string; where: string; old: string; new: string; confidence: string; reason: string; apply: boolean };
 type Finding = { rule: string; group: string; group_title: string; severity: string; severity_title: string; clause: string; client_text: string; our_text: string; comment: string; risk: string; rationale: string; source: string };
 type Preview = { context: { seller: Party; buyer: Party; items: { n: number; designation: string; qty: number; options: string; production_term: string; warranty: string }[]; params: unknown[]; options: unknown[]; totals: { amount: number | null; currency: string }; sources: Record<string, string>; brand_company: boolean; variant: { name: string } };
@@ -28,6 +29,7 @@ export default function LegalSaleWizard({ dealId, onBuilt, onMsg }: { dealId: st
   const [clientProfile, setClientProfile] = useState("");
   const [tpl, setTpl] = useState<Record<string, string>>({});
   const [useAi, setUseAi] = useState(true);
+  const [fw, setFw] = useState("");      // спецификация к рамочному договору с клиентом (D-169)
   const [notes, setNotes] = useState("");
   const [pv, setPv] = useState<Preview | null>(null);
   const [approved, setApproved] = useState<Set<string>>(new Set());
@@ -43,7 +45,7 @@ export default function LegalSaleWizard({ dealId, onBuilt, onMsg }: { dealId: st
   }).catch((e) => onMsg((e as Error).message));
   useEffect(() => { load(); }, [dealId]);
   if (!opt) return <div className="muted">Загрузка…</div>;
-  const body = () => ({ source_attachment_id: src, own_profile_id: ownProfile || null, own_bank_id: ownBank || null, client_profile_id: clientProfile || null, use_ai: useAi, notes,
+  const body = () => ({ framework_contract_id: fw || null, source_attachment_id: src, own_profile_id: ownProfile || null, own_bank_id: ownBank || null, client_profile_id: clientProfile || null, use_ai: useAi, notes,
     templates: Object.fromEntries(Object.entries(tpl).filter(([, v]) => v !== "auto").map(([k, v]) => [k, v === "builtin" ? "" : v])), approved_replacements: [...approved] });
   async function upload() {
     if (!file) return;
@@ -83,6 +85,10 @@ export default function LegalSaleWizard({ dealId, onBuilt, onMsg }: { dealId: st
         {(["disagreements_protocol", "tech_spec_client"] as const).map((k) => (
           <label key={k} className="f">Шаблон: {opt.doc_titles[k]}<select value={tpl[k] || "auto"} onChange={(e) => { setTpl({ ...tpl, [k]: e.target.value }); setPv(null); }}>
             <option value="auto">автоматически (действующий)</option><option value="builtin">встроенный генератор</option>{opt.templates.filter((t) => t.kind === k).map((t) => <option key={t.id} value={t.id}>{t.title} v{t.version}{t.unknown.length ? " ⚠" : ""}</option>)}</select></label>))}
+        <label className="f">Оформление<select value={fw} onChange={(e) => setFw(e.target.value)}>
+          <option value="">новый договор на сделку</option>
+          {(opt.frameworks || []).map((f) => <option key={f.id} value={f.id}>спецификация к рамочному {f.cp_number || f.number}{f.signed_on ? ` от ${String(f.signed_on).slice(0, 10)}` : " (проект)"} · спецификаций {f.specs}{f.remaining != null ? ` · остаток ${f.remaining.toLocaleString("ru-RU")} ${f.currency}` : ""}</option>)}</select>
+          {!(opt.frameworks || []).length && <span className="muted" style={{ fontSize: 11 }}>рамочных договоров с клиентом нет — отметьте договор «рамочный» в его карточке</span>}</label>
         <label className="f">Юридический анализ
           <label className="row" style={{ fontSize: 13, gap: 6 }}><input type="checkbox" checked={useAi} disabled={!opt.ai.configured} onChange={(e) => { setUseAi(e.target.checked); setPv(null); }} />
             правила системы{opt.ai.configured ? ` + ${opt.ai.title}${opt.ai.model ? ` (${opt.ai.model})` : ""}` : ""}</label>

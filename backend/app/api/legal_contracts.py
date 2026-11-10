@@ -130,12 +130,13 @@ class ContractIn(BaseModel):
     curator_id: Optional[str] = None
     lawyer_id: Optional[str] = None
     client_order: Optional[bool] = None
+    is_framework: Optional[bool] = None         # разовый / рамочный — можно поменять и во время исполнения (D-168)
     correction_reason: Optional[str] = None     # ЗГД исправляет ошибку в подписанном договоре — причина обязательна
 
 
 TERMS_FIELDS = {"client_order", "kind", "direction", "amount", "currency", "vat_mode", "vat_rate", "price_type", "fx_clause", "payment_terms", "performance_terms", "penalties", "liability_cap_pct",
                 "security", "warranty", "law", "own_entity_id", "cp_id", "cp_name", "cp_kind", "subject", "valid_to", "effective_from", "auto_renew"}
-LOCKED_OK = {"original", "notes", "edo", "lawyer_id", "curator_id", "deal_ids", "title"}   # можно править у подписанного договора
+LOCKED_OK = {"original", "notes", "edo", "lawyer_id", "curator_id", "deal_ids", "title", "is_framework"}   # можно править у подписанного договора
 NUMBER_FIELDS = {"cp_number", "signed_on"}                                                   # у подписанного — только ЗГД или КД
 
 
