@@ -6,7 +6,7 @@
 - Дата: 11.11.2026.
 - Исполнитель: Claude (облачная песочница, синтетические данные, локальный репозиторий restic).
 - Актуальный main перед работой: `740b25a` (merge #139).
-- Ветка: `feat/yandex-backup`; PR в `main` — номер в `16`.
+- Ветка: `feat/yandex-backup`; PR #140 → `main`.
 - Production deploy: не выполнялся. Production migrations: не применялись. Yandex bucket/ключи: не создавались.
 
 ## 2. Объём
