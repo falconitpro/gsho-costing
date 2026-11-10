@@ -796,6 +796,22 @@ def set_fact(c: Contract, kind: str, key: str, data: dict) -> None:
     c.facts = facts
 
 
+CONTRACT_ALL_SEE = ("lawyer", "gd", "cd", "fd", "admin", "observer")
+
+
+def can_see(db: Session, user, c: Contract) -> bool:
+    """Единая видимость договора (юридический блок и раздел «Финансы»): руководители, юрист, наблюдатель, куратор, автор
+    или видимость основной сделки."""
+    from ..api.common import can_see_deal   # видимость сделки живёт в api.common
+    from ..core.roles import Role
+    if user.has(*(Role(r) for r in CONTRACT_ALL_SEE)) or c.curator_id == user.id or c.created_by == user.id:
+        return True
+    if c.deal_id:
+        d = db.get(Deal, c.deal_id)
+        return bool(d and can_see_deal(user, d))
+    return False
+
+
 def deal_penalties(db: Session, deal_id: str, today: Optional[date] = None) -> dict:
     """Неустойки по всем действующим договорам сделки — в рублях, для план-факта и себестоимости сделки."""
     rows, rec, pay, rec_acc, pay_acc = [], 0.0, 0.0, 0.0, 0.0

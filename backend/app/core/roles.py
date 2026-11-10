@@ -63,7 +63,9 @@ FINANCE_FIELDS = {"cash_gap", "cashflow", "finance_breakdown", "fx_components", 
 FACTORY_PRICE_HISTORY_FIELDS = {"factory_price_history"}
 CLIENT_PRICE_HISTORY_FIELDS = {"client_kp_history", "client_price_history", "kp_history", "last_kp"}
 # Финансовая аналитика: суммы, маржа, портфель, история цен — в карточках клиентов и поставщиков, списке сделок, отчётах
-FINANCE_ANALYTICS_FIELDS = {"kp_totals", "avg_margin_pct", "sum_won_rub", "finance_analytics"}
+FINANCE_ANALYTICS_FIELDS = {"kp_totals", "avg_margin_pct", "sum_won_rub", "finance_analytics",
+                            # раздел «Финансы» (вариант Б): остатки, ликвидность, полный экспорт, снимок источника обязательства
+                            "available_balance", "projected_balance", "liquidity", "full_finance_export", "basis_snapshot"}
 PAYMENT_TERMS_FIELDS = {"client_payments", "client_payments_alt", "factory_payments", "bank_guarantee", "advance_guarantee"}
 LOCAL_OPTIONS_FIELDS = {"local_options", "local_option_cost_rub"}
 

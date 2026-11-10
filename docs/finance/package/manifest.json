@@ -1,0 +1,158 @@
+{
+  "schema_version": "1.0",
+  "package_name": "БЕРГ-ХАУС CRM — Финансы, вариант Б",
+  "package_slug": "berghaus-crm-finance-option-b-claude",
+  "package_version": "1.0.0",
+  "created_at": "2026-11-09",
+  "language": "ru",
+  "package_type": "implementation_specification_for_existing_repository",
+  "entrypoint": "00_НАЧНИ_ЗДЕСЬ.md",
+  "purpose": "Реальное поэтапное end-to-end внедрение раздела «Финансы» по варианту Б в существующую БЕРГ-ХАУС CRM с сохранением архитектуры, дизайн-системы, прав, обратной совместимости и возможности последующих правок в том же диалоге Claude.",
+  "intended_use": {
+    "recipient": "Claude",
+    "required_additional_input": "Актуальный репозиторий или актуальная выгрузка БЕРГ-ХАУС CRM",
+    "instruction": "Передать этот архив вместе с актуальным кодом CRM. Начать с entrypoint, затем прочитать документы в read_order, сверить спецификации с фактическим репозиторием и приступить к внедрению по плану.",
+    "standalone_application_allowed": false,
+    "new_technology_stack_allowed": false,
+    "implementation_not_only_plan_required": true
+  },
+  "crm_baseline": {
+    "branch": "main",
+    "export_date": "2026-11-08",
+    "pull_requests_through": 116,
+    "baseline_is_orientation_not_current_state": true,
+    "current_repository_precedence": "Актуальный код имеет приоритет для реализации; отличия и адаптации фиксируются в журналах без молчаливой отмены принятых продуктовых решений.",
+    "backend_stack": [
+      "Python 3.12",
+      "FastAPI",
+      "SQLAlchemy 2.0",
+      "PostgreSQL 16"
+    ],
+    "frontend_stack": [
+      "React 18",
+      "TypeScript",
+      "Vite",
+      "обычный CSS и существующие компоненты CRM"
+    ]
+  },
+  "source_code": {
+    "included": false,
+    "modified_during_package_preparation": false,
+    "reason": "Архив содержит только спецификации и рабочие журналы; внедрение выполняется в актуальном репозитории, который передаётся отдельно."
+  },
+  "read_order": [
+    "00_НАЧНИ_ЗДЕСЬ.md",
+    "01_Функциональное_ТЗ.md",
+    "02_Архитектура_и_модель_данных.md",
+    "03_Карта_интеграции_CRM.md",
+    "04_API_и_права.md",
+    "05_UI_UX_в_стилистике_CRM.md",
+    "06_План_внедрения.md",
+    "07_Приёмочные_тесты.md",
+    "08_Протокол_правок_в_том_же_диалоге.md",
+    "09_Журнал_решений.md",
+    "10_Состояние_внедрения.md",
+    "11_Шаблон_отчёта_этапа.md"
+  ],
+  "documents": [
+    {
+      "order": 0,
+      "file": "00_НАЧНИ_ЗДЕСЬ.md",
+      "role": "entrypoint_and_master_prompt",
+      "purpose": "Главный промт Claude: границы, запреты, канонические источники, стартовая последовательность, первый вертикальный срез, права, визуальная рамка и критерий завершения."
+    },
+    {
+      "order": 1,
+      "file": "01_Функциональное_ТЗ.md",
+      "role": "functional_specification",
+      "purpose": "Функциональный объём раздела, семь вкладок, роли, фильтры, статусы, импорт, разнесение, признание, валютные операции, вопросы, экспорт и совместимость."
+    },
+    {
+      "order": 2,
+      "file": "02_Архитектура_и_модель_данных.md",
+      "role": "architecture_and_data_model",
+      "purpose": "Модель данных, точные денежные типы, статусы, инварианты, идемпотентность, разнесение, сторнирование, ликвидность, recognition events, FX и миграционные правила."
+    },
+    {
+      "order": 3,
+      "file": "03_Карта_интеграции_CRM.md",
+      "role": "existing_crm_integration_map",
+      "purpose": "Карта изменений конкретных backend/frontend файлов и связей со сделками, юридическим блоком, этапами, план/фактом, запчастями, задачами, сводкой и рабочим местом."
+    },
+    {
+      "order": 4,
+      "file": "04_API_и_права.md",
+      "role": "api_security_and_permissions",
+      "purpose": "API-контракты, compatibility endpoints, серверная авторизация, object-level visibility, scoped DTO, фильтрация экспорта и требования безопасности."
+    },
+    {
+      "order": 5,
+      "file": "05_UI_UX_в_стилистике_CRM.md",
+      "role": "ui_ux_specification",
+      "purpose": "Экраны и состояния интерфейса в существующей дизайн-системе CRM, маршруты вкладок, таблицы, формы, адаптивность и обязательная визуальная проверка."
+    },
+    {
+      "order": 6,
+      "file": "06_План_внедрения.md",
+      "role": "implementation_plan",
+      "purpose": "Этапы 0–7 с вертикальным срезом, gates, фактическими проверками, миграционной репетицией, rollout/rollback и составом PR."
+    },
+    {
+      "order": 7,
+      "file": "07_Приёмочные_тесты.md",
+      "role": "acceptance_and_regression_tests",
+      "purpose": "Unit, integration, API E2E, browser E2E, security, visual и migration сценарии приёмки; пропущенный тест не считается пройденным."
+    },
+    {
+      "order": 8,
+      "file": "08_Протокол_правок_в_том_же_диалоге.md",
+      "role": "continuation_and_change_protocol",
+      "purpose": "Порядок точечных последующих правок, impact analysis, минимальный diff, версионирование решений и восстановление работы после прерывания или сжатия контекста."
+    },
+    {
+      "order": 9,
+      "file": "09_Журнал_решений.md",
+      "role": "decision_log",
+      "purpose": "Исходные согласованные решения D-001…D-064 и место для новых решений внедрения D-100+ с сохранением истории замен."
+    },
+    {
+      "order": 10,
+      "file": "10_Состояние_внедрения.md",
+      "role": "implementation_state",
+      "purpose": "Исходное состояние «внедрение не начато» и рабочий журнал этапов, изменённых файлов, миграций, проверок, блокеров и следующего действия."
+    },
+    {
+      "order": 11,
+      "file": "11_Шаблон_отчёта_этапа.md",
+      "role": "stage_report_template",
+      "purpose": "Шаблон фактического отчёта после каждого этапа: commits, файлы, интеграции, безопасность, команды, браузерный QA, миграционная сверка и ограничения."
+    }
+  ],
+  "continuation": {
+    "same_dialog_supported": true,
+    "decision_log": "09_Журнал_решений.md",
+    "implementation_state": "10_Состояние_внедрения.md",
+    "change_protocol": "08_Протокол_правок_в_том_же_диалоге.md",
+    "stage_report_template": "11_Шаблон_отчёта_этапа.md",
+    "repository_destination": "docs/finance/"
+  },
+  "security_and_execution": {
+    "contains_real_secrets": false,
+    "secret_placeholders_only": "<SECRET_...>",
+    "production_secrets_required_for_tests": false,
+    "production_database_allowed_for_tests": false,
+    "automatic_production_deploy_allowed": false,
+    "automatic_production_migration_allowed": false,
+    "seed_or_demo_users_to_production_allowed": false,
+    "destructive_migration_allowed": false,
+    "force_push_allowed": false,
+    "pull_request_target": "main",
+    "pull_request_merge_actor": "владелец репозитория"
+  },
+  "integrity": {
+    "checksum_algorithm": "SHA-256",
+    "checksums_file": "checksums.sha256",
+    "checksum_scope": "12 Markdown-документов и manifest.json; контрольные суммы вычислены для содержимого файлов относительно корня пакета.",
+    "checksums_file_self_hash_included": false
+  }
+}
