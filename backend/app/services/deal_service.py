@@ -59,6 +59,10 @@ def apply_transition(db: Session, deal: Deal, tr: TransitionResult, user_id: str
     before = deal.status.value
     deal.status = tr.status
     audit(db, user_id, deal.id, "deal", deal.id, "status", {"status": before}, {"status": tr.status.value}, tr.audit)
+    if deal.approved_version_id:   # «Финансы»: прогноз утверждённого расчёта — по статусу сделки, в той же транзакции (D-126)
+        from .finance.sources import sync_calculation
+        db.flush()
+        sync_calculation(db, deal, user_id)
     # закрываем открытые задачи того же блока
     for spec in tr.tasks:
         assignee = _assignee(db, deal, spec)

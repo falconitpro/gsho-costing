@@ -62,3 +62,18 @@ for i,(n,q,s) in enumerate([("Фильтр топливный",4,48000),("Рем
     db.add(PartRequestLine(request_id=r.id,no=i+1,raw_name=n,qty=q,price=s/q,status="ordered",calc={{"sum_rub":s}}))
 db.commit()'''],cwd=os.environ.get("BACKEND_DIR", "backend"),env=env,check=True,capture_output=True)
 print("undated after", c.get("/api/finance/undated",headers=H("fd@example.com")).json()["parts"]["total"])
+# выигранная сделка с утверждённым расчётом, договора ещё нет — прогноз из расчёта
+d3=c.post("/api/deals",headers=H("manager@example.com"),json={"client_id":cl["id"],"site":"Прогноз Восток"}).json()
+subprocess.run(["python","-c",f'''
+from app.db import SessionLocal
+from app.models import Deal, DealVersion, Position, Variant, Factory
+from app.core.workflow import DealStatus
+from sqlalchemy import select
+db=SessionLocal(); deal=db.get(Deal,"{d3["id"]}"); fac=db.scalars(select(Factory)).first()
+pos=Position(deal_id=deal.id,factory_id=fac.id,model="XDR80T",machine_type="Самосвал",qty=2,unit_price=2300000,currency="CNY"); db.add(pos); db.flush()
+var=Variant(deal_id=deal.id,name="Основной",position_ids=[pos.id],is_default=True); db.add(var); db.flush()
+res={{"variants":{{var.id:{{"base":{{"payment_dates":[{{"no":1,"event":"contract","on":"2026-12-01","amount_rub":28021786.28,"via":"transfer"}},{{"no":2,"event":"border","on":"2027-06-22","amount_rub":65384168.0,"via":"lc"}}],
+ "positions":[{{"position_id":pos.id,"factory_payment_dates":[{{"no":1,"event":"factory_contract","on":"2026-12-22","amount":1405800.0,"currency":"CNY"}},{{"no":2,"event":"readiness","on":"2027-06-10","amount":3280200.0,"currency":"CNY"}}]}}]}}}}}}}}
+v=DealVersion(deal_id=deal.id,version_no=1,reason="approval",calc_input={{}},calc_result=res); db.add(v); db.flush()
+deal.approved_version_id=v.id; deal.won_variant_id=var.id; deal.status=DealStatus.CONTRACT; db.commit()'''],cwd=os.environ.get("BACKEND_DIR", "backend"),env=env,check=True,capture_output=True)
+print("sync", c.post("/api/finance/sync?dry_run=false",headers=H("fd@example.com")).json()["created"])

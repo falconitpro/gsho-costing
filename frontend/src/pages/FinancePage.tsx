@@ -234,7 +234,7 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
           <select value={f.currency} onChange={(e) => go({ currency: e.target.value })} aria-label="Валюта">
             <option value="">все валюты</option>{meta.currencies.map((c) => <option key={c}>{c}</option>)}</select>
           <select value={f.source_type} onChange={(e) => go({ source: e.target.value })} aria-label="Источник">
-            <option value="">все источники</option><option value="contract">договоры</option><option value="purchase_order">заказы поставщикам</option><option value="batch">логистические партии</option></select>
+            <option value="">все источники</option><option value="contract">договоры</option><option value="purchase_order">заказы поставщикам</option><option value="batch">логистические партии</option><option value="calculation">прогноз по расчёту</option></select>
           <select value={f.legal_entity_id} onChange={(e) => go({ entity: e.target.value })} aria-label="Компания группы">
             <option value="">все компании группы</option>{meta.entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
           <label className="row" style={{ gap: 4 }} title="Срок по договору, а если он ещё не определён — ожидаемая дата">с <input type="date" value={f.date_from} onChange={(e) => go({ from: e.target.value })} />
@@ -264,7 +264,7 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
               <Fragment key={o.id}>
                 <tr style={{ ...(o.status === "overdue" ? { boxShadow: "inset 3px 0 0 var(--bad)" } : {}), ...(o.is_active ? {} : { color: "var(--muted)" }), cursor: "pointer" }}
                   onClick={() => go({ open: open === o.id ? null : o.id })}>
-                  <td className="fin-due">{o.legal_due_on ? fmtDate(o.legal_due_on) : <span className="muted" style={{ fontSize: 12 }} title={o.legal_due_text}>не определён — {o.legal_due_text.replace(/^[^—]*?в течение/, "в течение") || "событие не наступило"}</span>}</td>
+                  <td className="fin-due">{o.nature === "forecast" ? <span className="badge info" title={o.legal_due_text}>прогноз</span> : o.legal_due_on ? fmtDate(o.legal_due_on) : <span className="muted" style={{ fontSize: 12 }} title={o.legal_due_text}>не определён — {o.legal_due_text.replace(/^[^—]*?в течение/, "в течение") || "событие не наступило"}</span>}</td>
                   <td className="sec" style={{ whiteSpace: "nowrap" }}>{o.legal_due_on && o.forecast_on === o.legal_due_on ? <span className="muted">—</span> : fmtDate(o.forecast_on)}</td>
                   <td className="sec">{o.deal ? <Link to={o.deal.url} onClick={(e) => e.stopPropagation()}><b>{o.deal.number}</b></Link> : null}
                     <div style={{ fontSize: 12 }}>{o.contract ? o.contract.number : srcLabel(o)}</div></td>
