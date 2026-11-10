@@ -70,7 +70,7 @@ def meta(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_
     ents = [{"id": e.id, "code": e.code, "name": e.name, "currency": e.currency} for e in db.scalars(select(LegalEntity).order_by(LegalEntity.name)).all()]
     currencies = sorted({c for (c,) in db.execute(select(FinanceObligation.currency).distinct()).all()} | {a.currency for a in db.scalars(select(FinanceAccount)).all()})
     return {"can_edit": access.can_edit(user), "entities": ents, "currencies": currencies, "today": date.today().isoformat(),
-            "tabs": ["overview", "calendar", "liquidity"], "import_fields": imp_fields.FIELD_TITLES, "statuses": obl.STATUS_TITLES}
+            "tabs": ["overview", "calendar", "liquidity"] + (["economy"] if (user.can("finance_analytics", 1) and user.can("cost", 1)) else []), "import_fields": imp_fields.FIELD_TITLES, "statuses": obl.STATUS_TITLES}
 
 
 @router.get("/overview")
@@ -154,6 +154,8 @@ def sync(dry_run: bool = True, db: Session = Depends(get_db), user: CurrentUser 
     """Пересборка проекции подписанных договоров. По умолчанию dry-run — только отчёт, без изменений."""
     access.require_edit(user)
     rep = obl.rebuild(db, user.id, dry_run=dry_run)
+    from ..services.finance import recognition as rec   # старые факты по статьям план/факта → события признания (один раз)
+    rep["recognition_migrated"] = rec.migrate_planfact(db, user.id)
     if not dry_run:
         _commit(db)
     else:
@@ -535,3 +537,93 @@ def allocation_reverse(alid: str, body: ReasonIn, db: Session = Depends(get_db),
     al = txs.reverse_allocation(db, user, vis, alid, body.reason)
     _commit(db)
     return txs.alloc_dto(al)
+
+
+# ------------------------------------------------------------------ экономика сделок и признание (этап 5)
+
+def _require_economy(user: CurrentUser) -> None:
+    from ..core.roles import READ
+    if not (user.can("finance_analytics", READ) and user.can("cost", READ)):
+        raise HTTPException(403, "Экономика сделки: нужны права «Финансовая аналитика» и «Себестоимость»")
+
+
+@router.get("/economy/deals")
+def economy_deals(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    access.require_read(user)
+    _require_economy(user)
+    from ..services.finance import economy
+    return {"deals": economy.list_deals(db, user, access.Visibility(db, user))}
+
+
+@router.get("/deals/{deal_id}/economy")
+def deal_economy(deal_id: str, as_of: Optional[date] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """План / текущий прогноз / факт P&L / факт cash по сделке. Раздел «Финансы» не обязателен: тот же отчёт открывается из карточки сделки."""
+    _require_economy(user)
+    from .common import get_deal_or_404
+    from ..services.finance import economy
+    deal = get_deal_or_404(db, deal_id, user)
+    return economy.build(db, access.Visibility(db, user), deal, as_of or date.today())
+
+
+class RecognitionIn(BaseModel):
+    kind: str = Field(pattern="^(revenue|expense)$")
+    amount: Decimal
+    currency: str = "RUB"
+    fx_rate: Optional[Decimal] = None
+    fx_on: Optional[date] = None
+    fx_source: str = ""
+    recognized_on: Optional[date] = None
+    cost_item_code: Optional[str] = None
+    position_id: Optional[str] = None
+    obligation_id: Optional[str] = None
+    basis_type: str = "primary_document"
+    document_type: str = ""
+    document_number: str = ""
+    document_date: Optional[date] = None
+    attachment_id: Optional[str] = None
+    comment: str = ""
+
+
+deal_router = APIRouter(prefix="/api/deals", tags=["finance"])
+
+
+@deal_router.get("/{deal_id}/finance/recognition-events")
+def recognition_list(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from .common import get_deal_or_404
+    from ..services.finance import recognition as rec
+    deal = get_deal_or_404(db, deal_id, user)
+    return {"events": rec.list_for(db, user, deal), "all": rec.can_view_all(user)}
+
+
+@deal_router.post("/{deal_id}/finance/recognition-events", status_code=201)
+def recognition_create(deal_id: str, body: RecognitionIn, idem: Optional[str] = Header(None, alias="Idempotency-Key"),
+                       db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Признание выручки (ФД/ЗГД) или расхода по статье (по правам ввода план/факта). Деньги не двигает."""
+    from .common import get_deal_or_404
+    from ..services.finance import recognition as rec
+    deal = get_deal_or_404(db, deal_id, user)
+    key = _key(idem)
+    dup = db.scalar(select(rec.FinanceRecognitionEvent).where(rec.FinanceRecognitionEvent.idempotency_key == key))
+    if dup is not None:
+        if dup.deal_id != deal.id:
+            raise HTTPException(409, "Idempotency-Key уже использован для другой сделки")
+        return rec.dto(dup)
+    rec.check_create(user, deal, body.kind, body.cost_item_code)
+    ev = rec.create(db, user, deal, body.model_dump(), key)
+    _commit(db)
+    return rec.dto(ev)
+
+
+@router.post("/recognition-events/{eid}/reverse")
+def recognition_reverse(eid: str, body: ReasonIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from .common import can_see_deal
+    from ..models import Deal, FinanceRecognitionEvent
+    from ..services.finance import recognition as rec
+    ev = db.get(FinanceRecognitionEvent, eid)
+    deal = db.get(Deal, ev.deal_id) if ev and ev.deal_id else None
+    if ev is None or deal is None or not can_see_deal(user, deal) or not (rec.can_view_all(user) or ev.created_by == user.id):
+        raise HTTPException(404, "Событие не найдено")
+    rec.check_reverse(user, deal, ev)
+    rec.reverse(db, user, ev, body.reason)
+    _commit(db)
+    return rec.dto(ev)

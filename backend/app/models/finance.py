@@ -231,3 +231,42 @@ class FinanceFxOperation(_Stamp, Base):
     idempotency_key: Mapped[str] = mapped_column(String(128), unique=True)
     comment: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+
+class FinanceRecognitionEvent(_Stamp, Base):
+    """Признание выручки/расхода по первичному документу или хозяйственному событию (D-014). Оплата сама по себе его не создаёт.
+    Связь с обязательством не означает равенства оплаты и признания."""
+    __tablename__ = "finance_recognition_events"
+    __table_args__ = (
+        UniqueConstraint("source_type", "source_id", name="uq_fin_recognition_source"),
+        CheckConstraint("amount > 0", name="ck_fin_recognition_amount"),
+        CheckConstraint("kind in ('revenue','expense')", name="ck_fin_recognition_kind"),
+        Index("ix_fin_recognition_deal", "deal_id", "kind", "recognized_on"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    kind: Mapped[str] = mapped_column(String(8))                          # revenue | expense
+    deal_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    obligation_id: Mapped[Optional[str]] = mapped_column(ForeignKey("finance_obligations.id"))
+    cost_item_code: Mapped[Optional[str]] = mapped_column(String(32), index=True)
+    position_id: Mapped[Optional[str]] = mapped_column(String(36))
+    amount: Mapped[Decimal] = mapped_column(MONEY)
+    currency: Mapped[str] = mapped_column(String(3))
+    fx_rate: Mapped[Optional[Decimal]] = mapped_column(RATE)              # RUB за единицу валюты; для RUB — пусто
+    fx_source: Mapped[str] = mapped_column(String(64), default="")
+    fx_on: Mapped[Optional[date]] = mapped_column(Date)
+    amount_rub: Mapped[Decimal] = mapped_column(MONEY)
+    recognized_on: Mapped[date] = mapped_column(Date)
+    basis_type: Mapped[str] = mapped_column(String(32))                    # primary_document | business_event | legacy_business_event
+    document_type: Mapped[str] = mapped_column(String(64), default="")
+    document_number: Mapped[str] = mapped_column(String(64), default="")
+    document_date: Mapped[Optional[date]] = mapped_column(Date)
+    attachment_id: Mapped[Optional[str]] = mapped_column(String(36))
+    source_type: Mapped[str] = mapped_column(String(32), default="manual")   # manual | planfact (миграция старого факта по статье)
+    source_id: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="posted")        # posted | reversed
+    reversal_reason: Mapped[str] = mapped_column(Text, default="")
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), unique=True)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))
+    reversed_by: Mapped[Optional[str]] = mapped_column(String(36))
+    reversed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
