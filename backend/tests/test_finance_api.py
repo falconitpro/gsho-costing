@@ -23,6 +23,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.main import app  # noqa: E402
 from scripts.seed import run as seed  # noqa: E402
 
+# Договор в тесте подписан 02.11.2026, срок первого платежа — 10.11.2026. Статусы «скоро срок / частично оплачено» проверяем на этот день,
+# а не на сегодняшний: иначе тест «протухает» после срока (D-030, docs/operations/15).
+AS_OF = "2026-11-10"
 H = lambda email, key=None: {"X-Dev-User": email, **({"Idempotency-Key": key} if key else {})}   # noqa: E731
 MGR, CD, GD, FD, LAW, LOG = "manager@example.com", "cd@example.com", "evgeniy@dobrov.pro", "fd@example.com", "lawyer@example.com", "logist@example.com"
 PDF = ("scan.pdf", b"%PDF-1.4 test", "application/pdf")
@@ -71,7 +74,7 @@ def test_finance_vertical_slice():
             {"share_pct": 20, "event": "contract", "offset_days": 5, "offset_kind": "working"},
             {"share_pct": 10, "event": "contract", "offset_days": 10, "offset_kind": "calendar"},
             {"share_pct": 70, "event": "act_signed", "offset_days": 10, "offset_kind": "calendar"}])
-        reg = c.get(f"/api/finance/obligations?contract_id={k['id']}&as_of=2026-11-10", headers=H(FD)).json()
+        reg = c.get(f"/api/finance/obligations?contract_id={k['id']}&as_of={AS_OF}", headers=H(FD)).json()
         assert reg["total"] == 3, reg
         a1, a2, fin = reg["items"][0], reg["items"][1], next(x for x in reg["items"] if x["event"]["code"] == "act_signed")
         assert (a1["amount"], a2["amount"], fin["amount"]) == ("200000.00", "100000.00", "700000.00")
@@ -144,12 +147,12 @@ def test_finance_vertical_slice():
         again = c.post(f"/api/finance/transactions/{t1['id']}/allocations", headers=H(FD, f"al1-{RUN}"),
                        json={"items": [{"obligation_id": a1["id"], "amount_tx": "120000.00"}, {"obligation_id": a2["id"], "amount_tx": "30000.00"}]}).json()
         assert len(again["allocations"]) == 2                                                          # повтор ключа — без дублей
-        card = c.get(f"/api/finance/obligations/{a1['id']}", headers=H(FD)).json()
+        card = c.get(f"/api/finance/obligations/{a1['id']}?as_of={AS_OF}", headers=H(FD)).json()
         assert card["confirmed_paid"] == "0.00" and card["provisional_paid"] == "120000.00" and card["remaining"] == "200000.00" and "needs_reconciliation" in card["flags"]
         for al in tx["allocations"]:
             assert c.post(f"/api/finance/allocations/{al['id']}/confirm", headers=H(CD)).status_code == 403
             assert c.post(f"/api/finance/allocations/{al['id']}/confirm", headers=H(FD)).json()["status"] == "confirmed"
-        card = c.get(f"/api/finance/obligations/{a1['id']}", headers=H(FD)).json()
+        card = c.get(f"/api/finance/obligations/{a1['id']}?as_of={AS_OF}", headers=H(FD)).json()
         assert card["confirmed_paid"] == "120000.00" and card["remaining"] == "80000.00" and card["status"] == "partially_paid" and card["flags"] == []
         assert card["allocations"][0]["transaction"]["external_ref"] == f"PP-{RUN}-1" and "договоре" in card["readonly_note"]
         ex = c.get(f"/api/finance/obligations/{a1['id']}/explanation", headers=H(FD)).json()
@@ -191,7 +194,7 @@ def test_finance_vertical_slice():
         assert c.post(f"/api/finance/transactions/{t2['id']}/reverse", headers=H(FD, f"rev2b-{RUN}"), json={"reason": "ещё раз"}).status_code == 409
         assert c.post(f"/api/finance/transactions/{rv['reversal']['id']}/allocations", headers=H(FD, f"al5-{RUN}"),
                       json={"items": [{"obligation_id": a1["id"], "amount_tx": "1.00"}]}).status_code == 409
-        rows = {x["id"]: x for x in c.get(f"/api/finance/obligations?contract_id={k['id']}", headers=H(FD)).json()["items"]}
+        rows = {x["id"]: x for x in c.get(f"/api/finance/obligations?contract_id={k['id']}&as_of={AS_OF}", headers=H(FD)).json()["items"]}
         assert rows[a1["id"]]["remaining"] == "80000.00" and rows[a1["id"]]["status"] == "partially_paid"
         acc_now = next(a for a in c.get("/api/finance/accounts", headers=H(FD)).json()["items"] if a["id"] == acct["id"])
         assert acc_now["balance"] == "5149000.00"                                                    # 5 000 000 + 150 000 + 150 000 − 150 000 (сторно) − 1 000
