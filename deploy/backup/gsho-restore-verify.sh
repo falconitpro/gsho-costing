@@ -63,6 +63,10 @@ if [ -n "$PGDB" ]; then
   if psql -d postgres -Atc "select 1 from pg_database where datname='$PGDB'" | grep -q 1; then
     echo "БД $PGDB уже существует — восстанавливаем только в новую пустую" >&2; exit 2
   fi
+  srv=$(psql -d postgres -Atc "show server_version_num"); cli=$(pg_restore --version | sed -n 's/.* \([0-9][0-9]*\)\..*/\1/p')
+  if [ -n "$cli" ] && [ "$cli" -gt "$((srv / 10000))" ]; then
+    echo "pg_restore $cli новее сервера PostgreSQL $((srv / 10000)) — нужен клиент той же версии (postgresql-client-$((srv / 10000)))" >&2; exit 2
+  fi
   createdb "$PGDB"
   pg_restore --no-owner --exit-on-error -d "$PGDB" "$DIR/db.dump"
   echo "  таблиц: $(psql -d "$PGDB" -Atc "select count(*) from information_schema.tables where table_schema='public'")"

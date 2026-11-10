@@ -24,7 +24,10 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install -r backend/requirements.txt
       - name: restic, shellcheck, pg_dump 16 — для тестов резервного копирования (docs/operations/03)
-        run: sudo apt-get update -q && sudo apt-get install -y -q restic shellcheck postgresql-client
+        # pg_dump/pg_restore той же версии, что сервер (postgres:16): клиент 17+ пишет в дамп SET transaction_timeout, которого нет в 16
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q restic shellcheck postgresql-client-16
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
       - name: pytest
         run: |
           set -o pipefail
