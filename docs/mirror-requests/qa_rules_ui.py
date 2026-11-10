@@ -15,9 +15,10 @@ with sync_playwright() as pw:
     g=page(b, "evgeniy@dobrov.pro")
     g.goto(U+"/settings?tab=rates"); g.get_by_text("Правила внутригрупповых цепочек").wait_for()
     g.get_by_role("button", name="+ правило").click()
-    row=g.locator("tr", has=g.get_by_placeholder("CN или *")).last
-    row.locator("select").nth(2).select_option(label="Поставщик КНР → компания в Китае → РФ")
-    row.locator("input").nth(1).fill("Китай — через Альянс-Импекс")
+    row=g.locator(".card", has=g.get_by_text("Правила внутригрупповых цепочек")).last.locator("tbody tr").last
+    row.locator("select").nth(1).select_option(label="Китай")
+    row.locator("select").nth(3).select_option(label="Поставщик КНР → компания в Китае → РФ")
+    row.locator("input").nth(0).fill("Китай — через Альянс-Импекс")
     g.get_by_role("button", name="Сохранить правила").click(); g.get_by_text("Правила сохранены").wait_for()
     g.screenshot(path=S+"r01_rules_gd.png", full_page=False)
     m=page(b, "manager@example.com")
