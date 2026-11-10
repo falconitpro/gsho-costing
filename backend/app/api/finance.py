@@ -70,7 +70,7 @@ def meta(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_
     ents = [{"id": e.id, "code": e.code, "name": e.name, "currency": e.currency} for e in db.scalars(select(LegalEntity).order_by(LegalEntity.name)).all()]
     currencies = sorted({c for (c,) in db.execute(select(FinanceObligation.currency).distinct()).all()} | {a.currency for a in db.scalars(select(FinanceAccount)).all()})
     return {"can_edit": access.can_edit(user), "entities": ents, "currencies": currencies, "today": date.today().isoformat(),
-            "tabs": ["overview", "calendar", "liquidity"] + (["economy"] if (user.can("finance_analytics", 1) and user.can("cost", 1)) else []), "import_fields": imp_fields.FIELD_TITLES, "statuses": obl.STATUS_TITLES}
+            "tabs": ["overview", "calendar", "liquidity"] + (["economy"] if (user.can("finance_analytics", 1) and user.can("cost", 1)) else []) + ["exposure"], "import_fields": imp_fields.FIELD_TITLES, "statuses": obl.STATUS_TITLES}
 
 
 @router.get("/overview")
@@ -627,3 +627,20 @@ def recognition_reverse(eid: str, body: ReasonIn, db: Session = Depends(get_db),
     rec.reverse(db, user, ev, body.reason)
     _commit(db)
     return rec.dto(ev)
+
+
+# ------------------------------------------------------------------ обеспечение и неустойки (этап 5)
+
+@router.get("/legal-exposure")
+def legal_exposure(deal_id: Optional[str] = None, contract_id: Optional[str] = None, direction: Optional[str] = Query(None, pattern="^(receivable|payable)$"),
+                   status: Optional[str] = None, kind: Optional[str] = Query(None, pattern="^(security|penalty)$"), as_of: Optional[date] = None,
+                   db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Обеспечение и неустойки из юридического блока — только чтение; начисляемые суммы отделены от предъявленных/признанных и от прогноза."""
+    access.require_read(user)
+    from ..services.finance import exposure
+    vis = access.Visibility(db, user)
+    if deal_id and not vis.deal(deal_id):
+        raise HTTPException(404, "Сделка не найдена")
+    if contract_id and not vis.contract(contract_id):
+        raise HTTPException(404, "Договор не найден")
+    return exposure.build(db, user, vis, as_of or date.today(), deal_id, contract_id, direction, status, kind)
