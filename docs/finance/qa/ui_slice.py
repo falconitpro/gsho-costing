@@ -99,6 +99,10 @@ with sync_playwright() as pw:
     p.get_by_text("Ожидается, срок не согласован").scroll_into_view_if_needed(); p.screenshot(path=S+"19_undated_parts.png", full_page=True)
     p.get_by_role("link", name="ЗЧ-2026-0042").click(); p.wait_for_url(re.compile("/deals/parts/"))
     p.goto(U+"/finance"); p.get_by_text("Запчасти: заказано и не отгружено").wait_for(); p.screenshot(path=S+"20_overview_sources.png", full_page=True)
+    # прогноз по утверждённому расчёту (сделка выиграна, договора нет)
+    p.goto(U+"/finance?tab=calendar&source=calculation"); p.get_by_text("Прогноз Восток").count()
+    expect(p.locator("tbody tr").filter(has=p.locator(".badge", has_text=re.compile("^прогноз$")))).to_have_count(4)
+    p.screenshot(path=S+"21_calendar_forecast.png", full_page=True)
     # мобильная ширина
     m=ctx.new_page(); watch(m,"fd-mobile"); m.set_viewport_size({"width":390,"height":844}); m.goto(U+"/finance?tab=calendar"); m.get_by_text("АО «Алданзолото»").first.wait_for(); m.screenshot(path=S+"11_mobile_calendar.png", full_page=False)
     # КД: раздел по умолчанию закрыт (D-116) — пункта меню нет, на странице пояснение, запросов к API нет

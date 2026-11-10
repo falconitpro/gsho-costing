@@ -89,6 +89,7 @@ class LineSpec:
     basis: dict
     active: bool = True
     reason: str = ""
+    status: str = "ok"          # источник сам может пометить строку на сверку (напр., замещённый прогноз с разнесениями)
 
 
 def project_lines(db: Session, source_type: str, source_id: str, specs: list[LineSpec], user_id: Optional[str], deal_id: Optional[str],
@@ -102,7 +103,7 @@ def project_lines(db: Session, source_type: str, source_id: str, specs: list[Lin
     now = _now()
     for sp in specs:
         amount, currency, fields, rev = sp.amount, sp.currency, sp.fields, sp.revision
-        active, reason, sync_status = sp.active, sp.reason, "ok"
+        active, reason, sync_status = sp.active, sp.reason, sp.status
         if not currency:
             currency, active, reason, sync_status = "XXX", False, "валюта не определена в источнике", "conflict"   # XXX — ISO 4217 «без валюты»
         if amount is None and active:
@@ -189,6 +190,13 @@ def sync_contract(db: Session, c: Contract, user_id: Optional[str] = None, today
         specs.append(LineSpec(key=key, revision=_revision(line, c, amount), amount=amount, currency=c.currency, fields=fields, basis=basis, active=active, reason=reason))
     st = project_lines(db, "contract", c.id, specs, user_id, c.deal_id, "строка удалена из графика договора")
     st.contracts = 1
+    from .sources import sync_calculation   # подписанный договор замещает прогноз утверждённого расчёта своих сделок (D-127)
+    for did in {c.deal_id, *(c.deal_ids or [])} - {None, ""}:
+        d = db.get(Deal, did)
+        if d is not None and d.approved_version_id:
+            sub = sync_calculation(db, d, user_id)
+            sub.contracts = 0
+            st.add(sub)
     for i, line in enumerate(terms):
         if dec(rows[i]["amount"]) is None:
             st.skipped.append({"contract": c.number, "line": rows[i]["no"], "reason": "сумма не определена"})
@@ -268,6 +276,8 @@ STATUS_TITLES = {"paid": "оплачено", "partially_paid": "частично
 
 def source_number(o: FinanceObligation) -> str:
     bs = o.basis_snapshot or {}
+    if bs.get("version_no"):
+        return f"версия {bs['version_no']}"
     return str(bs.get("po_number") or bs.get("batch") or bs.get("contract_number") or "")
 
 
@@ -278,6 +288,8 @@ def source_url(o: FinanceObligation) -> Optional[str]:
         return "/supply?tab=po"
     if o.source_type == "batch" and o.deal_id:
         return f"/deals/{o.deal_id}?tab=logistics"
+    if o.source_type == "calculation" and o.deal_id:
+        return f"/deals/{o.deal_id}?tab=versions"
     if o.deal_id:
         return f"/deals/{o.deal_id}"
     return None

@@ -83,7 +83,7 @@ def overview(as_of: Optional[date] = None, db: Session = Depends(get_db), user: 
 @router.get("/obligations")
 def obligations(as_of: Optional[date] = None, direction: Optional[str] = Query(None, pattern="^(in|out)$"), currency: Optional[str] = None,
                 legal_entity_id: Optional[str] = None, deal_id: Optional[str] = None, contract_id: Optional[str] = None, status: Optional[str] = None,
-                source_type: Optional[str] = Query(None, pattern="^(contract|purchase_order|batch)$"),
+                source_type: Optional[str] = Query(None, pattern="^(contract|purchase_order|batch|calculation)$"),
                 date_from: Optional[date] = None, date_to: Optional[date] = None, search: str = "", include_inactive: bool = False, reconciliation: bool = False,
                 limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
                 db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):

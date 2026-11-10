@@ -116,6 +116,8 @@ def rebuild_sources(db: Session, user_id: Optional[str]) -> SyncStats:
     for b in db.scalars(select(Batch)).all():
         if b.payments or db.scalar(select(FinanceObligation.id).where(FinanceObligation.source_type == "batch", FinanceObligation.source_id == b.id)):
             total.add(sync_batch(db, b, user_id))
+    for d in db.scalars(select(Deal).where(Deal.approved_version_id.is_not(None))).all():
+        total.add(sync_calculation(db, d, user_id))
     return total
 
 
@@ -132,3 +134,114 @@ def parts_undated(db: Session, user) -> dict:
             "note": "Ожидаемые поступления по заказанным и не отгруженным запчастям. Срок оплаты не согласован — в календарь по датам не входят. "
                     "Связь с договором «С клиентом: запасные части» в CRM пока не ведётся: после подписания такого договора его строки появятся в календаре, "
                     "а эта сумма — пока строки не отгружены — продолжит показываться здесь (не складывайте их)."}
+
+
+# ------------------------------------------------------------------ утверждённый расчёт: прогноз до договора и замещение договором
+
+def _deal_won(deal) -> bool:
+    from ...core.workflow import POST_WIN_STATUSES, DealStatus
+    if deal.status in (DealStatus.LOST, DealStatus.CANCELLED) or getattr(deal, "deleted_at", None):
+        return False
+    return deal.status in POST_WIN_STATUSES or bool(deal.won_variant_id)
+
+
+def _deal_contracts(db: Session, deal_id: str) -> list:
+    """Подписанные договоры сделки (основная сделка или рамочный по нескольким сделкам)."""
+    from ...models import Contract
+    out = []
+    for c in db.scalars(select(Contract).where(Contract.status.in_(("active", "closed")), Contract.doc_type != "amendment")).all():
+        if c.deal_id == deal_id or deal_id in (c.deal_ids or []):
+            out.append(c)
+    return out
+
+
+def _contract_line(db: Session, contracts: list, line_no: int) -> Optional[FinanceObligation]:
+    if len(contracts) != 1:
+        return None
+    return db.scalar(select(FinanceObligation).where(FinanceObligation.source_type == "contract", FinanceObligation.source_id == contracts[0].id,
+                                                     FinanceObligation.source_line_no == line_no, FinanceObligation.is_active.is_(True)))
+
+
+def sync_calculation(db: Session, deal, user_id: Optional[str] = None) -> SyncStats:
+    """Прогноз платежей по утверждённой версии расчёта (базовый сценарий, выигравший вариант): график клиента и графики заводу
+    по позициям. Ключи от неизменяемой версии; новая утверждённая версия выводит прежнюю проекцию из итогов (история остаётся).
+    Подписанный договор замещает прогноз своей стороны: при однозначной строке — superseded_by, иначе — исключение с причиной (D-126, D-127)."""
+    from ...core.workflow import DealStatus
+    from ...models import Client, DealVersion, Position, Variant
+    from ..deal_service import audit
+    from .obligations import _active_alloc_total
+    st = SyncStats()
+    db.flush()   # сессия без autoflush: выборки ниже должны видеть изменения договора/сделки этой транзакции
+    ver = db.get(DealVersion, deal.approved_version_id) if deal.approved_version_id else None
+    won = _deal_won(deal)
+    specs: list[LineSpec] = []
+    if ver is not None and (won or db.scalar(select(FinanceObligation.id).where(FinanceObligation.source_type == "calculation", FinanceObligation.source_id == ver.id))):
+        variants = (ver.calc_result or {}).get("variants") or {}
+        vid = deal.won_variant_id if deal.won_variant_id in variants else next(
+            (v.id for v in db.scalars(select(Variant).where(Variant.deal_id == deal.id, Variant.is_default.is_(True))).all() if v.id in variants), next(iter(variants), None))
+        base = (variants.get(vid) or {}).get("base") or {}
+        client = db.get(Client, deal.client_id) if deal.client_id else None
+        contracts = _deal_contracts(db, deal.id)
+        client_contracts = [c for c in contracts if c.direction == "income"]
+        closed = deal.status == DealStatus.CLOSED
+        inactive_reason = "" if won and not closed else ("сделка закрыта" if closed else "сделка не выиграна или отменена")
+
+        def spec(key: str, no: int, on, amount, currency: str, direction: str, cp_kind: str, cp_id, cp_name: str, title: str, event: str,
+                 basis: dict, side_contracts: list) -> LineSpec:
+            amt = dec(amount)
+            fields = {"deal_id": deal.id, "contract_id": None, "legal_entity_id": None, "counterparty_kind": cp_kind, "counterparty_id": cp_id,
+                      "counterparty_name_snapshot": (cp_name or "")[:255], "direction": direction, "nature": "forecast", "title": title[:255], "event_code": event,
+                      "source_line_no": no, "legal_due_on": None, "legal_due_text": f"прогноз по утверждённому расчёту (версия {ver.version_no}); юридический срок — после подписания договора",
+                      "event_on": None, "event_is_fact": False, "forecast_on": _date(on), "superseded_by_id": None}
+            active, reason = (won and not closed), inactive_reason
+            if active and side_contracts:
+                target = _contract_line(db, side_contracts, no)
+                nums = ", ".join(c.number for c in side_contracts)
+                fields["superseded_by_id"] = target.id if target else None
+                active, reason = False, (f"заменено строкой договора {nums}" if target else f"заменено договором {nums}: построчное соответствие не установлено")
+            status = "ok"
+            if not active:   # прогноз вне итогов, а по нему уже разнесены деньги — их надо перенести на строку договора (сверка)
+                prev = db.scalar(select(FinanceObligation).where(FinanceObligation.source_type == "calculation", FinanceObligation.source_id == ver.id,
+                                                                 FinanceObligation.source_line_key == key))
+                if prev is not None and _active_alloc_total(db, prev.id) > 0:
+                    status, reason = "conflict", f"{reason}; есть разнесения — перенесите их на строку договора"
+            return LineSpec(key=key, revision=_rev({"on": str(on), "amount": s(amt), "currency": currency, "event": event, "version": ver.id}),
+                            amount=amt, currency=currency, fields=fields, basis={"version_no": ver.version_no, "variant_id": vid, "scenario": "base", **basis},
+                            active=active, reason=reason, status=status)
+
+        for row in base.get("payment_dates") or []:
+            no = int(row.get("no") or 0)
+            specs.append(spec(f"client:{vid}:{row.get('line_uid') or no}", no, row.get("on"), row.get("amount_rub"), "RUB", "in", "client", deal.client_id,
+                              client.name if client else "", f"{deal.number}: прогноз оплаты клиента — строка {no}", str(row.get("event") or ""),
+                              {"line": {k: row.get(k) for k in ("no", "event", "on", "amount_rub", "via")}}, client_contracts))
+        for pc in base.get("positions") or []:
+            pos = db.get(Position, pc.get("position_id"))
+            fac = db.get(Factory, pos.factory_id) if pos and pos.factory_id else None
+            fac_contracts = [c for c in contracts if c.direction == "expense" and fac is not None and c.cp_id == fac.id]
+            for row in pc.get("factory_payment_dates") or []:
+                no = int(row.get("no") or 0)
+                cur = (str(row.get("currency") or "").upper() or None)
+                specs.append(spec(f"factory:{pc.get('position_id')}:{row.get('line_uid') or no}", no, row.get("on"), row.get("amount"), cur, "out", "factory",
+                                  fac.id if fac else None, fac.name if fac else "", f"{deal.number}: прогноз оплаты заводу ({pos.model if pos else 'позиция'}) — строка {no}",
+                                  str(row.get("event") or ""), {"position_id": pc.get("position_id"), "line": {k: row.get(k) for k in ("no", "event", "on", "amount", "currency")}},
+                                  fac_contracts))
+        st = project_lines(db, "calculation", ver.id, specs, user_id, deal.id, "строка удалена из утверждённого расчёта")
+        st.contracts = 1
+    db.flush()
+    # прежние утверждённые версии — история: из итогов выводятся, не удаляются
+    for o in db.scalars(select(FinanceObligation).where(FinanceObligation.source_type == "calculation", FinanceObligation.deal_id == deal.id,
+                                                        FinanceObligation.is_active.is_(True))).all():
+        if ver is None or o.source_id != ver.id:
+            o.is_active, o.excluded_reason = False, f"заменено утверждённой версией {ver.version_no}" if ver else "утверждённая версия снята"
+            audit(db, user_id, deal.id, "finance_obligation", o.id, "superseded_version", after={"version": ver.id if ver else None})
+            st.updated += 1
+    db.flush()
+    # прогнозная строка вне итогов, а по ней есть разнесения — деньги надо перенести на строку договора (сверка)
+    for o in db.scalars(select(FinanceObligation).where(FinanceObligation.source_type == "calculation", FinanceObligation.deal_id == deal.id,
+                                                        FinanceObligation.is_active.is_(False), FinanceObligation.sync_status == "ok")).all():
+        if (ver is None or o.source_id != ver.id) and _active_alloc_total(db, o.id) > 0:   # прежние версии; текущая — через LineSpec.status
+            o.sync_status = "conflict"
+            o.excluded_reason = (o.excluded_reason + "; есть разнесения — перенесите их на строку договора").strip("; ")
+            audit(db, user_id, deal.id, "finance_obligation", o.id, "conflict", comment="прогноз замещён, а разнесения остались на прогнозной строке")
+            st.conflicts += 1
+    return st

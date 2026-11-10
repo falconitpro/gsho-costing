@@ -268,7 +268,7 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 /* раздел «Финансы» (вариант Б): реестр календаря — на узком экране остаются срок, контрагент, остаток, статус и действие */
 .fin-cal { min-width: 1100px; }
 .fin-cal td.fin-due { white-space: nowrap; max-width: 210px; }
-.fin-cal td.fin-due span { white-space: normal; display: block; }
+.fin-cal td.fin-due span.muted { white-space: normal; display: block; }
 .fin-narrow { display: none; }
 .fin-kpi-line { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
 .fin-kpi-line .muted { font-size: 12px; font-weight: 400; }
