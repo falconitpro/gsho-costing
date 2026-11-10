@@ -28,6 +28,8 @@ def sandbox(tmp_path):
     _stub(bin_, "docker", f'echo "docker $*" >> {log}\n'
                           'case "$*" in *is_dev*) exit "${STUB_IS_DEV_RC:-0}" ;; esac; exit 0\n')
     _stub(bin_, "backup", f'echo "backup $*" >> {log}; exit "${{STUB_BACKUP_RC:-0}}"\n')
+    # не root (как в CI) — деплой зовёт `sudo -n <backup>`; заглушка проверяет -n и запускает команду с тем же окружением
+    _stub(bin_, "sudo", f'echo "sudo $*" >> {log}; [ "$1" = -n ] || exit 97; shift; exec "$@"\n')
     env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "GSHO_DIR": str(tmp_path), "GSHO_DEPLOY_ENV": str(tmp_path / "deploy.env"),
            "GSHO_BACKUP_BIN": str(bin_ / "backup"), "GSHO_BACKUP_RETRY_SLEEP": "0"}
     env.pop("BACKUP_REQUIRED", None)
