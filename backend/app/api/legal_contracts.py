@@ -47,7 +47,16 @@ def _out(db: Session, user: CurrentUser, c: Contract) -> dict:
     mine = c.curator_id == user.id or c.created_by == user.id
     return {**svc.payload(db, c), "can_edit": _can_edit(user, c), "can_edit_number": user.has(Role.GD, Role.CD),
             "my_steps": [x["title"] for x in svc.user_steps(c, user.roles)], "can_register": user.has(Role.LAWYER, Role.GD),
-            "can_sign": user.has(Role.LAWYER, Role.GD, Role.CD, Role.FD) or mine, "can_correct": c.status in svc.LOCKED and user.has(Role.GD)}
+            "can_sign": user.has(Role.LAWYER, Role.GD, Role.CD, Role.FD) or mine, "can_correct": c.status in svc.LOCKED and user.has(Role.GD),
+            "finance_url": _finance_url(user, c)}
+
+
+def _finance_url(user: CurrentUser, c: Contract):
+    """Ссылка в «Финансы» на строки графика подписанного договора — только тем, кому раздел доступен (без мёртвых ссылок)."""
+    from ..services.finance.access import can_read
+    from ..services.finance.obligations import eligible
+    target = c
+    return f"/finance?tab=calendar&contract_id={target.id}" if can_read(user) and eligible(target) else None
 
 
 def _finance_sync(db: Session, c: Contract, user_id: str) -> None:

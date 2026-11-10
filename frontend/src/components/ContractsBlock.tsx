@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { ClaimCard, ClaimsTable, NewClaimDialog, type ClaimRow } from "./ClaimsBlock";
 
@@ -27,7 +28,7 @@ type Full = Row & {
   payment_terms: PayLine[]; performance_terms: PerfTerm[]; penalties: Penalty[]; liability_cap_pct: number | null; security: Record<string, string>; warranty: Record<string, string>;
   law: { law?: string; court?: string; claim_days?: number; pre_trial?: boolean }; edo: { operator?: string; doc_id?: string }; original: { received_on?: string; location?: string };
   files: CFile[]; history: { at: string; by_name: string; action: string; comment: string }[]; notes: string; schedule: Sched[]; check: { ok: boolean; errors: string[]; warnings: string[] };
-  children: Row[]; can_edit: boolean; can_edit_number: boolean; created_by_name: string;
+  children: Row[]; can_edit: boolean; can_edit_number: boolean; created_by_name: string; finance_url?: string | null;
   client_order: boolean; approval: { round?: number; submitted_at?: string; submitted_by_name?: string; steps?: Step[] }; route_preview: string[];
   sign_checklist: { code: string; title: string; ok: boolean; optional?: boolean }[]; amends: { field: string; title: string }[];
   my_steps: string[]; can_register: boolean; can_sign: boolean; can_correct?: boolean; obligations: Obligations | null;
@@ -330,7 +331,7 @@ function PayTab({ v, c, cat, ro, set, pull }: { v: Full; c: Full; cat: Catalog; 
           {lines.some((l) => l.share_pct != null) && <span className={`badge ${Math.abs(sum - 100) < 0.01 ? "ok" : "bad"}`}>итого {sum} %</span>}</div>}
       </div>
       <div className="poa-section" style={{ marginTop: 14 }}>
-        <div className="poa-section-head"><b>График платежей</b><span className="muted">срок считается от плановой даты события; юридически значимый — от фактической (тогда же считается просрочка)</span></div>
+        <div className="poa-section-head"><b>График платежей</b><span className="muted">срок считается от плановой даты события; юридически значимый — от фактической (тогда же считается просрочка)</span>{c.finance_url && <Link to={c.finance_url} style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>Оплаты в «Финансах» →</Link>}</div>
         <table className="table" style={{ fontSize: 13 }}><thead><tr><th>№</th><th className="num">Сумма</th><th>Событие</th><th>Дата события</th><th>Срок оплаты</th><th>Просрочка</th></tr></thead>
           <tbody>{c.schedule.map((s) => (
             <tr key={s.no}><td>{s.no}</td><td className="num">{money(s.amount, s.currency)}</td><td>{s.event_title}<div className="muted" style={{ fontSize: 11 }}>{s.text}</div></td>
