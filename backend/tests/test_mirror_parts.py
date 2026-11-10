@@ -49,7 +49,7 @@ def _setup(t: str):
         last = db.scalars(select(MarkupPolicy).order_by(MarkupPolicy.version_no.desc())).first()
         rules = {**(last.rules if last else {})}
         rules["default"] = {**(rules.get("default") or {}), cn.id: 10.0}
-        db.add(MarkupPolicy(version_no=(last.version_no + 1) if last else 1, status="approved", reason="тест запчастей", valid_from=None, rules=rules))
+        db.add(MarkupPolicy(version_no=(last.version_no + 1) if last else 1, status="approved", reason="тест запчастей", valid_from=date.today(), rules=rules))
         db.commit()
         return cn.id, ai.id, x.id
 

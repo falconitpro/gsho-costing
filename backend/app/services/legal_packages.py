@@ -186,6 +186,20 @@ def suppliers_in_deal(db: Session, deal: Deal) -> list[dict]:
         o["positions"] += 1
         o["units"] += pos.qty or 0
         o["amount"] = round(o["amount"] + ((pos.unit_price or 0) + (pos.options_price or 0)) * (pos.qty or 1), 2)
+        if f is not None and f.supplier_status == "group_company":
+            o["group_company"] = True
+    # конечные поставщики через компанию группы: договор от имени компании группы (D-160)
+    from .mirror_offers import mirror_positions, mirror_suppliers
+    via = mirror_suppliers(db, deal)
+    for mp in mirror_positions(db, deal):
+        if mp.factory_id in out and not out[mp.factory_id].get("via_group"):
+            continue
+        f = db.get(Factory, mp.factory_id)
+        o = out.setdefault(mp.factory_id, {"id": mp.factory_id, "name": f.name if f else "", "short_name": (f.short_name or f.name) if f else "", "country": (f.country if f else "CN") or "CN",
+                                             "positions": 0, "units": 0, "currency": mp.currency, "amount": 0.0, "via_group": via.get(mp.factory_id)})
+        o["positions"] += 1
+        o["units"] += mp.qty or 0
+        o["amount"] = round(o["amount"] + (mp.unit_price or 0) * (mp.qty or 1), 2)
     return list(out.values())
 
 
@@ -203,13 +217,19 @@ def build_context(db: Session, deal: Deal, ch: Choice) -> dict:
     if factory is None:
         raise ValueError("Поставщик не найден")
     positions = [p for p in deal.positions if p.factory_id == ch.factory_id]
+    mirror = None
+    if not positions:   # конечный поставщик через компанию группы: договор компании группы с ним по его ответу (D-160)
+        from .mirror_offers import mirror_positions, mirror_suppliers
+        positions = mirror_positions(db, deal, ch.factory_id)
+        mirror = mirror_suppliers(db, deal).get(ch.factory_id) if positions else None
     currency = (positions[0].currency if positions else factory.default_currency or "CNY").upper()
     country = (factory.country or "CN").upper()
     language = ch.language or DEFAULT_LANGUAGE.get(country, "ru-en")
 
     # компания группы — покупатель (по умолчанию RU; выбор другой — только ФД/ЗГД/КД, проверяется в API)
     entities = db.scalars(select(LegalEntity).where(LegalEntity.is_active.is_(True))).all()
-    own_entity = db.get(LegalEntity, ch.own_entity_id) if ch.own_entity_id else next((e for e in entities if e.sells_to_clients), entities[0] if entities else None)
+    own_entity = db.get(LegalEntity, ch.own_entity_id) if ch.own_entity_id else (
+        db.get(LegalEntity, mirror["entity_id"]) if mirror and mirror.get("entity_id") else next((e for e in entities if e.sells_to_clients), entities[0] if entities else None))
     own_profiles = lp.ensure_profiles(db, "own", own_entity.id) if own_entity else []
     own_profile = next((p for p in own_profiles if p.id == ch.own_profile_id), None) or next((p for p in own_profiles if p.is_default and p.is_active), own_profiles[0] if own_profiles else None)
     own_bank = None
@@ -252,7 +272,8 @@ def build_context(db: Session, deal: Deal, ch: Choice) -> dict:
                       "options": "; ".join(opts), "hs_code": (pos.logistics or {}).get("hs_code", ""), "production_term": production_term_text(pos.production_term, pos.production_days),
                       "warranty": warranty_text(pos), "name_zh": "", "params_text": "; ".join(f"{t.name_ru}: {t.value_ru}{(' ' + t.unit) if t.unit else ''}" for t in tps if t.value_ru)[:1000],
                       "local_options_excluded": sorted(local_names)})
-    src["items"] = "позиции сделки этого поставщика (цена поставщика, без наценок); опции РФ исключены"
+    src["items"] = ("позиции сделки через компанию группы: цена, валюта, базис, срок и оплата — из ответа поставщика компании группы; опции РФ исключены" if mirror
+                    else "позиции сделки этого поставщика (цена поставщика, без наценок); опции РФ исключены")
     src["params"] = "таблица технических характеристик позиций (без опций РФ)"
 
     zs = zip_set_for(db, deal, factory.id, create=False)
@@ -264,7 +285,8 @@ def build_context(db: Session, deal: Deal, ch: Choice) -> dict:
 
     ver = db.get(DealVersion, deal.approved_version_id) if deal.approved_version_id else None
     first = positions[0] if positions else None
-    contract = {"number": ch.contract_number or deal.factory_contract_number or "", "date": _fmt_date(ch.contract_date or deal.factory_contract_signed_at), "place": ch.place or "",
+    own_number, own_date = (ch.contract_number, ch.contract_date) if mirror else (ch.contract_number or deal.factory_contract_number, ch.contract_date or deal.factory_contract_signed_at)
+    contract = {"number": own_number or "", "date": _fmt_date(own_date), "place": ch.place or "",
                 "subject": "поставка горно-шахтного оборудования и запасных частей", "currency": currency, "basis": first.basis if first else (factory.default_basis or ""),
                 "delivery_point": first.delivery_point if first else "", "production_term": production_term_text(first.production_term, first.production_days) if first else "",
                 "delivery_term": "", "warranty": warranty_text(first) if first else "", "payment_terms": pay_text(first.factory_payments or first.factory_payments_offer) if first else "",
@@ -277,7 +299,7 @@ def build_context(db: Session, deal: Deal, ch: Choice) -> dict:
     return {"factory": {"id": factory.id, "name": factory.name, "short_name": factory.short_name or factory.name, "country": country}, "own_entity": {"id": own_entity.id, "name": own_entity.name, "code": own_entity.code} if own_entity else None,
             "buyer": buyer, "seller": seller, "contract": contract, "items": items, "params": params_rows, "zip": zrows, "zip_set": {"id": zs.id if zs else None, "confirmed": bool(zs and zs.confirmed_at), "pricing_mode": zs.pricing_mode if zs else "included", "lines_total": len(zs.lines) if zs else 0},
             "options": [], "totals": totals, "deal_version": {"id": ver.id if ver else None, "no": ver.version_no if ver else None}, "language": language, "sources": src,
-            "package": {"created_on": _fmt_date(date.today()), "author": "", "version": "", "status": STATUS_TITLES["draft"]}}
+            "package": {"created_on": _fmt_date(date.today()), "author": "", "version": "", "status": STATUS_TITLES["draft"]}, "mirror": mirror}
 
 
 def amount_words(v: float, currency: str) -> str:
@@ -390,7 +412,8 @@ def package_payload(pkg: LegalPackage, names: dict[str, str]) -> dict:
             "stage_code": pkg.stage_code, "checks": pkg.checks, "files": pkg.files, "approvals": [{**a, "by_name": names.get(a.get("by") or "", "")} for a in reversed(pkg.approvals or [])],
             "notes": pkg.notes, "created_by_name": names.get(pkg.created_by or "", ""), "created_at": pkg.created_at, "superseded_by": pkg.superseded_by,
             "counterparty_name": (pkg.snapshot or {}).get("factory", {}).get("short_name") or (pkg.snapshot or {}).get("client", {}).get("name", ""),
-            "totals": (pkg.snapshot or {}).get("totals", {}), "contract": (pkg.snapshot or {}).get("contract", {}), "next_statuses": TRANSITIONS.get(pkg.status, [])}
+            "totals": (pkg.snapshot or {}).get("totals", {}), "contract": (pkg.snapshot or {}).get("contract", {}), "next_statuses": TRANSITIONS.get(pkg.status, []),
+            "mirror": (pkg.snapshot or {}).get("mirror")}
 
 
 def user_names(db: Session) -> dict[str, str]:

@@ -192,7 +192,8 @@ def deal_contracts(deal_id: str, db: Session = Depends(get_db), user: CurrentUse
     d = db.get(Deal, deal_id)
     if d is None or not can_see_deal(user, d):
         raise HTTPException(404, "Сделка не найдена")
-    rows = db.scalars(select(Contract).where(Contract.deal_id == deal_id).order_by(Contract.created_at)).all()
+    rows = [c for c in db.scalars(select(Contract).where(Contract.deal_id == deal_id).order_by(Contract.created_at)).all()
+            if not c.mirror_kind or svc.can_see(db, user, c)]
     names = svc._names(db)
     return {"items": [svc.payload(db, c, names, full=False) for c in rows]}
 

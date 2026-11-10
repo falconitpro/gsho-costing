@@ -96,6 +96,8 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
         "events": {e.value: t for e, t in EVENT_TITLES.items()},
         "fd_declined": _fd_decline(db, deal),
     }
+    from ..services.mirror_offers import group_chain_summary
+    data["group_chain"] = group_chain_summary(db, deal, res)      # маржа группы — при праве «Цепочка компаний группы» (D-161)
     return filter_payload(data, user)
 
 

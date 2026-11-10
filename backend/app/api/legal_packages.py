@@ -62,6 +62,21 @@ class ChoiceIn(BaseModel):
     notes: str = ""
 
 
+def _chain(user: CurrentUser) -> bool:
+    from ..services.mirror_offers import can_see_mirror_docs
+    return can_see_mirror_docs(user)
+
+
+def _pkg_visible(p: LegalPackage, user: CurrentUser) -> bool:
+    """Пакет компании группы с конечным поставщиком (цена поставщика) — право «Цепочка компаний группы» и юрист (D-160)."""
+    return not (p.snapshot or {}).get("mirror") or _chain(user)
+
+
+def _mirror_guard(ctx: dict, user: CurrentUser) -> None:
+    if ctx.get("mirror") and not _chain(user):
+        raise HTTPException(403, "Договор компании группы с конечным поставщиком формируют КД, ФД, ЗГД или юрист")
+
+
 def _choice(body: ChoiceIn, user: CurrentUser) -> svc.Choice:
     if body.language and body.language not in LANGUAGES:
         raise HTTPException(422, "Неизвестный язык документов")
@@ -88,10 +103,15 @@ def _templates_for(db: Session, ctx: dict, override: dict[str, Optional[str]]) -
     return out
 
 
-def _check_entity_choice(db: Session, body: ChoiceIn, user: CurrentUser) -> None:
-    """Покупатель по умолчанию — компания РФ; другая компания группы — только ФД, ЗГД, КД (решение владельца)."""
+def _check_entity_choice(db: Session, body: ChoiceIn, user: CurrentUser, deal: Optional[Deal] = None) -> None:
+    """Покупатель по умолчанию — компания РФ; другая компания группы — только ФД, ЗГД, КД (решение владельца).
+    Для конечного поставщика через компанию группы покупатель — она сама (D-160), это не выбор другой компании."""
     if not body.own_entity_id:
         return
+    if deal is not None:
+        from ..services.mirror_offers import mirror_suppliers
+        if (mirror_suppliers(db, deal).get(body.factory_id) or {}).get("entity_id") == body.own_entity_id:
+            return
     e = db.get(LegalEntity, body.own_entity_id)
     if e is None:
         raise HTTPException(404, "Компания группы не найдена")
@@ -103,7 +123,7 @@ def _check_entity_choice(db: Session, body: ChoiceIn, user: CurrentUser) -> None
 def purchase_options(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Данные для мастера: поставщики из позиций, компании группы с профилями и счетами, профили поставщика, шаблоны, языки, состояние ЗИП."""
     deal = _deal(db, deal_id, user)
-    suppliers = svc.suppliers_in_deal(db, deal)
+    suppliers = [s for s in svc.suppliers_in_deal(db, deal) if not s.get("via_group") or _chain(user)]
     entities = []
     for e in db.scalars(select(LegalEntity).where(LegalEntity.is_active.is_(True)).order_by(LegalEntity.sells_to_clients.desc(), LegalEntity.name)).all():
         profs = lp.ensure_profiles(db, "own", e.id)
@@ -215,11 +235,12 @@ def reset_zip_set(deal_id: str, factory_id: str, db: Session = Depends(get_db), 
 def purchase_preview(deal_id: str, body: ChoiceIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Собирает данные пакета без формирования файлов: стороны, позиции, ЗИП, итоги, источники значений, проверки."""
     deal = _deal(db, deal_id, user)
-    _check_entity_choice(db, body, user)
+    _check_entity_choice(db, body, user, deal)
     try:
         ctx = svc.build_context(db, deal, _choice(body, user))
     except ValueError as e:
         raise HTTPException(404, str(e))
+    _mirror_guard(ctx, user)
     templates = _templates_for(db, ctx, body.templates)
     checks = svc.check_purchase(ctx, templates)
     db.commit()
@@ -232,11 +253,45 @@ def purchase_build(deal_id: str, body: ChoiceIn, db: Session = Depends(get_db), 
     При блокирующих ошибках пакет не формируется (422 со списком)."""
     deal = _deal(db, deal_id, user)
     _can_build(deal, user)
-    _check_entity_choice(db, body, user)
+    _check_entity_choice(db, body, user, deal)
+    pkg, ctx = _build(db, deal, body, user)
+    out = svc.package_payload(pkg, svc.user_names(db))
+    out["mirror_packages"] = _build_mirrors(db, deal, ctx, user, body.templates)
+    db.commit()
+    return out
+
+
+def _build_mirrors(db: Session, deal: Deal, ctx: dict, user: CurrentUser, templates: Optional[dict] = None) -> list[dict]:
+    """Договор с компанией группы → сразу пакеты компании группы с её конечными поставщиками по их ответам (D-160).
+    Ошибка пакета поставщика не отменяет основной пакет: она возвращается в ответе, пакет можно сформировать позже вручную."""
+    from ..services.mirror_offers import mirror_suppliers
+    if not ctx["factory"].get("id") or ctx.get("mirror"):
+        return []
+    res = []
+    for sid, info in mirror_suppliers(db, deal).items():
+        if info.get("group_factory_id") != ctx["factory"]["id"]:
+            continue
+        sup = db.get(Factory, sid)
+        name = (sup.short_name or sup.name) if sup else sid
+        sp = db.begin_nested()
+        try:
+            pkg, _ = _build(db, deal, ChoiceIn(factory_id=sid, templates=dict(templates or {})), user, auto=True)   # те же шаблоны, что выбраны для основного
+            sp.commit()
+            res.append({"supplier_id": sid, "supplier": name, "entity": info.get("entity_name"), "ok": True, "package_id": pkg.id, "version_no": pkg.version_no})
+        except HTTPException as e:
+            sp.rollback()
+            d = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail)}
+            res.append({"supplier_id": sid, "supplier": name, "entity": info.get("entity_name"), "ok": False, "message": d.get("message", ""), "errors": d.get("errors", [])})
+    return res
+
+
+def _build(db: Session, deal: Deal, body: ChoiceIn, user: CurrentUser, auto: bool = False):
     try:
         ctx = svc.build_context(db, deal, _choice(body, user))
     except ValueError as e:
         raise HTTPException(404, str(e))
+    if not auto:            # автоматически вслед за договором с компанией группы — может и менеджер; вручную — только с правом цепочки
+        _mirror_guard(ctx, user)
     templates = _templates_for(db, ctx, body.templates)
     checks = svc.check_purchase(ctx, templates)
     if checks["errors"]:
@@ -289,11 +344,12 @@ def purchase_build(deal_id: str, body: ChoiceIn, db: Session = Depends(get_db), 
         if p.status not in ("signed", "archived", "superseded"):
             p.status, p.superseded_by = "superseded", pkg.id
             p.approvals = list(p.approvals or []) + [{"at": datetime.now(timezone.utc).isoformat(), "by": user.id, "from": p.status, "to": "superseded", "comment": f"заменён версией v{version_no}"}]
-    db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"Юридический пакет (закупка у {ctx['factory']['short_name']}) v{version_no} сформирован: договор, приложения № 1 и № 2 — черновик",
+    db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"Юридический пакет (закупка у {ctx['factory']['short_name']}{(' от имени ' + ctx['mirror']['entity_name']) if ctx.get('mirror') else ''}) v{version_no} сформирован: договор, приложения № 1 и № 2 — черновик",
                      body="; ".join(checks["warnings"][:5]), user_id=user.id))
-    audit(db, user.id, deal.id, "legal_package", pkg.id, "build", after={"factory": ctx["factory"]["short_name"], "version": version_no, "files": [f["file_name"] for f in files], "warnings": len(checks["warnings"])})
-    db.commit()
-    return svc.package_payload(pkg, svc.user_names(db))
+    audit(db, user.id, deal.id, "legal_package", pkg.id, "build", after={"factory": ctx["factory"]["short_name"], "version": version_no, "files": [f["file_name"] for f in files],
+                                                                          "warnings": len(checks["warnings"]), **({"via_group": ctx["mirror"]["entity_name"]} if ctx.get("mirror") else {})})
+    db.flush()
+    return pkg, ctx
 
 
 # ------------------------------------------------------------------ реестр пакетов, файлы, статусы
@@ -302,7 +358,7 @@ def purchase_build(deal_id: str, body: ChoiceIn, db: Session = Depends(get_db), 
 def deal_packages(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = _deal(db, deal_id, user)
     names = svc.user_names(db)
-    rows = db.scalars(select(LegalPackage).where(LegalPackage.deal_id == deal.id).order_by(LegalPackage.created_at.desc())).all()
+    rows = [p for p in db.scalars(select(LegalPackage).where(LegalPackage.deal_id == deal.id).order_by(LegalPackage.created_at.desc())).all() if _pkg_visible(p, user)]
     return {"items": [svc.package_payload(p, names) for p in rows], "statuses": svc.STATUS_TITLES}
 
 
@@ -315,6 +371,8 @@ def all_packages(status: str = "", kind: str = "", db: Session = Depends(get_db)
     names = svc.user_names(db)
     out = []
     for p in db.scalars(select(LegalPackage).order_by(LegalPackage.created_at.desc())).all():
+        if not _pkg_visible(p, user):
+            continue
         deal = db.get(Deal, p.deal_id)
         if deal is None or not can_see_deal(user, deal):
             continue
@@ -351,7 +409,7 @@ def package_signed_scan(pid: str, file: UploadFile = File(...), comment: str = F
 
 def _pkg(db: Session, pid: str, user: CurrentUser) -> tuple[LegalPackage, Deal]:
     p = db.get(LegalPackage, pid)
-    if p is None:
+    if p is None or not _pkg_visible(p, user):
         raise HTTPException(404, "Пакет не найден")
     deal = _deal(db, p.deal_id, user)
     return p, deal
