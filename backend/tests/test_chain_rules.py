@@ -59,6 +59,8 @@ def test_rules_route_requests_and_visa_before_kp():
         assert c.put("/api/parts/intragroup-rules", headers=H(CD), json={"rules": []}).status_code == 403
         assert c.put("/api/parts/intragroup-rules", headers=H(FD), json={"rules": [{"kind": "gsho", "route_id": "нет"}]}).status_code == 422
         assert c.put("/api/parts/intragroup-rules", headers=H(FD), json={"rules": [{"kind": "x"}]}).status_code == 422
+        assert c.put("/api/parts/intragroup-rules", headers=H(FD), json={"rules": [{"kind": "gsho", "country": "Атлантида"}]}).status_code == 422
+        assert "Китай" in c.get("/api/parts/intragroup-rules", headers=H(CD)).json()["countries"]
         rules = [{"kind": "gsho", "country": "CN", "route_id": route_id, "note": "Китай — через Альянс-Импекс"},
                  {"kind": "*", "country": "DE", "route_id": None}]
         got = c.put("/api/parts/intragroup-rules", headers=H(GD), json={"rules": rules}).json()
@@ -67,7 +69,7 @@ def test_rules_route_requests_and_visa_before_kp():
         try:
             with SessionLocal() as db:
                 x, de = db.get(Factory, x_id), db.get(Factory, de_id)
-                assert chain_rules.match(db, x, "gsho")["country"] == "CN" and chain_rules.match(db, x, "parts") is None
+                assert chain_rules.match(db, x, "gsho")["country"] == "Китай" and chain_rules.match(db, x, "parts") is None
                 assert chain_rules.match(db, de, "parts")["kind"] == "*"
                 assert chain_rules.resolve(db, x, "gsho")[1].id == ai_id
 

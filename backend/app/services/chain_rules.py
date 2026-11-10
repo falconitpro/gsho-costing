@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Factory, LegalEntity, SupplyRoute
 from . import settings_service
+from .countries import normalize_country
 
 KEY = "intragroup_rules"
 KINDS = {"gsho": "ГШО", "parts": "Запчасти", "service": "Сервис", "*": "любая сделка"}
@@ -40,7 +41,10 @@ def validate(db: Session, rows: list[dict]) -> list[dict]:
         kind = (r.get("kind") or "*").strip()
         if kind not in KINDS:
             raise HTTPException(422, f"Правило {i}: вид сделки — ГШО, запчасти, сервис или любая")
-        country = (r.get("country") or "*").strip().upper() or "*"
+        raw = (r.get("country") or "*").strip() or "*"
+        country = "*" if raw == "*" else normalize_country(raw)   # «CN», «China», «Китай» → «Китай»
+        if country != "*" and country not in known_countries(db):
+            raise HTTPException(422, f"Правило {i}: неизвестная страна «{raw}» — выберите из списка")
         sid = (r.get("supplier_id") or "").strip()
         if sid:
             sup = db.get(Factory, sid)
@@ -60,6 +64,11 @@ def validate(db: Session, rows: list[dict]) -> list[dict]:
         seen.add(key)
         out.append({"id": r.get("id") or uuid.uuid4().hex[:8], "kind": kind, "country": country, "supplier_id": sid, "route_id": rid, "note": (r.get("note") or "").strip()[:200]})
     return out
+
+
+def known_countries(db: Session) -> set[str]:
+    from .countries import country_names
+    return set(country_names()) | {normalize_country(f.country) for f in db.scalars(select(Factory)).all() if f.country}
 
 
 def save(db: Session, rows: list[dict], user_id: str) -> list[dict]:
@@ -85,14 +94,14 @@ def group_factory_for(db: Session, route: SupplyRoute, n: Optional[int] = None) 
 
 def match(db: Session, supplier: Factory, kind: str) -> Optional[dict]:
     """Самое точное правило для поставщика и вида сделки (или None — правил нет, запрос напрямую)."""
-    country = (supplier.country or "").upper()
+    country = normalize_country(supplier.country or "")
     best, score = None, -1
     for r in rules(db):
         if r["kind"] not in (kind, "*"):
             continue
         if r["supplier_id"] and r["supplier_id"] != supplier.id:
             continue
-        if not r["supplier_id"] and r["country"] not in (country, "*"):
+        if not r["supplier_id"] and r["country"] != "*" and normalize_country(r["country"]) != country:
             continue
         sc = (4 if r["supplier_id"] else 2 if r["country"] != "*" else 0) + (1 if r["kind"] == kind else 0)
         if sc > score:

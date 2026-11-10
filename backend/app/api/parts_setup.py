@@ -440,7 +440,14 @@ def chain_rules_get(db: Session = Depends(get_db), user: CurrentUser = Depends(g
     names = {f.id: (f.short_name or f.name) for f in db.scalars(select(Factory)).all()}
     routes = {r.id: r.name for r in db.scalars(select(SupplyRoute)).all()}
     return {"rules": [{**r, "supplier_name": names.get(r["supplier_id"], ""), "route_name": routes.get(r["route_id"] or "", "")} for r in rows],
-            "kinds": cr.KINDS, "can_edit": user.has(Role.FD, Role.GD)}
+            "kinds": cr.KINDS, "can_edit": user.has(Role.FD, Role.GD), "countries": _rule_countries(db)}
+
+
+def _rule_countries(db: Session) -> list[str]:
+    """Страны для правил: страны поставщиков из справочника, затем остальные из списка стран."""
+    from ..services.countries import country_names, normalize_country
+    used = sorted({normalize_country(f.country) for f in db.scalars(select(Factory)).all() if f.country} - {""})
+    return used + [c for c in country_names() if c not in used]
 
 
 @router.put("/intragroup-rules")
