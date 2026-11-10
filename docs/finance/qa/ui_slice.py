@@ -103,6 +103,15 @@ with sync_playwright() as pw:
     p.goto(U+"/finance?tab=calendar&source=calculation"); p.get_by_text("Прогноз Восток").count()
     expect(p.locator("tbody tr").filter(has=p.locator(".badge", has_text=re.compile("^прогноз$")))).to_have_count(4)
     p.screenshot(path=S+"21_calendar_forecast.png", full_page=True)
+    # прогноз ликвидности и импорт выписки (этап 4)
+    p.goto(U+"/finance?tab=liquidity&group=day&horizon=90"); p.get_by_text("Прогноз остатков").wait_for()
+    p.locator("svg[role=img]").first.wait_for(); p.get_by_role("button", name=re.compile(r"^состав")).first.click(); p.get_by_text("Состав точки").wait_for()
+    p.get_by_text("Прогноз остатков").scroll_into_view_if_needed(); p.screenshot(path=S+"22_liquidity_forecast.png", full_page=True)
+    p.get_by_role("button", name="Импорт выписки").click(); p.locator("input[type=file]").set_input_files("statement_sample.csv")
+    p.get_by_role("button", name="Предпросмотр").click(); p.get_by_text("к загрузке 2").wait_for()
+    p.screenshot(path=S+"23_import_preview.png", full_page=True)
+    p.get_by_role("button", name=re.compile(r"Загрузить и провести \(2\)")).click(); p.get_by_text("Загружено операций: 2").wait_for()
+    p.locator("tbody tr").filter(has_text="9001").first.wait_for(); p.screenshot(path=S+"24_import_done.png", full_page=True)
     # мобильная ширина
     m=ctx.new_page(); watch(m,"fd-mobile"); m.set_viewport_size({"width":390,"height":844}); m.goto(U+"/finance?tab=calendar"); m.get_by_text("АО «Алданзолото»").first.wait_for(); m.screenshot(path=S+"11_mobile_calendar.png", full_page=False)
     # КД: раздел по умолчанию закрыт (D-116) — пункта меню нет, на странице пояснение, запросов к API нет

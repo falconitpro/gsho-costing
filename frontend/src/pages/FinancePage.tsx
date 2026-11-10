@@ -465,6 +465,7 @@ function Liquidity({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSear
               </Fragment>))}</tbody>
           </table></div>)}
       </div>
+      <Forecast sp={sp} go={go} stamp={stamp} />
       <Transactions meta={meta} accounts={accounts || []} sp={sp} go={go} stamp={stamp} onChanged={onChanged} />
     </>
   );
@@ -536,6 +537,7 @@ function Transactions({ meta, accounts, sp, go, stamp, onChanged }: { meta: Meta
   const [data, setData] = useState<List<Tx> | null>(null);
   const [err, setErr] = useState("");
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   useEffect(() => {
     const p = new URLSearchParams({ limit: "500" });
     if (f.account_id) p.set("account_id", f.account_id);
@@ -556,9 +558,11 @@ function Transactions({ meta, accounts, sp, go, stamp, onChanged }: { meta: Meta
             <option value="legacy">старые отметки оплаты</option><option value="reversal">сторно</option></select>
           <label style={{ fontSize: 13 }}><input type="checkbox" checked={f.unallocated} onChange={(e) => go({ unallocated: e.target.checked ? "1" : null })} /> только неразнесённые</label>
           <label style={{ fontSize: 13 }}><input type="checkbox" checked={f.withdrawn} onChange={(e) => go({ withdrawn: e.target.checked ? "1" : null })} /> показать отозванные</label>
-          {meta.can_edit && <button className="btn add" onClick={() => setCreating((x) => !x)}>Операция</button>}
+          {meta.can_edit && <button className="btn secondary" onClick={() => { setImporting((x) => !x); setCreating(false); }}>{importing ? "Закрыть импорт" : "Импорт выписки"}</button>}
+          {meta.can_edit && <button className="btn add" onClick={() => { setCreating((x) => !x); setImporting(false); }}>Операция</button>}
         </div>
       </div>
+      {importing && <ImportForm accounts={accounts} onDone={() => { onChanged(); }} />}
       {creating && <TxForm accounts={accounts} onDone={(id) => { setCreating(false); onChanged(); go({ tx: id }); }} />}
       {err && <div className="alert error">{err}</div>}
       {!data ? <div className="muted">Загружаю…</div> : (
@@ -763,6 +767,213 @@ function AssignAccount({ tx, onDone }: { tx: Tx; onDone: () => void }) {
           <label className="f">Банковский № документа<input value={ref} onChange={(e) => setRef(e.target.value)} /></label>
           <button className="btn secondary" disabled={busy || !acc || !changed} onClick={submit}>{busy ? "Сохраняю…" : "Сохранить"}</button>
         </div>)}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ прогноз ликвидности
+
+type LiqPoint = { on: string; inflow: string; outflow: string; balance: string | null; late_in_point: boolean; count: number };
+type Bucket = { in: string; out: string; count: number };
+type LiqCur = { currency: string; opening_balance: string | null; balance_status: "confirmed" | "partial" | "unknown";
+  accounts: { id: string; title: string; balance: string | null; balance_status: string; snapshot_as_of: string | null; stale: boolean }[];
+  points: LiqPoint[]; minimum: string | null; minimum_on: string | null; threshold: string; cash_gaps: { from: string; to: string; min: string; min_on: string }[];
+  undated: Bucket; beyond_horizon: Bucket; needs_reconciliation: Bucket; unallocated: Bucket; fx: { rate: string; on: string; source: string } | null };
+type Liq = { as_of: string; group_by: "day" | "week"; horizon_days: number; currencies: LiqCur[]; formula: string;
+  rub: { included: string[]; excluded: { currency: string; reason: string }[]; fx: { currency: string; rate: string; on: string; source: string }[]; points: { on: string; balance: string }[]; note: string } };
+type LiqExpl = { on: string; items: { id: string; title: string; direction: "in" | "out"; amount: string; on: string; late: boolean; nature: string; counterparty: string }[] };
+
+function Forecast({ sp, go, stamp }: { sp: URLSearchParams; go: (p: Record<string, string | null>) => void; stamp: number }) {
+  const groupBy = sp.get("group") === "day" ? "day" : "week";
+  const horizon = sp.get("horizon") || "90";
+  const [data, setData] = useState<Liq | null>(null);
+  const [err, setErr] = useState("");
+  const [threshold, setThreshold] = useState(sp.get("min") || "0");
+  const [expl, setExpl] = useState<LiqExpl | null>(null);
+  useEffect(() => {
+    setErr(""); setExpl(null);
+    api.get<Liq>(`/api/finance/liquidity?group_by=${groupBy}&horizon_days=${horizon}&threshold=${encodeURIComponent(sp.get("min") || "0")}`).then(setData).catch((e) => setErr(errText(e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupBy, horizon, sp.get("min"), stamp]);
+  if (err) return <div className="alert error">{err}</div>;
+  if (!data) return <div className="card muted">Загружаю прогноз…</div>;
+  const curList = data.currencies.map((c) => c.currency);
+  const curCode = sp.get("ccy") && curList.includes(sp.get("ccy")!) ? sp.get("ccy")! : curList.includes("RUB") ? "RUB" : curList[0];
+  const cur = data.currencies.find((c) => c.currency === curCode);
+  const explain = (on: string) => api.get<LiqExpl>(`/api/finance/liquidity/explanation?currency=${curCode}&on=${on}&group_by=${groupBy}&horizon_days=${horizon}`).then(setExpl).catch((e) => setErr(errText(e)));
+  const outside = (b: Bucket | undefined, label: string) => b && b.count > 0 ? <tr><td>{label}</td><td className="num">{Number(b.in) ? `+${fmtMoney(b.in)}` : "—"}</td><td className="num">{Number(b.out) ? `−${fmtMoney(b.out)}` : "—"}</td><td className="num">{b.count}</td></tr> : null;
+  return (
+    <div className="card">
+      <div className="section-head"><h2>Прогноз остатков</h2>
+        <div className="row">
+          {curList.length > 1 && <div className="tabs" style={{ margin: 0, border: 0 }}>{curList.map((c) => <button key={c} className={c === curCode ? "active" : ""} onClick={() => go({ ccy: c })}>{c}</button>)}</div>}
+          <select value={groupBy} onChange={(e) => go({ group: e.target.value })} aria-label="Шаг"><option value="week">по неделям</option><option value="day">по дням</option></select>
+          <select value={horizon} onChange={(e) => go({ horizon: e.target.value })} aria-label="Горизонт"><option value="30">30 дней</option><option value="90">90 дней</option><option value="180">180 дней</option><option value="365">год</option></select>
+          <form onSubmit={(e) => { e.preventDefault(); go({ min: threshold.replace(",", ".") || null }); }} className="row" style={{ gap: 4 }}>
+            <label className="muted" style={{ fontSize: 12 }}>порог разрыва</label><input value={threshold} onChange={(e) => setThreshold(e.target.value)} style={{ width: 110 }} inputMode="decimal" onBlur={() => go({ min: threshold.replace(",", ".") || null })} />
+          </form>
+        </div>
+      </div>
+      {!cur ? <div className="muted">Нет счетов и обязательств для прогноза.</div> : <>
+        {cur.balance_status !== "confirmed" && <div className="alert warn" style={{ fontSize: 13 }}>
+          {cur.balance_status === "unknown" ? `Входящий остаток в ${cur.currency} не подтверждён — кривая не строится от нуля. Подтвердите остаток счёта в блоке «Счета и остатки».`
+            : `Остаток подтверждён не по всем счетам в ${cur.currency}: кривая — по подтверждённым счетам, без ${cur.accounts.filter((a) => a.balance == null).map((a) => a.title).join(", ")}.`}</div>}
+        {cur.accounts.some((a) => a.stale) && <div className="alert warn" style={{ fontSize: 13 }}>Подтверждённый остаток старше 7 дней: {cur.accounts.filter((a) => a.stale).map((a) => a.title).join(", ")}.</div>}
+        <div className="row" style={{ gap: 10, alignItems: "stretch", marginBottom: 10 }}>
+          <Kpi label={`входящий остаток, ${cur.currency}`}>{cur.opening_balance == null ? <span className="muted" style={{ fontSize: 14 }}>не подтверждён</span> : fmtMoney(cur.opening_balance, cur.currency)}</Kpi>
+          <Kpi label={cur.minimum_on ? `минимальный остаток · ${fmtDate(cur.minimum_on)}` : "минимальный остаток"} bad={cur.minimum != null && Number(cur.minimum) < Number(cur.threshold)}>{cur.minimum == null ? <span className="muted" style={{ fontSize: 14 }}>нет данных</span> : fmtMoney(cur.minimum, cur.currency)}</Kpi>
+          <Kpi label="кассовые разрывы" bad={cur.cash_gaps.length > 0}>{cur.cash_gaps.length === 0 ? (cur.minimum == null ? <span className="muted" style={{ fontSize: 14 }}>нет данных</span> : "нет") :
+            cur.cash_gaps.map((g, i) => <div key={i} style={{ fontSize: 13 }}>{fmtDate(g.from)} — {fmtDate(g.to)}: <b>{fmtMoney(g.min, cur.currency)}</b></div>)}</Kpi>
+        </div>
+        <LiqChart cur={cur} onPick={explain} />
+        <div style={{ overflowX: "auto", marginTop: 10 }}><table style={{ fontSize: 13 }}>
+          <thead><tr><th>{groupBy === "week" ? "Неделя с" : "Дата"}</th><th className="num">Поступления</th><th className="num">Списания</th><th className="num">Остаток на конец</th><th></th></tr></thead>
+          <tbody>{cur.points.filter((p, i) => i === 0 || Number(p.inflow) || Number(p.outflow)).map((p) => (
+            <tr key={p.on} style={p.balance != null && Number(p.balance) < Number(cur.threshold) ? { background: "var(--late-bg)" } : undefined}>
+              <td style={{ whiteSpace: "nowrap" }}>{fmtDate(p.on)}{p.late_in_point && <span className="badge bad" style={{ marginLeft: 4, fontSize: 10 }} title="Срок уже прошёл — ожидается сейчас">просрочено</span>}</td>
+              <td className="num">{Number(p.inflow) ? `+${fmtMoney(p.inflow)}` : "—"}</td><td className="num">{Number(p.outflow) ? `−${fmtMoney(p.outflow)}` : "—"}</td>
+              <td className="num"><b>{p.balance == null ? "—" : fmtMoney(p.balance)}</b>{p.balance != null && Number(p.balance) < 0 && <span className="muted" style={{ fontSize: 11 }}> минус</span>}</td>
+              <td>{p.count > 0 && <button className="btn ghost" style={{ padding: "0 8px", fontSize: 12 }} onClick={() => explain(p.on)}>состав ({p.count})</button>}</td></tr>))}</tbody>
+        </table></div>
+        {expl && <div className="card" style={{ marginTop: 10, background: "#fcfcfc", fontSize: 13 }}>
+          <div className="row" style={{ justifyContent: "space-between" }}><b>Состав точки {fmtDate(expl.on)}</b><button className="btn ghost" style={{ padding: "0 8px" }} onClick={() => setExpl(null)} aria-label="Закрыть">×</button></div>
+          <div className="muted">{data.formula}</div>
+          <table style={{ marginTop: 6 }}><tbody>{expl.items.map((i) => <tr key={i.id}><td>{fmtDate(i.on)}{i.late && <span className="muted"> (срок прошёл)</span>}</td><td>{i.title}{i.nature === "forecast" && <span className="badge info" style={{ marginLeft: 4, fontSize: 10 }}>прогноз</span>}</td><td>{i.counterparty}</td>
+            <td className="num">{i.direction === "in" ? "+" : "−"}{fmtMoney(i.amount, cur.currency)}</td></tr>)}</tbody></table>
+        </div>}
+        <details style={{ marginTop: 10 }} open={[cur.undated, cur.beyond_horizon, cur.needs_reconciliation, cur.unallocated].some((b) => b.count > 0)}>
+          <summary><b>Не вошло в кривую</b></summary>
+          <table style={{ fontSize: 13, marginTop: 6 }}><thead><tr><th>Что</th><th className="num">Поступления</th><th className="num">Списания</th><th className="num">Строк</th></tr></thead><tbody>
+            {outside(cur.undated, "Без согласованной даты")}{outside(cur.beyond_horizon, "Позже горизонта")}
+            {outside(cur.needs_reconciliation, "Записи «требует сверки» — не банковский факт")}{outside(cur.unallocated, "Проведено, но не разнесено (уже в остатке)")}
+            {[cur.undated, cur.beyond_horizon, cur.needs_reconciliation, cur.unallocated].every((b) => b.count === 0) && <tr><td colSpan={4} className="muted">Ничего</td></tr>}
+          </tbody></table>
+        </details>
+        <details style={{ marginTop: 6 }}>
+          <summary><b>RUB-эквивалент по всем валютам</b></summary>
+          <div className="muted" style={{ fontSize: 12, margin: "6px 0" }}>{data.rub.note} Курсы: {data.rub.fx.map((f) => `${f.currency} ${f.rate.replace(".", ",")} (${f.source}, ${fmtDate(f.on)})`).join("; ") || "—"}.
+            {data.rub.excluded.length > 0 && <> Не включено: {data.rub.excluded.map((x) => `${x.currency} — ${x.reason}`).join("; ")}.</>}</div>
+          {data.rub.points.length > 0 && <table style={{ fontSize: 13 }}><thead><tr><th>Дата</th><th className="num">Остаток, ≈ RUB</th></tr></thead>
+            <tbody>{data.rub.points.filter((_, i) => i % (groupBy === "day" ? 7 : 1) === 0).map((p) => <tr key={p.on}><td>{fmtDate(p.on)}</td><td className="num">≈ {fmtMoney(p.balance, "₽")}</td></tr>)}</tbody></table>}
+        </details>
+      </>}
+    </div>
+  );
+}
+
+/** SVG-кривая остатка: сплошная точка — подтверждённый входящий остаток, пунктир — прогноз; порог подписан; столбики — движения. */
+function LiqChart({ cur, onPick }: { cur: LiqCur; onPick: (on: string) => void }) {
+  const W = 900, Hh = 220, pad = { l: 70, r: 12, t: 12, b: 24 };
+  const pts = cur.points;
+  if (cur.opening_balance == null || pts.length < 2) return <div className="muted" style={{ padding: 20, textAlign: "center", border: "1px dashed var(--line)", borderRadius: 8 }}>
+    {cur.opening_balance == null ? "График не строится: нет подтверждённого входящего остатка." : "Недостаточно точек для графика."}</div>;
+  const vals = pts.map((p) => Number(p.balance));
+  const thr = Number(cur.threshold);
+  const lo = Math.min(thr, ...vals, Number(cur.opening_balance)), hi = Math.max(thr, ...vals, Number(cur.opening_balance));
+  const span = hi - lo || 1;
+  const x = (i: number) => pad.l + (i * (W - pad.l - pad.r)) / (pts.length - 1);
+  const y = (v: number) => pad.t + ((hi - v) * (Hh - pad.t - pad.b)) / span;
+  const path = vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const short = (v: number) => new Intl.NumberFormat("ru-RU", { notation: "compact", maximumFractionDigits: 1 }).format(v);
+  return (
+    <>
+    <svg viewBox={`0 0 ${W} ${Hh}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label={`Прогноз остатка в ${cur.currency}`}>
+      {[lo, (lo + hi) / 2, hi].map((v, i) => <g key={i}><line x1={pad.l} x2={W - pad.r} y1={y(v)} y2={y(v)} stroke="var(--line)" /><text x={pad.l - 6} y={y(v) + 4} fontSize="11" textAnchor="end" fill="var(--muted)">{short(v)}</text></g>)}
+      <line x1={pad.l} x2={W - pad.r} y1={y(thr)} y2={y(thr)} stroke="var(--bad)" strokeDasharray="2 3" />
+      <text x={W - pad.r} y={y(thr) - 4} fontSize="11" textAnchor="end" fill="var(--bad)">порог {short(thr)} {cur.currency}</text>
+      <path d={path} fill="none" stroke="var(--ink)" strokeWidth="2" strokeDasharray="6 4" />
+      <circle cx={x(0)} cy={y(Number(cur.opening_balance))} r="4.5" fill="var(--ink)"><title>Подтверждённый входящий остаток: {fmtMoney(cur.opening_balance, cur.currency)}</title></circle>
+      {pts.map((p, i) => (Number(p.inflow) || Number(p.outflow)) ? <circle key={p.on} cx={x(i)} cy={y(vals[i])} r="4" fill={vals[i] < thr ? "var(--bad)" : "#fff"} stroke="var(--ink)" style={{ cursor: "pointer" }} onClick={() => onPick(p.on)}>
+        <title>{fmtDate(p.on)}: +{fmtMoney(p.inflow)} / −{fmtMoney(p.outflow)} · остаток {fmtMoney(p.balance, cur.currency)}</title></circle> : null)}
+      {[0, Math.floor((pts.length - 1) / 2), pts.length - 1].map((i) => <text key={i} x={x(i)} y={Hh - 6} fontSize="11" textAnchor={i === 0 ? "start" : i === pts.length - 1 ? "end" : "middle"} fill="var(--muted)">{fmtDate(pts[i].on)}</text>)}
+    </svg>
+    <div className="row muted" style={{ fontSize: 12, gap: 16, marginTop: 4 }}>
+      <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 5, background: "var(--ink)", marginRight: 4 }} />подтверждённый входящий остаток</span>
+      <span><span style={{ display: "inline-block", width: 24, borderTop: "2px dashed var(--ink)", verticalAlign: "middle", marginRight: 4 }} />прогноз остатка</span>
+      <span><span style={{ display: "inline-block", width: 24, borderTop: "1px dotted var(--bad)", verticalAlign: "middle", marginRight: 4 }} />порог кассового разрыва</span>
+      <span>кружок — точка с движением, клик — состав</span></div>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ импорт выписки
+
+type ImpRow = { n: number; status: "valid" | "duplicate" | "error"; booked_on: string; direction: string; amount: string; counterparty: string; purpose: string; external_ref: string; errors: string[] };
+type Imp = { id: string; file_name: string; status: string; rows: ImpRow[]; rows_valid: number; rows_duplicates: number; rows_errors: number; totals: { in: string; out: string };
+  result: { created?: number; skipped_duplicates?: number; errors?: number; same_file_confirmed_at?: string | null }; mapping: { header_row: number; columns: Record<string, number>; headers: string[] }; fields: Record<string, string> };
+const IMP_STATUS: Record<ImpRow["status"], [string, string]> = { valid: ["к загрузке", "ok"], duplicate: ["уже есть", ""], error: ["ошибка", "bad"] };
+
+function ImportForm({ accounts, onDone }: { accounts: Account[]; onDone: () => void }) {
+  const [acc, setAcc] = useState(accounts[0]?.id || "");
+  const [file, setFile] = useState<File | null>(null);
+  const [imp, setImp] = useState<Imp | null>(null);
+  const [pick, setPick] = useState<Set<number>>(new Set());
+  const [mapping, setMapping] = useState<{ headers: string[]; header_row: number; columns: Record<string, number> } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const key = useRef(newKey());
+  const doPreview = async (m?: typeof mapping) => {
+    if (!file || !acc) return;
+    setBusy(true); setErr(""); setImp(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file); fd.append("account_id", acc);
+      if (m) fd.append("mapping", JSON.stringify({ header_row: m.header_row, columns: m.columns }));
+      const res = await fetch("/api/finance/imports/preview", { method: "POST", body: fd, credentials: "include" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const d = data?.detail;
+        if (d && typeof d === "object" && d.headers) setMapping({ headers: d.headers, header_row: 0, columns: d.detected || {} });
+        throw new Error(typeof d === "string" ? d : d?.message || `HTTP ${res.status}`);
+      }
+      setImp(data); setMapping(null); key.current = newKey();
+      setPick(new Set((data as Imp).rows.filter((r) => r.status === "valid").map((r) => r.n)));
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  };
+  const confirm = async () => {
+    if (!imp) return;
+    setBusy(true); setErr("");
+    try { setImp(await api.postIdem<Imp>(`/api/finance/imports/${imp.id}/confirm`, { rows: [...pick] }, key.current)); onDone(); }
+    catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="card" style={{ background: "#fcfcfc" }}>
+      <b>Импорт банковской выписки</b> <span className="muted">— CSV или XLSX, одна строка — одна операция. Сначала предпросмотр: ничего не проводится до подтверждения.</span>
+      {err && <div className="alert error">{err}</div>}
+      {accounts.length === 0 ? <div className="muted">Сначала создайте финансовый счёт.</div> : (
+        <div className="row" style={{ marginTop: 8, alignItems: "flex-end" }}>
+          <label className="f">Счёт<select value={acc} onChange={(e) => { setAcc(e.target.value); setImp(null); }}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.title} · {a.currency}</option>)}</select></label>
+          <label className="f">Файл выписки<input type="file" accept=".csv,.xlsx,.txt" onChange={(e) => { setFile(e.target.files?.[0] || null); setImp(null); setMapping(null); }} /></label>
+          <button className="btn secondary" disabled={!file || busy} onClick={() => doPreview()}>{busy && !imp ? "Разбираю…" : "Предпросмотр"}</button>
+        </div>)}
+      {mapping && <div className="card" style={{ marginTop: 8 }}>
+        <b>Сопоставление колонок</b> <span className="muted">— заголовки не распознаны автоматически</span>
+        <div className="row" style={{ marginTop: 6, alignItems: "flex-end" }}>
+          <label className="f">Строка заголовков (с 1)<input type="number" min={1} value={mapping.header_row + 1} style={{ width: 80 }} onChange={(e) => setMapping({ ...mapping, header_row: Math.max(0, Number(e.target.value) - 1) })} /></label>
+          {["date", "amount", "inflow", "outflow", "counterparty", "purpose", "external_ref", "currency"].map((f) => (
+            <label key={f} className="f">{({ date: "Дата", amount: "Сумма ±", inflow: "Поступление", outflow: "Списание", counterparty: "Контрагент", purpose: "Назначение", external_ref: "Номер документа", currency: "Валюта" } as Record<string, string>)[f]}
+              <select value={mapping.columns[f] ?? ""} onChange={(e) => { const c = { ...mapping.columns }; if (e.target.value === "") delete c[f]; else c[f] = Number(e.target.value); setMapping({ ...mapping, columns: c }); }}>
+                <option value="">—</option>{mapping.headers.map((h, i) => <option key={i} value={i}>{h || `колонка ${i + 1}`}</option>)}</select></label>))}
+          <button className="btn secondary" disabled={busy} onClick={() => doPreview(mapping)}>Разобрать</button>
+        </div>
+      </div>}
+      {imp && <>
+        {imp.result.same_file_confirmed_at && imp.status === "preview" && <div className="alert warn" style={{ fontSize: 13 }}>Этот файл уже загружался по счёту {dt(imp.result.same_file_confirmed_at)} — совпадающие строки отмечены «уже есть» и не загрузятся.</div>}
+        {imp.status === "confirmed" && <div className="alert ok">Загружено операций: {imp.result.created}; пропущено как дубли: {imp.result.skipped_duplicates}; с ошибками: {imp.result.errors}. Операции проведены — разнесите их на обязательства.</div>}
+        <div className="row" style={{ marginTop: 8, fontSize: 13 }}>
+          <span className="badge ok">к загрузке {imp.rows_valid}</span><span className="badge">уже есть {imp.rows_duplicates}</span><span className="badge bad">ошибки {imp.rows_errors}</span>
+          <span className="muted">поступления +{fmtMoney(imp.totals.in)} · списания −{fmtMoney(imp.totals.out)}</span>
+        </div>
+        <div style={{ maxHeight: 360, overflowY: "auto", marginTop: 6 }}><table style={{ fontSize: 13 }}>
+          <thead><tr><th></th><th>Стр.</th><th>Дата</th><th>Направление</th><th className="num">Сумма</th><th>Контрагент / назначение</th><th>№</th><th>Статус</th></tr></thead>
+          <tbody>{imp.rows.map((r) => <tr key={r.n} style={r.status !== "valid" ? { color: "var(--muted)" } : undefined}>
+            <td>{r.status === "valid" && imp.status === "preview" && <input type="checkbox" checked={pick.has(r.n)} aria-label={`Загрузить строку ${r.n}`} onChange={(e) => { const s = new Set(pick); if (e.target.checked) s.add(r.n); else s.delete(r.n); setPick(s); }} />}</td>
+            <td>{r.n}</td><td>{r.booked_on ? fmtDate(r.booked_on) : "—"}</td><td>{r.direction === "in" ? "поступление" : r.direction === "out" ? "списание" : "—"}</td>
+            <td className="num">{r.amount ? fmtMoney(r.amount) : "—"}</td><td>{r.counterparty}<div className="muted" style={{ fontSize: 11 }}>{r.purpose}</div></td><td>{r.external_ref || "—"}</td>
+            <td><span className={`badge ${IMP_STATUS[r.status][1]}`}>{IMP_STATUS[r.status][0]}</span>{r.errors.length > 0 && <div style={{ fontSize: 11, color: "var(--bad)" }}>{r.errors.join("; ")}</div>}</td></tr>)}</tbody>
+        </table></div>
+        {imp.status === "preview" && <button className="btn" style={{ marginTop: 8 }} disabled={busy || pick.size === 0} onClick={confirm}>{busy ? "Загружаю…" : `Загрузить и провести (${pick.size})`}</button>}
+      </>}
     </div>
   );
 }
