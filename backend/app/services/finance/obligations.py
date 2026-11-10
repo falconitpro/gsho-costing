@@ -190,6 +190,7 @@ def sync_contract(db: Session, c: Contract, user_id: Optional[str] = None, today
         specs.append(LineSpec(key=key, revision=_revision(line, c, amount), amount=amount, currency=c.currency, fields=fields, basis=basis, active=active, reason=reason))
     st = project_lines(db, "contract", c.id, specs, user_id, c.deal_id, "строка удалена из графика договора")
     st.contracts = 1
+    st.add(_sync_penalties(db, c, user_id, today, cp_name))
     from .sources import sync_calculation   # подписанный договор замещает прогноз утверждённого расчёта своих сделок (D-127)
     for did in {c.deal_id, *(c.deal_ids or [])} - {None, ""}:
         d = db.get(Deal, did)
@@ -200,6 +201,32 @@ def sync_contract(db: Session, c: Contract, user_id: Optional[str] = None, today
     for i, line in enumerate(terms):
         if dec(rows[i]["amount"]) is None:
             st.skipped.append({"contract": c.number, "line": rows[i]["no"], "reason": "сумма не определена"})
+    return st
+
+
+def _sync_penalties(db: Session, c: Contract, user_id: Optional[str], today: date, cp_name: str) -> SyncStats:
+    """Неустойки из юридического блока (D-019, D-132): в реестр — только предъявленные и признанные. Начисляемая сумма — не денежный план;
+    оплаченная/«не взыскиваем» — выводится из итогов (история остаётся). Срок — указанный юристом или срок ответа на претензию."""
+    specs = []
+    claim_days = int((c.law or {}).get("claim_days") or 30)
+    for x in legal.obligations(db, c, today).get("penalties", []):
+        if x["status"] not in ("claimed", "recognized") or not x.get("amount"):
+            continue
+        mark = x.get("mark") or {}
+        due_set = mark.get("due_on")
+        on = date.fromisoformat(str(due_set)[:10]) if due_set else ((date.fromisoformat(str(mark["on"])[:10]) if mark.get("on") else today)
+                                                                     + timedelta(days=claim_days if x["status"] == "claimed" else 10))
+        amount = dec(x["amount"])
+        direction = "in" if x.get("payer") == "cp" else "out"
+        fields = {"deal_id": c.deal_id, "contract_id": c.id, "legal_entity_id": c.own_entity_id, "counterparty_kind": c.cp_kind or "other", "counterparty_id": c.cp_id,
+                  "counterparty_name_snapshot": cp_name[:255], "direction": direction, "nature": "penalty",
+                  "title": f"{c.number}: неустойка — {x['reason_title']} ({x['status_title']})"[:255], "event_code": x["status"], "source_line_no": None,
+                  "legal_due_on": on if due_set else None, "legal_due_text": "" if due_set else f"ожидаемая дата: срок ответа на претензию ({claim_days} дн.)",
+                  "event_on": None, "event_is_fact": False, "forecast_on": on}
+        rev = hashlib.sha256(json.dumps({"amount": s(amount), "status": x["status"], "due": str(on), "payer": x.get("payer")}, sort_keys=True).encode()).hexdigest()
+        specs.append(LineSpec(key=f"penalty:{x['key']}", revision=rev, amount=amount, currency=c.currency, fields=fields,
+                              basis={"contract_number": c.number, "penalty": {k: x.get(k) for k in ("key", "reason", "status", "payer", "days", "calc_amount", "amount")}}))
+    st = project_lines(db, "penalty", c.id, specs, user_id, c.deal_id, "неустойка оплачена, снята или ещё начисляется")
     return st
 
 
@@ -282,7 +309,7 @@ def source_number(o: FinanceObligation) -> str:
 
 
 def source_url(o: FinanceObligation) -> Optional[str]:
-    if o.source_type == "contract" and o.contract_id:
+    if o.source_type in ("contract", "penalty") and o.contract_id:
         return f"/legal?tab=contracts&open={o.contract_id}"
     if o.source_type == "purchase_order":
         return "/supply?tab=po"

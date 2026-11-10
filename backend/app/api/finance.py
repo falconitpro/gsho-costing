@@ -84,7 +84,7 @@ def overview(as_of: Optional[date] = None, db: Session = Depends(get_db), user: 
 @router.get("/obligations")
 def obligations(as_of: Optional[date] = None, direction: Optional[str] = Query(None, pattern="^(in|out)$"), currency: Optional[str] = None,
                 legal_entity_id: Optional[str] = None, deal_id: Optional[str] = None, contract_id: Optional[str] = None, status: Optional[str] = None,
-                source_type: Optional[str] = Query(None, pattern="^(contract|purchase_order|batch|calculation)$"),
+                source_type: Optional[str] = Query(None, pattern="^(contract|purchase_order|batch|calculation|penalty)$"),
                 date_from: Optional[date] = None, date_to: Optional[date] = None, search: str = "", include_inactive: bool = False, reconciliation: bool = False,
                 limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
                 db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
@@ -228,6 +228,61 @@ def import_confirm(iid: str, body: ImportConfirmIn, idem: Optional[str] = Header
     return imp.dto(b)
 
 
+# ------------------------------------------------------------------ конвертация валют
+
+class FxIn(BaseModel):
+    sell_account_id: str
+    buy_account_id: str
+    sell_amount: Decimal
+    buy_amount: Decimal
+    rate: Decimal                       # единиц проданной валюты за 1 единицу купленной
+    rate_source: str = ""
+    executed_at: datetime
+    external_ref: str = ""
+    comment: str = ""
+    sell_transaction_id: Optional[str] = None   # связать с уже проведёнными операциями (например, из выписки)
+    buy_transaction_id: Optional[str] = None
+    fee_amount: Optional[Decimal] = None        # комиссия банка — отдельное списание со счёта продажи
+
+
+@router.get("/fx-operations")
+def fx_list(account_id: Optional[str] = None, currency: Optional[str] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    access.require_read(user)
+    from ..models import FinanceFxOperation
+    from ..services.finance import fx
+    stmt = select(FinanceFxOperation).order_by(FinanceFxOperation.executed_at.desc())
+    rows = [o for o in db.scalars(stmt).all() if (not account_id or account_id in (o.sell_account_id, o.buy_account_id))
+            and (not currency or currency.upper() in (o.sell_currency, o.buy_currency))]
+    return {"items": [fx.dto(db, o) for o in rows], "can_edit": access.can_edit(user)}
+
+
+@router.post("/fx-operations", status_code=201)
+def fx_create(body: FxIn, idem: Optional[str] = Header(None, alias="Idempotency-Key"), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Конвертация: две ноги (списание проданной, зачисление купленной валюты) — новые или уже проведённые; не выручка и не расход."""
+    access.require_edit(user)
+    from ..services.finance import fx
+    from ..services.finance.money import rate as to_rate
+    try:
+        r = to_rate(body.rate)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    op = fx.create(db, user, sell_account_id=body.sell_account_id, buy_account_id=body.buy_account_id, sell_amount=_money(body.sell_amount), buy_amount=_money(body.buy_amount),
+                   rate=r, rate_source=body.rate_source, executed_at=body.executed_at, external_ref=body.external_ref, comment=body.comment, key=_key(idem),
+                   sell_transaction_id=body.sell_transaction_id, buy_transaction_id=body.buy_transaction_id,
+                   fee_amount=_money(body.fee_amount, "Комиссия") if body.fee_amount not in (None, "") else None)
+    _commit(db)
+    return fx.dto(db, op)
+
+
+@router.post("/fx-operations/{fid}/reverse")
+def fx_reverse(fid: str, body: ReasonIn, idem: Optional[str] = Header(None, alias="Idempotency-Key"), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    access.require_edit(user)
+    from ..services.finance import fx
+    op = fx.reverse(db, user, fid, body.reason, _key(idem))
+    _commit(db)
+    return fx.dto(db, op)
+
+
 # ------------------------------------------------------------------ счета и остатки
 
 class AccountIn(BaseModel):
@@ -344,7 +399,8 @@ class AllocIn(BaseModel):
 
 def _tx_out(db: Session, vis: access.Visibility, tx: FinanceTransaction) -> dict:
     a = db.get(FinanceAccount, tx.account_id) if tx.account_id else None
-    out = txs.tx_dto(tx, txs.allocated(db, [tx.id])[tx.id], a.title if a else "")
+    from ..services.finance.fx import leg_ids
+    out = txs.tx_dto(tx, txs.allocated(db, [tx.id])[tx.id], a.title if a else "", tx.id in leg_ids(db, [tx.id]))
     allocs = db.scalars(select(FinanceAllocation).where(FinanceAllocation.transaction_id == tx.id).order_by(FinanceAllocation.created_at)).all()
     obs = {o.id: o for o in db.scalars(select(FinanceObligation).where(FinanceObligation.id.in_([x.obligation_id for x in allocs] or ["-"]))).all()}
     shown = [x for x in allocs if obs.get(x.obligation_id) and vis.obligation(obs[x.obligation_id])]
@@ -381,7 +437,9 @@ def transactions_list(account_id: Optional[str] = None, status: Optional[str] = 
         rows = [t for t in rows if q in " ".join([t.counterparty_name, t.purpose, t.external_ref, t.note]).lower()]
     used = txs.allocated(db, [t.id for t in rows])
     titles = {a.id: a.title for a in db.scalars(select(FinanceAccount)).all()}
-    items = [txs.tx_dto(t, used[t.id], titles.get(t.account_id or "", "")) for t in rows]
+    from ..services.finance.fx import leg_ids
+    legs = leg_ids(db, [t.id for t in rows])
+    items = [txs.tx_dto(t, used[t.id], titles.get(t.account_id or "", ""), t.id in legs) for t in rows]
     if unallocated:
         items = [x for x in items if Decimal(x["unallocated"]) > 0]
     return {"total": len(items), "limit": limit, "offset": offset, "items": items[offset:offset + limit], "can_edit": access.can_edit(user)}

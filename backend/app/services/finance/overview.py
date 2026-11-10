@@ -50,6 +50,9 @@ def build(db: Session, vis, as_of: date, horizon_days: int = 30) -> dict:
     txs = db.scalars(select(FinanceTransaction).where(FinanceTransaction.status.in_(("posted", "draft", "needs_reconciliation")),
                                                       FinanceTransaction.origin_type != "reversal", FinanceTransaction.withdrawn_at.is_(None))).all()
     used = allocated(db, [t.id for t in txs])
+    from .fx import leg_ids
+    legs = leg_ids(db, [t.id for t in txs])
+    txs = [t for t in txs if t.id not in legs]   # ноги конвертации на обязательства не разносятся
     unalloc: dict[str, dict] = {}
     needs_rec = 0
     for t in txs:

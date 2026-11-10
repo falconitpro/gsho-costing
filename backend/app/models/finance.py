@@ -202,3 +202,32 @@ class FinanceImportBatch(_Stamp, Base):
     idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), unique=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(36))
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class FinanceFxOperation(_Stamp, Base):
+    """Конвертация: две реальные проведённые операции — списание проданной валюты и зачисление купленной (D-025).
+    Не выручка и не расход; ноги не разносятся на обязательства; одна нога — не более чем в одной конвертации."""
+    __tablename__ = "finance_fx_operations"
+    __table_args__ = (
+        CheckConstraint("sell_amount > 0 AND buy_amount > 0 AND rate > 0", name="ck_fin_fx_amounts"),
+        CheckConstraint("sell_currency <> buy_currency", name="ck_fin_fx_currencies"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    sell_transaction_id: Mapped[str] = mapped_column(ForeignKey("finance_transactions.id"), unique=True)
+    buy_transaction_id: Mapped[str] = mapped_column(ForeignKey("finance_transactions.id"), unique=True)
+    fee_transaction_id: Mapped[Optional[str]] = mapped_column(ForeignKey("finance_transactions.id"), unique=True)
+    sell_account_id: Mapped[str] = mapped_column(ForeignKey("finance_accounts.id"), index=True)
+    buy_account_id: Mapped[str] = mapped_column(ForeignKey("finance_accounts.id"), index=True)
+    sell_amount: Mapped[Decimal] = mapped_column(MONEY)
+    sell_currency: Mapped[str] = mapped_column(String(3))
+    buy_amount: Mapped[Decimal] = mapped_column(MONEY)
+    buy_currency: Mapped[str] = mapped_column(String(3))
+    rate: Mapped[Decimal] = mapped_column(RATE)                       # единиц проданной валюты за 1 единицу купленной
+    rate_source: Mapped[str] = mapped_column(String(64), default="")
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    external_ref: Mapped[str] = mapped_column(String(128), default="")
+    status: Mapped[str] = mapped_column(String(16), default="posted")  # posted | reversed
+    reverse_reason: Mapped[str] = mapped_column(Text, default="")
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))

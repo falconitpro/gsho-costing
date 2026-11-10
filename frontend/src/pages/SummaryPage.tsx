@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { api, fmtDate, fmtRub } from "../api";
 import type { Me } from "../types";
 
@@ -33,6 +33,8 @@ export default function SummaryPage({ me }: { me: Me }) {
   const [err, setErr] = useState("");
   useEffect(() => { setData(null); setErr(""); if (kind) api.get<Record<string, unknown>>(`/api/summary/${kind}`).then(setData).catch((e) => setErr((e as Error).message)); }, [kind]);
   if (!kinds.length) return <div className="card muted">Сводные экраны для вашей роли не предусмотрены.</div>;
+  // D-130: у кого открыт раздел «Финансы» — «Деньги» там; остальным (КД с финансовой аналитикой) — сводка на общем сервисе
+  if (kind === "money" && (me.perms?.finance_section ?? 0) >= 1) return <Navigate to="/finance?tab=overview" replace />;
   const t = (data?.totals || {}) as Record<string, number>;
   return (
     <>
@@ -97,19 +99,23 @@ function Shipments({ data, t }: { data: Record<string, unknown>; t: Record<strin
 
 type Pay = { deal_id: string | null; url?: string; deal_number: string; client: string; manager: string; title: string; direction: "in" | "out"; on: string; amount: number | null; currency: string; overdue_days: number };
 type Guar = { deal_id: string; deal_number: string; client: string; kind: string; amount: number | null; currency: string; until: string | null; status: string; bank: string };
-type Curve = { week: string; in: number; out: number; cum: number };
+type Curve = { week: string; in: number; out: number; cum: number | null };
 
 function Money({ data, t }: { data: Record<string, unknown>; t: Record<string, number> }) {
   const rows = data.rows as Pay[]; const rec = data.receivables as Pay[]; const g = data.guarantees as Guar[]; const curve = data.curve as Curve[];
   const parts = (data.parts || { rows: [], sum_rub: 0 }) as { rows: { id: string; number: string; client: string; manager: string; amount: number; lines: number; urgent: boolean; url: string }[]; sum_rub: number };
   const money = (p: Pay) => (p.amount == null ? "—" : `${fmtRub(p.amount)} ${p.currency}`);
-  const maxAbs = Math.max(1, ...curve.map((c) => Math.max(c.in, c.out, Math.abs(c.cum))));
+  const maxAbs = Math.max(1, ...curve.map((c) => Math.max(c.in, c.out)));
+  const unknown = (t as unknown as Record<string, unknown>).balance_status === "unknown" || t.min_cum == null;
+  const byCcy = (data.totals as { by_currency?: Record<string, { in: number; out: number }> }).by_currency || {};
   return (
     <>
       <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
-        <Kpi v={fmtRub(t.in_rub)} l="поступления, RUB (90 дн.)" /><Kpi v={fmtRub(t.out_rub)} l="платежи заводам, RUB (90 дн.)" />
-        <Kpi v={t.receivable_count} l="просроченных поступлений" bad /><Kpi v={fmtRub(t.min_cum)} l="минимум накопленного потока, RUB" bad={t.min_cum < 0} />
+        <Kpi v={fmtRub(t.in_rub)} l="поступления, RUB (90 дн.)" /><Kpi v={fmtRub(t.out_rub)} l="платежи, RUB (90 дн.)" />
+        <Kpi v={t.receivable_count} l="просроченных поступлений" bad /><Kpi v={unknown ? "не подтверждён" : fmtRub(t.min_cum)} l="минимум прогнозного остатка RUB-счетов" bad={!unknown && t.min_cum < 0} />
       </div>
+      {unknown && <div className="alert warn" style={{ fontSize: 13 }}>Остаток RUB-счетов не подтверждён: прогнозный остаток не рассчитывается от нуля. Подтвердить остаток могут ФД и ЗГД в разделе «Финансы».</div>}
+      {Object.keys(byCcy).filter((c) => c !== "RUB").length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Также в валюте: {Object.entries(byCcy).filter(([c]) => c !== "RUB").map(([c, v]) => `${c} — поступления ${fmtRub(v.in)}, платежи ${fmtRub(v.out)}`).join("; ")}</div>}
       {rec.length > 0 && (
         <div className="card" style={{ marginTop: 10, borderLeft: "4px solid var(--accent)" }}>
           <b>Просроченная дебиторка</b>
@@ -118,13 +124,13 @@ function Money({ data, t }: { data: Record<string, unknown>; t: Record<string, n
         </div>)}
       {curve.length > 0 && (
         <div className="card" style={{ marginTop: 10 }}>
-          <b>Поток по неделям, RUB</b> <span className="muted" style={{ fontSize: 12 }}>чёрное — поступления, красное — платежи, линия — накопленный итог</span>
+          <b>Поток по неделям, RUB</b> <span className="muted" style={{ fontSize: 12 }}>зелёное — поступления, красное — платежи; при наведении — прогнозный остаток RUB-счетов на конец недели</span>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 140, marginTop: 8, borderBottom: "1px solid var(--line)" }}>
             {curve.map((c) => (
-              <div key={c.week} title={`${fmtDate(c.week)}: +${fmtRub(c.in)} / −${fmtRub(c.out)} · итог ${fmtRub(c.cum)}`} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center", gap: 2, height: "100%" }}>
+              <div key={c.week} title={`${fmtDate(c.week)}: +${fmtRub(c.in)} / −${fmtRub(c.out)} · остаток ${c.cum == null ? "не подтверждён" : fmtRub(c.cum)}`} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center", gap: 2, height: "100%" }}>
                 <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", height: "85%" }}>
                   <div style={{ flex: 1, background: "var(--ok)", height: `${(c.in / maxAbs) * 100}%` }} /><div style={{ flex: 1, background: "var(--bad)", height: `${(c.out / maxAbs) * 100}%` }} /></div>
-                <div style={{ fontSize: 10, color: c.cum < 0 ? "var(--bad)" : "var(--muted)", whiteSpace: "nowrap" }}>{fmtDate(c.week).slice(0, 5)}</div>
+                <div style={{ fontSize: 10, color: c.cum != null && c.cum < 0 ? "var(--bad)" : "var(--muted)", whiteSpace: "nowrap" }}>{fmtDate(c.week).slice(0, 5)}</div>
               </div>))}
           </div>
         </div>)}

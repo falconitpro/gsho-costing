@@ -296,37 +296,11 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
             if p.valid_to and (p.valid_to - today).days <= 30:
                 attention.append({"title": f"Доверенность {p.number} истекает через {(p.valid_to - today).days} дн.", "sub": (p.attorney or {}).get("full_name", "") + " · продлить или отозвать", "url": "/legal?tab=poa", "tone": "warn"})
 
-    # ---------------- деньги (8 недель, RUB) — ФД, КД, ЗГД
+    # ---------------- деньги (8 недель, RUB) — у кого finance_analytics; расчёт — общий сервис «Финансов» (D-033, D-130)
     money = None
     if fin:
-        weeks: dict[str, dict[str, float]] = {}
-        horizon = today + timedelta(days=56)
-        for r in exec_rows:
-            for s in r["stages"]:
-                kind = {"client_advance": "in", "client_final": "in", "factory_advance": "out", "factory_final": "out"}.get(s.code)
-                on = s.refined_on or s.planned_on
-                if not kind or s.actual_on or not on or on > horizon or s.currency != "RUB" or not s.amount:
-                    continue
-                wk = max(on, today)
-                wk = (wk - timedelta(days=wk.weekday())).isoformat()
-                w = weeks.setdefault(wk, {"in": 0.0, "out": 0.0})
-                w[kind] += float(s.amount)
-        from ..services.legal_contracts import money_rows
-        for r in money_rows(db, today, horizon):
-            if r["currency"] != "RUB" or not r["amount"]:
-                continue
-            wk = max(r["on"], today)
-            wk = (wk - timedelta(days=wk.weekday())).isoformat()
-            w = weeks.setdefault(wk, {"in": 0.0, "out": 0.0})
-            w[r["direction"]] += float(r["amount"])
-        curve, cum = [], 0.0
-        for i in range(8):
-            wk = (monday + timedelta(days=7 * i)).isoformat()
-            w = weeks.get(wk, {"in": 0.0, "out": 0.0})
-            cum += w["in"] - w["out"]
-            curve.append({"week": wk, "label": f"{int(wk[8:10])} {MONTHS[int(wk[5:7]) - 1][:3]}", "in": round(w["in"]), "out": round(w["out"]), "net": round(w["in"] - w["out"]), "cum": round(cum)})
-        money = {"curve": curve, "receivable_sum": round(sum(r["amount"] for r in receivables if r["currency"] == "RUB")), "receivable_count": len(receivables),
-                 "min_cum": min((c["cum"] for c in curve), default=0), "min_week": min(curve, key=lambda c: c["cum"])["label"] if curve else ""}
+        from ..services.finance.cashview import workplace_money
+        money = workplace_money(db, user, today, monday)
 
     # ---------------- воронка и команда (ГШО + заявки на запчасти — единый раздел «Сделки»)
     mine = [d for d in deals if user.has(Role.CD, Role.GD, Role.FD, Role.OBSERVER) or d.manager_id == user.id or d.manager_id in user.acting_for]
@@ -375,7 +349,8 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
         kpis = [{"title": "Воронка · в работе", "value": str(len(open_deals) + len(open_parts)), "sub": (_fmt_money(in_work_sum) + " · " if fin else "") + f"ГШО {len(open_deals)} · ЗЧ {len(open_parts)}" + (f" · машина стоит: {len(urgent_parts)}" if urgent_parts else ""), "tone": "bad" if urgent_parts else "", "url": "/board" if board else "/deals?block=work"},
                 {"title": "Выиграно в квартале", "value": str(len(won_q) + len(won_q_parts)), "sub": (_fmt_money(won_sum) + " · " if fin else "") + f"ГШО {len(won_q)} · ЗЧ {len(won_q_parts)}", "tone": "ok" if won_q or won_q_parts else "", "url": "/deals?block=won"},
                 {"title": "Ждут решения", "value": str(len(approvals)), "sub": "согласований", "tone": "warn" if approvals else "ok", "url": "#approvals"},
-                {"title": "Дебиторка просрочена", "value": str(len(receivables)), "sub": _fmt_money(sum(r["amount"] for r in receivables if r["currency"] == "RUB")) if fin and receivables else "платежей", "tone": "bad" if receivables else "ok", "url": "/summary?kind=money"} if lead else
+                ({"title": "Дебиторка просрочена", "value": str(money["receivable_count"]), "sub": _fmt_money(money["receivable_sum"]) if money["receivable_count"] else "платежей", "tone": "bad" if money["receivable_count"] else "ok", "url": money["url"]} if money else
+                 {"title": "Дебиторка просрочена", "value": str(len(receivables)), "sub": "платежей", "tone": "bad" if receivables else "ok", "url": "/summary?kind=money"}) if lead else
                 {"title": "Просрочено задач", "value": str(len(overdue_tasks)), "sub": "", "tone": "bad" if overdue_tasks else "ok", "url": "/tasks"},
                 {"title": "Исполнение", "value": str(len(exec_rows)), "sub": f"{sum(1 for r in exec_rows if r['delay'] > 0)} с отставанием", "tone": "warn" if any(r["delay"] > 0 for r in exec_rows) else "", "url": "/summary?kind=shipments" if user.can("finance_analytics") or user.has(Role.LOGISTICIAN) else "/deals?block=won"}]
 
@@ -437,6 +412,9 @@ def _quick(user: CurrentUser) -> list[dict]:
         q.append({"title": "Отгрузки", "url": "/summary?kind=shipments"})
     if user.has(Role.FD, Role.GD):
         q.append({"title": "Деньги", "url": "/summary?kind=money"})
+    from ..services.finance.access import can_read as fin_section
+    if fin_section(user):
+        q.append({"title": "Финансы", "url": "/finance"})
     if user.has(Role.LAWYER, Role.GD, Role.FD):
         q.append({"title": "Доверенность", "url": "/legal?tab=poa"})
     q.append({"title": "Договор", "url": "/legal?tab=contracts&new=1"})
