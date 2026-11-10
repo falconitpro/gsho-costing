@@ -31,7 +31,7 @@ type Full = Row & {
   children: Row[]; can_edit: boolean; can_edit_number: boolean; created_by_name: string; finance_url?: string | null;
   client_order: boolean; approval: { round?: number; submitted_at?: string; submitted_by_name?: string; steps?: Step[] }; route_preview: string[];
   sign_checklist: { code: string; title: string; ok: boolean; optional?: boolean }[]; amends: { field: string; title: string }[];
-  my_steps: string[]; can_register: boolean; can_sign: boolean; can_correct?: boolean; obligations: Obligations | null;
+  my_steps: string[]; can_register: boolean; can_sign: boolean; can_correct?: boolean; can_delete?: boolean; obligations: Obligations | null;
 };
 type Catalog = { kinds: Record<string, { title: string; direction: string; cp_kind: string }>; directions: Record<string, string>; statuses: Record<string, string>; file_kinds: Record<string, string>;
   events: Record<string, string>; performance_codes: Record<string, string>; penalty_payers: Record<string, string>; penalty_reasons: Record<string, string>; rate_kinds: Record<string, string>;
@@ -273,6 +273,9 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
 
       <div className="poa-footer">
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          {c.can_delete && <button className="btn ghost" style={{ color: "var(--bad)" }} title="Проект заведён по ошибке — удалить из реестра (снимок останется в журнале)"
+            onClick={() => { if (window.confirm(`Удалить проект ${c.doc_type_title.toLowerCase()}а ${c.number}${c.cp_name ? " — " + c.cp_name : ""}? Восстановить из системы нельзя, снимок останется в журнале.`))
+              api.del<{ deleted: string }>(`/api/legal/contracts/${id}`).then(() => onClose()).catch(fail); }}>Удалить проект</button>}
           {c.status === "draft" && c.can_edit && <button className="btn" disabled={dirty} title={dirty ? "сначала сохраните" : ""} onClick={() => act("submit")}>На согласование</button>}
           {c.my_steps.length > 0 && <>
             <button className="btn" onClick={() => act("visa", { decision: "approve", comment: reason })}>Согласовать ({c.my_steps.join(", ")})</button>

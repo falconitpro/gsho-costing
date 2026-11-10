@@ -48,6 +48,7 @@ def _out(db: Session, user: CurrentUser, c: Contract) -> dict:
     return {**svc.payload(db, c), "can_edit": _can_edit(user, c), "can_edit_number": user.has(Role.GD, Role.CD),
             "my_steps": [x["title"] for x in svc.user_steps(c, user.roles)], "can_register": user.has(Role.LAWYER, Role.GD),
             "can_sign": user.has(Role.LAWYER, Role.GD, Role.CD, Role.FD) or mine, "can_correct": c.status in svc.LOCKED and user.has(Role.GD),
+            "can_delete": c.status not in svc.LOCKED and user.has(Role.GD),
             "finance_url": _finance_url(user, c)}
 
 
@@ -281,6 +282,32 @@ def create_contract(body: ContractIn, db: Session = Depends(get_db), user: Curre
 def get_contract(cid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     c = _get(db, cid, user)
     return _out(db, user, c)
+
+
+@router.delete("/legal/contracts/{cid}")
+def delete_contract(cid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Удалить ошибочно заведённый проект договора — только ЗГД и только до подписания (решение владельца).
+    Нельзя, если есть доп. соглашения или спецификации, претензии или строки в «Финансах». Снимок договора — в журнале."""
+    if not user.has(Role.GD):
+        raise HTTPException(403, "Удалять проекты договоров может ЗГД")
+    c = _get(db, cid, user)
+    if c.status in svc.LOCKED:
+        raise HTTPException(409, "Договор подписан — удалить нельзя; расторжение или изменение — доп. соглашением")
+    from ..models import ContractClaim
+    from ..models.finance import FinanceObligation
+    kids = db.scalars(select(Contract.number).where(Contract.parent_id == c.id)).all()
+    if kids:
+        raise HTTPException(409, f"Сначала удалите доп. соглашения и спецификации к договору: {', '.join(k or '—' for k in kids)}")
+    if db.scalar(select(ContractClaim.id).where(ContractClaim.contract_id == c.id).limit(1)):
+        raise HTTPException(409, "По договору есть претензии — удалить нельзя")
+    if db.scalar(select(FinanceObligation.id).where(FinanceObligation.contract_id == c.id).limit(1)):
+        raise HTTPException(409, "По договору есть строки в «Финансах» — удалить нельзя")
+    from .common import serialize
+    snap = {k: v for k, v in serialize(c).items() if k not in ("history",)}
+    audit(db, user.id, c.deal_id, "contract", c.id, "delete", before=snap, after=None)
+    db.delete(c)
+    db.commit()
+    return {"ok": True, "deleted": c.number}
 
 
 @router.put("/legal/contracts/{cid}")

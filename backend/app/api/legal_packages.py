@@ -505,7 +505,7 @@ def package_status(pid: str, body: StatusIn, db: Session = Depends(get_db), user
 from ..services import legal_sale as sale  # noqa: E402
 from ..services import legal_rules as rules  # noqa: E402
 from ..services import settings_service as settings  # noqa: E402
-from ..adapters.llm import PROVIDERS, DEFAULT_MODELS, configured_providers, make_llm, LLMNotConfigured  # noqa: E402
+from ..adapters.llm import PROVIDERS, DEFAULT_MODELS, configured_providers, make_llm, yandex_key_source, LLMNotConfigured  # noqa: E402
 
 
 class AiSettingsIn(BaseModel):
@@ -520,6 +520,7 @@ def ai_settings(db: Session = Depends(get_db), user: CurrentUser = Depends(get_c
         raise HTTPException(403)
     cur = settings.get(db, "legal_ai") or {}
     return {"provider": cur.get("provider", "yandexgpt"), "model": cur.get("model", ""), "providers": PROVIDERS, "default_models": DEFAULT_MODELS, "configured": configured_providers(),
+            "yandex_key_source": yandex_key_source(),   # имя переменной, не значение ключа
             "can_edit": user.has(Role.GD), "rules_version": rules.RULES_VERSION, "rules_count": len(rules.RULES), "groups": rules.GROUPS,
             "env_hint": {"yandexgpt": "LLM_YANDEX_API_KEY (или YANDEX_TRANSLATE_API_KEY) + YANDEX_FOLDER_ID", "openai": "LLM_OPENAI_API_KEY, LLM_OPENAI_BASE_URL, LLM_OPENAI_MODEL", "kimi": "LLM_KIMI_API_KEY, LLM_KIMI_MODEL"}}
 
@@ -551,7 +552,7 @@ def test_ai(db: Session = Depends(get_db), user: CurrentUser = Depends(get_curre
     except LLMNotConfigured as e:
         return {"ok": False, "message": str(e)}
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "message": f"Ошибка провайдера: {str(e)[:300]}"}
+        return {"ok": False, "message": f"Ошибка провайдера: {str(e)[:600]}"}
 
 
 def _llm_for(db: Session, use_ai: bool):

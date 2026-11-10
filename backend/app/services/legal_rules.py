@@ -205,7 +205,7 @@ def ai_findings(llm, clauses: list[Clause], known: list[Finding], ctx: dict, max
     except LLMNotConfigured as e:
         return [], str(e)
     except Exception as e:  # noqa: BLE001
-        return [], f"ИИ-анализ недоступен ({getattr(llm, 'name', '')}): {str(e)[:200]}"
+        return [], f"ИИ-анализ недоступен, договор проверен только правилами: {str(e)[:500]}"
     out = []
     for f in (data.get("findings") if isinstance(data, dict) else data) or []:
         if not isinstance(f, dict) or not f.get("our_text"):

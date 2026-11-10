@@ -51,14 +51,44 @@ class LLMAdapter:
         return json.loads(txt)
 
 
+class LLMProviderError(RuntimeError):
+    """Провайдер ответил ошибкой: код, сообщение провайдера и что проверить."""
+
+
+def _raise_for(r, name: str, hint_403: str = "") -> None:
+    if r.status_code < 400:
+        return
+    msg = ""
+    try:
+        j = r.json()
+        err = j.get("error")
+        msg = (err.get("message") if isinstance(err, dict) else err) or j.get("message") or ""
+    except Exception:  # noqa: BLE001
+        msg = (r.text or "")[:300]
+    hint = {401: "ключ не принят — проверьте значение ключа", 403: hint_403 or "у ключа нет доступа к модели", 404: "модель не найдена — проверьте имя модели",
+            429: "превышена квота или частота запросов"}.get(r.status_code, "")
+    raise LLMProviderError(f"{name}: HTTP {r.status_code}" + (f" — {msg}" if msg else "") + (f". Что проверить: {hint}" if hint else ""))
+
+
 class YandexGPT(LLMAdapter):
     name = "yandexgpt"
     URL = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 
-    def __init__(self, api_key: str, folder_id: str, model: str = "", timeout: float = 90.0):
+    def __init__(self, api_key: str, folder_id: str, model: str = "", timeout: float = 90.0, key_source: str = "LLM_YANDEX_API_KEY"):
         if not api_key or not folder_id:
             raise LLMNotConfigured("YandexGPT: задайте LLM_YANDEX_API_KEY (или YANDEX_TRANSLATE_API_KEY) и YANDEX_FOLDER_ID в backend/.env")
         self.api_key, self.folder_id, self.model, self.timeout = api_key, folder_id, model or DEFAULT_MODELS["yandexgpt"], timeout
+        self.key_source = key_source
+
+    def hint_403(self) -> str:
+        """403 у YandexGPT — почти всегда права ключа, а не код: сервисному аккаунту ключа нужна роль ai.languageModels.user
+        в каталоге YANDEX_FOLDER_ID, а у ключа с ограниченной областью — область yc.ai.languageModels.execute."""
+        base = (f"сервисному аккаунту ключа нужна роль ai.languageModels.user в каталоге {self.folder_id}; "
+                "если ключ создан с областью действия — добавьте область yc.ai.languageModels.execute")
+        if self.key_source == "YANDEX_TRANSLATE_API_KEY":
+            base = ("используется ключ переводчика (YANDEX_TRANSLATE_API_KEY) — у него, как правило, нет доступа к YandexGPT. "
+                    "Создайте отдельный ключ и задайте LLM_YANDEX_API_KEY; " + base)
+        return base
 
     def complete(self, system: str, user: str, temperature: float = 0.1, max_tokens: int = 4000) -> LLMResult:
         import httpx
@@ -66,7 +96,7 @@ class YandexGPT(LLMAdapter):
         body = {"modelUri": uri, "completionOptions": {"stream": False, "temperature": temperature, "maxTokens": str(max_tokens)},
                 "messages": [{"role": "system", "text": system}, {"role": "user", "text": user}]}
         r = httpx.post(self.URL, json=body, timeout=self.timeout, headers={"Authorization": f"Api-Key {self.api_key}", "x-folder-id": self.folder_id})
-        r.raise_for_status()
+        _raise_for(r, "YandexGPT", self.hint_403())
         res = r.json().get("result") or {}
         alt = (res.get("alternatives") or [{}])[0]
         return LLMResult(text=(alt.get("message") or {}).get("text", ""), provider=self.name, model=self.model, usage=res.get("usage") or {})
@@ -84,7 +114,7 @@ class OpenAICompatible(LLMAdapter):
         import httpx
         body = {"model": self.model, "temperature": temperature, "max_tokens": max_tokens, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
         r = httpx.post(f"{self.base_url}/chat/completions", json=body, timeout=self.timeout, headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
-        r.raise_for_status()
+        _raise_for(r, PROVIDERS.get(self.name, self.name))
         data = r.json()
         text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
         return LLMResult(text=text or "", provider=self.name, model=self.model, usage=data.get("usage") or {})
@@ -93,7 +123,8 @@ class OpenAICompatible(LLMAdapter):
 def make_llm(provider: str, model: str = "", env: Optional[dict[str, str]] = None) -> LLMAdapter:
     e = env if env is not None else os.environ
     if provider == "yandexgpt":
-        return YandexGPT(e.get("LLM_YANDEX_API_KEY") or e.get("YANDEX_TRANSLATE_API_KEY", ""), e.get("YANDEX_FOLDER_ID", ""), model)
+        src = "LLM_YANDEX_API_KEY" if e.get("LLM_YANDEX_API_KEY") else "YANDEX_TRANSLATE_API_KEY"
+        return YandexGPT(e.get("LLM_YANDEX_API_KEY") or e.get("YANDEX_TRANSLATE_API_KEY", ""), e.get("YANDEX_FOLDER_ID", ""), model, key_source=src)
     if provider == "openai":
         return OpenAICompatible(e.get("LLM_OPENAI_API_KEY", ""), e.get("LLM_OPENAI_BASE_URL", ""), model or e.get("LLM_OPENAI_MODEL") or DEFAULT_MODELS["openai"], "openai")
     if provider == "kimi":
@@ -106,3 +137,8 @@ def configured_providers(env: Optional[dict[str, str]] = None) -> dict[str, bool
     e = env if env is not None else os.environ
     return {"none": True, "yandexgpt": bool((e.get("LLM_YANDEX_API_KEY") or e.get("YANDEX_TRANSLATE_API_KEY")) and e.get("YANDEX_FOLDER_ID")),
             "openai": bool(e.get("LLM_OPENAI_API_KEY")), "kimi": bool(e.get("LLM_KIMI_API_KEY"))}
+
+
+def yandex_key_source(env: Optional[dict[str, str]] = None) -> str:
+    e = env if env is not None else os.environ
+    return "LLM_YANDEX_API_KEY" if e.get("LLM_YANDEX_API_KEY") else ("YANDEX_TRANSLATE_API_KEY" if e.get("YANDEX_TRANSLATE_API_KEY") else "")
