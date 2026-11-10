@@ -8,7 +8,7 @@
 - Baseline пакета: `main@e652a88eb96d216bf464a4936e27d99572ef7996` (PR #131).
 - Актуальный main перед работой: `30c4390faa8b389196e049c58b052a6d6c826a86` — merge PR #138 от 10.11.2026 23:06 МСК.
 - Ветка: `chore/operations-baseline` (только документы и read-only скрипт инвентаризации).
-- PR и base: в `main`, ссылка — в `16`.
+- PR и base: #139 → `main`.
 - Production deploy: не выполнялся. Production migrations: не применялись.
 
 ## 2. Объём
