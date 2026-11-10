@@ -277,3 +277,6 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
   .fin-cal .sec { display: none; }
   .fin-narrow { display: block; }
 }
+
+/* «Финансы → Экономика сделок»: на узком экране таблицы карточек прокручиваются внутри карточки */
+.fin-eco .card { overflow-x: auto; }

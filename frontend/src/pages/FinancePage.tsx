@@ -2,9 +2,10 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type React
 import { Link, useSearchParams } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtMoney, newKey } from "../api";
 import { can, type Me } from "../types";
+import FinanceEconomy from "../components/FinanceEconomy";
 
 // Раздел «Финансы», вариант Б (docs/finance/05_UI_UX_в_стилистике_CRM.md). Первый вертикальный срез:
-// «Обзор», «Платёжный календарь», «Ликвидность и валюта» (счета, остатки, операции, разнесение).
+// «Обзор», «Платёжный календарь», «Ликвидность и валюта» (счета, остатки, операции, разнесение), «Экономика сделок».
 // Остальные вкладки появятся по мере реализации — пустые вкладки-заглушки не показываем.
 
 type Meta = { can_edit: boolean; entities: { id: string; code: string; name: string; currency: string }[]; currencies: string[]; today: string; statuses: Record<string, string> };
@@ -31,7 +32,7 @@ type Tx = { id: string; account_id: string | null; account_title: string; direct
   withdrawn: boolean; withdrawn_reason: string; origin_title: string };
 type List<T> = { total: number; items: T[]; totals?: Record<string, Record<string, string>>; can_edit?: boolean };
 
-const TABS = [["overview", "Обзор"], ["calendar", "Платёжный календарь"], ["liquidity", "Ликвидность и валюта"]] as const;
+const TABS = [["overview", "Обзор"], ["calendar", "Платёжный календарь"], ["liquidity", "Ликвидность и валюта"], ["economy", "Экономика сделок"]] as const;
 type Tab = (typeof TABS)[number][0];
 const STATUS_BADGE: Record<string, string> = { paid: "ok", partially_paid: "info", overdue: "bad", due_soon: "warn", no_date: "", planned: "", superseded: "", excluded: "" };
 const TX_STATUS: Record<Tx["status"], [string, string]> = { draft: ["черновик", ""], needs_reconciliation: ["требует сверки", "warn"], posted: ["проведена", "ok"], reversed: ["сторнирована", "bad"] };
@@ -60,7 +61,9 @@ function Kpi({ label, children, bad }: { label: string; children: ReactNode; bad
 
 export default function FinancePage({ me }: { me: Me }) {
   const [sp, setSp] = useSearchParams();
-  const tab = (TABS.some(([k]) => k === sp.get("tab")) ? sp.get("tab") : "overview") as Tab;
+  const economy = can(me, "finance_analytics") && can(me, "cost");   // экономика — только с правом на себестоимость (04, FIN-SEC-005)
+  const tabs = TABS.filter(([k]) => k !== "economy" || economy);
+  const tab = (tabs.some(([k]) => k === sp.get("tab")) ? sp.get("tab") : "overview") as Tab;
   const [meta, setMeta] = useState<Meta | null>(null);
   const [err, setErr] = useState("");
   const [stamp, setStamp] = useState(0);   // «Обновить» и обновление зависимых блоков после действий
@@ -80,11 +83,12 @@ export default function FinancePage({ me }: { me: Me }) {
         <div className="push"><button className="btn secondary" onClick={() => setStamp((x) => x + 1)}>Обновить</button></div>
       </div>
       {err && <div className="alert error">{err}</div>}
-      <div className="tabs">{TABS.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => go({ tab: k })}>{t}</button>)}</div>
+      <div className="tabs">{tabs.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => go({ tab: k })}>{t}</button>)}</div>
       {!meta && !err && <div className="muted">Загружаю…</div>}
       {meta && tab === "overview" && <Overview stamp={stamp} go={go} />}
       {meta && tab === "calendar" && <Calendar meta={meta} sp={sp} go={go} stamp={stamp} onChanged={() => setStamp((x) => x + 1)} />}
       {meta && tab === "liquidity" && <Liquidity meta={meta} sp={sp} go={go} stamp={stamp} onChanged={() => setStamp((x) => x + 1)} />}
+      {meta && tab === "economy" && <FinanceEconomy sp={sp} go={go} stamp={stamp} />}
     </>
   );
 }

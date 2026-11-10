@@ -8,10 +8,13 @@ type Form = { open: boolean; closed: boolean; items: Item[]; payments: boolean; 
 type Row = { no: number; code: string; title: string; plan_base: number; plan_pess: number; fact: number | null; deviation_rub: number | null; deviation_pct: number | null; flag: boolean };
 type Tot = { plan_base: number | null; plan_pess: number | null; fact: number | null };
 type PenRow = { contract_id: string; number: string; cp_name: string; key: string; payer: string; reason_title: string; obligation: string; days: number; amount: number; currency: string; status: string; status_title: string; amount_rub: number };
-type Report = { variant: string; rows: Row[]; totals: Record<string, Tot>; closed: boolean; penalties?: { rows: PenRow[]; receivable_rub: number; payable_rub: number; net_rub: number; receivable_accruing_rub: number; payable_accruing_rub: number } };
+type Money = { status: string; in_rub: number | null; out_rub: number | null; legacy_in_rub: number | null; legacy_out_rub: number | null; data_gaps: string[]; revenue_events: number };
+type Gap = { amount_rub: number; starts_on: string | null; days: number } | null;
+type Report = { variant: string; rows: Row[]; totals: Record<string, Tot>; closed: boolean; money?: Money; economy_url?: string | null; penalties?: { rows: PenRow[]; receivable_rub: number; payable_rub: number; net_rub: number; receivable_accruing_rub: number; payable_accruing_rub: number } };
 
 const KIND: Record<string, string> = { cost_item: "статья себестоимости", payment_in: "поступление от клиента", payment_out: "оплата заводу / поставщику", delivery: "срок поставки, дней", fx: "курс" };
 const num = (s: string) => Number(String(s).replace(/\s/g, "").replace(",", "."));
+const gapRub = (g: Gap | undefined) => (g == null ? "—" : g.amount_rub >= 0 ? "нет" : `${fmtRub(g.amount_rub)}${g.days ? ` · ${g.days} дн.` : ""}`);
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(2).replace(".", ",")} %`);
 
 /** План/факт по сделке (после выигрыша): ввод факта по ролям, отчёт по статьям с отклонениями, закрытие ФД. */
@@ -66,7 +69,9 @@ export default function PlanFactTab({ deal }: { deal: Deal }) {
       {rep && (
         <div className="card">
           <h2 style={{ marginTop: 0 }}>План и факт{rep.variant ? ` · ${rep.variant}` : ""}</h2>
-          <p className="muted">План — утверждённая версия расчёта (базовый и пессимистичный сценарии). Отклонение больше {form.deviation_pct} % от базового плана подсвечено. Фактические платежи, внесённые ФД на вкладке «Контракт и исполнение», тоже учитываются.</p>
+          <p className="muted">План — утверждённая версия расчёта (базовый и пессимистичный сценарии). Отклонение больше {form.deviation_pct} % от базового плана подсвечено.
+            Факт выручки — по событиям признания (УПД, акт), факт расходов — по статьям; деньги показаны отдельно и выручкой не считаются.
+            {rep.economy_url && <> <a href={rep.economy_url}>Экономика в Финансах</a></>}</p>
           {T && (
             <table style={{ marginBottom: 12 }}>
               <thead><tr><th>Итог</th><th className="num">План (базовый)</th><th className="num">План (пессим.)</th><th className="num">Факт</th></tr></thead>
@@ -77,10 +82,17 @@ export default function PlanFactTab({ deal }: { deal: Deal }) {
                 {T.penalties && <tr><td>Неустойки по договорам (нетто), ₽<div className="muted" style={{ fontSize: 11 }}>пессим. — с учётом ещё начисляющихся</div></td><td className="num">{fmtRub(T.penalties.plan_base)}</td><td className="num">{fmtRub(T.penalties.plan_pess)}</td><td className="num">{fmtRub(T.penalties.fact)}</td></tr>}
                 {T.profit_after_penalties && <tr><td>Прибыль с учётом неустоек, ₽</td><td className="num">{fmtRub(T.profit_after_penalties.plan_base)}</td><td className="num">{fmtRub(T.profit_after_penalties.plan_pess)}</td><td className="num"><b>{fmtRub(T.profit_after_penalties.fact)}</b></td></tr>}
                 <tr><td>Маржа</td><td className="num">{pct(T.margin_pct?.plan_base)}</td><td className="num">{pct(T.margin_pct?.plan_pess)}</td><td className="num"><b>{pct(T.margin_pct?.fact)}</b></td></tr>
+                <tr><td>Кассовый разрыв, ₽</td><td className="num">{gapRub(T.cash_gap?.plan_base as unknown as Gap)}</td><td className="num">{gapRub(T.cash_gap?.plan_pess as unknown as Gap)}</td>
+                  <td className="num">{T.cash_gap?.fact ? <b>{gapRub(T.cash_gap.fact as unknown as Gap)}</b> : <span className="muted" title={(rep.money?.data_gaps || []).join("\n")}>недостаточно подтверждённых операций</span>}</td></tr>
                 <tr><td>Срок поставки, дней</td><td className="num">{T.delivery_days?.plan_base ?? "—"}</td><td className="num">{T.delivery_days?.plan_pess ?? "—"}</td><td className="num">{T.delivery_days?.fact ?? "—"}</td></tr>
                 <tr><td>Средний курс оплат заводу</td><td className="num">{T.weighted_fx?.plan_base ?? "—"}</td><td className="num">{T.weighted_fx?.plan_pess ?? "—"}</td><td className="num">{T.weighted_fx?.fact ?? "—"}</td></tr>
               </tbody>
             </table>)}
+          {rep.money && (
+            <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+              <b>Деньги по сделке</b> (банк, подтверждённые разнесения): {rep.money.in_rub == null ? "подтверждённых операций нет" : `поступило ${fmtRub(rep.money.in_rub)} ₽, оплачено ${fmtRub(rep.money.out_rub)} ₽`}
+              {(rep.money.legacy_in_rub || rep.money.legacy_out_rub) ? ` · отмечено в план/факте: поступления ${fmtRub(rep.money.legacy_in_rub)} ₽, оплаты ${fmtRub(rep.money.legacy_out_rub)} ₽ (ждут сверки в «Финансах»)` : ""}
+              {rep.money.revenue_events === 0 && " · выручка ещё не признана"}</div>)}
           {rep.penalties && rep.penalties.rows.length > 0 && (
             <div style={{ marginBottom: 12 }}>
               <h3 style={{ margin: "4px 0" }}>Неустойки по договорам сделки</h3>

@@ -64,7 +64,10 @@ export default function DealCard({ me }: { me: Me }) {
 
   const load = () => api.get<Deal>(`/api/deals/${id}`).then((d) => {
     setDeal(d); setWishes(d.client_payment_wishes || "");
-    if (!deal) { const p = dealPhase(d); setPhaseState(p); setTabState(p === "sale" ? "main" : "execution"); }   // первое открытие — фаза по статусу
+    if (!deal) {   // первое открытие — фаза по статусу; ?tab=… из ссылок («Финансы», задачи, уведомления) открывает нужную вкладку
+      const p = dealPhase(d); setPhaseState(p); setTabState(p === "sale" ? "main" : "execution");
+      if (wantTab && ([...SALE_TABS, ...CONTRACT_TABS, "feed", "versions"] as string[]).includes(wantTab) && (wantTab !== "pricing" || isMgmt)) setTab(wantTab);
+    }
   }).catch((e) => setErr(e.message));
   useEffect(() => { setDeal(null); setFeed([]); setVersions([]); load(); }, [id, me.id]);
   useEffect(() => {

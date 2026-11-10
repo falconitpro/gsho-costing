@@ -281,6 +281,8 @@ def add_fact(deal_id: str, body: FactIn, db: Session = Depends(get_db), user: Cu
     audit(db, user.id, deal.id, "fact", "new", "create", after=body.model_dump(mode="json"))
     from ..services.finance import legacy   # «Финансы»: ручной платёж план/факта — запись «требует сверки» (D-117)
     fin = legacy.from_planfact(db, user.id, e)
+    from ..services.finance import recognition   # статья себестоимости → одно событие признания расхода (D-028, D-133)
+    recognition.from_planfact(db, user.id, e)
     db.commit()
     out = {"entry": serialize(e), "deviation_threshold_pct": thr}
     if fin.get("status") != "none":
@@ -304,6 +306,9 @@ def delete_fact(deal_id: str, entry_id: str, db: Session = Depends(get_db), user
         from ..services.finance import legacy   # запись удалена — непроведённая запись сверки отзывается, история остаётся
         legacy.record(db, user.id, origin_type="planfact_legacy", origin_id=e.id, deal_id=deal.id, direction="in" if e.kind == "payment_in" else "out",
                       amount=None, currency=(e.currency or "RUB").upper(), on=None)
+    if e.kind == "cost_item":
+        from ..services.finance import recognition   # событие признания сторнируется с причиной, история остаётся
+        recognition.planfact_deleted(db, user, e)
     db.delete(e)
     db.commit()
     return {"deleted": True}
@@ -325,10 +330,10 @@ def plan_fact(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = D
     res = ver.calc_result["variants"][won_variant.id]
     base, pess = res["base"], res["pessimistic"]
     rows = []
-    fact_by_item: dict[str, float] = {}
-    for f in facts:
-        if f.kind == "cost_item" and f.cost_item_code:
-            fact_by_item[f.cost_item_code] = fact_by_item.get(f.cost_item_code, 0) + f.amount * ((f.fx_rate or 1.0) if f.currency != "RUB" else 1.0)
+    # факт P&L — по событиям признания (D-134): расход по статьям (старые факты без события учитываются один раз), выручка — только признанная
+    from ..services.finance import access as fin_access, economy as fin_economy
+    rec = fin_economy.recognized(db, deal.id)
+    fact_by_item: dict[str, float] = {k: float(v) for k, v in rec["items_rub"].items()}
     for no, key, title in COST_ITEMS:
         plan_b, plan_p = base["items_rub"].get(key, 0), pess["items_rub"].get(key, 0)
         fact = fact_by_item.get(key)
@@ -337,14 +342,19 @@ def plan_fact(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = D
         rows.append({"no": no, "code": key, "title": title, "plan_base": plan_b, "plan_pess": plan_p, "fact": fact, "deviation_rub": dev,
                      "deviation_pct": None if dev_pct is None else round(dev_pct, 2), "flag": dev_pct is not None and abs(dev_pct) > thr})
     cost_fact = sum(fact_by_item.values()) if fact_by_item else None
-    revenue_fact = sum(f.amount for f in facts if f.kind == "payment_in") or None
+    revenue_fact = float(rec["revenue_rub"]) if rec["revenue_rub"] is not None else None
+    cash = fin_economy.cash(db, fin_access.Visibility(db, user), deal.id, date.today())
+    cf = cash["fact"]
+    legacy_in = sum(f.amount * ((f.fx_rate or 1.0) if f.currency != "RUB" else 1.0) for f in facts if f.kind == "payment_in")
+    legacy_out = sum(f.amount * ((f.fx_rate or 1.0) if f.currency != "RUB" else 1.0) for f in facts if f.kind == "payment_out")
     totals = {
         "cost_total": {"plan_base": base["cost_total_rub"], "plan_pess": pess["cost_total_rub"], "fact": cost_fact},
         "revenue": {"plan_base": base["price_rub"], "plan_pess": pess["price_rub"], "fact": revenue_fact},
         "margin_pct": {"plan_base": base["margin_pct"], "plan_pess": pess["margin_pct"],
                        "fact": None if not (revenue_fact and cost_fact) else round((revenue_fact - cost_fact) / revenue_fact * 100, 2)},
         "profit": {"plan_base": base["profit_rub"], "plan_pess": pess["profit_rub"], "fact": None if not (revenue_fact and cost_fact) else revenue_fact - cost_fact},
-        "cash_gap": {"plan_base": base["cash_gap"], "plan_pess": pess["cash_gap"], "fact": None},
+        "cash_gap": {"plan_base": base["cash_gap"], "plan_pess": pess["cash_gap"],
+                     "fact": None if cf["gap"] is None else {"amount_rub": float(cf["gap"]["amount_rub"]), "starts_on": cf["gap"]["starts_on"], "days": cf["gap"]["days"]}},
         "delivery_days": {"plan_base": base["delivery_days"], "plan_pess": pess["delivery_days"],
                           "fact": next((f.amount for f in facts if f.kind == "delivery"), None)},
         "weighted_fx": {"plan_base": _weighted_fx(ver.calc_result, "base"), "plan_pess": _weighted_fx(ver.calc_result, "pessimistic"),
@@ -358,7 +368,11 @@ def plan_fact(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = D
         totals["penalties"] = {"plan_base": 0.0, "plan_pess": round(pen["receivable_accruing_rub"] - pen["payable_accruing_rub"], 2), "fact": net}
         pf = totals["profit"]["fact"]
         totals["profit_after_penalties"] = {"plan_base": base["profit_rub"], "plan_pess": pess["profit_rub"], "fact": None if pf is None else round(pf + net, 2)}
-    return {"variant": won_variant.name, "rows": rows, "totals": totals, "entries": [serialize(f) for f in facts], "closed": deal.plan_fact_closed, "penalties": pen}
+    money = {"status": cf["status"], "in_rub": None if cf["in_rub"] is None else float(cf["in_rub"]), "out_rub": None if cf["out_rub"] is None else float(cf["out_rub"]),
+             "legacy_in_rub": round(legacy_in, 2) or None, "legacy_out_rub": round(legacy_out, 2) or None,
+             "data_gaps": [g["text"] for g in cash["data_gaps"]], "revenue_events": rec["revenue_events"]}
+    return {"variant": won_variant.name, "rows": rows, "totals": totals, "entries": [serialize(f) for f in facts], "closed": deal.plan_fact_closed, "penalties": pen,
+            "money": money, "economy_url": f"/finance?tab=economy&deal={deal.id}" if fin_access.can_read(user) else None}
 
 
 def _weighted_fx(res: dict, scen: str) -> Optional[float]:
