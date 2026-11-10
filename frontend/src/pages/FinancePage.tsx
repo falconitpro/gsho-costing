@@ -40,6 +40,12 @@ const dir = (d: "in" | "out") => (d === "in" ? <span className="badge ok">нам
 const errText = (e: unknown) => (e instanceof ApiError ? (typeof e.detail === "string" ? e.detail : e.message) : (e as Error).message);
 const dt = (s: string | null | undefined) => (s ? new Date(s).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }) : "—");
 
+/** «Заказ поставщику ЗК-…», «Партия 1» — без повтора типа, если номер его уже содержит. */
+const srcLabel = (o: Pick<Obligation, "source">) => {
+  const n = o.source.number || "";
+  return !n ? o.source.type_title : n.toLowerCase().startsWith(o.source.type_title.toLowerCase()) ? n : `${o.source.type_title} ${n}`;
+};
+
 function StatusBadge({ o }: { o: Pick<Obligation, "status" | "status_title" | "days_overdue" | "flags"> }) {
   return <>
     <span className={`badge ${STATUS_BADGE[o.status] ?? ""}`}>{o.status_title}{o.days_overdue > 0 ? ` · ${o.days_overdue} дн.` : ""}</span>
@@ -150,10 +156,43 @@ function Overview({ stamp, go }: { stamp: number; go: (p: Record<string, string 
         </div>
         <div className="card">
           <div className="section-head"><h2>Без согласованной даты</h2><button className="btn ghost" style={{ padding: "2px 10px" }} onClick={() => go({ tab: "calendar", status: "no_date" })}>Показать все</button></div>
-          <div className="muted">{d.no_date_count ? `${d.no_date_count} строк: срок зависит от события, которое ещё не наступило. В кривую по датам они не входят.` : "Нет"}</div>
+          <div className="muted">{d.no_date_count ? `${d.no_date_count} строк: срок зависит от события, которое ещё не наступило. В кривую по датам они не входят.` : "Строк графиков без даты нет."}</div>
+          <UndatedSummary stamp={stamp} go={go} />
         </div>
       </div>
     </>
+  );
+}
+
+type UndatedData = { parts: { items: { id: string; number: string; client: string; manager: string; amount: string; currency: string; lines: number; urgent: boolean; url: string }[]; total: string; currency: string; note: string } };
+
+function useUndated(stamp: number) {
+  const [d, setD] = useState<UndatedData | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => { api.get<UndatedData>("/api/finance/undated").then(setD).catch((e) => setErr(errText(e))); }, [stamp]);
+  return { d, err };
+}
+
+function UndatedSummary({ stamp, go }: { stamp: number; go: (p: Record<string, string | null>) => void }) {
+  const { d } = useUndated(stamp);
+  if (!d || !d.parts.items.length) return null;
+  return <div style={{ marginTop: 6 }}>Запчасти: заказано и не отгружено по {d.parts.items.length} заявк. — <b>{fmtMoney(d.parts.total, d.parts.currency)}</b>, срок не согласован.{" "}
+    <button className="btn ghost" style={{ padding: "0 8px", fontSize: 12 }} onClick={() => go({ tab: "calendar", direction: "in" })}>Подробнее</button></div>;
+}
+
+/** Ожидаемые суммы без согласованной даты — визуально отдельно от датированного календаря и просрочки (05, раздел 9). */
+function Undated({ stamp }: { stamp: number }) {
+  const { d, err } = useUndated(stamp);
+  if (err) return <div className="alert error">{err}</div>;
+  if (!d || !d.parts.items.length) return null;
+  return (
+    <div className="card" style={{ marginTop: 14, background: "#fcfcfc", borderStyle: "dashed" }}>
+      <div className="section-head"><h2>Ожидается, срок не согласован</h2><span className="muted">запчасти · {fmtMoney(d.parts.total, d.parts.currency)}</span></div>
+      <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>{d.parts.note}</div>
+      <table style={{ fontSize: 13 }}><thead><tr><th>Заявка</th><th>Клиент</th><th className="num">Позиций</th><th className="num">Сумма</th><th>Менеджер</th></tr></thead>
+        <tbody>{d.parts.items.map((p) => <tr key={p.id}><td><Link to={p.url}>{p.number}</Link>{p.urgent && <span className="badge bad" style={{ marginLeft: 4 }}>машина стоит</span>}</td>
+          <td>{p.client}</td><td className="num">{p.lines}</td><td className="num"><b>{fmtMoney(p.amount, p.currency)}</b></td><td>{p.manager}</td></tr>)}</tbody></table>
+    </div>
   );
 }
 
@@ -169,7 +208,7 @@ function MiniTable({ rows, empty }: { rows: Obligation[]; empty: string }) {
 
 function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearchParams; go: (p: Record<string, string | null>) => void; stamp: number; onChanged: () => void }) {
   const f = { direction: sp.get("direction") || "", status: sp.get("status") || "", currency: sp.get("currency") || "", legal_entity_id: sp.get("entity") || "",
-    search: sp.get("q") || "", contract_id: sp.get("contract_id") || "", deal_id: sp.get("deal_id") || "", date_from: sp.get("from") || "", date_to: sp.get("to") || "",
+    search: sp.get("q") || "", contract_id: sp.get("contract_id") || "", source_type: sp.get("source") || "", deal_id: sp.get("deal_id") || "", date_from: sp.get("from") || "", date_to: sp.get("to") || "",
     reconciliation: sp.get("reconciliation") === "1", include_inactive: sp.get("inactive") === "1" };
   const open = sp.get("open");
   const [data, setData] = useState<List<Obligation> | null>(null);
@@ -182,7 +221,7 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
   useEffect(() => { setErr(""); api.get<List<Obligation>>(`/api/finance/obligations?${qs}`).then(setData).catch((e) => setErr(errText(e))); }, [qs, stamp]);
-  const active = [f.direction, f.status, f.currency, f.legal_entity_id, f.search, f.contract_id, f.deal_id, f.date_from, f.date_to, f.reconciliation, f.include_inactive].filter(Boolean).length;
+  const active = [f.direction, f.status, f.currency, f.legal_entity_id, f.search, f.contract_id, f.deal_id, f.date_from, f.date_to, f.reconciliation, f.include_inactive, f.source_type].filter(Boolean).length;
   return (
     <>
       <div className="card" style={{ padding: 10 }}>
@@ -194,6 +233,8 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
             {Object.entries(meta.statuses).filter(([k]) => !["superseded", "excluded"].includes(k)).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
           <select value={f.currency} onChange={(e) => go({ currency: e.target.value })} aria-label="Валюта">
             <option value="">все валюты</option>{meta.currencies.map((c) => <option key={c}>{c}</option>)}</select>
+          <select value={f.source_type} onChange={(e) => go({ source: e.target.value })} aria-label="Источник">
+            <option value="">все источники</option><option value="contract">договоры</option><option value="purchase_order">заказы поставщикам</option><option value="batch">логистические партии</option></select>
           <select value={f.legal_entity_id} onChange={(e) => go({ entity: e.target.value })} aria-label="Компания группы">
             <option value="">все компании группы</option>{meta.entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
           <label className="row" style={{ gap: 4 }} title="Срок по договору, а если он ещё не определён — ожидаемая дата">с <input type="date" value={f.date_from} onChange={(e) => go({ from: e.target.value })} />
@@ -206,7 +247,7 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
           <label><input type="checkbox" checked={f.include_inactive} onChange={(e) => go({ inactive: e.target.checked ? "1" : null })} /> показать исключённые из итогов</label>
           {f.deal_id && <span className="badge info">отбор по сделке {data?.items[0]?.deal?.number ?? ""} <button className="btn ghost" style={{ padding: "0 6px", minHeight: 0, marginLeft: 4 }} onClick={() => go({ deal_id: null })} aria-label="Снять отбор по сделке">×</button></span>}
           {f.contract_id && <span className="badge info">отбор по договору {data?.items[0]?.contract?.number ?? ""} <button className="btn ghost" style={{ padding: "0 6px", minHeight: 0, marginLeft: 4 }} onClick={() => go({ contract_id: null })} aria-label="Снять отбор по договору">×</button></span>}
-          {active > 0 && <button className="btn ghost" style={{ padding: "2px 10px", marginLeft: "auto" }} onClick={() => { setQ(""); go({ direction: null, status: null, currency: null, entity: null, q: null, contract_id: null, deal_id: null, from: null, to: null, reconciliation: null, inactive: null }); }}>Сбросить фильтры ({active})</button>}
+          {active > 0 && <button className="btn ghost" style={{ padding: "2px 10px", marginLeft: "auto" }} onClick={() => { setQ(""); go({ direction: null, status: null, currency: null, entity: null, q: null, contract_id: null, deal_id: null, from: null, to: null, reconciliation: null, inactive: null, source: null }); }}>Сбросить фильтры ({active})</button>}
         </div>
       </div>
       {err && <div className="alert error">{err}</div>}
@@ -226,8 +267,8 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
                   <td className="fin-due">{o.legal_due_on ? fmtDate(o.legal_due_on) : <span className="muted" style={{ fontSize: 12 }} title={o.legal_due_text}>не определён — {o.legal_due_text.replace(/^[^—]*?в течение/, "в течение") || "событие не наступило"}</span>}</td>
                   <td className="sec" style={{ whiteSpace: "nowrap" }}>{o.legal_due_on && o.forecast_on === o.legal_due_on ? <span className="muted">—</span> : fmtDate(o.forecast_on)}</td>
                   <td className="sec">{o.deal ? <Link to={o.deal.url} onClick={(e) => e.stopPropagation()}><b>{o.deal.number}</b></Link> : null}
-                    <div style={{ fontSize: 12 }}>{o.contract ? o.contract.number : o.source.type_title}</div></td>
-                  <td>{o.counterparty.name}<div className="fin-narrow muted" style={{ fontSize: 11 }}>{o.direction === "in" ? "нам платят" : "мы платим"} · {o.contract?.number || o.source.type_title}</div></td>
+                    <div style={{ fontSize: 12 }}>{o.contract ? o.contract.number : srcLabel(o)}</div></td>
+                  <td>{o.counterparty.name}<div className="fin-narrow muted" style={{ fontSize: 11 }}>{o.direction === "in" ? "нам платят" : "мы платим"} · {o.contract?.number || o.source.number || o.source.type_title}</div></td>
                   <td className="sec" style={{ fontSize: 13 }}>{o.title.replace(/^[^:]+:\s*/, "")}</td>
                   <td className="sec">{dir(o.direction)}</td>
                   <td className="num sec">{fmtMoney(o.amount, o.currency)}</td>
@@ -240,10 +281,11 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
                 {open === o.id && <tr><td colSpan={12} style={{ background: "#fcfcfc", padding: 12 }}><ObligationCard id={o.id} canEdit={meta.can_edit} stamp={stamp} onChanged={onChanged} /></td></tr>}
               </Fragment>))}
               {data.items.length === 0 && <tr><td colSpan={12} className="muted" style={{ padding: 16 }}>
-                {active ? "По выбранным фильтрам обязательств нет." : "Обязательств пока нет: они появляются из графика платежей подписанных договоров."}</td></tr>}
+                {active ? "По выбранным фильтрам обязательств нет." : "Обязательств пока нет: они появляются из графиков платежей подписанных договоров, подтверждённых заказов поставщикам и логистических партий."}</td></tr>}
             </tbody>
           </table>
         </div>)}
+      {!f.direction || f.direction === "in" ? <Undated stamp={stamp} /> : null}
     </>
   );
 }

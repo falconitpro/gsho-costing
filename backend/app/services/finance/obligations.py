@@ -78,24 +78,97 @@ def eligible(c: Contract) -> bool:
     return c.doc_type != "amendment" and c.direction in DIRECTION and c.status in PROJECTED_STATUSES
 
 
-def sync_contract(db: Session, c: Contract, user_id: Optional[str] = None, today: Optional[date] = None) -> SyncStats:
-    """Пересобрать проекцию строк графика одного договора. Вызывается в той же транзакции, что и изменение договора.
-    Повтор с тем же source_revision ничего не меняет. Изменение суммы/валюты строки с разнесениями → conflict, без перезаписи."""
+@dataclass
+class LineSpec:
+    """Строка источника для проекции: ключ, ревизия значимых полей, сумма/валюта и производные поля обязательства."""
+    key: str
+    revision: str
+    amount: Optional[Decimal]
+    currency: Optional[str]
+    fields: dict
+    basis: dict
+    active: bool = True
+    reason: str = ""
+
+
+def project_lines(db: Session, source_type: str, source_id: str, specs: list[LineSpec], user_id: Optional[str], deal_id: Optional[str],
+                  orphan_reason: str = "строка удалена из источника") -> SyncStats:
+    """Единая пересборка строк одного источника (договор, заказ поставщику, партия). Правила одинаковы для всех источников:
+    повтор с той же ревизией ничего не меняет; изменение суммы/валюты при разнесениях → conflict без перезаписи;
+    строка без валюты — conflict «валюта не определена» (не подставляем RUB); исчезнувшая строка → orphaned, не удаляется."""
     st = SyncStats()
+    existing = {o.source_line_key: o for o in db.scalars(select(FinanceObligation).where(
+        FinanceObligation.source_type == source_type, FinanceObligation.source_id == source_id)).all()}
+    now = _now()
+    for sp in specs:
+        amount, currency, fields, rev = sp.amount, sp.currency, sp.fields, sp.revision
+        active, reason, sync_status = sp.active, sp.reason, "ok"
+        if not currency:
+            currency, active, reason, sync_status = "XXX", False, "валюта не определена в источнике", "conflict"   # XXX — ISO 4217 «без валюты»
+        if amount is None and active:
+            active, reason = False, "сумма строки не определена"
+        o = existing.pop(sp.key, None)
+        if o is None:
+            o = FinanceObligation(source_type=source_type, source_id=source_id, source_line_key=sp.key, source_revision=rev, amount=amount or ZERO,
+                                  currency=currency, basis_snapshot=sp.basis, is_active=active, excluded_reason=reason, sync_status=sync_status, synced_at=now, **fields)
+            db.add(o)
+            db.flush()
+            audit(db, user_id, deal_id, "finance_obligation", o.id, "create", after={"source": f"{source_type}:{source_id}:{sp.key}", "amount": s(o.amount), "currency": o.currency, "revision": rev})
+            st.created += 1
+            continue
+        before = {"amount": s(o.amount), "currency": o.currency, "legal_due_on": o.legal_due_on, "forecast_on": o.forecast_on, "is_active": o.is_active, "sync_status": o.sync_status}
+        money_changed = (amount or ZERO) != o.amount or currency != o.currency
+        if money_changed and o.sync_status == "conflict" and (o.basis_snapshot or {}).get("pending", {}).get("revision") == rev:
+            st.conflicts += 1   # тот же неразрешённый конфликт — без повторной записи и аудита
+            continue
+        if money_changed and _active_alloc_total(db, o.id) > 0:
+            # сумма/валюта изменилась, а по строке уже есть разнесения: не перезаписываем, ставим на сверку
+            o.sync_status = "conflict"
+            o.basis_snapshot = {**sp.basis, "pending": {"amount": s(amount), "currency": currency, "revision": rev}}
+            o.synced_at = now
+            for k, v in fields.items():
+                setattr(o, k, v)
+            audit(db, user_id, deal_id, "finance_obligation", o.id, "conflict", before=before,
+                  after={"pending_amount": s(amount), "pending_currency": currency, "revision": rev}, comment="изменение источника при наличии разнесений")
+            st.conflicts += 1
+            continue
+        changed = (money_changed or rev != o.source_revision or o.is_active != active or o.sync_status != sync_status
+                   or any(getattr(o, k) != v for k, v in fields.items()))
+        if not changed:
+            st.unchanged += 1 if sync_status == "ok" else 0
+            st.conflicts += 0 if sync_status == "ok" else 1
+            continue
+        for k, v in fields.items():
+            setattr(o, k, v)
+        o.amount, o.currency, o.source_revision, o.basis_snapshot = amount or ZERO, currency, rev, sp.basis
+        o.is_active, o.excluded_reason, o.sync_status, o.synced_at = active, reason, sync_status, now
+        audit(db, user_id, deal_id, "finance_obligation", o.id, "sync", before=before,
+              after={"amount": s(o.amount), "currency": o.currency, "legal_due_on": o.legal_due_on, "forecast_on": o.forecast_on, "is_active": o.is_active, "revision": rev})
+        st.updated += 1
+        if sync_status != "ok":
+            st.conflicts += 1
+    for key, o in existing.items():   # строки больше нет в источнике — не удаляем (история и разнесения), а выводим из итогов
+        if o.sync_status == "orphaned" and not o.is_active:
+            st.unchanged += 1
+            continue
+        audit(db, user_id, deal_id, "finance_obligation", o.id, "orphaned", before={"is_active": o.is_active, "sync_status": o.sync_status}, after={"is_active": False, "sync_status": "orphaned"})
+        o.is_active, o.sync_status, o.excluded_reason, o.synced_at = False, "orphaned", orphan_reason, now
+        st.orphaned += 1
+    return st
+
+
+def sync_contract(db: Session, c: Contract, user_id: Optional[str] = None, today: Optional[date] = None) -> SyncStats:
+    """Пересобрать проекцию строк графика одного договора. Вызывается в той же транзакции, что и изменение договора."""
     if not eligible(c):
-        return st
-    st.contracts = 1
+        return SyncStats()
     today = today or date.today()
     terms = list(c.payment_terms or [])
     rows = legal.schedule(db, c, today)
     keys = _line_keys(terms)
-    existing = {o.source_line_key: o for o in db.scalars(select(FinanceObligation).where(
-        FinanceObligation.source_type == "contract", FinanceObligation.source_id == c.id)).all()}
     cp_name = legal.cp_display(db, c)
-    now = _now()
+    specs = []
     for i, (line, row, key) in enumerate(zip(terms, rows, keys)):
         amount = dec(row["amount"])
-        rev = _revision(line, c, amount)
         due = date.fromisoformat(row["due_on"]) if row.get("due_on") else None
         legal_due = due if row.get("due_legal") else None
         fields: dict[str, Any] = {
@@ -113,49 +186,9 @@ def sync_contract(db: Session, c: Contract, user_id: Optional[str] = None, today
             active, reason = False, "договор расторгнут"
         basis = {"contract_number": c.number, "contract_status": c.status, "line": {k: line.get(k) for k in ("no", "line_uid", "share_pct", "amount", "event", "offset_days", "offset_kind", "via", "event_on", "day_of_month")},
                  "event_source": row.get("event_source", ""), "terms_text": row["text"]}
-        o = existing.pop(key, None)
-        if o is None:
-            o = FinanceObligation(source_type="contract", source_id=c.id, source_line_key=key, source_revision=rev, amount=amount or ZERO,
-                                  currency=c.currency, basis_snapshot=basis, is_active=active, excluded_reason=reason, sync_status="ok", synced_at=now, **fields)
-            db.add(o)
-            db.flush()
-            audit(db, user_id, c.deal_id, "finance_obligation", o.id, "create", after={"source": f"contract:{c.id}:{key}", "amount": s(o.amount), "currency": o.currency, "revision": rev})
-            st.created += 1
-            continue
-        before = {"amount": s(o.amount), "currency": o.currency, "legal_due_on": o.legal_due_on, "forecast_on": o.forecast_on, "is_active": o.is_active, "sync_status": o.sync_status}
-        money_changed = (amount or ZERO) != o.amount or c.currency != o.currency
-        if money_changed and o.sync_status == "conflict" and (o.basis_snapshot or {}).get("pending", {}).get("revision") == rev:
-            st.conflicts += 1   # тот же неразрешённый конфликт — без повторной записи и аудита
-            continue
-        if money_changed and _active_alloc_total(db, o.id) > 0:
-            # сумма/валюта изменилась, а по строке уже есть разнесения: не перезаписываем, ставим на сверку
-            o.sync_status = "conflict"
-            o.basis_snapshot = {**basis, "pending": {"amount": s(amount), "currency": c.currency, "revision": rev}}
-            o.synced_at = now
-            for k, v in fields.items():
-                setattr(o, k, v)
-            audit(db, user_id, c.deal_id, "finance_obligation", o.id, "conflict", before=before,
-                  after={"pending_amount": s(amount), "pending_currency": c.currency, "revision": rev}, comment="изменение источника при наличии разнесений")
-            st.conflicts += 1
-            continue
-        changed = money_changed or rev != o.source_revision or o.is_active != active or o.sync_status != "ok" or any(getattr(o, k) != v for k, v in fields.items())
-        if not changed:
-            st.unchanged += 1
-            continue
-        for k, v in fields.items():
-            setattr(o, k, v)
-        o.amount, o.currency, o.source_revision, o.basis_snapshot = amount or ZERO, c.currency, rev, basis
-        o.is_active, o.excluded_reason, o.sync_status, o.synced_at = active, reason, "ok", now
-        audit(db, user_id, c.deal_id, "finance_obligation", o.id, "sync", before=before,
-              after={"amount": s(o.amount), "currency": o.currency, "legal_due_on": o.legal_due_on, "forecast_on": o.forecast_on, "is_active": o.is_active, "revision": rev})
-        st.updated += 1
-    for key, o in existing.items():   # строки больше нет в договоре — не удаляем (история и разнесения), а выводим из итогов
-        if o.sync_status == "orphaned" and not o.is_active:
-            st.unchanged += 1
-            continue
-        audit(db, user_id, c.deal_id, "finance_obligation", o.id, "orphaned", before={"is_active": o.is_active, "sync_status": o.sync_status}, after={"is_active": False, "sync_status": "orphaned"})
-        o.is_active, o.sync_status, o.excluded_reason, o.synced_at = False, "orphaned", "строка удалена из графика договора", now
-        st.orphaned += 1
+        specs.append(LineSpec(key=key, revision=_revision(line, c, amount), amount=amount, currency=c.currency, fields=fields, basis=basis, active=active, reason=reason))
+    st = project_lines(db, "contract", c.id, specs, user_id, c.deal_id, "строка удалена из графика договора")
+    st.contracts = 1
     for i, line in enumerate(terms):
         if dec(rows[i]["amount"]) is None:
             st.skipped.append({"contract": c.number, "line": rows[i]["no"], "reason": "сумма не определена"})
@@ -169,11 +202,13 @@ def rebuild(db: Session, user_id: Optional[str], dry_run: bool = True, today: Op
     try:
         for c in db.scalars(select(Contract).where(Contract.status.in_(PROJECTED_STATUSES)).order_by(Contract.created_at)).all():
             total.add(sync_contract(db, c, user_id, today))
+        from .sources import rebuild_sources
+        total.add(rebuild_sources(db, user_id))   # заказы поставщикам и партии
         db.flush()
-        counts = dict(db.execute(select(FinanceObligation.currency, func.count()).where(FinanceObligation.source_type == "contract",
-                                                                                       FinanceObligation.is_active.is_(True)).group_by(FinanceObligation.currency)).all())
-        sums = {k: s(dec(v)) for k, v in db.execute(select(FinanceObligation.currency, func.sum(FinanceObligation.amount)).where(
-            FinanceObligation.source_type == "contract", FinanceObligation.is_active.is_(True)).group_by(FinanceObligation.currency)).all()}
+        counts = {f"{t}:{c}": n for t, c, n in db.execute(select(FinanceObligation.source_type, FinanceObligation.currency, func.count()).where(
+            FinanceObligation.is_active.is_(True)).group_by(FinanceObligation.source_type, FinanceObligation.currency)).all()}
+        sums = {f"{t}:{c}": s(dec(v)) for t, c, v in db.execute(select(FinanceObligation.source_type, FinanceObligation.currency, func.sum(FinanceObligation.amount)).where(
+            FinanceObligation.is_active.is_(True)).group_by(FinanceObligation.source_type, FinanceObligation.currency)).all()}
     finally:
         if dry_run:
             sp.rollback()
@@ -231,9 +266,18 @@ STATUS_TITLES = {"paid": "оплачено", "partially_paid": "частично
                  "planned": "ожидается", "superseded": "замещено", "excluded": "исключено из итогов"}
 
 
+def source_number(o: FinanceObligation) -> str:
+    bs = o.basis_snapshot or {}
+    return str(bs.get("po_number") or bs.get("batch") or bs.get("contract_number") or "")
+
+
 def source_url(o: FinanceObligation) -> Optional[str]:
     if o.source_type == "contract" and o.contract_id:
         return f"/legal?tab=contracts&open={o.contract_id}"
+    if o.source_type == "purchase_order":
+        return "/supply?tab=po"
+    if o.source_type == "batch" and o.deal_id:
+        return f"/deals/{o.deal_id}?tab=logistics"
     if o.deal_id:
         return f"/deals/{o.deal_id}"
     return None
@@ -246,7 +290,7 @@ def dto(o: FinanceObligation, st: dict, deals: dict[str, Deal], contracts: dict[
     return {
         "id": o.id, "direction": o.direction, "nature": o.nature, "title": o.title,
         "source": {"type": o.source_type, "type_title": SOURCE_TITLES.get(o.source_type, o.source_type), "id": o.source_id, "line_key": o.source_line_key,
-                   "line_no": o.source_line_no, "number": k.number if k else "", "url": source_url(o)},
+                   "line_no": o.source_line_no, "number": k.number if k else source_number(o), "url": source_url(o)},
         "deal": {"id": d.id, "number": d.number, "url": f"/deals/{d.id}"} if d else None,
         "contract": {"id": k.id, "number": k.number, "status": k.status, "url": f"/legal?tab=contracts&open={k.id}"} if k else None,
         "legal_entity_id": o.legal_entity_id,
@@ -277,6 +321,7 @@ class ObligationFilter:
     legal_entity_id: Optional[str] = None
     deal_id: Optional[str] = None
     contract_id: Optional[str] = None
+    source_type: Optional[str] = None
     status: Optional[str] = None           # paid | partially_paid | overdue | no_date | due_soon | planned | open (не оплачено)
     date_from: Optional[date] = None
     date_to: Optional[date] = None
@@ -293,7 +338,7 @@ def query(db: Session, vis, f: ObligationFilter) -> dict:
     if not f.include_inactive:
         stmt = stmt.where(FinanceObligation.is_active.is_(True))
     for col, val in ((FinanceObligation.direction, f.direction), (FinanceObligation.currency, f.currency), (FinanceObligation.legal_entity_id, f.legal_entity_id),
-                     (FinanceObligation.deal_id, f.deal_id), (FinanceObligation.contract_id, f.contract_id)):
+                     (FinanceObligation.deal_id, f.deal_id), (FinanceObligation.contract_id, f.contract_id), (FinanceObligation.source_type, f.source_type)):
         if val:
             stmt = stmt.where(col == val)
     if f.ids is not None:
@@ -317,8 +362,8 @@ def query(db: Session, vis, f: ObligationFilter) -> dict:
             continue
         if f.search:
             q = f.search.lower()
-            hay = " ".join([o.title, o.counterparty_name_snapshot, (deals.get(o.deal_id or "") or Deal()).number or "",
-                            (contracts.get(o.contract_id or "") or Contract()).number or ""]).lower()
+            d_, k_ = deals.get(o.deal_id or ""), contracts.get(o.contract_id or "")
+            hay = " ".join([o.title, o.counterparty_name_snapshot, d_.number if d_ else "", k_.number if k_ else "", source_number(o)]).lower()
             if q not in hay:
                 continue
         items.append((on, o, st))

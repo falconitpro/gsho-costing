@@ -30,3 +30,35 @@ c.put(f"/api/legal/contracts/{k2['id']}",headers=H(LAW),json={"payment_terms":[{
 c.post(f"/api/legal/contracts/{k2['id']}/files",headers=H(LAW),files={"file":("scan.pdf",b"%PDF-1.4 x","application/pdf")},data={"kind":"signed_scan"})
 print("deal contract", c.post(f"/api/legal/contracts/{k2['id']}/status",headers=H(LAW),json={"status":"active"}).status_code)
 json.dump({"contract_id":k["id"],"number":k["number"],"deal_id":d["id"],"deal_number":d["number"]},open("prep.json","w"))
+# заказ поставщику с графиком оплат и партия с платежами (источники этапа 2)
+code2 = '''
+from app.db import SessionLocal
+from app.models import PurchaseOrder, Factory, LegalEntity, Deal
+from app.core.workflow import DealStatus
+from sqlalchemy import select
+db=SessionLocal(); sup=db.scalars(select(Factory)).first(); ent=db.scalars(select(LegalEntity)).first()
+po=PurchaseOrder(number="ЗК-2026-0901", kind="external", supplier_id=sup.id, buyer_entity_id=ent.id, currency="CNY", status="sent"); db.add(po)
+d=Deal(**{}) if False else None
+db.commit(); print(po.id)
+'''
+po_id=subprocess.run(["python","-c",code2],cwd=os.environ.get("BACKEND_DIR", "backend"),env=env,check=True,capture_output=True,text=True).stdout.strip().splitlines()[-1]
+print("po confirm", c.post(f"/api/parts/po/{po_id}/confirm",headers=H(GD),json={"supplier_ref":"PI-2026-77","payments":[{"due":"2026-11-14","amount":120000,"comment":"аванс 30 %"},{"due":"2026-12-10","amount":280000,"comment":"до отгрузки"}]}).status_code)
+d2=c.post("/api/deals",headers=H("manager@example.com"),json={"client_id":cl["id"],"site":"Логистика тест"}).json()
+subprocess.run(["python","-c",f'''
+from app.db import SessionLocal
+from app.models import Deal
+from app.core.workflow import DealStatus
+db=SessionLocal(); db.get(Deal,"{d2["id"]}").status=DealStatus.LOGISTICS_CALC; db.commit()'''],cwd=os.environ.get("BACKEND_DIR", "backend"),env=env,check=True,capture_output=True)
+print("batch", c.post(f"/api/deals/{d2['id']}/logistics/batches",headers=H(GD),json={"name":"Партия 1","payments":[{"due":"2026-11-25","amount":450000,"currency":"RUB","payee":"ООО «Брокер Забайкальск»","comment":"брокер и СВХ"},{"due":"2026-11-28","amount":38000,"payee":"ТК «Восток»","comment":"фрахт"}]}).status_code)
+print("undated", c.get("/api/finance/undated",headers=H("fd@example.com")).json()["parts"]["total"])
+# заявка на запчасти: заказана клиентом, не отгружена — блок «ожидается, срок не согласован»
+subprocess.run(["python","-c",f'''
+from app.db import SessionLocal
+from app.models import PartRequest, PartRequestLine, User
+from sqlalchemy import select
+db=SessionLocal(); m=db.scalar(select(User).where(User.email=="manager@example.com"))
+r=PartRequest(number="ЗЧ-2026-0042", client_id="{cl["id"]}", manager_id=m.id, machine="XCMG XDR80T № 7", urgent=True); db.add(r); db.flush()
+for i,(n,q,s) in enumerate([("Фильтр топливный",4,48000),("Ремкомплект гидроцилиндра",1,186500)]):
+    db.add(PartRequestLine(request_id=r.id,no=i+1,raw_name=n,qty=q,price=s/q,status="ordered",calc={{"sum_rub":s}}))
+db.commit()'''],cwd=os.environ.get("BACKEND_DIR", "backend"),env=env,check=True,capture_output=True)
+print("undated after", c.get("/api/finance/undated",headers=H("fd@example.com")).json()["parts"]["total"])

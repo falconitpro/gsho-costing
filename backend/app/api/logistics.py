@@ -94,8 +94,16 @@ def create_batch(deal_id: str, body: BatchIn, db: Session = Depends(get_db), use
             p.batch_id = b.id
     deal.logistician_id = deal.logistician_id or user.id
     audit(db, user.id, deal.id, "batch", b.id, "create", after=data)
+    _finance_sync(db, b, user.id)
     db.commit()
     return serialize(b)
+
+
+def _finance_sync(db: Session, b: Batch, user_id: str) -> None:
+    """Раздел «Финансы»: график платежей партии — строки обязательств в той же транзакции (D-123)."""
+    from ..services.finance.sources import sync_batch
+    db.flush()
+    sync_batch(db, b, user_id)
 
 
 def _check_batch_items(db: Session, deal: Deal, b: Batch, items: dict) -> dict:
@@ -134,6 +142,7 @@ def update_batch(deal_id: str, batch_id: str, body: BatchIn, db: Session = Depen
         elif p.batch_id == b.id:
             p.batch_id = None
     audit(db, user.id, deal.id, "batch", b.id, "update", before, data)
+    _finance_sync(db, b, user.id)
     db.commit()
     return serialize(b)
 

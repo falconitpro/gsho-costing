@@ -83,12 +83,13 @@ def overview(as_of: Optional[date] = None, db: Session = Depends(get_db), user: 
 @router.get("/obligations")
 def obligations(as_of: Optional[date] = None, direction: Optional[str] = Query(None, pattern="^(in|out)$"), currency: Optional[str] = None,
                 legal_entity_id: Optional[str] = None, deal_id: Optional[str] = None, contract_id: Optional[str] = None, status: Optional[str] = None,
+                source_type: Optional[str] = Query(None, pattern="^(contract|purchase_order|batch)$"),
                 date_from: Optional[date] = None, date_to: Optional[date] = None, search: str = "", include_inactive: bool = False, reconciliation: bool = False,
                 limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
                 db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     access.require_read(user)
     f = obl.ObligationFilter(as_of=as_of or date.today(), direction=direction, currency=currency.upper() if currency else None, legal_entity_id=legal_entity_id,
-                             deal_id=deal_id, contract_id=contract_id, status=status, date_from=date_from, date_to=date_to, search=search.strip(),
+                             deal_id=deal_id, contract_id=contract_id, source_type=source_type, status=status, date_from=date_from, date_to=date_to, search=search.strip(),
                              include_inactive=include_inactive, reconciliation=reconciliation, limit=limit, offset=offset)
     return obl.query(db, access.Visibility(db, user), f)
 
@@ -99,6 +100,14 @@ def _obligation(db: Session, user: CurrentUser, oid: str) -> tuple[FinanceObliga
     if o is None or not vis.obligation(o):
         raise HTTPException(404, "Обязательство не найдено")
     return o, vis
+
+
+@router.get("/undated")
+def undated(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Ожидаемые суммы без согласованной даты (запчасти): отдельный блок, не входит в датированный календарь (D-018, D-124)."""
+    access.require_read(user)
+    from ..services.finance.sources import parts_undated
+    return {"parts": parts_undated(db, user)}
 
 
 @router.get("/obligations/{oid}")
