@@ -6,7 +6,7 @@ import tempfile
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
@@ -64,7 +64,13 @@ def _payload(db: Session, req: PartRequest, user: CurrentUser) -> dict:
     mgr = db.get(User, req.manager_id) if req.manager_id else None
     d["client_name"] = client.name if client else ""
     d["manager_name"] = mgr.display_name if mgr else ""
-    lines = [line_payload(l, db.get(Part, l.part_id) if l.part_id else None) for l in req.lines]
+    from ..services.parts_requests import stock_by_warehouse
+    lines = []
+    for l in req.lines:
+        p = db.get(Part, l.part_id) if l.part_id else None
+        d_ = line_payload(l, p)
+        d_["warehouses"] = stock_by_warehouse(db, p) if p else []      # наличие по складам — в строке заявки (D-174)
+        lines.append(d_)
     from ..services import mirror_parts
     mirror_parts.mask_lines(db, lines, user)
     d["lines"] = lines
@@ -125,6 +131,7 @@ class LineIn(BaseModel):
     raw_name: str = ""
     qty: float = 1
     unit: str = "шт"
+    part_id: Optional[str] = None          # выбрано из каталога запчастей (D-172)
 
 
 class RequestIn(BaseModel):
@@ -140,6 +147,20 @@ class RequestIn(BaseModel):
     lines_text: str = ""          # вставка из письма или Excel: «артикул <Tab> наименование <Tab> количество»
 
 
+def _with_parts(db: Session, items: list[dict]) -> list[dict]:
+    """Строки из каталога: артикул, наименование и единица — из карточки, если не заданы."""
+    out = []
+    for it in items:
+        if it.get("part_id"):
+            p = db.get(Part, it["part_id"])
+            if p is None:
+                raise HTTPException(422, "Карточка запчасти не найдена")
+            it = {**it, "raw_article": it.get("raw_article") or p.article, "raw_name": it.get("raw_name") or p.name_ru,
+                  "unit": it.get("unit") if it.get("unit") not in (None, "", "шт") else (p.unit or "шт")}
+        out.append(it)
+    return out
+
+
 def _add_lines(req: PartRequest, items: list[dict]) -> None:
     n = max([l.no for l in req.lines] or [0])
     for it in items:
@@ -148,8 +169,11 @@ def _add_lines(req: PartRequest, items: list[dict]) -> None:
         if float(it.get("qty") or 0) <= 0:
             raise HTTPException(422, f"Количество в строке «{it.get('raw_article') or it.get('raw_name')}» должно быть больше нуля")
         n += 1
-        req.lines.append(PartRequestLine(no=n, raw_article=(it.get("raw_article") or "").strip(), raw_name=(it.get("raw_name") or "").strip(),
-                                         qty=float(it["qty"]), unit=it.get("unit") or "шт"))
+        line = PartRequestLine(no=n, raw_article=(it.get("raw_article") or "").strip(), raw_name=(it.get("raw_name") or "").strip(),
+                               qty=float(it["qty"]), unit=it.get("unit") or "шт")
+        if it.get("part_id"):
+            line.part_id, line.match_kind = it["part_id"], "manual"
+        req.lines.append(line)
 
 
 @router.post("", status_code=201)
@@ -169,7 +193,7 @@ def create(body: RequestIn, db: Session = Depends(get_db), user: CurrentUser = D
         machine = machine or " ".join(x for x in (m.manufacturer, m.model, f"зав. № {m.serial}" if m.serial else "") if x)
     req = PartRequest(number=next_number(db), client_id=body.client_id, manager_id=user.id, contact=body.contact, channel=body.channel,
                       machine=machine, machine_id=body.machine_id, urgent=body.urgent, warranty=body.warranty, comment=body.comment)
-    _add_lines(req, [l.model_dump() for l in body.lines] + parse_lines_text(body.lines_text))
+    _add_lines(req, _with_parts(db, [l.model_dump() for l in body.lines]) + parse_lines_text(body.lines_text))
     if not req.lines:
         raise HTTPException(422, "Добавьте хотя бы одну строку: артикул или наименование")
     db.add(req)
@@ -198,7 +222,7 @@ class AddLinesIn(BaseModel):
 def add_lines(rid: str, body: AddLinesIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     req = _req_or_404(db, rid, user)
     _editable(user, req)
-    _add_lines(req, [l.model_dump() for l in body.lines] + parse_lines_text(body.lines_text))
+    _add_lines(req, _with_parts(db, [l.model_dump() for l in body.lines]) + parse_lines_text(body.lines_text))
     db.flush()
     match_lines(db, req)
     _recalc(db, req)
@@ -525,3 +549,79 @@ def kp_sent(kid: str, db: Session = Depends(get_db), user: CurrentUser = Depends
 
 def Role_all():   # noqa: N802 — полный набор прав для внутренней проверки виз (данные не уходят пользователю)
     return {Role.CD, Role.FD, Role.GD}
+
+
+
+# ------------------------------------------------------------------ удобное заведение заявки: файл заказа, предпросмотр подбора (D-171, D-172)
+
+@router.post("/parse-file")
+def parse_file(file: UploadFile = File(...), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Файл заказа клиента (Excel, CSV) → строки заявки с подбором по каталогу. Ничего не сохраняет."""
+    from ..services.parts_requests import parse_order_file, preview_lines
+    if not user.has(*EDIT_ROLES):
+        raise HTTPException(403, "Заявки на запчасти заводят менеджеры, закупки, КД и ЗГД")
+    fd, path = tempfile.mkstemp(suffix=os.path.splitext(file.filename or "")[1])
+    with os.fdopen(fd, "wb") as f:
+        f.write(file.file.read())
+    try:
+        res = parse_order_file(path, file.filename or "")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception:   # noqa: BLE001 — повреждённый файл
+        raise HTTPException(422, "Файл не читается — сохраните его как .xlsx или CSV и загрузите снова")
+    finally:
+        os.unlink(path)
+    res["lines"] = preview_lines(db, res["lines"])
+    return res
+
+
+class PreviewIn(BaseModel):
+    lines: list[LineIn] = Field(default_factory=list)
+    lines_text: str = ""
+
+
+@router.post("/preview-lines")
+def preview(body: PreviewIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Подбор строк по каталогу до создания заявки: найдена ли карточка, остаток, кандидаты."""
+    from ..services.parts_requests import preview_lines
+    if not user.has(*EDIT_ROLES):
+        raise HTTPException(403, "Заявки на запчасти заводят менеджеры, закупки, КД и ЗГД")
+    return {"lines": preview_lines(db, [l.model_dump() for l in body.lines] + parse_lines_text(body.lines_text))}
+
+
+@router.delete("/{rid}")
+def delete_request(rid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Удалить ошибочно заведённую заявку (D-173): менеджер своей заявки, КД, ЗГД — пока по ней нет КП, заказа клиента,
+    заказа поставщику, отгрузки и гарантии. Запросы поставщикам только по этой заявке закрываются; снимок — в журнале."""
+    from ..models import PartShipment, PoLine, SupplierRfq, SupplierRfqLine, WarrantyClaim
+    req = _req_or_404(db, rid, user)
+    if not (user.has(Role.CD, Role.GD) or (user.has(*EDIT_ROLES) and req.manager_id == user.id)):
+        raise HTTPException(403, "Удалить заявку может её менеджер, КД или ЗГД")
+    why = []
+    if db.scalar(select(PartKp.id).where(PartKp.request_id == req.id).limit(1)):
+        why.append("по ней сформировано КП")
+    bad = [str(l.no) for l in req.lines if l.status not in DELETABLE_LINE]
+    if bad:
+        why.append(f"строки {', '.join(bad)} уже заказаны клиентом или поставщику")
+    ids = [l.id for l in req.lines]
+    if ids and db.scalar(select(PoLine.id).where(PoLine.request_line_id.in_(ids)).limit(1)):
+        why.append("есть заказ поставщику")
+    if db.scalar(select(PartShipment.id).where(PartShipment.request_id == req.id).limit(1)):
+        why.append("есть отгрузка")
+    if db.scalar(select(WarrantyClaim.id).where(WarrantyClaim.request_id == req.id).limit(1)):
+        why.append("есть гарантийная претензия")
+    if why:
+        raise HTTPException(409, "Заявку удалить нельзя: " + "; ".join(why) + ". Закройте её («закрыть заявку…» → отменена клиентом)")
+    rfq_ids = set(db.scalars(select(SupplierRfqLine.rfq_id).where(SupplierRfqLine.request_line_id.in_(ids))).all()) if ids else set()
+    snap = {**serialize(req), "lines": [serialize(l) for l in req.lines]}
+    for l in req.lines:
+        for rl in db.scalars(select(SupplierRfqLine).where(SupplierRfqLine.request_line_id == l.id)).all():
+            rl.request_line_id = None
+    for rq in (db.get(SupplierRfq, x) for x in rfq_ids):
+        if rq is not None and not any(x.request_line_id for x in rq.lines):
+            rq.status = "closed"
+    audit(db, user.id, None, "part_request", req.id, "delete", before=snap, after=None)
+    number = req.number
+    db.delete(req)
+    db.commit()
+    return {"ok": True, "deleted": number}

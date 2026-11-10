@@ -1,6 +1,8 @@
 """Заявки клиентов на запчасти: подбор строк по каталогу, наличие, цена и маржа (ТЗ запчастей, разделы 5–6)."""
 from __future__ import annotations
 
+import os
+
 import re
 from datetime import date
 from typing import Any, Optional
@@ -204,3 +206,155 @@ def approvals_pending(req: PartRequest, lines: list[dict]) -> Optional[str]:
 
 def count_requests(db: Session) -> int:
     return db.scalar(select(func.count(PartRequest.id))) or 0
+
+
+# ------------------------------------------------------------------ заказ клиента из файла (D-171)
+
+_ART = ("каталожн", "артикул", "кат. №", "кат.№", "номер детали", "part no", "part number", "part#", "p/n", "pn", "oem", "код", "обозначение", "номер")
+_NAME = ("наименование", "название", "описание", "description", "name", "деталь", "товар", "позиция")
+_QTY = ("кол-во", "колич", "кол.", "qty", "quantity", "шт", "количество")
+_UNIT = ("ед.", "ед ", "единиц", "unit", "uom", "изм")
+
+
+def _cell(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return str(v).strip()
+
+
+def _num(v) -> Optional[float]:
+    s = _cell(v).replace(" ", "").replace(" ", "").replace(",", ".")
+    try:
+        x = float(s)
+        return x if x > 0 else None
+    except ValueError:
+        return None
+
+
+def _find_col(header: list[str], keys: tuple[str, ...], taken: set[int]) -> Optional[int]:
+    for i, h in enumerate(header):
+        low = h.lower()
+        if i not in taken and low and any(k in low for k in keys):
+            return i
+    return None
+
+
+def read_order_rows(path: str, filename: str) -> list[list]:
+    """Строки файла заказа клиента: Excel (xlsx/xlsm) или CSV/TXT (разделитель — ; , или Tab)."""
+    import csv
+    ext = os.path.splitext(filename or path)[1].lower()
+    if ext in (".xlsx", ".xlsm"):
+        from openpyxl import load_workbook
+        wb = load_workbook(path, data_only=True, read_only=True)
+        rows = []
+        for ws in wb.worksheets:            # первый лист с данными
+            rows = [list(r) for r in ws.iter_rows(values_only=True)]
+            if any(any(_cell(c) for c in r) for r in rows):
+                break
+        return rows
+    if ext in (".csv", ".txt"):
+        raw = open(path, "rb").read()
+        for enc in ("utf-8-sig", "cp1251"):
+            try:
+                text = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        try:
+            dialect = csv.Sniffer().sniff(text[:4000], delimiters=";,\t")
+            delim = dialect.delimiter
+        except csv.Error:
+            delim = ";" if text.count(";") >= text.count(",") else ","
+        return [r for r in csv.reader(text.splitlines(), delimiter=delim)]
+    raise ValueError("Поддерживаются файлы Excel (.xlsx) и CSV. Старый .xls откройте в Excel и сохраните как .xlsx; PDF и скан — вставьте строки текстом")
+
+
+def parse_order_file(path: str, filename: str) -> dict:
+    """Заказ клиента → строки заявки. Заголовок ищется в первых 20 строках по словам «артикул / каталожный номер»,
+    «наименование», «количество», «ед.»; без заголовка — первая колонка номер, последняя числовая — количество."""
+    numbered = [(i + 1, [_cell(c) for c in r]) for i, r in enumerate(read_order_rows(path, filename))]
+    numbered = [(n, r) for n, r in numbered if any(r)]      # номер строки в файле — для сообщений
+    rows = [r for _, r in numbered]
+    if not rows:
+        raise ValueError("Файл пустой")
+    head_i, cols = None, {}
+    for i, r in enumerate(rows[:20]):
+        taken: set[int] = set()
+        a = _find_col(r, _ART, taken)
+        if a is not None:
+            taken.add(a)
+        n = _find_col(r, _NAME, taken)
+        if n is not None:
+            taken.add(n)
+        q = _find_col(r, _QTY, taken)
+        if q is not None:
+            taken.add(q)
+        u = _find_col(r, _UNIT, taken)
+        if (a is not None or n is not None) and q is not None:
+            head_i, cols = i, {"article": a, "name": n, "qty": q, "unit": u}
+            break
+    body = rows[head_i + 1:] if head_i is not None else rows
+    if head_i is None:      # без заголовка: номер — первая колонка, количество — последняя числовая
+        width = max(len(r) for r in body)
+        qcol = next((j for j in range(width - 1, 0, -1) if sum(1 for r in body if j < len(r) and _num(r[j])) >= max(1, len(body) // 2)), None)
+        cols = {"article": 0, "name": 1 if width > 2 or (width == 2 and qcol != 1) else None, "qty": qcol, "unit": None}
+    out, skipped = [], []
+    g = lambda r, k: r[cols[k]] if cols.get(k) is not None and cols[k] < len(r) else ""   # noqa: E731
+    start = (head_i + 1) if head_i is not None else 0
+    for j, r in enumerate(body):
+        i = numbered[start + j][0]
+        art, name = g(r, "article"), g(r, "name")
+        if not art and not name:
+            continue
+        low = f"{art} {name}".lower()
+        if any(w in low for w in ("итого", "всего", "total")):
+            continue
+        qty = _num(g(r, "qty")) if cols.get("qty") is not None else 1.0
+        if qty is None:
+            skipped.append({"row": i, "article": art, "name": name, "reason": "нет количества"})
+            qty = 1.0
+        out.append({"raw_article": art, "raw_name": name if name != art else "", "qty": qty, "unit": g(r, "unit") or "шт", "row": i})
+    if not out:
+        raise ValueError("Не нашли строк с номером или наименованием детали — проверьте, что в файле есть колонки «Артикул / каталожный номер» и «Количество»")
+    header = rows[head_i] if head_i is not None else []
+    return {"lines": out, "columns": {k: (header[v] if header and v is not None and v < len(header) else (f"колонка {v + 1}" if v is not None else None)) for k, v in cols.items()},
+            "header_row": numbered[head_i][0] if head_i is not None else None, "skipped": skipped}
+
+
+def preview_lines(db: Session, lines: list[dict]) -> list[dict]:
+    """Подбор по каталогу без сохранения: какая карточка найдена, остаток на складе, кандидаты при неоднозначности."""
+    idx = Index(db)
+    out = []
+    for l in lines:
+        p = db.get(Part, l["part_id"]) if l.get("part_id") else None
+        kind, cands = ("catalog" if p else ""), []
+        if p is None and (l.get("raw_article") or "").strip():
+            pid, kind, cands = idx.match(l["raw_article"])
+            p = db.get(Part, pid) if pid else None
+        by_wh = stock_by_warehouse(db, p) if p else []
+        stock = round(sum(w["available"] for w in by_wh), 3) if p else None
+        qty = float(l.get("qty") or 0)
+        if p is not None:     # строка из каталога: номер и наименование — из карточки
+            l = {**l, "raw_article": l.get("raw_article") or p.article, "raw_name": l.get("raw_name") or p.name_ru,
+                 "unit": l.get("unit") if l.get("unit") not in (None, "", "шт") else (p.unit or "шт")}
+        out.append({**l, "part": {"id": p.id, "article": p.article, "name_ru": p.name_ru, "unit": p.unit, "manufacturer": p.manufacturer, "available": stock,
+                                  "warehouses": by_wh} if p else None,
+                    "stock_state": None if p is None else ("full" if stock >= qty > 0 else "partial" if stock > 0 else "none"),
+                    "match_kind": kind or "", "candidates": (cands or [])[:5]})
+    return out
+
+
+
+def stock_by_warehouse(db: Session, part: Part) -> list[dict]:
+    """Свободный остаток по складам (количество минус резерв), только склады с остатком или резервом."""
+    from ..models import Warehouse
+    out = []
+    for st in part.stock:
+        if (st.qty or 0) == 0 and (st.reserved or 0) == 0:
+            continue
+        w = db.get(Warehouse, st.warehouse_id)
+        out.append({"warehouse_id": st.warehouse_id, "warehouse": w.name if w else "", "qty": st.qty or 0, "reserved": st.reserved or 0,
+                    "available": round((st.qty or 0) - (st.reserved or 0), 3)})
+    return sorted(out, key=lambda x: -x["available"])

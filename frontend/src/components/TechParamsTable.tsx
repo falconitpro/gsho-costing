@@ -1,3 +1,4 @@
+import NewSupplierInline from "./NewSupplierInline";
 import { MeContext } from "../App";
 import { Fragment, useEffect, useState } from "react";
 import { lbl, IMAGE_KIND, IMAGE_SOURCE } from "../labels";
@@ -43,6 +44,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
   const [offers, setOffers] = useState<{ id: string; factory: string; factory_id: string; status: string; mirror?: { group_company: string }; lower_of?: string }[]>([]);
   const [viaGroup, setViaGroup] = useState<Record<string, string[]>>({});   // компания группы → конечные поставщики (зеркальный запрос)
   const [factories, setFactories] = useState<Factory[]>([]);
+  const [addingSup, setAddingSup] = useState(false);
   const [countries, setCountries] = useState<string[]>([]);
   const [reqFactories, setReqFactories] = useState<string[]>([position.factory_id]);
   const [reqImages, setReqImages] = useState<string[]>([]);
@@ -151,12 +153,15 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
         <div className="row" style={{ flexWrap: "wrap", alignItems: "center" }}>
           <b>Завод для запроса:</b>
           {canEdit && (
-            <select value="" onChange={(e) => e.target.value && setReqFactories([...reqFactories, e.target.value])} style={{ minWidth: 280 }}>
+            <select value="" onChange={(e) => { const v = e.target.value; if (v === "__new") setAddingSup(true); else if (v) setReqFactories([...reqFactories, v]); }} style={{ minWidth: 280 }}>
               <option value="">{reqFactories.length ? "+ добавить ещё завод…" : "— выбрать завод —"}</option>
               {factories.filter((f) => !reqFactories.includes(f.id) && (fdGd || f.supplier_status !== "group_company")).map((f) => { const na = (f as { approval_status?: string }).approval_status === "pending";
                 return <option key={f.id} value={f.id} disabled={na}>{fname(f)}{na ? " — на утверждении" : ""}</option>; })}
+              <option value="__new">＋ Добавить нового поставщика…</option>
             </select>)}
           {reqFactories.length === 0 && <span className="badge warn">завод не выбран</span>}
+          {addingSup && <NewSupplierInline supplies="gsho" onCancel={() => setAddingSup(false)}
+            onCreated={(x, m) => { setFactories([...factories, x as unknown as Factory]); if (x.approval_status !== "pending") setReqFactories([...reqFactories, x.id]); setAddingSup(false); setMsg(m); }} />}
           {canEdit && <span className="muted" style={{ fontSize: 11 }}>выбирайте конечного поставщика — закупку через компанию группы (Китай, Киргизия) подставят правила цепочек{fdGd ? "; ФД и ЗГД могут выбрать компанию группы вручную" : ""}</span>}
         </div>
         <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 8 }}>
