@@ -46,6 +46,8 @@ def my_tasks(db: Session = Depends(get_db), user: CurrentUser = Depends(get_curr
                       "hint": TASK_HINTS.get(t.block.split(":")[0], ""), "tab": TASK_TABS.get(t.block.split(":")[0], "main"),
                       "can_close": t.assignee_id == user.id or user.has(Role.CD, Role.GD)})
             out.append(d)
+    from ..services.finance import questions as fin_questions   # уточнения «Финансов» — task-like элементы (D-141), без финансового контекста
+    out.extend(fin_questions.task_items(db, user))
     return out
 
 

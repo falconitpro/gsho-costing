@@ -36,13 +36,14 @@ export default function TasksPage() {
     const n = t.days_left ?? 0;
     return n < 0 ? `просрочено ${-n} дн.` : n === 0 ? "сегодня" : n === 1 ? "завтра" : `через ${n} дн.`;
   };
+  const href = (t: Task) => t.url || `/deals/${t.deal_id}?tab=${t.tab || "main"}`;   // уточнение «Финансов» — свой адрес (D-141)
   const card = (t: Task) => {
     const late = (t.days_left ?? 0) < 0;
     return (
       <div key={t.id} style={{ background: "#fff", border: "1px solid var(--line)", borderLeft: `4px solid ${late ? "var(--bad)" : (t.days_left ?? 0) === 0 ? "var(--warn)" : "var(--line)"}`,
         borderRadius: 8, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
         <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
-          <Link to={`/deals/${t.deal_id}?tab=${t.tab || "main"}`} style={{ fontWeight: 700, textDecoration: "none" }}>{t.deal_number}</Link>
+          <Link to={href(t)} style={{ fontWeight: 700, textDecoration: "none" }}>{t.deal_number}</Link>
           <span style={{ fontSize: 12, fontWeight: 600, color: late ? "var(--bad)" : "var(--muted)", whiteSpace: "nowrap" }}>{fmtDate(t.due)} · {dueText(t)}</span>
         </div>
         <div style={{ fontSize: 13 }}><b>{t.client_name}</b>{t.site && <span className="muted"> · {t.site}</span>}</div>
@@ -50,9 +51,9 @@ export default function TasksPage() {
         <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.3 }}>{t.title}</div>
         {t.hint && <div className="muted" style={{ fontSize: 12 }}>Что сделать: {t.hint}</div>}
         <div className="row" style={{ justifyContent: "space-between", marginTop: 2, gap: 8, flexWrap: "wrap" }}>
-          <span className="row" style={{ gap: 6 }}><span className="badge">{blockTitle(t.block)}</span><span className="badge" style={{ background: toneOf(t.deal_status)[0], color: toneOf(t.deal_status)[1], fontWeight: 600 }}>{STATUS_TITLES[t.deal_status] || t.deal_status}</span></span>
+          <span className="row" style={{ gap: 6 }}><span className="badge">{blockTitle(t.block)}</span>{t.deal_status && <span className="badge" style={{ background: toneOf(t.deal_status)[0], color: toneOf(t.deal_status)[1], fontWeight: 600 }}>{STATUS_TITLES[t.deal_status] || t.deal_status}</span>}</span>
           <span className="row" style={{ gap: 6 }}>
-            <Link to={`/deals/${t.deal_id}?tab=${t.tab || "main"}`} className="btn" style={{ padding: "4px 12px", fontSize: 12, textDecoration: "none" }}>Открыть →</Link>
+            <Link to={href(t)} className="btn" style={{ padding: "4px 12px", fontSize: 12, textDecoration: "none" }}>Открыть →</Link>
             {t.can_close && <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => done(t)} title="задача сделана вне системы">Выполнено</button>}
           </span>
         </div>
@@ -88,10 +89,10 @@ export default function TasksPage() {
             <tbody>
               {shown.map((t) => (
                 <tr key={t.id} style={(t.days_left ?? 0) < 0 ? { boxShadow: "inset 3px 0 0 var(--bad)" } : undefined}>
-                  <td><Link to={`/deals/${t.deal_id}?tab=${t.tab || "main"}`}>{t.deal_number}</Link></td><td>{t.client_name}{t.site && <div className="muted" style={{ fontSize: 11 }}>{t.site}</div>}</td>
+                  <td><Link to={href(t)}>{t.deal_number}</Link></td><td>{t.client_name}{t.site && <div className="muted" style={{ fontSize: 11 }}>{t.site}</div>}</td>
                   <td>{t.title}{t.hint && <div className="muted" style={{ fontSize: 11 }}>{t.hint}</div>}</td><td>{blockTitle(t.block)}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{fmtDate(t.due)} <span style={{ color: (t.days_left ?? 0) < 0 ? "var(--bad)" : "var(--muted)", fontSize: 12 }}>{dueText(t)}</span></td>
-                  <td>{STATUS_TITLES[t.deal_status] || t.deal_status}</td>
+                  <td>{t.deal_status ? STATUS_TITLES[t.deal_status] || t.deal_status : "—"}</td>
                   <td>{t.can_close && <button className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => done(t)}>Выполнено</button>}</td>
                 </tr>))}
             </tbody>

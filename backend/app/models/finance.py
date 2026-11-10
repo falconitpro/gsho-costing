@@ -270,3 +270,35 @@ class FinanceRecognitionEvent(_Stamp, Base):
     created_by: Mapped[Optional[str]] = mapped_column(String(36))
     reversed_by: Mapped[Optional[str]] = mapped_column(String(36))
     reversed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class FinanceQuestion(_Stamp, Base):
+    """Уточнение по финансовой строке (02, раздел 4.10; D-140). Не Task: попадает в «Мои задачи» task-like элементом.
+    Ответ сам ничего не исправляет: данные меняются в каноническом источнике его владельцем; отметка «данные исправлены» — только с фактической ссылкой."""
+    __tablename__ = "finance_questions"
+    __table_args__ = (
+        CheckConstraint("status in ('open','answered','verified','rejected','closed')", name="ck_fin_question_status"),
+        Index("ix_fin_question_assignee_status", "assignee_id", "status"),
+        Index("ix_fin_question_subject", "subject_type", "subject_id"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    subject_type: Mapped[str] = mapped_column(String(24))                 # obligation | transaction | recognition | account | deal_metric | reconciliation
+    subject_id: Mapped[str] = mapped_column(String(64))
+    deal_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    question: Mapped[str] = mapped_column(Text)
+    context_snapshot: Mapped[dict] = mapped_column(JSONType, default=dict)   # минимальный разрешённый контекст, сформирован сервером
+    asked_by: Mapped[Optional[str]] = mapped_column(String(36))
+    assignee_id: Mapped[str] = mapped_column(String(36))
+    due_on: Mapped[Optional[date]] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    answer: Mapped[str] = mapped_column(Text, default="")
+    answered_by: Mapped[Optional[str]] = mapped_column(String(36))
+    answered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(36))
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    review_comment: Mapped[str] = mapped_column(Text, default="")
+    source_updated_by: Mapped[Optional[str]] = mapped_column(String(36))
+    source_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    source_update_ref: Mapped[str] = mapped_column(String(255), default="")
+    files: Mapped[list] = mapped_column(JSONType, default=list)           # [{id, name, size, uploaded_by, uploaded_at}]
+    history: Mapped[list] = mapped_column(JSONType, default=list)         # [{at, by, action, comment}]
