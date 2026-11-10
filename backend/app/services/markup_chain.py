@@ -36,6 +36,22 @@ def markup_pct_for(rules: Mapping[str, Any], entity_id: str, part_group: Optiona
     return float((rules.get("default") or {}).get(entity_id) or 0)
 
 
+def gsho_markup_pct_for(rules: Mapping[str, Any], entity_id: str, supplier_id: Optional[str] = None, machine_type: Optional[str] = None) -> Optional[float]:
+    """Наценка компании группы на ГШО (D-153): поставщик → тип машины → ставка ГШО по умолчанию. Нет ставки ГШО — None
+    (ставки запчастей на ГШО не переносятся: у техники своя экономика)."""
+    rules = rules or {}
+    if supplier_id:
+        for r in rules.get("gsho_by_supplier") or []:
+            if r.get("entity_id") == entity_id and r.get("supplier_id") == supplier_id:
+                return float(r.get("pct") or 0)
+    if machine_type:
+        for r in rules.get("gsho_by_machine_type") or []:
+            if r.get("entity_id") == entity_id and (r.get("machine_type") or "").strip().lower() == machine_type.strip().lower():
+                return float(r.get("pct") or 0)
+    d = rules.get("gsho_default") or {}
+    return float(d[entity_id]) if entity_id in d and d[entity_id] is not None else None
+
+
 def validate_steps(steps: Sequence[Mapping[str, Any]]) -> list[str]:
     """Проверки маршрута: первая ступень — от поставщика, далее продавец = покупатель предыдущей ступени."""
     errs: list[str] = []
@@ -73,7 +89,7 @@ def _to(amount: float, cur_from: str, cur_to: str, fx: Mapping[str, float]) -> f
 def simulate(purchase_price: float, steps: Sequence[Mapping[str, Any]], rules: Mapping[str, Any], *,
              fx: Mapping[str, float], part_group: Optional[str] = None, supplier_id: Optional[str] = None,
              client_price_rub: Optional[float] = None, extra_costs_rub: float = 0.0,
-             entity_names: Optional[Mapping[str, str]] = None) -> dict[str, Any]:
+             entity_names: Optional[Mapping[str, str]] = None, mode: str = "parts", machine_type: Optional[str] = None) -> dict[str, Any]:
     """Цены на каждой ступени, маржа каждой компании группы и маржа группы.
 
     purchase_price — цена поставщика в валюте первой ступени. extra_costs_rub — прочие расходы до продажи клиенту
@@ -105,6 +121,11 @@ def simulate(purchase_price: float, steps: Sequence[Mapping[str, Any]], rules: M
         fixed = s.get("transfer_price")
         if fixed:
             sale, pct = float(fixed), None
+        elif mode == "gsho":
+            pct = gsho_markup_pct_for(rules, seller, supplier_id, machine_type)
+            if pct is None:
+                raise ChainError(f"Для «{names.get(seller, seller)}» не задана наценка на ГШО в политике наценок группы")
+            sale = cost_in_sale_cur * (1 + pct / 100)
         else:
             pct = markup_pct_for(rules, seller, part_group, supplier_id)
             sale = cost_in_sale_cur * (1 + pct / 100)

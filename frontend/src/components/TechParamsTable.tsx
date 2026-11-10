@@ -6,7 +6,7 @@ import type { Position, TechParamRow } from "../types";
 
 type Preview = { sheets: { name: string; rows: unknown[][]; total_rows: number; mapping: { header_row: number; first_row: number; columns: Record<string, number>; source?: string } }[];
   columns: { key: string; title: string }[] };
-type Factory = { id: string; name: string; trademarks?: string[] };
+type Factory = { id: string; name: string; trademarks?: string[]; supplier_status?: string; country?: string };
 const CJK = /[\u3400-\u9fff]/;
 const freeRow = (r: TechParamRow) => !(r.name_ru || "").trim() && !r.value_ru && !r.value_zh && !r.customer_requirement_ru;
 const isCountry = (r: { code?: string; name_ru?: string }) => r.code === "1.3" || /^(страна|country)/i.test((r.name_ru || "").trim());
@@ -38,7 +38,8 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
   const [mapping, setMapping] = useState<{ header_row: number; first_row: number; last_row: string; columns: Record<string, string> }>({ header_row: 0, first_row: 1, last_row: "", columns: {} });
   const [selected, setSelected] = useState<Set<number> | null>(null);
   const [offerId, setOfferId] = useState("");
-  const [offers, setOffers] = useState<{ id: string; factory: string; factory_id: string; status: string }[]>([]);
+  const [offers, setOffers] = useState<{ id: string; factory: string; factory_id: string; status: string; mirror?: { group_company: string }; lower_of?: string }[]>([]);
+  const [viaGroup, setViaGroup] = useState<Record<string, string[]>>({});   // компания группы → конечные поставщики (зеркальный запрос)
   const [factories, setFactories] = useState<Factory[]>([]);
   const [countries, setCountries] = useState<string[]>([]);
   const [reqFactories, setReqFactories] = useState<string[]>([position.factory_id]);
@@ -105,12 +106,15 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
       setMsg(`Загружено файлов завода: ${offerFiles.length} (источник «завод», отмечены как «есть логотип завода»)`); setAnswerOffer(""); setOfferFiles(null); onChanged();
     } catch (e) { setErr((e as Error).message); }
   }
+  const isGroup = (id: string) => factories.find((x) => x.id === id)?.supplier_status === "group_company";
+  const groupMissing = reqFactories.some((id) => isGroup(id) && !(viaGroup[id] || []).length);
+  const fileIds = reqFactories.flatMap((id) => (isGroup(id) ? viaGroup[id] || [] : [id]));   // файл для ручной отправки — конечным поставщикам
   async function sendRequest() {
     setSending(true);
     try {
       const r = await api.post<{ sent: { factory: string; wecom: string | null; mail: string | null; machine_translations: unknown[] }[] }>(`${base}/request`,
-        { factory_ids: reqFactories, image_ids: reqImages, via_wecom: true, via_mail: true, request_images: true, client_files_checked: clientChecked });
-      setMsg("Запрос отправлен: " + r.sent.map((s) => `${s.factory} (WeCom: ${s.wecom || "—"}, почта: ${s.mail || "—"}${s.machine_translations.length ? `, машинный перевод: ${s.machine_translations.length} строк — проверьте глоссарий` : ""})`).join("; "));
+        { factory_ids: reqFactories, image_ids: reqImages, via_wecom: true, via_mail: true, request_images: true, client_files_checked: clientChecked, via_group: viaGroup });
+      setMsg("Запрос отправлен: " + r.sent.map((s) => `${(s as { end_supplier?: string }).end_supplier ? `${s.factory} → ${(s as { end_supplier?: string }).end_supplier}` : s.factory} (WeCom: ${s.wecom || "—"}, почта: ${s.mail || "—"}${s.machine_translations.length ? `, машинный перевод: ${s.machine_translations.length} строк — проверьте глоссарий` : ""})`).join("; "));
       setErr(""); api.get<typeof offers>(`/api/deals/${dealId}/offers`).then(setOffers); onChanged();
     } catch (e) { setErr((e as ApiError).message); } finally { setSending(false); }
   }
@@ -161,6 +165,19 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
                 <div style={{ fontSize: 15, fontWeight: 700 }}>✔ {f?.name || "—"}</div>
                 <div style={{ fontSize: 13 }}>Марка: <b>{tm || "—"}</b>{f?.trademarks && f.trademarks.length > 1 ? <span className="muted"> (марки завода: {f.trademarks.join(", ")})</span> : null}</div>
                 {id === position.factory_id && <div className="muted" style={{ fontSize: 11 }}>завод позиции</div>}
+                {f?.supplier_status === "group_company" && (
+                  <div style={{ marginTop: 6, fontSize: 13 }}>
+                    <div className="muted" style={{ fontSize: 11 }}>Компания группы: запрос уйдёт от её имени, с её почты и WeCom, выбранным поставщикам</div>
+                    <div className="row" style={{ flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                      {(viaGroup[id] || []).map((sid) => <span key={sid} className="badge">{fname(factories.find((x) => x.id === sid))}
+                        {canEdit && <button className="btn ghost" style={{ padding: "0 4px" }} title="убрать поставщика" onClick={() => setViaGroup({ ...viaGroup, [id]: (viaGroup[id] || []).filter((x) => x !== sid) })}>×</button>}</span>)}
+                      {canEdit && <select value="" aria-label="Конечный поставщик" onChange={(e) => e.target.value && setViaGroup({ ...viaGroup, [id]: [...(viaGroup[id] || []), e.target.value] })}>
+                        <option value="">{(viaGroup[id] || []).length ? "+ ещё поставщик…" : "— конечный поставщик —"}</option>
+                        {factories.filter((x) => x.supplier_status !== "group_company" && !(viaGroup[id] || []).includes(x.id)).map((x) => <option key={x.id} value={x.id}>{fname(x)}{x.country ? ` · ${x.country}` : ""}</option>)}
+                      </select>}
+                    </div>
+                    {(viaGroup[id] || []).length === 0 && <span className="badge warn">выберите конечного поставщика</span>}
+                  </div>)}
                 {canEdit && <button className="btn ghost" style={{ position: "absolute", top: 2, right: 2, padding: "0 6px" }} title="убрать завод" onClick={() => setReqFactories(reqFactories.filter((x) => x !== id))}>×</button>}
               </div>);
           })}
@@ -243,9 +260,9 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
                 {images.map((im) => <option key={im.id} value={im.id}>{im.caption || im.file_name || lbl(IMAGE_KIND, im.kind)} ({lbl(IMAGE_SOURCE, im.source)})</option>)}
               </select>
             )}
-            <button className="btn" onClick={sendRequest} disabled={sending || reqFactories.length === 0 || (clientSelected.length > 0 && !clientChecked)}>Отправить запрос {reqFactories.length > 1 ? `${reqFactories.length} заводам` : "заводу"}</button>
+            <button className="btn" onClick={sendRequest} disabled={sending || reqFactories.length === 0 || (clientSelected.length > 0 && !clientChecked) || groupMissing}>Отправить запрос {reqFactories.length > 1 ? `${reqFactories.length} заводам` : "заводу"}</button>
             <a className={"btn secondary" + (reqFactories.length ? "" : " disabled")} aria-disabled={!reqFactories.length}
-              href={reqFactories.length ? `${base}/request/file?factory_ids=${reqFactories.join(",")}` : undefined}
+              href={reqFactories.length ? `${base}/request/file?factory_ids=${fileIds.join(",")}` : undefined}
               title="двуязычный Excel (RU + CN) для отправки вручную; несколько заводов — архив ZIP с файлом на каждый завод">Скачать запрос {reqFactories.length > 1 ? `${reqFactories.length} заводам (ZIP)` : "заводу"}</a>
           </div>
           {clientSelected.length > 0 && (
@@ -281,7 +298,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
             {wizard === "factory_answer" && offers.length > 0 && (
               <select value={offerId} onChange={(e) => setOfferId(e.target.value)}>
                 <option value="">ответ завода позиции ({fname(factories.find((f) => f.id === position.factory_id))})</option>
-                {offers.map((o) => <option key={o.id} value={o.id}>ответ: {o.factory}</option>)}
+                {offers.filter((o) => !o.mirror).map((o) => <option key={o.id} value={o.id}>ответ: {o.factory}{o.lower_of ? ` (через ${offers.find((u) => u.id === o.lower_of)?.mirror?.group_company || "компанию группы"})` : ""}</option>)}
               </select>
             )}
             <button className="btn secondary" onClick={doPreview} disabled={!file}>Предпросмотр</button>

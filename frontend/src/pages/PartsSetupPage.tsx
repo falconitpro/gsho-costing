@@ -10,12 +10,14 @@ import PartsReports from "../components/PartsReports";
 
 // Запчасти, шаг 1: компании группы, маршруты поставки, политика наценок между компаниями (визы ЗГД и ФД).
 
-type Entity = { id?: string; code: string; name: string; country: string; currency: string; warehouse: string; sells_to_clients: boolean; is_active: boolean; notes: string };
+type Entity = { id?: string; code: string; name: string; country: string; currency: string; warehouse: string; sells_to_clients: boolean; is_active: boolean; notes: string;
+  channels?: { mail_profile?: string; mail_from?: string; wecom_profile?: string } };
 type Step = { seller_entity_id: string | null; buyer_entity_id: string; incoterms: string; place: string; currency: string; customs_country: string;
   pay_days: number | null; transit_days: number | null; comment: string; seller?: string; buyer?: string };
 type Route = { id?: string; name: string; description: string; supplier_country: string; is_active: boolean; steps: Step[]; chain?: string };
 type Rules = { default: Record<string, number>; by_group: { entity_id: string; part_group: string; pct: number }[];
-  by_supplier: { entity_id: string; supplier_id: string; pct: number }[]; min_margin_pct: number | null };
+  by_supplier: { entity_id: string; supplier_id: string; pct: number }[]; min_margin_pct: number | null;
+  gsho_default?: Record<string, number>; gsho_by_supplier?: { entity_id: string; supplier_id: string; pct: number }[]; gsho_by_machine_type?: { entity_id: string; machine_type: string; pct: number }[] };
 type Visa = { user_id: string; name: string; at: string; comment: string };
 type Policy = { id: string; version_no: number; status: string; status_title: string; valid_from: string | null; reason: string; rules: Rules;
   approvals: Record<string, Visa>; rejection: Partial<Visa>; created_at: string; missing_approvals: string[] };
@@ -28,7 +30,7 @@ type Supplier = { id: string; name: string; short_name: string; country: string 
 
 const EMPTY_ENTITY: Entity = { code: "", name: "", country: "", currency: "RUB", warehouse: "none", sells_to_clients: false, is_active: true, notes: "" };
 const EMPTY_STEP = (buyer = ""): Step => ({ seller_entity_id: null, buyer_entity_id: buyer, incoterms: "FCA", place: "", currency: "CNY", customs_country: "", pay_days: null, transit_days: null, comment: "" });
-const EMPTY_RULES: Rules = { default: {}, by_group: [], by_supplier: [], min_margin_pct: null };
+const EMPTY_RULES: Rules = { default: {}, by_group: [], by_supplier: [], min_margin_pct: null, gsho_default: {}, gsho_by_supplier: [], gsho_by_machine_type: [] };
 const num = (v: string) => (v === "" ? null : Number(v.replace(",", ".")));
 
 export default function SupplyPage({ me }: { me: Me }) {
@@ -111,6 +113,13 @@ function Entities({ meta, list, editor, onSaved, setMsg }: { meta: Meta; list: E
             <label className="f">Действует<div className="row"><input type="checkbox" checked={cur.is_active} onChange={(e) => set({ is_active: e.target.checked })} /> {cur.is_active ? "да" : "нет"}</div></label>
           </div>
           <label className="f" style={{ marginTop: 6 }}>Заметки<textarea rows={2} value={cur.notes} onChange={(e) => set({ notes: e.target.value })} /></label>
+          <div className="grid cols-3" style={{ marginTop: 6 }}>
+            <label className="f">Почта для запросов от имени компании<input value={cur.channels?.mail_from || ""} placeholder="rfq@company.com" onChange={(e) => set({ channels: { ...cur.channels, mail_from: e.target.value } })} /></label>
+            <label className="f">Профиль почты на сервере<input value={cur.channels?.mail_profile || ""} placeholder="напр. alliance" onChange={(e) => set({ channels: { ...cur.channels, mail_profile: e.target.value } })} /></label>
+            <label className="f">Профиль WeCom на сервере<input value={cur.channels?.wecom_profile || ""} placeholder="напр. alliance" onChange={(e) => set({ channels: { ...cur.channels, wecom_profile: e.target.value } })} /></label>
+          </div>
+          <div className="muted" style={{ fontSize: 12 }}>Зеркальные запросы ГШО уходят поставщикам с почты и WeCom этой компании. Пароли и ключи задаются администратором на сервере
+            (MAIL_PROFILE_&lt;профиль&gt;_SMTP_USER / _SMTP_PASSWORD, WECOM_PROFILE_&lt;профиль&gt;_CORP_ID / _SECRET) и в программе не хранятся.</div>
           <div className="row" style={{ marginTop: 8 }}><button className="btn" onClick={save} disabled={!cur.code || !cur.name}>Сохранить</button><button className="btn ghost" onClick={() => setCur(null)}>отмена</button></div>
         </div>)}
     </div>
@@ -259,6 +268,7 @@ function Markups({ me, meta, entities, routes, setMsg }: { me: Me; meta: Meta; e
               <button className="btn ghost" onClick={() => setRules({ by_supplier: draft.rules.by_supplier.filter((_, j) => j !== i) })}>удалить</button>
             </div>))}
           {sellers.length > 0 && <button className="btn add" onClick={() => setRules({ by_supplier: [...draft.rules.by_supplier, { entity_id: sellers[0].id!, supplier_id: "", pct: 0 }] })}>Исключение по поставщику</button>}
+          <GshoRules rules={draft.rules} sellers={sellers} suppliers={suppliers} setRules={setRules} />
           <div className="row" style={{ marginTop: 10 }}><button className="btn" onClick={saveDraft}>Сохранить черновик</button><button className="btn ghost" onClick={() => setDraft(null)}>отмена</button></div>
           <Simulator routes={routes} suppliers={suppliers} rules={draft.rules} title="Проверка черновика на примере" />
         </div>)}
@@ -307,6 +317,9 @@ function RulesView({ rules, sellers, suppliers }: { rules: Rules; sellers: Entit
         {(rules.by_group || []).map((r, i) => <tr key={`g${i}`}><td>{ename(r.entity_id)}</td><td>группа «{r.part_group}»</td><td className="num">{r.pct} %</td></tr>)}
         {(rules.by_supplier || []).map((r, i) => <tr key={`s${i}`}><td>{ename(r.entity_id)}</td><td>поставщик {sname(r.supplier_id)}</td><td className="num">{r.pct} %</td></tr>)}
         {rules.min_margin_pct != null && <tr><td colSpan={2} className="muted">Минимум маржи компании на ступени</td><td className="num">{rules.min_margin_pct} %</td></tr>}
+        {Object.entries(rules.gsho_default || {}).map(([id, pct]) => <tr key={`gd${id}`}><td>{ename(id)}</td><td>ГШО, по умолчанию</td><td className="num">{pct} %</td></tr>)}
+        {(rules.gsho_by_machine_type || []).map((r, i) => <tr key={`gm${i}`}><td>{ename(r.entity_id)}</td><td>ГШО, тип «{r.machine_type}»</td><td className="num">{r.pct} %</td></tr>)}
+        {(rules.gsho_by_supplier || []).map((r, i) => <tr key={`gs${i}`}><td>{ename(r.entity_id)}</td><td>ГШО, поставщик {sname(r.supplier_id)}</td><td className="num">{r.pct} %</td></tr>)}
       </tbody>
     </table>
   );
@@ -381,4 +394,39 @@ export function GroupSetupBlock({ me, part }: { me: Me; part: "entities" | "rout
       {meta && part === "entities" && <Entities meta={meta} list={entities} editor={has("cd", "gd", "admin")} onSaved={() => { loadEntities(); loadRoutes(); }} setMsg={setMsg} />}
       {meta && part === "routes" && <RoutesTab meta={meta} list={routes} entities={entities} editor={has("cd", "gd", "admin", "logistician")} name={name} onSaved={loadRoutes} setMsg={setMsg} />}
     </>);
+}
+
+/** Наценки компаний группы на ГШО (зеркальные запросы, D-153): по умолчанию, исключения по типу машины и поставщику. Без ставки — цена не считается. */
+function GshoRules({ rules, sellers, suppliers, setRules }: { rules: Rules; sellers: Entity[]; suppliers: Supplier[]; setRules: (p: Partial<Rules>) => void }) {
+  const d = rules.gsho_default || {}, mt = rules.gsho_by_machine_type || [], bs = rules.gsho_by_supplier || [];
+  const n = (s: string) => (s.trim() === "" ? null : Number(s.replace(",", ".")));
+  return (
+    <>
+      <h3>ГШО: наценка компании группы на технику</h3>
+      <p className="muted">Применяется к предложению компании группы Берг-Хаусу по ответу конечного поставщика. Приоритет: поставщик → тип машины → ставка ГШО по умолчанию. Без ставки предложение не рассчитывается — ставки запчастей на технику не переносятся.</p>
+      <div className="grid cols-3">
+        {sellers.map((e) => (
+          <label key={e.id} className="f">{e.name}, ГШО по умолчанию, %<input type="number" step="0.1" value={d[e.id!] ?? ""}
+            onChange={(ev) => { const v = n(ev.target.value); const x = { ...d }; if (v == null) delete x[e.id!]; else x[e.id!] = v; setRules({ gsho_default: x }); }} /></label>))}
+      </div>
+      <h4>Исключения по типу машины</h4>
+      {mt.map((r, i) => (
+        <div key={i} className="row" style={{ marginBottom: 4 }}>
+          <select value={r.entity_id} onChange={(e) => setRules({ gsho_by_machine_type: mt.map((x, j) => (j === i ? { ...x, entity_id: e.target.value } : x)) })}>{sellers.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
+          <input placeholder="тип машины, напр. Самосвал" value={r.machine_type} onChange={(e) => setRules({ gsho_by_machine_type: mt.map((x, j) => (j === i ? { ...x, machine_type: e.target.value } : x)) })} />
+          <input type="number" step="0.1" style={{ width: 80 }} value={r.pct} onChange={(e) => setRules({ gsho_by_machine_type: mt.map((x, j) => (j === i ? { ...x, pct: Number(e.target.value) } : x)) })} /> %
+          <button className="btn ghost" onClick={() => setRules({ gsho_by_machine_type: mt.filter((_, j) => j !== i) })}>удалить</button>
+        </div>))}
+      {sellers.length > 0 && <button className="btn add" onClick={() => setRules({ gsho_by_machine_type: [...mt, { entity_id: sellers[0].id!, machine_type: "", pct: 0 }] })}>Исключение по типу машины</button>}
+      <h4>Исключения по поставщику ГШО</h4>
+      {bs.map((r, i) => (
+        <div key={i} className="row" style={{ marginBottom: 4 }}>
+          <select value={r.entity_id} onChange={(e) => setRules({ gsho_by_supplier: bs.map((x, j) => (j === i ? { ...x, entity_id: e.target.value } : x)) })}>{sellers.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
+          <select value={r.supplier_id} onChange={(e) => setRules({ gsho_by_supplier: bs.map((x, j) => (j === i ? { ...x, supplier_id: e.target.value } : x)) })}><option value="">— поставщик —</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.short_name || s.name}</option>)}</select>
+          <input type="number" step="0.1" style={{ width: 80 }} value={r.pct} onChange={(e) => setRules({ gsho_by_supplier: bs.map((x, j) => (j === i ? { ...x, pct: Number(e.target.value) } : x)) })} /> %
+          <button className="btn ghost" onClick={() => setRules({ gsho_by_supplier: bs.filter((_, j) => j !== i) })}>удалить</button>
+        </div>))}
+      {sellers.length > 0 && <button className="btn add" onClick={() => setRules({ gsho_by_supplier: [...bs, { entity_id: sellers[0].id!, supplier_id: "", pct: 0 }] })}>Исключение по поставщику ГШО</button>}
+    </>
+  );
 }

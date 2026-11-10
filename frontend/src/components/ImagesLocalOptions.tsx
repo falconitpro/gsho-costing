@@ -125,7 +125,7 @@ export function LocalOptionsBlock({ dealId, position, me, onChanged }: { dealId:
 
 /** Задача 9: ответы заводов — сравнение «параметр × завод», отправка на отбор, отбор КД/ЗГД. */
 export function OffersBlock({ dealId, position, me, onChanged }: { dealId: string; position: Position; me: Me; onChanged: () => void }) {
-  type Cmp = { offers: { offer_id: string; factory: string; model: string; unit_price?: number; currency: string; production_term: Record<string, unknown>; status: string; answered: boolean; images: number; selected_deal_id: string | null }[];
+  type Cmp = { offers: { offer_id: string; factory: string; model: string; unit_price?: number; currency: string; production_term: Record<string, unknown>; status: string; answered: boolean; images: number; selected_deal_id: string | null; mirror?: Mirror }[];
     rows: { no: number; name_ru: string; unit: string; requirement: string; required: boolean; cells: { value: string; status: string; comment: string }[] }[] };
   const [cmp, setCmp] = useState<Cmp | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -156,7 +156,8 @@ export function OffersBlock({ dealId, position, me, onChanged }: { dealId: strin
       <div style={{ overflowX: "auto", marginTop: 6 }}>
         <table>
           <thead><tr><th>№</th><th>Параметр</th><th>Требование</th>{cmp.offers.map((o) => (
-            <th key={o.offer_id}>{canSelect && o.status !== "selected" && <input type="checkbox" checked={sel.has(o.offer_id)} onChange={(e) => { const s = new Set(sel); e.target.checked ? s.add(o.offer_id) : s.delete(o.offer_id); setSel(s); }} />} {o.factory}
+            <th key={o.offer_id}>{canSelect && o.status !== "selected" && (!o.mirror || o.answered) && <input type="checkbox" checked={sel.has(o.offer_id)} onChange={(e) => { const s = new Set(sel); e.target.checked ? s.add(o.offer_id) : s.delete(o.offer_id); setSel(s); }} />} {o.factory}
+              {o.mirror && <MirrorHead dealId={dealId} offerId={o.offer_id} m={o.mirror} price={o.unit_price} currency={o.currency} me={me} onChanged={() => { load(); onChanged(); }} />}
               <div style={{ fontWeight: 400, fontSize: 11 }}>{o.model || "—"}{o.unit_price != null && <> · {fmtRub(o.unit_price)} {o.currency}</>}{o.production_term?.value != null && <> · {String(o.production_term.value)} {String(o.production_term.unit || "")}</>}
                 <div><span className={"badge " + (o.status === "selected" ? "ok" : o.answered ? "" : "warn")}>{o.status === "selected" ? "отобран" : o.status === "rejected" ? "не выбран" : o.answered ? "ответ получен" : "ожидание"}</span>{o.images > 0 && ` · ${o.images} изобр.`}</div>
                 {can(me, "images", 2) && o.status !== "selected" && (
@@ -190,3 +191,74 @@ export function RelatedDeals({ dealId, me }: { dealId: string; me: Me }) {
   );
 }
 
+
+type Mirror = { group_company: string; end_supplier: string; end_supplier_country: string; state: string; revision: number; lower_offer_id: string | null; lower_answered: boolean;
+  supplier_price?: number | null; supplier_currency?: string | null; companies?: { name: string; margin: number; margin_pct: number; currency: string }[];
+  steps?: { no: number; seller: string; buyer: string; price: number; currency: string; markup_pct: number | null; transfer_price?: boolean; incoterms: string }[];
+  group_margin_rub?: number | null; warnings?: string[]; error?: string | null; transfer_price?: number | null; transfer_note?: string; pending?: { pending_price: number | null } | null;
+  route?: { name: string } | null };
+
+const MIRROR_STATE: Record<string, [string, string]> = { waiting: ["ждёт ответа поставщика", "warn"], ok: ["рассчитано по наценкам группы", "ok"],
+  no_policy: ["нет ставки наценки на ГШО", "bad"], error: ["цена не рассчитана", "bad"], changed_after_select: ["ответ поставщика изменился после отбора", "bad"] };
+
+/** Предложение компании группы (зеркальный запрос, D-150): через кого, состояние, для КД/ФД/ЗГД/логиста — цепочка, ввод ответа поставщика, трансфертная цена. */
+function MirrorHead({ dealId, offerId, m, price, currency, me, onChanged }: { dealId: string; offerId: string; m: Mirror; price?: number; currency: string; me: Me; onChanged: () => void }) {
+  const [form, setForm] = useState<null | "answer" | "transfer">(null);
+  const [f, setF] = useState({ unit_price: "", currency: m.supplier_currency || "CNY", basis: "EXW", days: "", model: "", note: "" });
+  const [err, setErr] = useState("");
+  const canChain = m.supplier_price !== undefined;
+  const canEnter = can(me, "intragroup_chain", 2);
+  const canTransfer = me.roles.some((r) => r.code === "fd" || r.code === "gd");
+  const [label, tone] = MIRROR_STATE[m.state] || [m.state, ""];
+  const num = (s: string) => Number(s.replace(/\s/g, "").replace(",", "."));
+  async function saveAnswer() {
+    setErr("");
+    try {
+      await api.post(`/api/deals/${dealId}/offers`, { factory_id: "", offer_id: m.lower_offer_id, unit_price: num(f.unit_price), currency: f.currency, basis: f.basis,
+        ...(f.model ? { model: f.model } : {}), ...(f.days ? { production_term: { value: Number(f.days), unit: "calendar_days" } } : {}) });
+      setForm(null); onChanged();
+    } catch (e) { setErr((e as Error).message); }
+  }
+  async function saveTransfer(clear = false) {
+    setErr("");
+    try { await api.post(`/api/deals/${dealId}/offers/${offerId}/transfer-price`, clear ? { price: null } : { price: num(f.unit_price), note: f.note }); setForm(null); onChanged(); }
+    catch (e) { setErr((e as Error).message); }
+  }
+  return (
+    <div style={{ fontWeight: 400, fontSize: 11, marginTop: 2, maxWidth: 300 }}>
+      <div>конечный поставщик: <b>{m.end_supplier}</b>{m.end_supplier_country ? ` (${m.end_supplier_country})` : ""}</div>
+      <span className={`badge ${tone}`}>{label}{m.revision > 1 ? ` · ред. ${m.revision}` : ""}</span>
+      {canChain && m.supplier_price != null && (
+        <div title={(m.steps || []).map((s) => `${s.no}. ${s.seller} → ${s.buyer}: ${fmtRub(s.price)} ${s.currency}${s.markup_pct != null ? ` (+${s.markup_pct} %)` : s.transfer_price ? " (трансфертная цена)" : ""}`).join("\n")}>
+          поставщик {fmtRub(m.supplier_price)} {m.supplier_currency}{(m.companies || []).map((c) => ` → ${c.name} +${fmtRub(c.margin)} ${c.currency}`).join("")}
+          {price != null && <> = <b>{fmtRub(price)} {currency}</b></>}
+          {m.group_margin_rub != null && <div>маржа группы ≈ {fmtRub(m.group_margin_rub)} ₽{m.transfer_price ? ` · трансфертная цена: ${m.transfer_note}` : ""}</div>}
+        </div>)}
+      {m.error && <div style={{ color: "var(--bad)" }}>{m.error}</div>}
+      {canChain && m.pending?.pending_price != null && <div style={{ color: "var(--bad)" }}>новая цена была бы {fmtRub(m.pending.pending_price)} {currency} — в сделке не изменена</div>}
+      {(m.warnings || []).map((w) => <div key={w} style={{ color: "var(--bad)" }}>{w}</div>)}
+      <div className="row" style={{ gap: 4, marginTop: 2 }}>
+        {canEnter && m.lower_offer_id && <button className="btn ghost" style={{ padding: "0 6px", fontSize: 11 }} onClick={() => setForm(form === "answer" ? null : "answer")}>ответ поставщика</button>}
+        {canTransfer && m.state !== "changed_after_select" && <button className="btn ghost" style={{ padding: "0 6px", fontSize: 11 }} onClick={() => setForm(form === "transfer" ? null : "transfer")}>трансфертная цена</button>}
+      </div>
+      {form && (
+        <div style={{ background: "#fafafa", border: "1px solid var(--line)", borderRadius: 6, padding: 6, marginTop: 4 }}>
+          {err && <div style={{ color: "var(--bad)" }}>{err}</div>}
+          <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
+            <input placeholder={form === "answer" ? `цена ${m.end_supplier}` : `цена ${m.group_company}`} inputMode="decimal" value={f.unit_price} onChange={(e) => setF({ ...f, unit_price: e.target.value })} style={{ width: 110 }} />
+            {form === "answer" && <>
+              <select value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })}>{["CNY", "USD", "EUR", "RUB"].map((c) => <option key={c}>{c}</option>)}</select>
+              <select value={f.basis} onChange={(e) => setF({ ...f, basis: e.target.value })}>{["EXW", "FCA", "FOB", "CIF", "DAP"].map((c) => <option key={c}>{c}</option>)}</select>
+              <input placeholder="срок, дн." inputMode="numeric" value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} style={{ width: 70 }} />
+              <input placeholder="модель" value={f.model} onChange={(e) => setF({ ...f, model: e.target.value })} style={{ width: 90 }} />
+              <button className="btn" style={{ padding: "2px 8px" }} disabled={!f.unit_price} onClick={saveAnswer}>Сохранить</button></>}
+            {form === "transfer" && <>
+              <input placeholder="основание" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} style={{ width: 160 }} />
+              <button className="btn" style={{ padding: "2px 8px" }} disabled={!f.unit_price || f.note.trim().length < 3} onClick={() => saveTransfer()}>Зафиксировать</button>
+              {m.transfer_price != null && <button className="btn ghost" style={{ padding: "2px 8px" }} onClick={() => saveTransfer(true)}>Снять</button>}</>}
+          </div>
+          {form === "answer" && <div className="muted">Параметры ответа поставщика — импортом файла на вкладке «Технические характеристики» (выбрать «ответ: {m.end_supplier}»).</div>}
+        </div>)}
+    </div>
+  );
+}
