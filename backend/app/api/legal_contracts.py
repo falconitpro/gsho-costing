@@ -24,17 +24,12 @@ from .common import can_see_deal
 
 router = APIRouter(prefix="/api", tags=["legal"])
 
-ALL_SEE = (Role.LAWYER, Role.GD, Role.CD, Role.FD, Role.ADMIN, Role.OBSERVER)
+ALL_SEE = tuple(Role(r) for r in svc.CONTRACT_ALL_SEE)   # единый список — services.legal_contracts.can_see
 EDIT_ROLES = (Role.LAWYER, Role.GD, Role.CD, Role.FD)
 
 
 def _can_see(db: Session, user: CurrentUser, c: Contract) -> bool:
-    if user.has(*ALL_SEE) or c.curator_id == user.id or c.created_by == user.id:
-        return True
-    if c.deal_id:
-        d = db.get(Deal, c.deal_id)
-        return bool(d and can_see_deal(user, d))
-    return False
+    return svc.can_see(db, user, c)
 
 
 def _can_edit(user: CurrentUser, c: Contract) -> bool:
@@ -52,7 +47,27 @@ def _out(db: Session, user: CurrentUser, c: Contract) -> dict:
     mine = c.curator_id == user.id or c.created_by == user.id
     return {**svc.payload(db, c), "can_edit": _can_edit(user, c), "can_edit_number": user.has(Role.GD, Role.CD),
             "my_steps": [x["title"] for x in svc.user_steps(c, user.roles)], "can_register": user.has(Role.LAWYER, Role.GD),
-            "can_sign": user.has(Role.LAWYER, Role.GD, Role.CD, Role.FD) or mine, "can_correct": c.status in svc.LOCKED and user.has(Role.GD)}
+            "can_sign": user.has(Role.LAWYER, Role.GD, Role.CD, Role.FD) or mine, "can_correct": c.status in svc.LOCKED and user.has(Role.GD),
+            "finance_url": _finance_url(user, c)}
+
+
+def _finance_url(user: CurrentUser, c: Contract):
+    """Ссылка в «Финансы» на строки графика подписанного договора — только тем, кому раздел доступен (без мёртвых ссылок)."""
+    from ..services.finance.access import can_read
+    from ..services.finance.obligations import eligible
+    target = c
+    return f"/finance?tab=calendar&contract_id={target.id}" if can_read(user) and eligible(target) else None
+
+
+def _finance_sync(db: Session, c: Contract, user_id: str) -> None:
+    """Раздел «Финансы»: проекция строк графика подписанного договора обновляется в той же транзакции, что и договор.
+    Доп. соглашение меняет условия основного договора — пересобирается и он."""
+    from ..services.finance.obligations import sync_contract
+    sync_contract(db, c, user_id)
+    if c.parent_id:
+        parent = db.get(Contract, c.parent_id)
+        if parent is not None:
+            sync_contract(db, parent, user_id)
 
 
 def _get(db: Session, cid: str, user: CurrentUser) -> Contract:
@@ -302,6 +317,7 @@ def update_contract(cid: str, body: ContractIn, db: Session = Depends(get_db), u
                          f"ЗГД исправил данные подписанного договора {c.number} ({svc.cp_display(db, c)}): {reason}")
         if "signed_on" in changes or "cp_number" in changes:
             svc.apply_signed_to_deal(db, c, overwrite=True)
+        _finance_sync(db, c, user.id)
         db.commit()
         return _out(db, user, c)
     if in_route and any(k in TERMS_FIELDS for k in changes):
@@ -391,6 +407,7 @@ def set_status(cid: str, body: StatusIn, db: Session = Depends(get_db), user: Cu
         svc.notify_users(db, c, [c.curator_id or ""] if c.curator_id != user.id else [], f"Договор {c.number} передан на подпись")
     svc.hist(c, user.id, "status", f"{svc.STATUSES.get(before)} → {svc.STATUSES.get(to)}" + note + (f": {body.comment.strip()}" if body.comment.strip() else ""))
     audit(db, user.id, c.deal_id, "contract", c.id, "status", {"status": before}, {"status": to, "comment": body.comment})
+    _finance_sync(db, c, user.id)
     db.commit()
     return _out(db, user, c)
 

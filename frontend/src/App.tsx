@@ -10,6 +10,7 @@ import WorkplacePage from "./pages/WorkplacePage";
 import DealCard from "./pages/DealCard";
 import TasksPage from "./pages/TasksPage";
 import SummaryPage from "./pages/SummaryPage";
+import FinancePage from "./pages/FinancePage";
 import BoardPage from "./pages/BoardPage";
 import SettingsHub from "./pages/SettingsHub";
 import CounterpartiesPage from "./pages/CounterpartiesPage";
@@ -125,6 +126,7 @@ export default function App() {
             <NavLink to="/tasks">Мои задачи</NavLink>
             {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
             {has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager") && <NavLink to="/summary">Сводка</NavLink>}
+            {perm("finance_analytics") && <NavLink to="/finance">Финансы</NavLink>}
             <NavLink to="/counterparties">Контрагенты</NavLink>
             {has("cd", "fd", "gd", "lawyer", "admin", "manager") ? <NavLink to="/legal">Юридический блок</NavLink> : !has("observer") && <NavLink to="/legal?tab=contracts">Договоры</NavLink>}
 
@@ -146,6 +148,7 @@ export default function App() {
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/board" element={<BoardPage />} />
             <Route path="/summary" element={<SummaryPage me={me} />} />
+            <Route path="/finance" element={<FinancePage me={me} />} />
             <Route path="/counterparties" element={<CounterpartiesPage me={me} />} />
             <Route path="/legal" element={<LegalPage me={me} />} />
             <Route path="/clients" element={<Navigate to="/counterparties?type=clients" replace />} />

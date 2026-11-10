@@ -1776,3 +1776,9 @@ class AcceptanceUnit(TimestampMixin, Base):
     is_final: Mapped[bool] = mapped_column(Boolean, default=True)                    # приёмка окончательная (на заводе — всегда; онлайн — по отметке)
     round_no: Mapped[int] = mapped_column(Integer, default=1)                        # номер текущей приёмки машины
     rounds: Mapped[list[dict]] = mapped_column(JSONType, default=list)               # история предыдущих приёмок (полные снимки)
+
+
+# ------------------------------------------------------------------ раздел «Финансы» (вариант Б): docs/finance/
+from .finance import (  # noqa: E402,F401
+    FinanceAccount, FinanceAllocation, FinanceBalanceSnapshot, FinanceObligation, FinanceTransaction,
+)

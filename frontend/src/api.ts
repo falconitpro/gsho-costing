@@ -19,8 +19,8 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, url: string, body?: unknown, form?: FormData): Promise<T> {
-  const headers: Record<string, string> = {};
+async function request<T>(method: string, url: string, body?: unknown, form?: FormData, extra?: Record<string, string>): Promise<T> {
+  const headers: Record<string, string> = { ...(extra || {}) };
   const dev = getDevUser();
   if (dev) headers["X-Dev-User"] = dev;
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -38,6 +38,8 @@ export const api = {
   put: <T>(url: string, body?: unknown) => request<T>("PUT", url, body),
   patch: <T>(url: string, body?: unknown) => request<T>("PATCH", url, body),
   del: <T>(url: string) => request<T>("DELETE", url),
+  /** POST с ключом идемпотентности (раздел «Финансы»: повтор запроса с тем же ключом не создаёт дубль). */
+  postIdem: <T>(url: string, body: unknown, key: string) => request<T>("POST", url, body, undefined, { "Idempotency-Key": key }),
   upload: <T>(url: string, file: File, extra?: Record<string, string>) => {
     const fd = new FormData();
     fd.append("file", file);
@@ -64,3 +66,15 @@ export const fmtRub = (v: number | null | undefined, digits = 0) =>
   v == null ? "—" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(v);
 export const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(2).replace(".", ",")} %`);
 export const fmtDate = (s: string | null | undefined) => (s ? new Date(s).toLocaleDateString("ru-RU") : "—");
+
+/** Сумма в исходной валюте из строки-decimal без потери точности: «1 250 000,50 CNY»; null → «—». */
+export const fmtMoney = (amount: string | number | null | undefined, currency?: string) => {
+  if (amount == null || amount === "") return "—";
+  const raw = String(amount);
+  const neg = raw.startsWith("-");
+  const [int, frac = ""] = raw.replace("-", "").split(".");
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
+  return `${neg ? "−" : ""}${grouped},${(frac + "00").slice(0, 2)}${currency ? `\u00a0${currency}` : ""}`;
+};
+/** Ключ идемпотентности для одной попытки действия. */
+export const newKey = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`);
