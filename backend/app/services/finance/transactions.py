@@ -84,6 +84,8 @@ def post(db: Session, user, tx_id: str, key: str) -> FinanceTransaction:
         return tx   # повтор проведения — тот же результат
     if tx.status not in ("draft", "needs_reconciliation"):
         raise HTTPException(409, "Провести можно только черновик или операцию, требующую сверки")
+    if tx.withdrawn_at:
+        raise HTTPException(409, "Запись отозвана — проведение недоступно")
     a = db.scalar(select(FinanceAccount).where(FinanceAccount.id == tx.account_id).with_for_update()) if tx.account_id else None
     if a is None:
         raise HTTPException(422, "Для проведения выберите действующий финансовый счёт — без счёта операция остаётся «требует сверки»")
@@ -137,6 +139,43 @@ def reverse(db: Session, user, tx_id: str, reason: str, booked_at: Optional[date
     return rev
 
 
+def assign_account(db: Session, user, tx_id: str, account_id: str, external_ref: Optional[str]) -> FinanceTransaction:
+    """Сверка записи «требует сверки» (старая отметка или операция без счёта): ФД указывает реальный счёт и банковский номер.
+    Проведение — отдельным действием, как у любой операции."""
+    tx = _lock_tx(db, tx_id)
+    if tx.status not in ("draft", "needs_reconciliation") or tx.withdrawn_at:
+        raise HTTPException(409, "Счёт меняется только у непроведённой и не отозванной записи")
+    a = db.get(FinanceAccount, account_id)
+    if a is None or a.status != "active":
+        raise HTTPException(422, "Выберите действующий финансовый счёт")
+    if a.currency != tx.currency:
+        raise HTTPException(422, f"Валюта записи ({tx.currency}) не совпадает с валютой счёта ({a.currency})")
+    before = _snap(tx)
+    tx.account_id = a.id
+    if external_ref is not None:
+        tx.external_ref = external_ref.strip()[:128]
+    audit(db, user.id, None, "finance_transaction", tx.id, "assign_account", before=before, after=_snap(tx))
+    return tx
+
+
+def withdraw(db: Session, user, tx_id: str, reason: str) -> FinanceTransaction:
+    """Отозвать непроведённую запись (дубль банковской операции, не платёж, ошибка ввода). Не удаляется; временные разнесения сторнируются."""
+    if len((reason or "").strip()) < 3:
+        raise HTTPException(422, "Укажите причину отзыва")
+    tx = _lock_tx(db, tx_id)
+    if tx.withdrawn_at:
+        return tx
+    if tx.status not in ("draft", "needs_reconciliation"):
+        raise HTTPException(409, "Проведённую операцию не отзывают — её сторнируют")
+    n = 0
+    for al in db.scalars(select(FinanceAllocation).where(FinanceAllocation.transaction_id == tx.id, FinanceAllocation.status.in_(ACTIVE_ALLOC)).with_for_update()).all():
+        _reverse_alloc(db, user, al, f"запись отозвана: {reason.strip()}")
+        n += 1
+    tx.withdrawn_at, tx.withdrawn_by, tx.withdrawn_reason = _now(), user.id, reason.strip()
+    audit(db, user.id, None, "finance_transaction", tx.id, "withdraw", before={"status": tx.status}, after={"withdrawn": True, "reason": reason.strip(), "allocations_reversed": n})
+    return tx
+
+
 # ------------------------------------------------------------------ разнесение
 
 def _reverse_alloc(db: Session, user, al: FinanceAllocation, reason: str) -> None:
@@ -158,6 +197,8 @@ def allocate(db: Session, user, vis, tx_id: str, items: list[dict], status: str,
     tx = _lock_tx(db, tx_id)
     if tx.origin_type == "reversal" or tx.status == "reversed":
         raise HTTPException(409, "Сторнированную операцию и сторно не разносят")
+    if tx.withdrawn_at:
+        raise HTTPException(409, "Запись отозвана — разнесение недоступно")
     if status == "confirmed" and tx.status != "posted":
         raise HTTPException(409, "Подтвердить разнесение можно только для проведённой операции")
     ob_ids = sorted({str(i["obligation_id"]) for i in items})
@@ -260,11 +301,15 @@ def alloc_dto(al: FinanceAllocation, tx: Optional[FinanceTransaction] = None, ob
     return out
 
 
+LEGACY_TITLES = {"execution_legacy": "старая отметка: этап исполнения", "contract_legacy": "старая отметка: договор", "planfact_legacy": "старая отметка: план/факт"}
+
+
 def tx_dto(tx: FinanceTransaction, used: Decimal, account_title: str = "") -> dict:
-    movable = tx.status in ("posted", "draft", "needs_reconciliation") and tx.origin_type != "reversal"
+    movable = tx.status in ("posted", "draft", "needs_reconciliation") and tx.origin_type != "reversal" and not tx.withdrawn_at
     return {"id": tx.id, "account_id": tx.account_id, "account_title": account_title, "direction": tx.direction, "amount": s(tx.amount), "currency": tx.currency,
             "booked_at": tx.booked_at.isoformat(), "value_date": tx.value_date.isoformat() if tx.value_date else None,
             "counterparty_name": tx.counterparty_name, "purpose": tx.purpose, "external_ref": tx.external_ref, "status": tx.status, "origin_type": tx.origin_type,
             "reversal_of_id": tx.reversal_of_id, "reversed_by_id": tx.reversed_by_id, "note": tx.note,
             "allocated": s(used), "unallocated": s(max(tx.amount - used, ZERO)) if movable else s(ZERO),
-            "posted_at": tx.posted_at.isoformat() if tx.posted_at else None}
+            "posted_at": tx.posted_at.isoformat() if tx.posted_at else None,
+            "withdrawn": bool(tx.withdrawn_at), "withdrawn_reason": tx.withdrawn_reason, "origin_title": LEGACY_TITLES.get(tx.origin_type, "")}

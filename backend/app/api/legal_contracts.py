@@ -546,8 +546,17 @@ def contract_fact(cid: str, body: FactIn, db: Session = Depends(get_db), user: C
     svc.set_fact(c, body.kind, body.key, data)
     svc.hist(c, user.id, "fact", f"{txt} · {body.key}" + (" — снято" if body.clear else "") + (f" · {body.comment.strip()}" if body.comment.strip() else ""))
     audit(db, user.id, c.deal_id, "contract", c.id, "fact", after=body.model_dump(mode="json"))
+    fin = None
+    if body.kind == "pay":   # «Финансы»: старая отметка оплаты — запись «требует сверки», не банковский факт (D-117)
+        from ..services.finance import legacy
+        fin = legacy.from_contract_pay(db, user.id, c, body.key, data)
     db.commit()
-    return _out(db, user, c)
+    out = _out(db, user, c)
+    if fin and fin.get("status") != "none":
+        from ..services.finance.access import can_read
+        out["finance"] = {"status": fin["status"], "warning": fin.get("warning", ""),
+                          "url": f"/finance?tab=liquidity&tx={fin['transaction_id']}" if can_read(user) and fin.get("transaction_id") else None}
+    return out
 
 
 @router.get("/legal/contracts/{cid}/packages")

@@ -1,6 +1,6 @@
 """Права раздела «Финансы» (docs/finance/04_API_и_права.md): доступ к функции по эффективной матрице + видимость объекта.
 
-- чтение раздела: finance_analytics ≥ READ;
+- чтение раздела: finance_section ≥ READ (ФД, ЗГД; КД — только если выдано в настройках доступа, D-116);
 - банковский факт, счета, остатки, разнесения: дополнительно execution_payments ≥ EDIT;
 - обязательство видно, если видна его сделка и договор; исходящие платежи заводам — ещё и при payment_terms ≥ READ
   (закупочные условия не расширяются через «Финансы»).
@@ -18,7 +18,7 @@ from ...models import Contract, Deal, FinanceObligation
 
 
 def can_read(user) -> bool:
-    return user.can("finance_analytics", READ)
+    return user.can("finance_section", READ)
 
 
 def can_edit(user) -> bool:
@@ -27,7 +27,7 @@ def can_edit(user) -> bool:
 
 def require_read(user) -> None:
     if not can_read(user):
-        raise HTTPException(403, "Нет доступа к разделу «Финансы»")
+        raise HTTPException(403, "Нет доступа к разделу «Финансы» (право «Раздел «Финансы»» в настройках доступа)")
 
 
 def require_edit(user) -> None:

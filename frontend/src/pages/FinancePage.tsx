@@ -27,7 +27,8 @@ type Account = { id: string; title: string; currency: string; status: string; le
   balance_status: "unknown" | "confirmed"; last_snapshot: { as_of: string; amount: string; source: string } | null; movements_in: string | null; movements_out: string | null };
 type Tx = { id: string; account_id: string | null; account_title: string; direction: "in" | "out"; amount: string; currency: string; booked_at: string; value_date: string | null;
   counterparty_name: string; purpose: string; external_ref: string; status: "draft" | "needs_reconciliation" | "posted" | "reversed"; origin_type: string;
-  reversal_of_id: string | null; reversed_by_id: string | null; note: string; allocated: string; unallocated: string; allocations?: Alloc[]; hidden_allocations?: number };
+  reversal_of_id: string | null; reversed_by_id: string | null; note: string; allocated: string; unallocated: string; allocations?: Alloc[]; hidden_allocations?: number;
+  withdrawn: boolean; withdrawn_reason: string; origin_title: string };
 type List<T> = { total: number; items: T[]; totals?: Record<string, Record<string, string>>; can_edit?: boolean };
 
 const TABS = [["overview", "Обзор"], ["calendar", "Платёжный календарь"], ["liquidity", "Ликвидность и валюта"]] as const;
@@ -57,14 +58,14 @@ export default function FinancePage({ me }: { me: Me }) {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [err, setErr] = useState("");
   const [stamp, setStamp] = useState(0);   // «Обновить» и обновление зависимых блоков после действий
-  const allowed = can(me, "finance_analytics");
+  const allowed = can(me, "finance_section");
   useEffect(() => { if (allowed) api.get<Meta>("/api/finance/meta").then(setMeta).catch((e) => setErr(errText(e))); }, [allowed]);
   const go = (patch: Record<string, string | null>) => {
     const n = new URLSearchParams(sp);
     Object.entries(patch).forEach(([k, v]) => (v == null || v === "" ? n.delete(k) : n.set(k, v)));
     setSp(n);
   };
-  if (!allowed) return <div className="card muted">Раздел «Финансы» доступен при праве «Финансовая аналитика» (по умолчанию — КД, ФД, ЗГД).</div>;
+  if (!allowed) return <div className="card muted">Раздел «Финансы» доступен при праве «Раздел «Финансы»» (по умолчанию — ФД и ЗГД; другим сотрудникам его выдаёт администратор в настройках доступа).</div>;
   return (
     <>
       <div className="page-head">
@@ -129,7 +130,8 @@ function Overview({ stamp, go }: { stamp: number; go: (p: Record<string, string 
             <div className="fin-kpi-line"><span className="muted">мы должны</span> {byCcy(d.overdue.by_currency, "out")}</div></>}
         </Kpi>
         <Kpi label="требует сверки" bad={recCount > 0}>
-          <div>{recCount}</div><div className="muted" style={{ fontSize: 12, fontWeight: 400 }}>операций без счёта {rec.transactions_needs_reconciliation} · временных разнесений {rec.provisional_allocations} · конфликтов {rec.obligation_conflicts}</div>
+          <div>{recCount}</div><div className="muted" style={{ fontSize: 12, fontWeight: 400 }}>записей на сверке {rec.transactions_needs_reconciliation} · временных разнесений {rec.provisional_allocations} · конфликтов {rec.obligation_conflicts}</div>
+          {rec.transactions_needs_reconciliation > 0 && <button className="btn ghost" style={{ padding: "2px 8px", marginTop: 4, fontSize: 12 }} onClick={() => go({ tab: "liquidity", tx_status: "needs_reconciliation" })}>Открыть записи на сверке</button>}
         </Kpi>
       </div>
       <div className="grid cols-2">
@@ -202,6 +204,7 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
         <div className="row" style={{ marginTop: 8, fontSize: 13 }}>
           <label><input type="checkbox" checked={f.reconciliation} onChange={(e) => go({ reconciliation: e.target.checked ? "1" : null })} /> только требующие сверки</label>
           <label><input type="checkbox" checked={f.include_inactive} onChange={(e) => go({ inactive: e.target.checked ? "1" : null })} /> показать исключённые из итогов</label>
+          {f.deal_id && <span className="badge info">отбор по сделке {data?.items[0]?.deal?.number ?? ""} <button className="btn ghost" style={{ padding: "0 6px", minHeight: 0, marginLeft: 4 }} onClick={() => go({ deal_id: null })} aria-label="Снять отбор по сделке">×</button></span>}
           {f.contract_id && <span className="badge info">отбор по договору {data?.items[0]?.contract?.number ?? ""} <button className="btn ghost" style={{ padding: "0 6px", minHeight: 0, marginLeft: 4 }} onClick={() => go({ contract_id: null })} aria-label="Снять отбор по договору">×</button></span>}
           {active > 0 && <button className="btn ghost" style={{ padding: "2px 10px", marginLeft: "auto" }} onClick={() => { setQ(""); go({ direction: null, status: null, currency: null, entity: null, q: null, contract_id: null, deal_id: null, from: null, to: null, reconciliation: null, inactive: null }); }}>Сбросить фильтры ({active})</button>}
         </div>
@@ -308,7 +311,7 @@ function Explanation({ e }: { e: Record<string, unknown> }) {
   );
 }
 
-function AllocTable({ rows, canEdit, onChanged, side }: { rows: Alloc[]; canEdit: boolean; onChanged: () => void; side: "obligation" | "transaction" }) {
+function AllocTable({ rows, canEdit, onChanged, side, txStatus }: { rows: Alloc[]; canEdit: boolean; onChanged: () => void; side: "obligation" | "transaction"; txStatus?: string }) {
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
   const act = async (a: Alloc, what: "confirm" | "reverse") => {
@@ -332,7 +335,9 @@ function AllocTable({ rows, canEdit, onChanged, side }: { rows: Alloc[]; canEdit
             : a.obligation?.title}</td>
           <td className="num">{fmtMoney(side === "obligation" ? a.amount_obligation : a.amount_tx)}{a.fx_rate && <div className="muted" style={{ fontSize: 11 }} title={`курс ${a.fx_rate} на ${fmtDate(a.fx_on)}, ${a.fx_source}`}>по курсу {a.fx_rate}</div>}</td>
           <td><span className={`badge ${ALLOC_STATUS[a.status][1]}`}>{ALLOC_STATUS[a.status][0]}</span>{a.reverse_reason && <div className="muted" style={{ fontSize: 11 }}>{a.reverse_reason}</div>}</td>
-          <td style={{ whiteSpace: "nowrap" }}>{canEdit && a.status === "provisional" && <button className="btn" style={{ padding: "2px 8px" }} disabled={busy === a.id} onClick={() => act(a, "confirm")}>Подтвердить</button>}
+          <td style={{ whiteSpace: "nowrap" }}>{canEdit && a.status === "provisional" && ((side === "transaction" ? txStatus : a.transaction?.status) === "posted"
+              ? <button className="btn" style={{ padding: "2px 8px" }} disabled={busy === a.id} onClick={() => act(a, "confirm")}>Подтвердить</button>
+              : <span className="muted" style={{ fontSize: 11 }}>подтверждение — после проведения операции </span>)}
             {canEdit && a.status !== "reversed" && <button className="btn ghost" style={{ padding: "2px 8px", marginLeft: 4 }} disabled={busy === a.id} onClick={() => act(a, "reverse")}>Отменить</button>}</td>
         </tr>))}</tbody>
     </table>
@@ -484,7 +489,7 @@ function SnapshotForm({ a, onDone }: { a: Account; onDone: () => void }) {
 }
 
 function Transactions({ meta, accounts, sp, go, stamp, onChanged }: { meta: Meta; accounts: Account[]; sp: URLSearchParams; go: (p: Record<string, string | null>) => void; stamp: number; onChanged: () => void }) {
-  const f = { account_id: sp.get("account") || "", status: sp.get("tx_status") || "", unallocated: sp.get("unallocated") === "1" };
+  const f = { account_id: sp.get("account") || "", status: sp.get("tx_status") || "", unallocated: sp.get("unallocated") === "1", origin: sp.get("origin") || "", withdrawn: sp.get("withdrawn") === "1" };
   const open = sp.get("tx");
   const [data, setData] = useState<List<Tx> | null>(null);
   const [err, setErr] = useState("");
@@ -494,6 +499,8 @@ function Transactions({ meta, accounts, sp, go, stamp, onChanged }: { meta: Meta
     if (f.account_id) p.set("account_id", f.account_id);
     if (f.status) p.set("status", f.status);
     if (f.unallocated) p.set("unallocated", "true");
+    if (f.origin) p.set("origin", f.origin);
+    if (f.withdrawn) p.set("include_withdrawn", "true");
     setErr(""); api.get<List<Tx>>(`/api/finance/transactions?${p}`).then(setData).catch((e) => setErr(errText(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp, stamp]);
@@ -503,7 +510,10 @@ function Transactions({ meta, accounts, sp, go, stamp, onChanged }: { meta: Meta
         <div className="row">
           <select value={f.account_id} onChange={(e) => go({ account: e.target.value })} aria-label="Счёт"><option value="">все счета</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.title} · {a.currency}</option>)}</select>
           <select value={f.status} onChange={(e) => go({ tx_status: e.target.value })} aria-label="Статус операции"><option value="">все статусы</option>{Object.entries(TX_STATUS).map(([k, [t]]) => <option key={k} value={k}>{t}</option>)}</select>
+          <select value={f.origin} onChange={(e) => go({ origin: e.target.value })} aria-label="Источник записи"><option value="">все источники</option><option value="manual">введены вручную</option>
+            <option value="legacy">старые отметки оплаты</option><option value="reversal">сторно</option></select>
           <label style={{ fontSize: 13 }}><input type="checkbox" checked={f.unallocated} onChange={(e) => go({ unallocated: e.target.checked ? "1" : null })} /> только неразнесённые</label>
+          <label style={{ fontSize: 13 }}><input type="checkbox" checked={f.withdrawn} onChange={(e) => go({ withdrawn: e.target.checked ? "1" : null })} /> показать отозванные</label>
           {meta.can_edit && <button className="btn add" onClick={() => setCreating((x) => !x)}>Операция</button>}
         </div>
       </div>
@@ -517,15 +527,15 @@ function Transactions({ meta, accounts, sp, go, stamp, onChanged }: { meta: Meta
               <tr style={{ cursor: "pointer", ...(t.status === "reversed" ? { color: "var(--muted)" } : {}) }} onClick={() => go({ tx: open === t.id ? null : t.id })}>
                 <td style={{ whiteSpace: "nowrap" }}>{dt(t.booked_at)}</td><td>{t.account_title || <span className="muted">без счёта</span>}</td>
                 <td>{t.origin_type === "reversal" ? <span className="badge">сторно</span> : t.direction === "in" ? <span className="badge ok">поступление</span> : <span className="badge bad">списание</span>}</td>
-                <td>{t.counterparty_name}<div className="muted" style={{ fontSize: 12 }}>{t.purpose}</div></td><td>{t.external_ref || "—"}</td>
+                <td>{t.counterparty_name}<div className="muted" style={{ fontSize: 12 }}>{t.purpose}</div>{t.origin_title && <span className="badge info" style={{ fontSize: 11 }}>{t.origin_title}</span>}</td><td>{t.external_ref || "—"}</td>
                 <td className="num"><b>{t.direction === "out" ? "−" : "+"}{fmtMoney(t.amount, t.currency)}</b></td>
                 <td className="num">{Number(t.unallocated) > 0 ? <b>{fmtMoney(t.unallocated)}</b> : "—"}</td>
-                <td><span className={`badge ${TX_STATUS[t.status][1]}`}>{TX_STATUS[t.status][0]}</span></td>
+                <td>{t.withdrawn ? <span className="badge" title={t.withdrawn_reason}>отозвана</span> : <span className={`badge ${TX_STATUS[t.status][1]}`}>{TX_STATUS[t.status][0]}</span>}</td>
                 <td><button className="btn ghost" style={{ padding: "2px 10px" }} aria-expanded={open === t.id}>{open === t.id ? "Свернуть" : "Открыть"}</button></td>
               </tr>
               {open === t.id && <tr><td colSpan={9} style={{ background: "#fcfcfc", padding: 12 }}><TxCard id={t.id} canEdit={meta.can_edit} stamp={stamp} onChanged={onChanged} /></td></tr>}
             </Fragment>))}
-            {data.items.length === 0 && <tr><td colSpan={9} className="muted" style={{ padding: 16 }}>{f.account_id || f.status || f.unallocated ? "По выбранным фильтрам операций нет." : "Операций пока нет."}</td></tr>}
+            {data.items.length === 0 && <tr><td colSpan={9} className="muted" style={{ padding: 16 }}>{f.account_id || f.status || f.unallocated || f.origin ? "По выбранным фильтрам операций нет." : "Операций пока нет."}</td></tr>}
           </tbody>
         </table></div>)}
     </div>
@@ -587,7 +597,13 @@ function TxCard({ id, canEdit, stamp, onChanged }: { id: string; canEdit: boolea
     if (!reason.trim()) return;
     run(() => api.postIdem(`/api/finance/transactions/${t.id}/reverse`, { reason }, revKey.current));
   };
-  const editable = t.origin_type !== "reversal" && t.status !== "reversed";
+  const editable = t.origin_type !== "reversal" && t.status !== "reversed" && !t.withdrawn;
+  const pending = (t.status === "draft" || t.status === "needs_reconciliation") && !t.withdrawn;
+  const withdraw = () => {
+    const reason = window.prompt("Почему запись отзывается (дубль операции из выписки, не платёж, ошибка ввода)? Запись не удаляется.") || "";
+    if (!reason.trim()) return;
+    run(() => api.post(`/api/finance/transactions/${t.id}/withdraw`, { reason }));
+  };
   return (
     <div className="grid cols-2">
       <div>
@@ -596,21 +612,24 @@ function TxCard({ id, canEdit, stamp, onChanged }: { id: string; canEdit: boolea
           <tr><td className="muted">Сумма</td><td className="num"><b>{fmtMoney(t.amount, t.currency)}</b></td></tr>
           <tr><td className="muted">Разнесено / свободно</td><td className="num">{fmtMoney(t.allocated)} / <b>{fmtMoney(t.unallocated)}</b></td></tr>
           <tr><td className="muted">Счёт</td><td>{t.account_title || "не указан — операция требует сверки и не входит в остаток"}</td></tr>
-          <tr><td className="muted">Статус</td><td><span className={`badge ${TX_STATUS[t.status][1]}`}>{TX_STATUS[t.status][0]}</span>{t.reversal_of_id && <span className="muted"> · сторно операции</span>}</td></tr>
+          <tr><td className="muted">Статус</td><td>{t.withdrawn ? <><span className="badge">отозвана</span> <span className="muted">{t.withdrawn_reason}</span></> : <span className={`badge ${TX_STATUS[t.status][1]}`}>{TX_STATUS[t.status][0]}</span>}{t.reversal_of_id && <span className="muted"> · сторно операции</span>}</td></tr>
+          {t.origin_title && <tr><td className="muted">Источник</td><td>{t.origin_title} — {t.purpose}. Это не банковский факт: выберите счёт и проведите запись или отзовите её, если платёж уже есть в выписке.</td></tr>}
           {t.note && <tr><td className="muted">Примечание</td><td>{t.note}</td></tr>}
         </tbody></table>
         {canEdit && (
           <div className="row" style={{ marginTop: 8 }}>
-            {(t.status === "draft" || t.status === "needs_reconciliation") && <button className="btn" disabled={busy || !t.account_id} title={t.account_id ? "" : "Без счёта провести нельзя"}
+            {pending && <button className="btn" disabled={busy || !t.account_id} title={t.account_id ? "" : "Без счёта провести нельзя"}
               onClick={() => run(() => api.postIdem(`/api/finance/transactions/${t.id}/post`, {}, postKey.current))}>Провести</button>}
             {t.status === "posted" && t.origin_type !== "reversal" && <button className="btn ghost" disabled={busy} onClick={reverse}>Сторнировать</button>}
             {editable && Number(t.unallocated) > 0 && <button className="btn secondary" onClick={() => setAlloc((x) => !x)}>{alloc ? "Отмена" : "Разнести на обязательства"}</button>}
+            {pending && <button className="btn ghost" disabled={busy} onClick={withdraw}>Отозвать</button>}
           </div>)}
+        {canEdit && pending && <AssignAccount tx={t} onDone={changed} />}
         {alloc && <AllocateFromTx tx={t} onDone={() => { setAlloc(false); changed(); }} />}
       </div>
       <div>
         <b>Разнесения</b>
-        <AllocTable rows={t.allocations || []} canEdit={canEdit} onChanged={changed} side="transaction" />
+        <AllocTable rows={t.allocations || []} canEdit={canEdit} onChanged={changed} side="transaction" txStatus={t.status} />
         {(t.hidden_allocations || 0) > 0 && <div className="muted" style={{ fontSize: 12 }}>и ещё {t.hidden_allocations} — по обязательствам, закрытым для вашей роли</div>}
       </div>
     </div>
@@ -674,6 +693,34 @@ function AllocateFromTx({ tx, onDone }: { tx: Tx; onDone: () => void }) {
             {fmtMoney(total.toFixed(2), tx.currency)}{total > free ? ` — больше свободного остатка (${fmtMoney(tx.unallocated)})` : ` · останется ${fmtMoney((free - total).toFixed(2))}`}</td></tr>
         </tbody></table>}
       <button className="btn" style={{ marginTop: 8 }} disabled={busy || !lines.length || bad || total > free} onClick={submit}>{busy ? "Сохраняю…" : "Разнести"}</button>
+    </div>
+  );
+}
+
+/** Сверка записи без счёта (старая отметка оплаты): выбрать реальный счёт и банковский номер; проведение — отдельной кнопкой. */
+function AssignAccount({ tx, onDone }: { tx: Tx; onDone: () => void }) {
+  const [accounts, setAccounts] = useState<Account[] | null>(null);
+  const [acc, setAcc] = useState(tx.account_id || "");
+  const [ref, setRef] = useState(tx.external_ref || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => { api.get<{ items: Account[] }>("/api/finance/accounts").then((r) => setAccounts(r.items.filter((a) => a.currency === tx.currency))).catch((e) => setErr(errText(e))); }, [tx.currency]);
+  const changed = acc !== (tx.account_id || "") || ref !== (tx.external_ref || "");
+  const submit = async () => {
+    setBusy(true); setErr("");
+    try { await api.post(`/api/finance/transactions/${tx.id}/assign-account`, { account_id: acc, external_ref: ref }); onDone(); }
+    catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="card" style={{ marginTop: 10, background: "#fcfcfc" }}>
+      <b>Сверка: счёт и банковский документ</b>
+      {err && <div className="alert error">{err}</div>}
+      {!accounts ? <div className="muted">Загружаю счета…</div> : accounts.length === 0 ? <div className="muted">Нет действующих счетов в {tx.currency}. Создайте счёт в блоке «Счета и остатки».</div> : (
+        <div className="row" style={{ marginTop: 6, alignItems: "flex-end" }}>
+          <label className="f">Счёт<select value={acc} onChange={(e) => setAcc(e.target.value)}><option value="">— выберите —</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.title} · {a.bank_name} {a.account_masked}</option>)}</select></label>
+          <label className="f">Банковский № документа<input value={ref} onChange={(e) => setRef(e.target.value)} /></label>
+          <button className="btn secondary" disabled={busy || !acc || !changed} onClick={submit}>{busy ? "Сохраняю…" : "Сохранить"}</button>
+        </div>)}
     </div>
   );
 }

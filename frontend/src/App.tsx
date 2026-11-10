@@ -126,7 +126,7 @@ export default function App() {
             <NavLink to="/tasks">Мои задачи</NavLink>
             {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
             {has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager") && <NavLink to="/summary">Сводка</NavLink>}
-            {perm("finance_analytics") && <NavLink to="/finance">Финансы</NavLink>}
+            {perm("finance_section") && <NavLink to="/finance">Финансы</NavLink>}
             <NavLink to="/counterparties">Контрагенты</NavLink>
             {has("cd", "fd", "gd", "lawyer", "admin", "manager") ? <NavLink to="/legal">Юридический блок</NavLink> : !has("observer") && <NavLink to="/legal?tab=contracts">Договоры</NavLink>}
 

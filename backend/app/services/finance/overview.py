@@ -48,7 +48,7 @@ def build(db: Session, vis, as_of: date, horizon_days: int = 30) -> dict:
             soon[r["currency"]][r["direction"]] += rem
             upcoming.append(r)
     txs = db.scalars(select(FinanceTransaction).where(FinanceTransaction.status.in_(("posted", "draft", "needs_reconciliation")),
-                                                      FinanceTransaction.origin_type != "reversal")).all()
+                                                      FinanceTransaction.origin_type != "reversal", FinanceTransaction.withdrawn_at.is_(None))).all()
     used = allocated(db, [t.id for t in txs])
     unalloc: dict[str, dict] = {}
     needs_rec = 0
