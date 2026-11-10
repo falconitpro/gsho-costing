@@ -18,7 +18,7 @@ from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
 from ..core.workflow import DealStatus
 from ..db import get_db
-from ..models import Attachment, Factory, FactoryOffer, Position, PositionTechParam
+from ..models import Attachment, Factory, FactoryOffer, FeedEntry, Position, PositionTechParam
 from ..services import offers_service, tech_params_service as tps
 from ..services.deal_service import audit, ensure_folders
 from .common import get_deal_or_404, serialize
@@ -294,18 +294,27 @@ def send_request(deal_id: str, pos_id: str, body: RequestIn, db: Session = Depen
                     image_paths.append(s.download(att.storage_path, os.path.join(tempfile.mkdtemp(), att.file_name)))
                 except Exception:
                     pass
+    from ..services import chain_rules
     from ..services import mirror_offers as mirror
     from ..services.suppliers import require_approved
     out = []
     plain = []
+    fd_gd = user.has(Role.FD, Role.GD)
     for fid in ids:
         f_ = db.get(Factory, fid)
         if f_ is None:
             raise HTTPException(404, f"Завод {fid} не найден")
-        if mirror.group_entity(db, f_) is not None:   # компания группы: запрос от её имени конечным поставщикам
+        if mirror.group_entity(db, f_) is not None:   # компания группы вручную — только ФД/ЗГД (менеджер выбирает конечного поставщика, D-164)
+            if not fd_gd:
+                raise HTTPException(422, f"Выберите конечного поставщика — закупку через «{f_.short_name or f_.name}» подставят правила цепочек (их ведут ФД и ЗГД)")
             out += mirror.request_via_group(db, deal, pos, f_, body.via_group.get(fid) or [], user.id, image_paths, body.via_wecom, body.via_mail, body.request_images)
+            continue
+        require_approved(f_, "отправить ему запрос")
+        route, gf, rule = chain_rules.resolve(db, f_, "gsho")       # правило по умолчанию: через компанию группы или напрямую
+        if route is not None:
+            out += mirror.request_via_group(db, deal, pos, gf, [fid], user.id, image_paths, body.via_wecom, body.via_mail, body.request_images,
+                                            route=route, rule_note=chain_rules.describe(db, rule))
         else:
-            require_approved(f_, "отправить ему запрос")
             plain.append(fid)
     for fid in plain:
         factory = db.get(Factory, fid)
@@ -319,7 +328,7 @@ def send_request(deal_id: str, pos_id: str, body: RequestIn, db: Session = Depen
         offer.request_sent_at = datetime.now(timezone.utc)
         db.flush()
         out.append({"factory_id": fid, "factory": factory.name, "offer_id": offer.id, "file": res.get("file"), "wecom": res.get("wecom"), "mail": res.get("mail"),
-                    "machine_translations": machine})
+                    "machine_translations": machine, "rule": "напрямую"})
     audit(db, user.id, deal.id, "tech_params", pos.id, "request_sent", after={"factories": ids, "via_group": body.via_group, "images": len(image_paths)})
     db.commit()
     return {"sent": out}
@@ -541,3 +550,61 @@ def offer_transfer_price(deal_id: str, offer_id: str, body: TransferPriceIn, db:
     mirror.set_transfer_price(db, o, body.price, body.note, user.id)
     db.commit()
     return {"offer_id": o.id, "unit_price": o.unit_price, "currency": o.currency, **mirror.view(db, o, True)}
+
+
+
+# ------------------------------------------------------------------ внутренняя цепочка сделки: правка и виза ФД/ЗГД (D-165, D-166)
+
+class ChainIn(BaseModel):
+    route_id: Optional[str] = None          # маршрут через компанию группы; None — напрямую от Берг-Хауса
+
+
+@router.get("/chain")
+def deal_chain(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Цепочка отобранных позиций и состояние визы; маршруты — для правки ФД/ЗГД."""
+    from ..core.roles import READ, can
+    from ..models import SupplyRoute
+    from ..services import mirror_offers as mirror
+    deal = get_deal_or_404(db, deal_id, user)
+    out = mirror.chain_view(db, deal)
+    out["can_edit"] = user.has(Role.FD, Role.GD)
+    if out["can_edit"]:
+        out["routes"] = [{"id": r.id, "name": r.name, "country": r.supplier_country} for r in db.scalars(select(SupplyRoute).where(SupplyRoute.is_active.is_(True)).order_by(SupplyRoute.name)).all()
+                         if len(r.steps) >= 2]
+    if not can(user, "intragroup_chain", READ):
+        for r in out["rows"]:
+            r.pop("transfer_price", None)
+        out.pop("chain", None)
+    return out
+
+
+@router.post("/offers/{offer_id}/chain")
+def set_offer_chain(deal_id: str, offer_id: str, body: ChainIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """ФД/ЗГД меняет цепочку предложения до отбора: другой маршрут через компанию группы или напрямую."""
+    from ..services import chain_rules
+    from ..services import mirror_offers as mirror
+    chain_rules.require_fd_gd(user)
+    deal = get_deal_or_404(db, deal_id, user)
+    o = db.get(FactoryOffer, offer_id)
+    if o is None or o.deal_id != deal.id:
+        raise HTTPException(404, "Предложение не найдено")
+    res = mirror.set_chain(db, deal, o, body.route_id, user.id)
+    db.commit()
+    return {"offer_id": res.id if res else None, "via_group": bool(res and res.end_supplier_id)}
+
+
+@router.post("/chain/approve")
+def approve_chain(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Виза ФД/ЗГД на внутреннюю цепочку сделки — до КП клиенту. Меняется цепочка — нужна новая виза."""
+    from ..services import chain_rules
+    from ..services import mirror_offers as mirror
+    chain_rules.require_fd_gd(user)
+    deal = get_deal_or_404(db, deal_id, user)
+    chain = mirror.deal_chain(db, deal)
+    if not chain:
+        raise HTTPException(409, "В сделке нет позиций через компанию группы — утверждать нечего")
+    deal.chain_approval = chain_rules.approval_record(user, chain)
+    audit(db, user.id, deal.id, "deal", deal.id, "chain_approved", after={"rows": len(chain)})
+    db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"Внутренняя цепочка утверждена ({user.display_name})", body=f"позиций через компанию группы: {len(chain)}", user_id=user.id))
+    db.commit()
+    return mirror.chain_view(db, deal)

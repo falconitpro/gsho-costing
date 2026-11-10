@@ -1,3 +1,4 @@
+import { MeContext } from "../App";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtRub } from "../api";
@@ -282,7 +283,10 @@ function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: ()
   const [quotes, setQuotes] = useState<Record<string, Quote[]>>({});
   const [err, setErr] = useState("");
   const base = `/api/parts/requests/${r.id}`;
+  const [chain, setChain] = useState<{ rows: { line_id: string; no: number | null; end_supplier: string; group_company: string; route: string }[]; needed: boolean; approved: boolean; stale: boolean;
+    by_name?: string; can_edit: boolean; routes?: { id: string; name: string }[] } | null>(null);
   const reload = () => {
+    api.get<typeof chain>(`/api/parts/requests/${r.id}/chain`).then(setChain).catch(() => setChain(null));
     api.get<Rfq[]>(`/api/parts/rfq?open_only=false&request_id=${r.id}`).then(setRfqs).catch((e) => setErr((e as Error).message));
     api.get<Record<string, Quote[]>>(`${base}/quotes`).then(setQuotes).catch(() => setQuotes({}));
   };
@@ -290,6 +294,7 @@ function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: ()
   useEffect(reload, [r]);
   const run = async (fn: () => Promise<unknown>, ok = "") => { setErr(""); try { const x = await fn(); if (ok) setErr(ok); if (x && (x as Rfq).lines && (x as Rfq).supplier_id) setOpen(x as Rfq); reload(); } catch (e) { setErr((e as Error).message); } };
   const withQuotes = r.lines.filter((l) => quotes[l.id]?.length);
+  const fdGd = (MeContext.current?.roles || []).some((r) => ["fd", "gd"].includes(r.code));   // компания группы вручную — ФД/ЗГД (D-164)
   const groups = sups.filter((s) => pickSup.includes(s.id) && s.supplier_status === "group_company");
   const ends = sups.filter((s) => s.supplier_status !== "group_company" && s.approval_status !== "pending");
   const groupMissing = groups.some((g) => !(viaGroup[g.id] || []).length);
@@ -301,7 +306,7 @@ function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: ()
       <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
         <span className="muted">Отмечено строк: {sel.length}</span>
         <select multiple size={4} style={{ minWidth: 260 }} value={pickSup} onChange={(e) => setPickSup(Array.from(e.target.selectedOptions as ArrayLike<HTMLOptionElement>).map((o: HTMLOptionElement) => o.value))}>
-          {sups.map((s) => <option key={s.id} value={s.id} disabled={s.approval_status === "pending"}>{s.short_name || s.name} · {s.country}{s.approval_status === "pending" ? " — на утверждении" : ""}</option>)}</select>
+          {sups.filter((s) => fdGd || s.supplier_status !== "group_company").map((s) => <option key={s.id} value={s.id} disabled={s.approval_status === "pending"}>{s.short_name || s.name} · {s.country}{s.approval_status === "pending" ? " — на утверждении" : ""}</option>)}</select>
         {groups.map((g) => (
           <label key={g.id} style={{ display: "flex", flexDirection: "column", fontSize: 12 }}>через «{g.short_name || g.name}» — конечные поставщики
             <select multiple size={4} style={{ minWidth: 220 }} value={viaGroup[g.id] || []}
@@ -310,18 +315,28 @@ function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: ()
         <label className="row">ответ за<input type="number" style={{ width: 50 }} value={due} onChange={(e) => setDue(Number(e.target.value))} />дн.</label>
         <button className="btn" disabled={!sel.length || !pickSup.length || groupMissing} title={groupMissing ? "Выберите конечных поставщиков для компании группы" : undefined} onClick={() => act(async () => {
           const via_group = Object.fromEntries(groups.map((g) => [g.id, viaGroup[g.id] || []]));
-          const x = await api.post<{ request: Req }>(`${base}/rfq`, { line_ids: sel, supplier_ids: pickSup, due_days: due, via_group }); reload(); return x.request;
-        }, groups.length ? "Запросы созданы: компания группы запросит цену у поставщиков со своей почты и WeCom — отправьте из её предложения"
-          : "Запросы созданы — скачайте файл или отправьте поставщику")}>Запросить цены</button>
+          const x = await api.post<{ request: Req; rules: Record<string, string> }>(`${base}/rfq`, { line_ids: sel, supplier_ids: pickSup, due_days: due, via_group }); reload();
+          const via = Object.entries(x.rules || {}).filter(([, t]) => t.includes("→") && !t.endsWith("напрямую"));
+          setErr(via.length ? `По правилам цепочек: ${via.map(([id, t]) => `${sups.find((q) => q.id === id)?.short_name || sups.find((q) => q.id === id)?.name || ""} — ${t}`).join("; ")}. Запрос поставщику уходит от имени компании группы — отправьте из её предложения` : "");
+          return x.request;
+        }, "Запросы созданы — скачайте файл или отправьте поставщику")}>Запросить цены</button>
         <span className="muted" style={{ fontSize: 11 }}>Ctrl/⌘ — несколько поставщиков; файл — на языке поставщика. Нет нужного — в разделе «Поставщики» отметьте у него «Запасные части»</span>
       </div>
+      {chain && chain.rows.length > 0 && <div className={"alert " + (chain.needed ? "warn" : "info")} style={{ fontSize: 13, marginTop: 6 }}>
+        <b>Цепочка:</b> {chain.rows.map((x) => `строка ${x.no}: ${x.end_supplier} → ${x.group_company}${x.route ? ` (${x.route})` : ""}`).join("; ")}.{" "}
+        {chain.approved ? `Утверждена${chain.by_name ? `: ${chain.by_name}` : ""}.` : chain.stale ? "Изменилась после визы — нужна новая виза ФД или ЗГД до КП." : "Нужна виза ФД или ЗГД до КП."}
+        {chain.can_edit && chain.needed && <button className="btn" style={{ marginLeft: 8 }} onClick={() => run(() => api.post(`/api/parts/requests/${r.id}/chain/approve`), "Цепочка утверждена")}>Утвердить цепочку</button>}</div>}
       {rfqs.length > 0 && (
         <table style={{ marginTop: 6 }}>
           <thead><tr><th>Запрос</th><th>Поставщик</th><th>Язык</th><th className="num">Ответ</th><th>Срок ответа</th><th>Статус</th><th></th></tr></thead>
           <tbody>{rfqs.map((q) => (
             <tr key={q.id} style={{ background: open?.id === q.id ? "var(--accent-soft)" : undefined }}>
               <td><a href="#" onClick={(e) => { e.preventDefault(); api.get<Rfq>(`/api/parts/rfq/${q.id}`).then(setOpen); }}><b>{q.number}</b></a></td>
-              <td>{rfqTitle(q)}<MirrorBadge m={q.mirror} /></td><td>{q.language_title}</td><td className="num">{q.answered} из {q.lines_count ?? q.lines?.length}</td>
+              <td>{rfqTitle(q)}<MirrorBadge m={q.mirror} />
+                {chain?.can_edit && q.mirror?.role !== "lower" && q.status !== "closed" && <div style={{ fontSize: 11 }}>цепочка: <select style={{ fontSize: 11, maxWidth: 220 }} value={q.mirror ? "?" : ""}
+                  onChange={(e) => run(() => api.post(`/api/parts/rfq/${q.id}/chain`, { route_id: e.target.value === "" ? null : e.target.value }), "Цепочка изменена")}>
+                  <option value="">напрямую от Берг-Хауса</option>{q.mirror && <option value="?">{q.mirror.route || "текущий маршрут"}</option>}
+                  {(chain.routes || []).filter((x) => x.name !== q.mirror?.route).map((x) => <option key={x.id} value={x.id}>через: {x.name}</option>)}</select></div>}</td><td>{q.language_title}</td><td className="num">{q.answered} из {q.lines_count ?? q.lines?.length}</td>
               <td style={{ color: q.due_date && !["answered", "closed"].includes(q.status) && new Date(q.due_date) < new Date() ? "var(--bad)" : undefined }}>{fmtDate(q.due_date)}</td>
               <td>{q.status_title}</td>
               <td><a className="btn ghost" href={`/api/parts/rfq/${q.id}/xlsx`}>Excel</a>

@@ -27,7 +27,7 @@ from app.models import Factory, FxRate, LegalEntity, MarkupPolicy, NotificationL
 from scripts.seed import run as seed  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
-MGR, CD, FD, LOG = "manager@example.com", "cd@example.com", "fd@example.com", "logist@example.com"
+MGR, CD, FD, LOG, GD = "manager@example.com", "cd@example.com", "fd@example.com", "logist@example.com", "evgeniy@dobrov.pro"
 
 
 def _ok(r, code=200):
@@ -65,10 +65,19 @@ def test_mirror_parts_flow():
         rid, ids = r["id"], [l["id"] for l in r["lines"]]
         url = f"/api/parts/requests/{rid}/rfq"
 
-        assert c.post(url, headers=H(MGR), json={"line_ids": ids, "supplier_ids": [ai_id]}).status_code == 422          # нет конечного поставщика
-        assert c.post(url, headers=H(MGR), json={"line_ids": ids, "supplier_ids": [ai_id], "via_group": {ai_id: [ai_id]}}).status_code == 422
-        res = _ok(c.post(url, headers=H(MGR), json={"line_ids": ids, "supplier_ids": [ai_id], "via_group": {ai_id: [x_id]}}), 201)
-        assert len(res["rfqs"]) == 1                                         # менеджер видит только предложение компании группы
+        assert c.post(url, headers=H(MGR), json={"line_ids": ids, "supplier_ids": [ai_id], "via_group": {ai_id: [x_id]}}).status_code == 422  # менеджер компанию группы не выбирает
+        assert c.post(url, headers=H(GD), json={"line_ids": ids, "supplier_ids": [ai_id]}).status_code == 422          # нет конечного поставщика
+        assert c.post(url, headers=H(GD), json={"line_ids": ids, "supplier_ids": [ai_id], "via_group": {ai_id: [ai_id]}}).status_code == 422
+        # правило по умолчанию (ведут ФД/ЗГД): запчасти у поставщика из Китая — через компанию в Китае
+        route_id = next(r["id"] for r in _ok(c.get("/api/parts/routes", headers=H(CD))) if r["name"] == "Поставщик КНР → компания в Китае → РФ")
+        assert c.put("/api/parts/intragroup-rules", headers=H(CD), json={"rules": [{"kind": "parts", "country": "CN", "route_id": route_id}]}).status_code == 403
+        assert c.put("/api/parts/intragroup-rules", headers=H(FD), json={"rules": [{"kind": "parts", "country": "CN", "supplier_id": ai_id, "route_id": route_id}]}).status_code == 422
+        _ok(c.put("/api/parts/intragroup-rules", headers=H(FD), json={"rules": [{"kind": "parts", "supplier_id": x_id, "route_id": route_id}]}))
+        try:
+            res = _ok(c.post(url, headers=H(MGR), json={"line_ids": ids, "supplier_ids": [x_id]}), 201)
+        finally:
+            _ok(c.put("/api/parts/intragroup-rules", headers=H(GD), json={"rules": []}))            # правила — общие настройки, не мешать другим тестам
+        assert "→" in res["rules"][x_id] and len(res["rfqs"]) == 1            # менеджер видит только предложение компании группы
         up = res["rfqs"][0]
         assert up["supplier_id"] == ai_id and up["mirror"]["role"] == "upper" and up["mirror"]["end_supplier"] == f"Завод запчастей {t}"
         assert up["mirror"]["route"] == "Поставщик КНР → компания в Китае → РФ" and up["mirror"]["state"] == "waiting"
@@ -169,6 +178,18 @@ def test_mirror_parts_flow():
                 p = db.scalars(select(MarkupPolicy).where(MarkupPolicy.reason == "тест запчастей").order_by(MarkupPolicy.version_no.desc())).first()
                 p.status = "approved"
                 db.commit()
+
+        # КП со строкой через компанию группы — только с визой ФД/ЗГД на цепочку
+        r = c.post(f"/api/parts/requests/{rid}/kp", headers=H(CD), json={"line_ids": [ids[0]]})
+        assert r.status_code == 409 and "цепочка" in r.json()["detail"]
+        ch = _ok(c.get(f"/api/parts/requests/{rid}/chain", headers=H(CD)))
+        assert ch["needed"] and ch["rows"][0]["group_company"] and ch["can_edit"] is False
+        assert c.post(f"/api/parts/requests/{rid}/chain/approve", headers=H(CD)).status_code == 403
+        assert _ok(c.post(f"/api/parts/requests/{rid}/chain/approve", headers=H(FD)))["approved"] is True
+        r = c.post(f"/api/parts/requests/{rid}/kp", headers=H(CD), json={"line_ids": [ids[0]]})
+        assert r.status_code != 409 or "цепочка" not in r.text, r.text
+        # правка цепочки после выбора — нельзя (сначала другой ответ)
+        assert c.post(f"/api/parts/rfq/{up['id']}/chain", headers=H(FD), json={"route_id": None}).status_code == 409
 
         # закрытие пары
         _ok(c.post(f"/api/parts/rfq/{up['id']}/close", headers=H(MGR)))

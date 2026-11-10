@@ -205,3 +205,78 @@ def on_supplier_change(db: Session, line: PartRequestLine, data: dict) -> dict:
     if "route_id" not in data:
         line.route_id = None
     return data
+
+
+# ------------------------------------------------------------------ цепочка заявки: правка и виза ФД/ЗГД до КП (D-165, D-166)
+
+def request_chain(db: Session, req) -> list[dict]:
+    """Строки заявки, выбранные из предложения компании группы: компания, маршрут (основа визы)."""
+    out = []
+    for l in req.lines:
+        ul = db.get(SupplierRfqLine, l.rfq_line_id) if l.rfq_line_id else None
+        up = db.get(SupplierRfq, ul.rfq_id) if ul else None
+        if is_upper(up):
+            out.append({"line_id": l.id, "rfq_id": up.id, "group_factory_id": up.supplier_id, "end_supplier_id": up.end_supplier_id, "route_id": up.route_id})
+    return out
+
+
+def chain_view(db: Session, req) -> dict:
+    from .chain_rules import approval_state
+    rows = []
+    for r in request_chain(db, req):
+        l = next((x for x in req.lines if x.id == r["line_id"]), None)
+        route = db.get(SupplyRoute, r["route_id"]) if r["route_id"] else None
+        g, x = db.get(Factory, r["group_factory_id"]), db.get(Factory, r["end_supplier_id"])
+        rows.append({**r, "no": l.no if l else None, "group_company": (g.short_name or g.name) if g else "", "end_supplier": (x.short_name or x.name) if x else "",
+                     "route": route.name if route else ""})
+    return {"rows": rows, **approval_state(req.chain_approval or None, request_chain(db, req))}
+
+
+def require_chain_visa(db: Session, req, line_ids: Optional[set] = None) -> None:
+    from .chain_rules import approval_state
+    chain = request_chain(db, req)
+    if line_ids is not None and not any(r["line_id"] in line_ids for r in chain):
+        return
+    st = approval_state(req.chain_approval or None, chain)
+    if st["needed"]:
+        raise HTTPException(409, "Внутренняя цепочка (закупка через компанию группы) не утверждена — нужна виза ФД или ЗГД"
+                                 + (" (цепочка изменилась после визы)" if st["stale"] else "") + ": «Запросы поставщикам» → «Цепочка»")
+
+
+def set_chain(db: Session, rfq: SupplierRfq, route_id: Optional[str], user_id: Optional[str]) -> SupplierRfq:
+    """ФД/ЗГД меняет цепочку запроса до выбора строк: другой маршрут (и компания группы) или напрямую."""
+    from .chain_rules import group_factory_for
+    up = rfq if is_upper(rfq) else (upper_of(db, rfq) if is_lower(rfq) else None)
+    target = up or rfq
+    if any(_chosen(db, l) is not None for l in target.lines):
+        raise HTTPException(409, "По запросу уже выбраны строки заявки — сначала выберите другой ответ, затем меняйте цепочку")
+    route = db.get(SupplyRoute, route_id) if route_id else None
+    if route_id and (route is None or not route.is_active):
+        raise HTTPException(422, "Маршрут не найден или не активен")
+    if up is not None:
+        low = lower_of(db, up)
+        if route is None:                               # напрямую: запрос поставщику становится обычным, предложение компании группы — удаляется
+            if low is not None:
+                low.mirror_of_id = None
+            db.delete(up)
+            db.flush()
+            return low
+        g = group_factory_for(db, route)
+        up.supplier_id, up.route_id = g.id, route.id
+        db.flush()
+        refresh(db, up)
+        return up
+    if route is None:
+        return rfq
+    g = group_factory_for(db, route)                    # было напрямую → через компанию группы
+    from ..api.parts_rfq import _next_number
+    up = SupplierRfq(number=_next_number(db), supplier_id=g.id, language="ru", end_supplier_id=rfq.supplier_id, route_id=route.id, due_date=rfq.due_date,
+                     comment=rfq.comment, created_by=user_id, mirror_state="waiting", status=rfq.status)
+    db.add(up)
+    db.flush()
+    for ll in rfq.lines:
+        up.lines.append(SupplierRfqLine(no=ll.no, request_line_id=ll.request_line_id, part_id=ll.part_id, number=ll.number, name_ru=ll.name_ru, qty=ll.qty, unit=ll.unit))
+    rfq.mirror_of_id = up.id
+    db.flush()
+    refresh(db, up)
+    return up

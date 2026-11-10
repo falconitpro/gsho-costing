@@ -442,6 +442,8 @@ def create_kp(rid: str, body: KpIn, db: Session = Depends(get_db), user: Current
     bad = [str(l["no"]) for l in chosen if l["price"] is None or l["status"] in ("cancelled", "unavailable")]
     if bad:
         raise HTTPException(422, f"В КП нельзя включить строки без цены или отменённые: {', '.join(bad)}")
+    from ..services.mirror_parts import require_chain_visa
+    require_chain_visa(db, req, set(body.line_ids))      # строки через компанию группы — с визой ФД/ЗГД на цепочку (D-166)
     need = approvals_pending(req, chosen)
     if need:
         raise HTTPException(409, f"Есть цены ниже порога маржи — сначала виза {'ФД' if need == 'fd' else 'КД'}")

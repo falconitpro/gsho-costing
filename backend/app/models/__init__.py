@@ -452,6 +452,7 @@ class Deal(TimestampMixin, Base):
 
     client = relationship("Client")
     positions = relationship("Position", back_populates="deal", cascade="all, delete-orphan")
+    chain_approval: Mapped[dict] = mapped_column(JSONType, default=dict)   # виза ФД/ЗГД на внутреннюю цепочку до КП (D-166): {sig, by, by_name, at, chain}
     variants = relationship("Variant", back_populates="deal", cascade="all, delete-orphan")
     batches = relationship("Batch", back_populates="deal", cascade="all, delete-orphan")
     versions = relationship("DealVersion", back_populates="deal", order_by="DealVersion.version_no")
@@ -1311,6 +1312,7 @@ class PartRequest(TimestampMixin, Base):
     closed: Mapped[str] = mapped_column(String(16), default="")          # "" | lost | cancelled | done
     close_reason: Mapped[str] = mapped_column(Text, default="")
     approvals: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # [{role, user_id, name, at, comment, lines: [...], level}]
+    chain_approval: Mapped[dict] = mapped_column(JSONType, default=dict)   # виза ФД/ЗГД на внутреннюю цепочку до КП (D-166)
     lines: Mapped[list["PartRequestLine"]] = relationship(cascade="all, delete-orphan", order_by="PartRequestLine.no")
 
 

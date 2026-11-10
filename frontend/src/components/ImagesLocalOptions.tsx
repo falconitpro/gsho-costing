@@ -132,8 +132,15 @@ export function OffersBlock({ dealId, position, me, onChanged }: { dealId: strin
   const [msg, setMsg] = useState("");
   const canSelect = can(me, "factory_offers", 2);
   const isMgr = me.roles.some((r) => r.code === "manager" || r.code === "gd");
-  const load = () => api.get<Cmp>(`/api/deals/${dealId}/offers/compare?position_id=${position.id}`).then(setCmp).catch(() => setCmp(null));
+  const [chain, setChain] = useState<ChainState | null>(null);
+  const load = () => { api.get<Cmp>(`/api/deals/${dealId}/offers/compare?position_id=${position.id}`).then(setCmp).catch(() => setCmp(null));
+    api.get<ChainState>(`/api/deals/${dealId}/chain`).then(setChain).catch(() => setChain(null)); };
   useEffect(() => { load(); }, [position.id]);
+  const routeOf = (o: { mirror?: Mirror }) => (o.mirror ? o.mirror.route?.id || "?" : "");
+  async function setRoute(offerId: string, routeId: string) {
+    try { await api.post(`/api/deals/${dealId}/offers/${offerId}/chain`, { route_id: routeId || null }); setMsg("Цепочка изменена"); load(); onChanged(); }
+    catch (e) { setMsg((e as Error).message); }
+  }
   if (!cmp || cmp.offers.length === 0) return <div className="muted">Запросов заводам по этой позиции ещё нет — отправьте запрос из таблицы технических характеристик (можно нескольким заводам).</div>;
   const color: Record<string, string> = { match: "#ededed", mismatch: "#ffe3e3", empty: "#f4f4f4", unknown: "" };
   async function select() {
@@ -152,12 +159,19 @@ export function OffersBlock({ dealId, position, me, onChanged }: { dealId: strin
         </div>
       </div>
       {msg && <div className="alert info">{msg}</div>}
+      {chain && chain.rows.length > 0 && <div className={"alert " + (chain.needed ? "warn" : "info")} style={{ fontSize: 13 }}>
+        <b>Цепочка:</b> {chain.rows.map((r) => `${r.designation}: ${r.end_supplier} → ${r.group_company}${r.route ? ` (${r.route})` : ""}`).join("; ")}.{" "}
+        {chain.approved ? `Утверждена${chain.by_name ? `: ${chain.by_name}` : ""}.` : chain.stale ? "Изменилась после визы — нужна новая виза ФД или ЗГД до КП." : "Нужна виза ФД или ЗГД до КП."}
+        {chain.can_edit && chain.needed && <button className="btn" style={{ marginLeft: 8 }} onClick={() => api.post<ChainState>(`/api/deals/${dealId}/chain/approve`).then((x) => { setChain({ ...chain, ...x }); setMsg("Цепочка утверждена"); }).catch((e) => setMsg((e as Error).message))}>Утвердить цепочку</button>}</div>}
       <div className="muted" style={{ fontSize: 11 }}>Первый отобранный ответ остаётся в этой заявке, остальные становятся отдельными заявками (дублирование) и отдельными КП. Неотобранные остаются в истории цен завода.</div>
       <div style={{ overflowX: "auto", marginTop: 6 }}>
         <table>
           <thead><tr><th>№</th><th>Параметр</th><th>Требование</th>{cmp.offers.map((o) => (
             <th key={o.offer_id}>{canSelect && o.status !== "selected" && (!o.mirror || o.answered) && <input type="checkbox" checked={sel.has(o.offer_id)} onChange={(e) => { const s = new Set(sel); e.target.checked ? s.add(o.offer_id) : s.delete(o.offer_id); setSel(s); }} />} {o.factory}
               {o.mirror && <MirrorHead dealId={dealId} offerId={o.offer_id} m={o.mirror} price={o.unit_price} currency={o.currency} me={me} onChanged={() => { load(); onChanged(); }} />}
+              {chain?.can_edit && o.status !== "selected" && <div style={{ fontWeight: 400, fontSize: 11 }}>цепочка: <select value={routeOf(o)} onChange={(e) => setRoute(o.offer_id, e.target.value)} style={{ fontSize: 11, maxWidth: 220 }}>
+                <option value="">напрямую от Берг-Хауса</option>{routeOf(o) === "?" && <option value="?">текущий маршрут</option>}
+                {(chain.routes || []).map((r) => <option key={r.id} value={r.id}>через: {r.name}</option>)}</select></div>}
               <div style={{ fontWeight: 400, fontSize: 11 }}>{o.model || "—"}{o.unit_price != null && <> · {fmtRub(o.unit_price)} {o.currency}</>}{o.production_term?.value != null && <> · {String(o.production_term.value)} {String(o.production_term.unit || "")}</>}
                 <div><span className={"badge " + (o.status === "selected" ? "ok" : o.answered ? "" : "warn")}>{o.status === "selected" ? "отобран" : o.status === "rejected" ? "не выбран" : o.answered ? "ответ получен" : "ожидание"}</span>{o.images > 0 && ` · ${o.images} изобр.`}</div>
                 {can(me, "images", 2) && o.status !== "selected" && (
@@ -192,11 +206,13 @@ export function RelatedDeals({ dealId, me }: { dealId: string; me: Me }) {
 }
 
 
+type ChainState = { rows: { position_id: string; designation: string; end_supplier: string; group_company: string; route: string }[]; needed: boolean; approved: boolean; stale: boolean;
+  by_name?: string; at?: string; can_edit: boolean; routes?: { id: string; name: string }[] };
 type Mirror = { group_company: string; end_supplier: string; end_supplier_country: string; state: string; revision: number; lower_offer_id: string | null; lower_answered: boolean;
   supplier_price?: number | null; supplier_currency?: string | null; companies?: { name: string; margin: number; margin_pct: number; currency: string }[];
   steps?: { no: number; seller: string; buyer: string; price: number; currency: string; markup_pct: number | null; transfer_price?: boolean; incoterms: string }[];
   group_margin_rub?: number | null; warnings?: string[]; error?: string | null; transfer_price?: number | null; transfer_note?: string; pending?: { pending_price: number | null } | null;
-  route?: { name: string } | null };
+  route?: { id?: string; name: string } | null };
 
 const MIRROR_STATE: Record<string, [string, string]> = { waiting: ["ждёт ответа поставщика", "warn"], ok: ["рассчитано по наценкам группы", "ok"],
   no_policy: ["нет ставки наценки на ГШО", "bad"], error: ["цена не рассчитана", "bad"], changed_after_select: ["ответ поставщика изменился после отбора", "bad"] };

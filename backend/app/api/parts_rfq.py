@@ -144,16 +144,25 @@ def create_rfqs(rid: str, body: RfqCreateIn, db: Session = Depends(get_db), user
         raise HTTPException(422, "Отметьте строки для запроса")
     if not body.supplier_ids:
         raise HTTPException(422, "Выберите поставщиков")
+    from ..services import chain_rules
     from ..services.suppliers import require_approved
     plan: list[tuple[Factory, Optional[list]]] = []          # (поставщик, None) или (компания группы, [(X, маршрут)])
+    rules_used: dict[str, str] = {}
     for sid in dict.fromkeys(body.supplier_ids):
         sup = db.get(Factory, sid)
         if sup is None:
             raise HTTPException(404, "Поставщик не найден")
-        if sup.supplier_status == "group_company":
+        if sup.supplier_status == "group_company":   # вручную — только ФД/ЗГД; менеджер выбирает конечного поставщика (D-164)
+            if not user.has(Role.FD, Role.GD):
+                raise HTTPException(422, f"Выберите конечного поставщика — закупку через «{sup.short_name or sup.name}» подставят правила цепочек (их ведут ФД и ЗГД)")
             plan.append((sup, mirror.resolve(db, sup, body.via_group.get(sid) or [])[1]))
+            continue
+        require_approved(sup, "запросить у него цену")
+        route, gf, rule = chain_rules.resolve(db, sup, "parts")
+        rules_used[sid] = chain_rules.describe(db, rule)
+        if route is not None:
+            plan.append((gf, [(sup, route)]))
         else:
-            require_approved(sup, "запросить у него цену")
             plan.append((sup, None))
     created = []
     for sup, pairs in plan:
@@ -181,7 +190,7 @@ def create_rfqs(rid: str, body: RfqCreateIn, db: Session = Depends(get_db), user
     audit(db, user.id, None, "supplier_rfq", req.id, "create", None, {"request": req.number, "rfqs": [r.number for r in created], "lines": len(lines)})
     db.commit()
     return {"rfqs": [_rfq_payload(db, r, user) for r in created if not mirror.is_lower(r) or can(user, "intragroup_chain", READ)],
-            "request": _payload(db, req, user)}
+            "request": _payload(db, req, user), "rules": rules_used}
 
 
 # ------------------------------------------------------------------ список, карточка, файл, отправка
@@ -534,3 +543,48 @@ def choose(rid: str, line_id: str, body: ChooseIn, db: Session = Depends(get_db)
     audit(db, user.id, None, "part_request_line", line.id, "choose_quote", None, {"rfq": rfq.number, "price": q.price, "currency": q.currency})
     db.commit()
     return _payload(db, req, user)
+
+
+
+# ------------------------------------------------------------------ внутренняя цепочка заявки: правка и виза ФД/ЗГД (D-165, D-166)
+
+class ChainIn(BaseModel):
+    route_id: Optional[str] = None
+
+
+@router.get("/requests/{rid}/chain")
+def request_chain(rid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_viewer)):
+    req = _req_or_404(db, rid, user)
+    out = mirror.chain_view(db, req)
+    out["can_edit"] = user.has(Role.FD, Role.GD)
+    if out["can_edit"]:
+        out["routes"] = [{"id": r.id, "name": r.name, "country": r.supplier_country}
+                         for r in db.scalars(select(SupplyRoute).where(SupplyRoute.is_active.is_(True)).order_by(SupplyRoute.name)).all() if len(r.steps) >= 2]
+    return out
+
+
+@router.post("/rfq/{rfq_id}/chain")
+def rfq_chain(rfq_id: str, body: ChainIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """ФД/ЗГД меняет цепочку запроса до выбора строк: другой маршрут через компанию группы или напрямую."""
+    from ..services import chain_rules
+    chain_rules.require_fd_gd(user)
+    rfq = _rfq_or_404(db, rfq_id)
+    res = mirror.set_chain(db, rfq, body.route_id, user.id)
+    audit(db, user.id, None, "supplier_rfq", rfq_id, "chain", after={"route": body.route_id, "result": res.id if res else None})
+    db.commit()
+    return _rfq_payload(db, res, user) if res else {"ok": True}
+
+
+@router.post("/requests/{rid}/chain/approve")
+def approve_request_chain(rid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Виза ФД/ЗГД на внутреннюю цепочку заявки — до КП клиенту."""
+    from ..services import chain_rules
+    chain_rules.require_fd_gd(user)
+    req = _req_or_404(db, rid, user)
+    chain = mirror.request_chain(db, req)
+    if not chain:
+        raise HTTPException(409, "В заявке нет строк через компанию группы — утверждать нечего")
+    req.chain_approval = chain_rules.approval_record(user, chain)
+    audit(db, user.id, None, "part_request", req.id, "chain_approved", after={"lines": len(chain)})
+    db.commit()
+    return mirror.chain_view(db, req)
