@@ -319,6 +319,11 @@ def deal_client_terms(deal: Deal) -> tuple[list[dict], Optional[float], str]:
 
 def deal_factory_terms(deal: Deal, factory_id: str) -> tuple[list[dict], Optional[float], str]:
     poss = [p for p in deal.positions if p.factory_id == factory_id] if factory_id else list(deal.positions)
+    if factory_id and not poss:   # конечный поставщик через компанию группы — по его ответу (D-160)
+        from sqlalchemy.orm import object_session
+        from .mirror_offers import mirror_positions
+        sess = object_session(deal)
+        poss = mirror_positions(sess, deal, factory_id) if sess is not None else []
     first = poss[0] if poss else None
     lines = list((first.factory_payments or first.factory_payments_offer) if first else []) or DEFAULT_FACTORY_PAYMENTS
     amount = sum((float(p.unit_price or 0) + float(p.options_price or 0)) * int(p.qty or 1) for p in poss) if poss else None
@@ -360,7 +365,10 @@ def upsert_from_package(db: Session, pkg: LegalPackage, deal: Deal, user_id: Opt
         c = Contract(doc_type="contract", kind="client_supply" if income else "supplier", direction=direction, number=num, seq=seq, own_entity_id=pkg.own_entity_id,
                      cp_kind=pkg.counterparty_kind, cp_id=pkg.counterparty_id, deal_id=deal.id, deal_ids=[deal.id], subject=(snap.get("contract") or {}).get("subject") or "поставка горно-шахтного оборудования",
                      penalties=pens, liability_cap_pct=cap, curator_id=deal.manager_id, created_by=user_id, source="package", status="draft",
-                     law={"claim_days": 30, "pre_trial": True}, cp_number=(snap.get("contract") or {}).get("number") or "")
+                     law={"claim_days": 30, "pre_trial": True}, cp_number=(snap.get("contract") or {}).get("number") or "",
+                     mirror_kind="via_group" if snap.get("mirror") else "")
+        if snap.get("mirror"):
+            c.subject = f"{c.subject} (сделка {deal.number}, поставка через {snap['mirror'].get('entity_name') or 'компанию группы'})"
         db.add(c)
     if c.status in LOCKED:
         c.package_id = c.package_id or pkg.id
@@ -404,7 +412,7 @@ def import_from_deals(db: Session) -> int:
 
 def apply_signed_to_deal(db: Session, c: Contract, overwrite: bool = False) -> None:
     """Подписанный договор сделки → номер и дата контракта в сделке (как раньше вносили вручную); при исправлении ЗГД — перезаписать."""
-    if not c.deal_id or c.doc_type != "contract":
+    if not c.deal_id or c.doc_type != "contract" or c.mirror_kind:   # договор компании группы с конечным поставщиком — не договор сделки с заводом
         return
     deal = db.get(Deal, c.deal_id)
     if not deal:
@@ -804,6 +812,9 @@ def can_see(db: Session, user, c: Contract) -> bool:
     или видимость основной сделки."""
     from ..api.common import can_see_deal   # видимость сделки живёт в api.common
     from ..core.roles import Role
+    from .mirror_offers import can_see_mirror_docs
+    if c.mirror_kind and not can_see_mirror_docs(user):   # договор компании группы с конечным поставщиком — цена поставщика (D-160)
+        return False
     if user.has(*(Role(r) for r in CONTRACT_ALL_SEE)) or c.curator_id == user.id or c.created_by == user.id:
         return True
     if c.deal_id:

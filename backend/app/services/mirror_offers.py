@@ -310,3 +310,102 @@ def view(db: Session, o: FactoryOffer, can_chain: bool) -> dict:
     elif o.mirror_state in ("no_policy", "error"):
         out["error"] = "цена компании группы ещё не рассчитана"
     return out
+
+
+# ------------------------------------------------------------------ зеркальные договоры: компания группы ↔ конечный поставщик (D-160)
+
+class MirrorPosition:
+    """Позиция сделки глазами договора компании группы с конечным поставщиком: цена, валюта, базис, срок и оплата — из
+    ответа поставщика (L); остальное (модель, количество, характеристики, опции РФ) — из позиции сделки."""
+
+    def __init__(self, pos: Position, lo: FactoryOffer, up: FactoryOffer):
+        self._pos, self._lo, self._up = pos, lo, up
+        self.factory_id = lo.factory_id
+        self.unit_price = lo.unit_price
+        self.options_price = None
+        self.currency = (lo.currency or pos.currency or "CNY").upper()
+        self.basis = lo.basis or pos.basis
+        self.production_term = lo.production_term or pos.production_term
+        self.factory_payments = list(lo.factory_payments or [])
+        self.factory_payments_offer = list(lo.factory_payments or [])
+        self.model = lo.model or pos.model
+
+    def __getattr__(self, name: str):
+        return getattr(self._pos, name)
+
+
+def mirror_positions(db: Session, deal: Deal, supplier_id: Optional[str] = None) -> list[MirrorPosition]:
+    """Позиции сделки, взятые из отобранного предложения компании группы, с ответом конечного поставщика (по поставщику X)."""
+    out = []
+    for pos in deal.positions:
+        up = db.get(FactoryOffer, pos.offer_id) if pos.offer_id else None
+        if up is None or not up.end_supplier_id or pos.factory_id != up.factory_id:
+            continue
+        if supplier_id and up.end_supplier_id != supplier_id:
+            continue
+        lo = lower_of(db, up)
+        if lo is None or not lo.unit_price:
+            continue
+        out.append(MirrorPosition(pos, lo, up))
+    return out
+
+
+def mirror_suppliers(db: Session, deal: Deal) -> dict[str, dict]:
+    """Конечные поставщики сделки через компанию группы: X → {group_factory_id, entity_id, entity_name, group_name}."""
+    out: dict[str, dict] = {}
+    for mp in mirror_positions(db, deal):
+        gf = db.get(Factory, mp._up.factory_id)
+        ent = group_entity(db, gf)
+        out.setdefault(mp.factory_id, {"group_factory_id": gf.id if gf else None, "group_name": (gf.short_name or gf.name) if gf else "",
+                                       "entity_id": ent.id if ent else None, "entity_name": ent.name if ent else ""})
+    return out
+
+
+def is_group_factory(db: Session, factory_id: Optional[str]) -> bool:
+    f = db.get(Factory, factory_id) if factory_id else None
+    return bool(f and f.supplier_status == "group_company")
+
+
+# ------------------------------------------------------------------ маржа группы на экране «Расчёт и утверждение» (D-161)
+
+def group_chain_summary(db: Session, deal: Deal, res: Any) -> Optional[dict]:
+    """Позиции, купленные через компанию группы: цена конечного поставщика, цена компании группы («Цена завода» сделки),
+    маржа компаний группы на единицу и всего; по предложениям — прибыль сделки + маржа группы = прибыль группы."""
+    rows = []
+    for pos in deal.positions:
+        up = db.get(FactoryOffer, pos.offer_id) if pos.offer_id else None
+        if up is None or not up.end_supplier_id:
+            continue
+        ch = up.chain or {}
+        sup = db.get(Factory, up.end_supplier_id)
+        ent = group_entity(db, db.get(Factory, up.factory_id))
+        per = ch.get("group_margin_rub")
+        qty = pos.qty or 1
+        rows.append({"position_id": pos.id, "designation": pos.designation, "qty": qty, "end_supplier": (sup.short_name or sup.name) if sup else "",
+                     "group_company": ent.name if ent else "", "supplier_price": ch.get("supplier_price"), "supplier_currency": ch.get("supplier_currency"),
+                     "group_price": up.unit_price, "currency": up.currency, "transfer_price": up.transfer_price, "companies": ch.get("companies") or [],
+                     "group_margin_rub_unit": per, "group_margin_rub": round(per * qty, 2) if per is not None else None,
+                     "state": up.mirror_state, "policy_version": ch.get("policy_version"), "warnings": ch.get("warnings") or []})
+    if not rows:
+        return None
+    variants = {}
+    for v in deal.variants:
+        mine = [r for r in rows if r["position_id"] in (v.position_ids or [])]
+        if not mine:
+            continue
+        g = round(sum(r["group_margin_rub"] or 0 for r in mine), 2)
+        base = ((getattr(res, "variants", None) or {}).get(v.id) or {}).get("base")
+        profit = getattr(base, "profit_rub", None) if base is not None else None
+        price = getattr(base, "price_rub", None) if base is not None else None
+        total = round(profit + g, 2) if profit is not None else None
+        variants[v.id] = {"name": v.name, "group_margin_rub": g, "deal_profit_rub": profit, "group_profit_rub": total,
+                          "group_margin_pct": round(total / price * 100, 2) if total is not None and price else None,
+                          "incomplete": any(r["group_margin_rub"] is None for r in mine)}
+    return {"positions": rows, "variants": variants}
+
+
+def can_see_mirror_docs(user) -> bool:
+    """Договор и пакет компании группы с конечным поставщиком (с его ценой): право «Цепочка компаний группы» и юрист —
+    он проверяет договор (решение владельца); менеджер их не видит (D-160)."""
+    from ..core.roles import READ, Role, can
+    return can(user, "intragroup_chain", READ) or user.has(Role.LAWYER)

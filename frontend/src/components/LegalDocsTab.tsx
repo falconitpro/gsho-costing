@@ -9,7 +9,8 @@ import ContractsBlock from "./ContractsBlock";
 
 type Bank = { id: string; title: string; currency: string; bank_name: string; account: string; swift?: string; verified: boolean };
 type Prof = { id: string; title: string; is_default: boolean; summary: string; check_status: string; banks: Bank[] };
-type Options = { suppliers: { id: string; name: string; short_name: string; country: string; positions: number; units: number; currency: string; amount: number }[];
+type Options = { suppliers: { id: string; name: string; short_name: string; country: string; positions: number; units: number; currency: string; amount: number;
+  group_company?: boolean; via_group?: { group_name: string; entity_id: string | null; entity_name: string } | null }[];
   entities: { id: string; name: string; code: string; default: boolean; currency: string; profiles: Prof[] }[];
   supplier_profiles: Record<string, { profiles: Prof[]; default_language: string; contract_kind: string; zip_set: { confirmed: boolean; lines: number; selected: number } }>;
   templates: { id: string; kind: string; title: string; version: number; language: string; country: string; unknown: string[] }[]; languages: Record<string, string>; doc_titles: Record<string, string>;
@@ -23,7 +24,7 @@ type Party = { name_ru: string; name_en: string; name_zh: string; tax_number: st
   bank: { title: string; bank_name: string; account: string; currency: string; verified: boolean; swift: string; bik: string } };
 type Item = { n: number; designation: string; qty: number; unit_price: number; amount: number; currency: string; options: string; hs_code: string; production_term: string; warranty: string; local_options_excluded: string[] };
 type Pkg = { id: string; kind: string; version_no: number; deal_version_no: number | null; status: string; status_title: string; files: { kind: string; title: string; file_name: string; template: { title: string; version: number } | null }[];
-  checks: { warnings: string[]; documents?: { ok: boolean; files: Record<string, { ok: boolean; tables?: number; problems: string[] }> } }; approvals: { at: string; by_name: string; from: string; to: string; comment: string }[]; created_by_name: string; created_at: string; counterparty_name: string; language: string;
+  checks: { warnings: string[]; documents?: { ok: boolean; files: Record<string, { ok: boolean; tables?: number; problems: string[] }> } }; approvals: { at: string; by_name: string; from: string; to: string; comment: string }[]; created_by_name: string; created_at: string; counterparty_name: string; language: string; mirror?: { entity_name: string } | null;
   totals: { amount?: number; currency?: string }; contract: { number?: string }; next_statuses: string[]; superseded_by: string | null };
 
 const KIND_SHORT: Record<string, string> = { purchase_contract: "Договор", spec_equipment: "Прил. 1 — оборудование", spec_zip: "Прил. 2 — ЗИП", client_contract_copy: "Рабочая копия договора", disagreements_protocol: "Протокол разногласий", tech_spec_client: "Техспецификация" };
@@ -112,13 +113,14 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
   const start = (factoryId: string) => {
     if (!opt) return;
     const sp = opt.supplier_profiles[factoryId];
-    const ent = opt.entities.find((e) => e.default) || opt.entities[0];
+    const via = opt.suppliers.find((s) => s.id === factoryId)?.via_group;
+    const ent = (via?.entity_id && opt.entities.find((e) => e.id === via.entity_id)) || opt.entities.find((e) => e.default) || opt.entities[0];
     const ownP = ent?.profiles.find((p) => p.is_default) || ent?.profiles[0];
     const cpP = sp?.profiles.find((p) => p.is_default) || sp?.profiles[0];
     const cur = opt.suppliers.find((s) => s.id === factoryId)?.currency || "CNY";
     const pickBank = (bs: Bank[] | undefined) => (bs?.find((b) => b.currency === cur && b.verified) || bs?.find((b) => b.currency === cur) || bs?.[0])?.id || "";
     setCh({ factory_id: factoryId, own_entity_id: ent?.id || "", own_profile_id: ownP?.id || "", own_bank_id: pickBank(ownP?.banks), cp_profile_id: cpP?.id || "", cp_bank_id: pickBank(cpP?.banks), language: sp?.default_language || "ru-en", templates: {},
-      contract_number: opt.contract_number, contract_date: opt.contract_date ? String(opt.contract_date).slice(0, 10) : "", place: "", notes: "" });
+      contract_number: via ? "" : opt.contract_number, contract_date: !via && opt.contract_date ? String(opt.contract_date).slice(0, 10) : "", place: "", notes: "" });
     setPreview(null);
   };
   const body = () => ({ ...ch, own_entity_id: ch.own_entity_id || null, own_profile_id: ch.own_profile_id || null, own_bank_id: ch.own_bank_id || null, cp_profile_id: ch.cp_profile_id || null, cp_bank_id: ch.cp_bank_id || null, contract_date: ch.contract_date || null,
@@ -126,7 +128,12 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
   const doPreview = () => api.post<Preview>(`/api/deals/${deal.id}/legal/purchase/preview`, body()).then(setPreview).catch((e) => setMsg((e as Error).message));
   const doBuild = async () => {
     setBuilding(true);
-    try { await api.post(`/api/deals/${deal.id}/legal/purchase/build`, body()); setMsg("Пакет сформирован (черновик) — файлы в списке пакетов и в папке «08 Документы клиента и юридические»"); setWizard(false); setPreview(null); loadPkgs(); loadOpt(); reload(); }
+    try {
+      const r = await api.post<{ mirror_packages?: { supplier: string; entity: string; ok: boolean; version_no?: number; message?: string; errors?: string[] }[] }>(`/api/deals/${deal.id}/legal/purchase/build`, body());
+      const mirrors = (r.mirror_packages || []).map((m) => m.ok ? `пакет «${m.entity} — ${m.supplier}» v${m.version_no} сформирован`
+        : `пакет «${m.entity} — ${m.supplier}» не сформирован: ${(m.errors || []).join("; ") || m.message} — дополните и сформируйте его в мастере`);
+      setMsg(["Пакет сформирован (черновик) — файлы в списке пакетов и в папке «08 Документы клиента и юридические»", ...mirrors].join(". "));
+      setWizard(false); setPreview(null); loadPkgs(); loadOpt(); reload(); }
     catch (e) { const d = (e as { detail?: unknown }).detail as { message?: string; errors?: string[] } | undefined; setMsg(d?.errors ? `${d.message}: ${d.errors.join("; ")}` : (e as Error).message); }
     finally { setBuilding(false); }
   };
@@ -160,7 +167,9 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
         <div className="card" style={{ borderColor: "var(--accent)" }}>
           <h3 style={{ marginTop: 0 }}>Закупочный пакет: договор + приложение № 1 (оборудование) + приложение № 2 (ЗИП)</h3>
           <div className="grid cols-3">
-            <label className="f">1. Поставщик (из позиций сделки)<select value={ch.factory_id} onChange={(e) => start(e.target.value)}>{opt.suppliers.map((s) => <option key={s.id} value={s.id}>{s.short_name} · {s.positions} поз., {s.units} ед. · {fmtRub(s.amount)} {s.currency}</option>)}</select></label>
+            <label className="f">1. Поставщик (из позиций сделки)<select value={ch.factory_id} onChange={(e) => start(e.target.value)}>{opt.suppliers.map((s) => <option key={s.id} value={s.id}>{s.via_group ? `${s.via_group.entity_name} ← ` : ""}{s.short_name}{s.group_company ? " (компания группы)" : ""} · {s.positions} поз., {s.units} ед. · {fmtRub(s.amount)} {s.currency}</option>)}</select>
+              {sup?.via_group && <span className="muted" style={{ fontSize: 11 }}>Договор «{sup.via_group.entity_name}» с конечным поставщиком: покупатель — {sup.via_group.entity_name}, цена, срок и оплата — из ответа поставщика.</span>}
+              {sup?.group_company && <span className="muted" style={{ fontSize: 11 }}>После формирования сразу формируются пакеты компании группы с её конечными поставщиками.</span>}</label>
             <label className="f">2. Покупатель — компания группы{!opt.can_choose_entity && <span className="muted"> (выбор другой компании — ФД, ЗГД, КД)</span>}
               <select value={ch.own_entity_id} disabled={!opt.can_choose_entity} onChange={(e) => { const en = opt.entities.find((x) => x.id === e.target.value); const p = en?.profiles.find((x) => x.is_default) || en?.profiles[0]; setCh({ ...ch, own_entity_id: e.target.value, own_profile_id: p?.id || "", own_bank_id: p?.banks[0]?.id || "" }); setPreview(null); }}>
                 {opt.entities.map((e) => <option key={e.id} value={e.id}>{e.name}{e.default ? " (по умолчанию)" : ""}</option>)}</select></label>
@@ -223,7 +232,7 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
           {[...active, ...pkgs.filter((p) => !active.includes(p))].map((p) => (
             <div key={p.id} style={{ border: "1px solid var(--line)", borderLeft: `4px solid ${p.status === "signed" ? "var(--ok)" : p.status === "approved" ? "var(--info)" : p.status === "superseded" || p.status === "archived" ? "var(--line)" : "var(--warn)"}`, borderRadius: 8, padding: "8px 12px", marginBottom: 8, background: "#fff", opacity: p.status === "superseded" || p.status === "archived" ? .6 : 1 }}>
               <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8, cursor: "pointer" }} onClick={() => setOpenPkg(openPkg === p.id ? null : p.id)}>
-                <div><b>{p.kind === "purchase" ? "Закупка" : "Продажа"} · {p.counterparty_name}</b> <span className="badge" style={{ marginLeft: 4 }}>v{p.version_no}</span> <span className={`badge ${p.status === "signed" || p.status === "approved" ? "ok" : p.status === "draft" || p.status === "needs_data" ? "warn" : "info"}`} style={{ marginLeft: 2 }}>{p.status_title}</span>
+                <div><b>{p.kind === "purchase" ? "Закупка" : "Продажа"} · {p.counterparty_name}{p.mirror && <span className="muted" style={{ fontWeight: 400 }}> · от имени {p.mirror.entity_name}</span>}</b> <span className="badge" style={{ marginLeft: 4 }}>v{p.version_no}</span> <span className={`badge ${p.status === "signed" || p.status === "approved" ? "ok" : p.status === "draft" || p.status === "needs_data" ? "warn" : "info"}`} style={{ marginLeft: 2 }}>{p.status_title}</span>
                   <div className="muted" style={{ fontSize: 12 }}>{p.contract.number ? `№ ${p.contract.number} · ` : ""}{p.totals.amount != null && `${fmtRub(p.totals.amount)} ${p.totals.currency} · `}версия сделки {p.deal_version_no ?? "—"} · {p.language} · {p.created_by_name} · {fmtDate(p.created_at)}</div></div>
                 <div className="row" style={{ gap: 6 }} onClick={(e) => e.stopPropagation()}>
                   {p.files.map((f) => <a key={f.kind} className="btn ghost" style={{ padding: "3px 10px", fontSize: 12 }} href={`/api/legal/packages/${p.id}/files/${f.kind}`} title={f.template ? `по шаблону ${f.template.title} v${f.template.version}` : "встроенный генератор"}>{KIND_SHORT[f.kind] || f.title}</a>)}

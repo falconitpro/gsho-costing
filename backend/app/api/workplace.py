@@ -245,6 +245,9 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
             d = db.get(Deal, p.deal_id)
             if d is None or not can_see_deal(user, d):
                 continue
+            from ..services.mirror_offers import can_see_mirror_docs
+            if (p.snapshot or {}).get("mirror") and not can_see_mirror_docs(user):
+                continue
             approvals.append({"kind": "package", "title": f"{'Закупочный' if p.kind == 'purchase' else 'Клиентский'} пакет · {d.number} · {d.client.name if d.client else ''}",
                               "sub": "на проверке юриста" if p.status == "lawyer_review" else "коммерческое согласование", "url": f"/deals/{d.id}?tab=legal", "waiting_since": p.updated_at.isoformat() if p.updated_at else None, "tone": "info"})
     for x in cin["visas"]:

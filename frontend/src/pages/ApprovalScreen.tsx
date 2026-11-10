@@ -141,6 +141,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
               </div>
             )}
           </div>
+          {calc.group_chain && <GroupMargin g={calc.group_chain} vid={vid} />}
           <div className="row muted" style={{ marginTop: 6 }}>
             Дата отчёта (расчёта): <b>{fmtDate(calc.input.calc_date)}</b>{deal.report_date ? " — задана вручную" : " — сегодня"}
             {isCD && <>
@@ -336,4 +337,29 @@ function KpSettings({ deal, calc, reload }: { deal: Deal; calc: CalcResponse; re
       {selected.length > 0 ? <ul>{selected.map((i) => <li key={i.id}>{i.model}: {i.caption || i.file_name} <span className="muted">({lbl(IMAGE_KIND, i.kind)}, {lbl(IMAGE_SOURCE, i.source)}{i.has_factory_logo ? ", логотип завода" : ""})</span></li>)}</ul> : <div className="muted">Файлы в КП не выбраны</div>}
     </div>
   );
+}
+
+
+// маржа группы при закупке через компанию группы (D-161): «Цена завода» сделки — цена компании группы, её маржа — отдельно
+type GroupChain = { positions: { position_id: string; designation: string; qty: number; end_supplier: string; group_company: string; supplier_price: number | null;
+  supplier_currency: string; group_price: number | null; currency: string; transfer_price: number | null; group_margin_rub_unit: number | null; group_margin_rub: number | null;
+  state: string; policy_version: number | null; warnings: string[] }[];
+  variants: Record<string, { name: string; group_margin_rub: number; deal_profit_rub: number | null; group_profit_rub: number | null; group_margin_pct: number | null; incomplete: boolean }> };
+function GroupMargin({ g, vid }: { g: GroupChain; vid: string }) {
+  const v = g.variants[vid];
+  if (!v) return null;
+  return (
+    <div style={{ marginTop: 8, borderTop: "1px solid var(--line)", paddingTop: 6 }}>
+      <b>Через компанию группы</b>
+      <div style={{ fontSize: 13 }}>прибыль сделки {fmtRub(v.deal_profit_rub)} RUB + маржа группы {fmtRub(v.group_margin_rub)} RUB = <b>прибыль группы {fmtRub(v.group_profit_rub)} RUB</b>
+        {v.group_margin_pct != null && <> · {fmtPct(v.group_margin_pct)} от выручки</>}{v.incomplete && <span className="badge warn">не по всем позициям есть расчёт цепочки</span>}</div>
+      <table style={{ fontSize: 12, marginTop: 4 }}>
+        <thead><tr><th>Позиция</th><th>Поставщик → компания группы</th><th className="num">Цена поставщика</th><th className="num">Цена компании группы</th><th className="num">Маржа группы, RUB</th></tr></thead>
+        <tbody>{g.positions.map((r) => (
+          <tr key={r.position_id}><td>{r.designation} × {r.qty}</td><td>{r.end_supplier} → {r.group_company}{r.state === "changed_after_select" && <span className="badge warn">ответ поставщика изменился</span>}</td>
+            <td className="num">{r.supplier_price != null ? `${fmtRub(r.supplier_price)} ${r.supplier_currency}` : "—"}</td>
+            <td className="num">{r.group_price != null ? `${fmtRub(r.group_price)} ${r.currency}` : "—"}{r.transfer_price != null && <div className="muted">трансфертная</div>}</td>
+            <td className="num">{fmtRub(r.group_margin_rub)}{r.group_margin_rub_unit != null && <div className="muted">{fmtRub(r.group_margin_rub_unit)} за ед.</div>}</td></tr>))}</tbody>
+      </table>
+    </div>);
 }

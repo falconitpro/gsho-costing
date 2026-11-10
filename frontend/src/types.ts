@@ -101,6 +101,7 @@ export interface FxComponent {
   rate_by_scenario: Record<string, number>; fixed: boolean;
 }
 export interface CalcResponse {
+  group_chain?: any;   // маржа группы через компанию группы (D-161), есть при праве «Цепочка компаний группы»
   fd_declined?: { comment: string; at: string | null; user: string } | null;
   input: { base_currency: string; calc_date?: string; fx: { as_of: string; rates: Record<string, number>; source: string; note?: string }; thresholds: { margin_threshold_pct: number } };
   result: { variants: Record<string, Record<string, ScenarioResult>>; fx_components: FxComponent[]; approval: { financial: boolean; general: boolean; reasons: string[] }; warnings: string[] };
