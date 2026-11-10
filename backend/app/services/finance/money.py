@@ -44,3 +44,18 @@ def ccy(v: Any) -> str:
     if len(c) != 3 or not c.isalpha():
         raise ValueError(f"Валюта должна быть кодом ISO 4217 (3 буквы): {v!r}")
     return c
+
+
+def ru(v, currency: str = "") -> str:
+    """Сумма для текста (вопрос, проблема сверки): «77 000,00 RUB». Неразрывные пробелы не используются — текст уходит и в уведомления."""
+    d = dec(v)
+    if d is None:
+        return "—"
+    sign = "−" if d < 0 else ""
+    whole, frac = f"{abs(d):.2f}".split(".")
+    whole = f"{int(whole):,}".replace(",", " ")
+    return f"{sign}{whole},{frac}" + (f" {currency}" if currency else "")
+
+
+def ru_date(v) -> str:
+    return v.strftime("%d.%m.%Y") if v else "—"

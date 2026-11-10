@@ -70,7 +70,7 @@ def meta(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_
     ents = [{"id": e.id, "code": e.code, "name": e.name, "currency": e.currency} for e in db.scalars(select(LegalEntity).order_by(LegalEntity.name)).all()]
     currencies = sorted({c for (c,) in db.execute(select(FinanceObligation.currency).distinct()).all()} | {a.currency for a in db.scalars(select(FinanceAccount)).all()})
     return {"can_edit": access.can_edit(user), "entities": ents, "currencies": currencies, "today": date.today().isoformat(),
-            "tabs": ["overview", "calendar", "liquidity"] + (["economy"] if (user.can("finance_analytics", 1) and user.can("cost", 1)) else []) + ["exposure"], "import_fields": imp_fields.FIELD_TITLES, "statuses": obl.STATUS_TITLES}
+            "tabs": ["overview", "calendar", "liquidity"] + (["economy"] if (user.can("finance_analytics", 1) and user.can("cost", 1)) else []) + ["exposure", "reconciliation"], "import_fields": imp_fields.FIELD_TITLES, "statuses": obl.STATUS_TITLES}
 
 
 @router.get("/overview")
@@ -644,3 +644,190 @@ def legal_exposure(deal_id: Optional[str] = None, contract_id: Optional[str] = N
     if contract_id and not vis.contract(contract_id):
         raise HTTPException(404, "Договор не найден")
     return exposure.build(db, user, vis, as_of or date.today(), deal_id, contract_id, direction, status, kind)
+
+
+# ------------------------------------------------------------------ сверка и уточнения (этап 6)
+
+@router.get("/reconciliation")
+def reconciliation(queue: Optional[str] = None, deal_id: Optional[str] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    access.require_read(user)
+    from ..services.finance import reconciliation as rec
+    if queue and queue not in rec.QUEUES:
+        raise HTTPException(422, "Очередь: " + ", ".join(rec.QUEUES))
+    vis = access.Visibility(db, user)
+    if deal_id and not vis.deal(deal_id):
+        raise HTTPException(404, "Сделка не найдена")
+    return rec.build(db, user, vis, date.today(), queue, deal_id)
+
+
+class QuestionIn(BaseModel):
+    subject_type: str
+    subject_id: str
+    assignee_id: str
+    question: str
+    due_on: Optional[date] = None
+
+
+class AnswerIn(BaseModel):
+    answer: str = ""
+
+
+class ReviewIn(BaseModel):
+    decision: str = Field(pattern="^(verified|rejected)$")
+    review_comment: str = ""
+    source_update_ref: str = ""
+
+
+def _question(db: Session, qid: str):
+    from ..models import FinanceQuestion
+    q = db.get(FinanceQuestion, qid)
+    if q is None:
+        raise HTTPException(404, "Вопрос не найден")
+    return q
+
+
+def _can_see_full(db: Session, user: CurrentUser, q) -> bool:
+    return access.can_read(user) and access.Visibility(db, user).deal(q.deal_id)
+
+
+@router.get("/questions/my")
+def questions_my(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Вопросы, назначенные пользователю (и замещаемым). Права на раздел не нужно — только свой ограниченный контекст."""
+    from ..models import FinanceQuestion
+    from ..services.finance import questions as qs
+    rows = db.scalars(select(FinanceQuestion).where(FinanceQuestion.assignee_id.in_({user.id, *user.acting_for})).order_by(FinanceQuestion.created_at.desc())).all()
+    return {"items": [qs.scoped_dto(db, q) for q in rows]}
+
+
+@router.get("/questions/assignees")
+def question_assignees(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    access.require_read(user)
+    from ..models import User
+    return {"items": [{"id": u.id, "name": u.display_name, "roles": list(u.roles or [])} for u in db.scalars(select(User).where(User.is_active.is_(True)).order_by(User.display_name)).all()]}
+
+
+@router.get("/questions/context")
+def question_context(subject_type: str, subject_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Что увидит ответственный — показывается перед отправкой (05, раздел 13)."""
+    access.require_read(user)
+    from ..services.finance import questions as qs
+    sub = qs.subject(db, user, access.Visibility(db, user), subject_type, subject_id)
+    return {"title": sub["title"], "fields": {k: v for k, v in sub["context"].items() if v not in (None, "")}}
+
+
+@router.get("/questions")
+def questions_list(status: Optional[str] = None, assignee_id: Optional[str] = None, deal_id: Optional[str] = None, subject_type: Optional[str] = None,
+                   subject_id: Optional[str] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    access.require_read(user)
+    from ..models import FinanceQuestion
+    from ..services.finance import questions as qs
+    q = select(FinanceQuestion).order_by(FinanceQuestion.created_at.desc())
+    for col, val in ((FinanceQuestion.status, status), (FinanceQuestion.assignee_id, assignee_id), (FinanceQuestion.deal_id, deal_id),
+                     (FinanceQuestion.subject_type, subject_type), (FinanceQuestion.subject_id, subject_id)):
+        if val:
+            q = q.where(col == val)
+    vis = access.Visibility(db, user)
+    return {"items": [qs.full_dto(db, user, vis, x) for x in db.scalars(q.limit(500)).all() if vis.deal(x.deal_id)], "statuses": qs.STATUS}
+
+
+@router.post("/questions", status_code=201)
+def question_create(body: QuestionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    access.require_read(user)
+    from ..services.finance import questions as qs
+    vis = access.Visibility(db, user)
+    q = qs.create(db, user, vis, body.model_dump())
+    _commit(db)
+    return qs.full_dto(db, user, vis, q)
+
+
+@router.get("/questions/{qid}")
+def question_get(qid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from ..services.finance import questions as qs
+    q = _question(db, qid)
+    if _can_see_full(db, user, q):
+        return qs.full_dto(db, user, access.Visibility(db, user), q)
+    if qs.is_assignee(user, q):
+        return qs.scoped_dto(db, q)
+    raise HTTPException(404, "Вопрос не найден")
+
+
+@router.post("/questions/{qid}/answer")
+def question_answer(qid: str, body: AnswerIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from ..services.finance import questions as qs
+    q = qs.answer(db, user, _question(db, qid), body.answer)
+    _commit(db)
+    return qs.scoped_dto(db, q)
+
+
+@router.post("/questions/{qid}/files", status_code=201)
+async def question_file(qid: str, file: UploadFile = File(...), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Файл к ответу: загружает ответственный, пока ответ не дан (или отклонён)."""
+    import os
+    import uuid as _uuid
+    from datetime import timezone as _tz
+    from ..core.config import get_settings
+    from ..core.files import read_limited
+    from ..services.finance import questions as qs
+    q = _question(db, qid)
+    if not qs.is_assignee(user, q):
+        raise HTTPException(404, "Вопрос не найден")
+    if q.status not in ("open", "rejected"):
+        raise HTTPException(409, "Ответ уже дан — файл добавить нельзя")
+    name = os.path.basename(file.filename or "file")
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in (".pdf", ".jpg", ".jpeg", ".png", ".xlsx", ".xls", ".csv", ".docx", ".doc", ".zip"):
+        raise HTTPException(422, "Файл: PDF, JPG, PNG, XLSX, XLS, CSV, DOCX, DOC или ZIP")
+    data = read_limited(file)
+    d = os.path.join(get_settings().storage_local_root, "_finance", "questions", q.id)
+    os.makedirs(d, exist_ok=True)
+    fid = _uuid.uuid4().hex
+    with open(os.path.join(d, f"{fid}{ext}"), "wb") as f:
+        f.write(data)
+    q.files = [*(q.files or []), {"id": fid, "name": name[:200], "size": len(data), "uploaded_by": user.id, "uploaded_at": datetime.now(_tz.utc).isoformat()}]
+    from ..services.deal_service import audit as _audit
+    _audit(db, user.id, q.deal_id, "finance_question", q.id, "file", after={"name": name[:200], "size": len(data)})
+    _commit(db)
+    return qs.scoped_dto(db, q)
+
+
+@router.get("/questions/{qid}/files/{fid}")
+def question_file_get(qid: str, fid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    import os
+    from ..core.config import get_settings
+    from ..core.files import file_response
+    from ..services.finance import questions as qs
+    q = _question(db, qid)
+    if not (_can_see_full(db, user, q) or qs.is_assignee(user, q)):
+        raise HTTPException(404, "Вопрос не найден")
+    f = next((x for x in (q.files or []) if x["id"] == fid), None)
+    d = os.path.join(get_settings().storage_local_root, "_finance", "questions", q.id)
+    path = next((os.path.join(d, x) for x in (os.listdir(d) if os.path.isdir(d) else []) if x.startswith(fid)), None) if f else None
+    if not path:
+        raise HTTPException(404, "Файл не найден")
+    return file_response(path, f["name"], inline=False)
+
+
+@router.post("/questions/{qid}/review")
+def question_review(qid: str, body: ReviewIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Проверка ответа ФД/ЗГД. «Данные исправлены» — только со ссылкой на фактическое изменение источника (source_update_ref)."""
+    access.require_edit(user)
+    from ..services.finance import questions as qs
+    q = _question(db, qid)
+    if not _can_see_full(db, user, q):
+        raise HTTPException(404, "Вопрос не найден")
+    qs.review(db, user, q, body.decision, body.review_comment, body.source_update_ref)
+    _commit(db)
+    return qs.full_dto(db, user, access.Visibility(db, user), q)
+
+
+@router.post("/questions/{qid}/close")
+def question_close(qid: str, body: ReasonIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from ..services.finance import questions as qs
+    q = _question(db, qid)
+    if not _can_see_full(db, user, q):
+        raise HTTPException(404, "Вопрос не найден")
+    if not (q.asked_by == user.id or access.can_edit(user)):
+        raise HTTPException(403, "Закрыть вопрос может автор, ФД или ЗГД")
+    qs.close(db, user, q, body.reason)
+    _commit(db)
+    return qs.full_dto(db, user, access.Visibility(db, user), q)

@@ -10,7 +10,7 @@ export const ROLE: Dict = { manager: "менеджер", logistician: "логи�
   observer: "наблюдатель", purchasing: "закупки", lawyer: "юрист" };
 export const OUTCOME: Dict = { won: "выиграна", lost: "проиграна", cancelled: "отменена", kp_sent: "КП отправлено", open: "без результата" };
 export const STATUS: Dict = { ...STATUS_TITLES };
-export const BLOCK: Dict = { waiting: "ожидание результата", manager: "менеджер", logistics: "логистика", service: "сервис", pricing: "цена и условия", gd: "ЗГД", visa: "виза", kp: "КП",
+export const BLOCK: Dict = { finance_question: "уточнение «Финансов»", waiting: "ожидание результата", manager: "менеджер", logistics: "логистика", service: "сервис", pricing: "цена и условия", gd: "ЗГД", visa: "виза", kp: "КП",
   contract: "контракт", legal: "юрист", catalog: "каталог", offers: "отбор заводов", local_options: "опции РФ", execution: "исполнение", test: "проверка" };
 export const blockTitle = (b: string | null | undefined) => {
   const s = String(b || "");

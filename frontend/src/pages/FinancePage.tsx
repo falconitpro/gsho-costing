@@ -4,9 +4,10 @@ import { api, ApiError, fmtDate, fmtMoney, newKey } from "../api";
 import { can, type Me } from "../types";
 import FinanceEconomy from "../components/FinanceEconomy";
 import FinanceExposure from "../components/FinanceExposure";
+import FinanceReconciliation from "../components/FinanceReconciliation";
 
 // Раздел «Финансы», вариант Б (docs/finance/05_UI_UX_в_стилистике_CRM.md). Первый вертикальный срез:
-// «Обзор», «Платёжный календарь», «Ликвидность и валюта» (счета, остатки, операции, разнесение), «Экономика сделок», «Обеспечение и неустойки».
+// «Обзор», «Платёжный календарь», «Ликвидность и валюта» (счета, остатки, операции, разнесение), «Экономика сделок», «Обеспечение и неустойки», «Сверка и уточнения».
 // Остальные вкладки появятся по мере реализации — пустые вкладки-заглушки не показываем.
 
 type Meta = { can_edit: boolean; entities: { id: string; code: string; name: string; currency: string }[]; currencies: string[]; today: string; statuses: Record<string, string> };
@@ -33,7 +34,7 @@ type Tx = { id: string; account_id: string | null; account_title: string; direct
   withdrawn: boolean; withdrawn_reason: string; origin_title: string };
 type List<T> = { total: number; items: T[]; totals?: Record<string, Record<string, string>>; can_edit?: boolean };
 
-const TABS = [["overview", "Обзор"], ["calendar", "Платёжный календарь"], ["liquidity", "Ликвидность и валюта"], ["economy", "Экономика сделок"], ["exposure", "Обеспечение и неустойки"]] as const;
+const TABS = [["overview", "Обзор"], ["calendar", "Платёжный календарь"], ["liquidity", "Ликвидность и валюта"], ["economy", "Экономика сделок"], ["exposure", "Обеспечение и неустойки"], ["reconciliation", "Сверка и уточнения"]] as const;
 type Tab = (typeof TABS)[number][0];
 const STATUS_BADGE: Record<string, string> = { paid: "ok", partially_paid: "info", overdue: "bad", due_soon: "warn", no_date: "", planned: "", superseded: "", excluded: "" };
 const TX_STATUS: Record<Tx["status"], [string, string]> = { draft: ["черновик", ""], needs_reconciliation: ["требует сверки", "warn"], posted: ["проведена", "ok"], reversed: ["сторнирована", "bad"] };
@@ -91,6 +92,7 @@ export default function FinancePage({ me }: { me: Me }) {
       {meta && tab === "liquidity" && <Liquidity meta={meta} sp={sp} go={go} stamp={stamp} onChanged={() => setStamp((x) => x + 1)} />}
       {meta && tab === "economy" && <FinanceEconomy sp={sp} go={go} stamp={stamp} />}
       {meta && tab === "exposure" && <FinanceExposure sp={sp} go={go} stamp={stamp} />}
+      {meta && tab === "reconciliation" && <FinanceReconciliation sp={sp} go={go} stamp={stamp} canEdit={meta.can_edit} />}
     </>
   );
 }

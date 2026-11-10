@@ -1780,5 +1780,5 @@ class AcceptanceUnit(TimestampMixin, Base):
 
 # ------------------------------------------------------------------ раздел «Финансы» (вариант Б): docs/finance/
 from .finance import (  # noqa: E402,F401
-    FinanceAccount, FinanceAllocation, FinanceBalanceSnapshot, FinanceFxOperation, FinanceImportBatch, FinanceObligation, FinanceRecognitionEvent, FinanceTransaction,
+    FinanceAccount, FinanceAllocation, FinanceBalanceSnapshot, FinanceFxOperation, FinanceImportBatch, FinanceObligation, FinanceQuestion, FinanceRecognitionEvent, FinanceTransaction,
 )

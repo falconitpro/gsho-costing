@@ -10,6 +10,7 @@ import WorkplacePage from "./pages/WorkplacePage";
 import DealCard from "./pages/DealCard";
 import TasksPage from "./pages/TasksPage";
 import SummaryPage from "./pages/SummaryPage";
+import FinanceQuestionPage from "./pages/FinanceQuestionPage";
 import FinancePage from "./pages/FinancePage";
 import BoardPage from "./pages/BoardPage";
 import SettingsHub from "./pages/SettingsHub";
@@ -146,6 +147,7 @@ export default function App() {
             <Route path="/deals/parts/:id" element={<PartsRequestRoute me={me} />} />
             <Route path="/deals/:id" element={<DealCard me={me} />} />
             <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/finance/questions/:id" element={<FinanceQuestionPage />} />
             <Route path="/board" element={<BoardPage />} />
             <Route path="/summary" element={<SummaryPage me={me} />} />
             <Route path="/finance" element={<FinancePage me={me} />} />
