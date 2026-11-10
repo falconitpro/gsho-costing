@@ -32,6 +32,7 @@ type Ref = { id: string; name: string };
 const MATCH: Record<string, string> = { article: "по артикулу", oem: "по OEM", supplier: "по номеру поставщика", analog: "аналог", manual: "вручную" };
 const PSRC: Record<string, string> = { contract: "договорная", pricelist: "прайс", calc: "расчёт", manual: "вручную" };
 const CUR = ["RUB", "EUR", "CNY", "USD", "KGS"];
+const DELETABLE = ["new", "rfq", "quoted", "unavailable", "replaced", "cancelled"];   // как DELETABLE_LINE на сервере
 
 export default function PartsRequests({ me }: { me: Me }) {
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -107,6 +108,8 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
   const [kpCur, setKpCur] = useState("RUB");
   const [noFee, setNoFee] = useState(false);
   const [pick, setPick] = useState<{ line: string; q: string; items: { id: string; article: string; name_ru: string; manufacturer: string }[] } | null>(null);
+  const [sups, setSups] = useState<{ id: string; name: string; short_name: string; effective_currency: string }[]>([]);
+  useEffect(() => { api.get<typeof sups>("/api/refs/factories?supplies=parts").then(setSups).catch(() => setSups([])); }, []);
   const base = `/api/parts/requests/${r.id}`;
   const patch = (l: Line, body: Record<string, unknown>) => act(() => api.patch<Req>(`${base}/lines/${l.id}`, body));
   async function search(line: string, q: string) {
@@ -134,7 +137,10 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
             <tr key={l.id} style={{ opacity: ["cancelled", "unavailable"].includes(l.status) ? 0.5 : 1 }}>
               <td><input type="checkbox" disabled={closed || ["cancelled", "unavailable"].includes(l.status)} checked={sel.includes(l.id)}
                 onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></td>
-              <td>{l.no}{l.parent_line_id && <div className="muted" style={{ fontSize: 11 }}>часть строки</div>}</td>
+              <td>{l.no}{l.parent_line_id && <div className="muted" style={{ fontSize: 11 }}>часть строки</div>}
+                {!closed && r.lines.length > 1 && DELETABLE.includes(l.status) && (
+                  <div><a href="#" style={{ fontSize: 11, color: "var(--bad)" }} title="Удалить ошибочно введённую позицию"
+                    onClick={(e) => { e.preventDefault(); if (confirm(`Удалить позицию ${l.no} «${l.raw_article || l.raw_name}»?`)) act(() => api.del<Req>(`${base}/lines/${l.id}`), "Позиция удалена"); }}>удалить</a></div>)}</td>
               <td><b>{l.raw_article}</b><div className="muted" style={{ fontSize: 11 }}>{l.raw_name}</div></td>
               <td>{l.part ? <>{l.part.article} {l.part.name_ru}<div className="muted" style={{ fontSize: 11 }}>{MATCH[l.match_kind] || l.match_kind}{l.part.manufacturer && ` · ${l.part.manufacturer}`}</div></>
                 : <span className="badge bad">{l.candidates?.length ? `несколько вариантов (${l.candidates.length})` : "не найдено"}</span>}
@@ -152,7 +158,11 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
               <td className="num"><input type="number" style={{ width: 60 }} defaultValue={l.lead_days ?? ""} disabled={closed} onBlur={(e) => patch(l, { lead_days: e.target.value ? Number(e.target.value) : null })} /></td>
               <td className="num"><input type="number" style={{ width: 90 }} defaultValue={l.price ?? ""} disabled={closed} key={`${l.id}-${l.price}`}
                 onBlur={(e) => { const v = e.target.value ? Number(e.target.value) : 0; if (v !== (l.price || 0)) patch(l, { price: v, currency: l.currency }); }} />
-                <select value={l.currency} disabled={closed} onChange={(e) => patch(l, { price: l.price || 0, currency: e.target.value })}>{CUR.map((c) => <option key={c}>{c}</option>)}</select>
+                <select value={l.currency} disabled={closed} onChange={(e) => patch(l, { currency: e.target.value })}>{CUR.map((c) => <option key={c}>{c}</option>)}</select>
+                {!closed && l.part && (
+                  <div><select style={{ maxWidth: 150, fontSize: 11 }} title="Поставщик: от него зависит валюта по умолчанию (GRP — евро, Китай — CNY, Россия — рубли)" value={l.supplier_id || ""}
+                    onChange={(e) => patch(l, { supplier_id: e.target.value || null })}>
+                    <option value="">поставщик —</option>{sups.map((f) => <option key={f.id} value={f.id}>{f.short_name || f.name} · {f.effective_currency}</option>)}</select></div>)}
                 <div className="muted" style={{ fontSize: 11 }}>{PSRC[l.price_source] || ""}</div></td>
               <td className="num">{l.sum_rub != null ? fmtRub(l.sum_rub) : "—"}</td>
               {seesCost && <><td className="num">{l.cost != null ? fmtRub(l.cost) : <span className="muted" style={{ fontSize: 11 }}>{l.cost_note}</span>}</td>

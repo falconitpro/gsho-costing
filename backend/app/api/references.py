@@ -422,7 +422,9 @@ def factories(include_archived: bool = False, supplies: str = "", stats: bool = 
     pend = {}
     for fid in db.scalars(select(FactoryChange.factory_id).where(FactoryChange.status == "pending")).all():
         pend[fid] = pend.get(fid, 0) + 1
-    out = [{**serialize(f), "approval_status": f.approval_status or "approved", "pending_changes": pend.get(f.id, 0)}
+    from ..services.parts_pricing import supplier_currency
+    out = [{**serialize(f), "approval_status": f.approval_status or "approved", "pending_changes": pend.get(f.id, 0),
+            "effective_currency": supplier_currency(f.name, f.short_name, f.country, f.default_currency)}
            for f in db.scalars(select(Factory).order_by(Factory.name)).all()
            if (include_archived or f.is_active is not False) and (not supplies or supplies in (f.supplies or []))]
     if not user.can("factory_price_history"):          # банковские реквизиты — тем, кто видит цены завода

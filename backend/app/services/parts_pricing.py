@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable, Mapping, Optional
 
 DEFAULT_BANDS = [{"up_to_rub": 10_000, "pct": 40.0}, {"up_to_rub": 100_000, "pct": 30.0}, {"up_to_rub": None, "pct": 20.0}]
@@ -20,6 +21,27 @@ LINE_STATUS = {
     "unavailable": "нет у поставщиков", "replaced": "замена аналогом", "cancelled": "отменена клиентом",
 }
 CLOSED_LINE = {"shipped", "unavailable", "cancelled"}
+# строку заявки можно удалить, пока по ней нет заказа клиента, КП, заказа у поставщика, движения и отгрузки
+DELETABLE_LINE = {"new", "rfq", "quoted", "unavailable", "replaced", "cancelled"}
+
+CURRENCIES = ("RUB", "EUR", "CNY", "USD", "KGS")
+_EUR_COUNTRIES = {"DE", "AT", "FR", "IT", "ES", "NL", "BE", "FI", "IE", "PT", "GR", "LU", "ГЕРМАНИЯ", "GERMANY", "ЕВРОПА", "EU"}
+_COUNTRY_CUR = {"CN": "CNY", "КИТАЙ": "CNY", "CHINA": "CNY", "RU": "RUB", "РОССИЯ": "RUB", "RUSSIA": "RUB", "KG": "KGS", "КИРГИЗИЯ": "KGS",
+                "US": "USD", "USA": "USD", "США": "USD"}
+
+
+def supplier_currency(name: str = "", short_name: str = "", country: str = "", default_currency: str = "") -> str:
+    """Валюта по умолчанию для цен поставщика: GRP — евро (по решению владельца), Китай — CNY, Россия — рубли, Германия/ЕС — евро,
+    Киргизия — KGS; для прочих — валюта по умолчанию из карточки поставщика."""
+    if re.search(r"(?<![A-Za-zА-Яа-я0-9])GRP(?![A-Za-zА-Яа-я0-9])", f"{name} {short_name}", re.IGNORECASE):
+        return "EUR"
+    c = (country or "").strip().upper()
+    if c in _EUR_COUNTRIES:
+        return "EUR"
+    if c in _COUNTRY_CUR:
+        return _COUNTRY_CUR[c]
+    d = (default_currency or "").strip().upper()
+    return d if d in CURRENCIES else "RUB"
 
 
 # общие этапы сделок (ГШО и запчасти в одном списке «Сделки»): запрос → расчёт и согласование → КП у клиента → исполнение → закрыта

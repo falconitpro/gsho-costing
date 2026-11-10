@@ -8,10 +8,10 @@ from typing import Any, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import Part, PartCrossRef, PartRequest, PartRequestLine, SupplyRoute
+from ..models import Factory, Part, PartCrossRef, PartRequest, PartRequestLine, SupplyRoute
 from . import settings_service
 from .markup_chain import ChainError, simulate
-from .parts_pricing import price_line
+from .parts_pricing import price_line, supplier_currency
 
 
 def norm_article(s: str) -> str:
@@ -141,6 +141,11 @@ def contract_price(db: Session, part: Part, client_id: str, on: date) -> Optiona
     return None
 
 
+def supplier_currency_of(db: Session, supplier_id: Optional[str]) -> str:
+    f = db.get(Factory, supplier_id) if supplier_id else None
+    return supplier_currency(f.name, f.short_name, f.country, f.default_currency) if f else "RUB"
+
+
 def price_lines(db: Session, req: PartRequest, fx: dict, rules: dict) -> None:
     bands = settings_service.get(db, "parts_margin_bands")
     tol = settings_service.get(db, "parts_cd_tolerance_pp")
@@ -156,13 +161,16 @@ def price_lines(db: Session, req: PartRequest, fx: dict, rules: dict) -> None:
             line.lead_days = part.lead_days
         if not line.supplier_id and part.supplier_id:      # поставщик по умолчанию — из карточки; меняется выбором ответа на запрос
             line.supplier_id = part.supplier_id
+            if line.price is None and line.currency in (None, "", "RUB"):
+                line.currency = supplier_currency_of(db, line.supplier_id)
         quote = (line.quote_price, line.quote_currency, line.supplier_id) if line.quote_price else None
         cost, cost_note = unit_cost_rub(db, part, line.route_id, rules, fx, quote)
         manual = (line.price, line.currency) if line.price_source == "manual" and line.price else None
         pricelist = (part.sale_price, part.sale_currency or "EUR") if part.sale_price else None
         res = price_line(qty=line.qty, unit_cost_rub=cost, fx=fx, manual=manual, contract=contract_price(db, part, req.client_id, today),
                          pricelist=pricelist, bands=bands, cd_tolerance_pp=tol)
-        line.price, line.currency, line.price_source = res["price"], res["currency"], res["price_source"]
+        line.price, line.price_source = res["price"], res["price_source"]
+        line.currency = res["currency"] if res["price"] is not None else (line.currency or "RUB")   # без цены остаётся выбранная валюта
         line.calc = {**{k: v for k, v in (line.calc or {}).items() if k == "candidates"}, **res, "cost_note": cost_note, "available": available}
         if line.price is not None and line.status == "new":
             line.status = "quoted"

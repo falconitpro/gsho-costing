@@ -16,12 +16,12 @@ from sqlalchemy.orm import Session
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role, filter_payload
 from ..db import get_db
-from ..models import Client, LegalEntity, Part, PartKp, PartRequest, PartRequestLine, User
+from ..models import Client, Factory, LegalEntity, Part, PartKp, PartRequest, PartRequestLine, User
 from ..services import settings_service
 from ..services.deal_service import audit, notify
 from ..services.parts_kp import build_kp_lines, diff_kp, release_expired, render_docx, reserve_soft
-from ..services.parts_pricing import LINE_STATUS, kp_summary, request_stage, request_status
-from ..services.parts_requests import approvals_pending, line_payload, match_lines, next_number, parse_lines_text, price_lines
+from ..services.parts_pricing import CURRENCIES, DELETABLE_LINE, LINE_STATUS, to_rub, kp_summary, request_stage, request_status
+from ..services.parts_requests import approvals_pending, supplier_currency_of, line_payload, match_lines, next_number, parse_lines_text, price_lines
 from .common import serialize
 from .parts_setup import current_policy, latest_fx
 
@@ -249,6 +249,25 @@ def patch_line(rid: str, line_id: str, body: LinePatch, db: Session = Depends(ge
     for k in ("route_id", "supplier_id", "lead_days", "comment"):
         if k in data:
             setattr(line, k, data[k])
+    if data.get("supplier_id"):
+        if db.get(Factory, data["supplier_id"]) is None:
+            raise HTTPException(422, "Поставщик не найден")
+        if "currency" not in data and line.price is None:       # валюта по умолчанию — по поставщику (GRP — евро, Китай — CNY, Россия — рубли)
+            line.currency = supplier_currency_of(db, data["supplier_id"])
+    cur = None
+    if "currency" in data:
+        cur = (data["currency"] or "").upper()
+        if cur not in CURRENCIES:
+            raise HTTPException(422, f"Валюта: {', '.join(CURRENCIES)}")
+        if "price" not in data and line.price and line.price_source != "manual" and cur != line.currency:
+            # автоматическая цена посчитана в рублях: пересчитываем в выбранную валюту по курсу и фиксируем как введённую вручную
+            fx = latest_fx(db)
+            if cur != "RUB" and not fx.get(cur):
+                raise HTTPException(422, f"Нет курса {cur} — задайте его в «Курсах»")
+            rub = to_rub(line.price, line.currency, fx)
+            if rub is not None:
+                line.price, line.price_source = round(rub / (1.0 if cur == "RUB" else fx[cur]), 2), "manual"
+        line.currency = cur
     if "status" in data:
         if data["status"] not in LINE_STATUS:
             raise HTTPException(422, "Неизвестный статус строки")
@@ -256,12 +275,35 @@ def patch_line(rid: str, line_id: str, body: LinePatch, db: Session = Depends(ge
     if "price" in data:
         if data["price"]:
             line.price, line.price_source = data["price"], "manual"
-            line.currency = data.get("currency") or line.currency or "RUB"
+            line.currency = cur or line.currency or "RUB"
         else:
             line.price, line.price_source = None, ""
     db.flush()
     _recalc(db, req)
     audit(db, user.id, None, "part_request_line", line.id, "update", None, data)
+    db.commit()
+    return _payload(db, req, user)
+
+
+@router.delete("/{rid}/lines/{line_id}")
+def delete_line(rid: str, line_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Удалить ошибочно введённую строку. Нельзя, если по ней уже есть заказ клиента, КП, заказ у поставщика, движение или отгрузка
+    (тогда — статус «отменена клиентом»); последнюю строку заявки не удалить."""
+    req = _req_or_404(db, rid, user)
+    _editable(user, req)
+    line = _line(req, line_id)
+    if line.status not in DELETABLE_LINE:
+        raise HTTPException(409, f"Строка в статусе «{LINE_STATUS.get(line.status, line.status)}» — удалить нельзя, отметьте её «отменена клиентом»")
+    if len(req.lines) <= 1:
+        raise HTTPException(409, "Это единственная строка заявки — добавьте новую или закройте заявку")
+    info = {"no": line.no, "article": line.raw_article, "name": line.raw_name, "qty": line.qty}
+    for ch in req.lines:
+        if ch.parent_line_id == line.id:
+            ch.parent_line_id = None
+    req.lines.remove(line)
+    db.flush()
+    _recalc(db, req)
+    audit(db, user.id, None, "part_request_line", line_id, "delete", info, None)
     db.commit()
     return _payload(db, req, user)
 
