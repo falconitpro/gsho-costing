@@ -81,16 +81,18 @@ def money(days: int = 90, db: Session = Depends(get_db), user: CurrentUser = Dep
     if not user.can("finance_analytics"):
         raise HTTPException(403, "Финансовая аналитика доступна ФД, КД и ЗГД")
     today = date.today()
+    # гарантии и аккредитивы — из общего сервиса «Обеспечение и неустойки» (D-139): сделки, договоры сделок, аккредитив клиента
+    from ..services.finance import access as fin_access, exposure
+    active = {d.id: d for d in _deals(db, user)}
     guarantees = []
-    for d in _deals(db, user):
-        sts = db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == d.id)).all()
-        bg = d.bank_guarantee or {}
-        if bg.get("required") or bg.get("amount"):
-            guarantees.append({"deal_id": d.id, "deal_number": d.number, "client": d.client.name if d.client else "", "kind": "банковская гарантия", **{k: bg.get(k) for k in ("amount", "currency", "until", "status", "bank")}})
-        lc = next((s for s in sts if s.code == "lc_opened"), None)
-        if lc is not None:
-            guarantees.append({"deal_id": d.id, "deal_number": d.number, "client": d.client.name if d.client else "", "kind": "аккредитив",
-                               "amount": None, "currency": "", "until": None, "status": "открыт" if lc.actual_on else f"план {(lc.refined_on or lc.planned_on or today):%d.%m}", "bank": ""})
+    for x in exposure.build(db, user, fin_access.Visibility(db, user), today, kind="security")["security"]:
+        dl = x.get("deal")
+        if not dl or dl["id"] not in active:
+            continue
+        d = active[dl["id"]]
+        guarantees.append({"deal_id": d.id, "deal_number": d.number, "client": d.client.name if d.client else "",
+                           "kind": x["kind_title"] if x["source"] != "contract" else f"{x['kind_title']} (договор {x['contract']['number']})",
+                           "amount": x["amount"], "currency": x["currency"] if x["amount"] is not None else "", "until": x["valid_to"], "status": x["status_title"], "bank": x["bank"]})
     # строки, дебиторка, кривая, запчасти и итоги — общий сервис «Финансов» (адаптер, D-130); гарантии и аккредитивы — как раньше
     from ..services.finance.cashview import summary_money
     return {**summary_money(db, user, days), "guarantees": guarantees}
