@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -173,6 +174,7 @@ class Choice:
     contract_number: str = ""
     contract_date: Optional[date] = None
     place: str = ""
+    framework_contract_id: Optional[str] = None      # оформить сделку спецификацией к рамочному договору (D-169)
 
 
 def suppliers_in_deal(db: Session, deal: Deal) -> list[dict]:
@@ -293,13 +295,17 @@ def build_context(db: Session, deal: Deal, ch: Choice) -> dict:
                 "language": language, "deal_number": deal.number, "deal_version": str(ver.version_no) if ver else "", "client_contract_number": deal.contract_number or "",
                 "client_contract_date": _fmt_date(deal.contract_signed_at)}
     src["contract.number"] = "реквизиты контракта сделки (номер договора с заводом)" if deal.factory_contract_number else "не внесён — заполнится при подписании"
+    framework = _framework_ref(db, deal, ch.framework_contract_id, factory.id, "expense", own_entity.id if own_entity else None) if ch.framework_contract_id else None
+    if framework:
+        contract.update({"number": framework["number"], "date": framework["date"], "spec_number": framework["spec_number"]})
+        src["contract.number"] = f"рамочный договор {framework['number']}; спецификация {framework['spec_number']}"
     src["contract.payment_terms"] = "условия оплаты заводу из позиции (КД / ответ завода)"
     totals = {"equipment_amount": round(eq_amount, 2), "zip_amount": zip_amount, "options_amount": 0.0, "amount": total, "amount_words": amount_words(total, currency), "currency": currency,
               "vat_text": "НДС не облагается (экспорт)" if country != "RU" else "в том числе НДС 20 %", "items_count": len(items), "units_count": units, "zip_included": included}
     return {"factory": {"id": factory.id, "name": factory.name, "short_name": factory.short_name or factory.name, "country": country}, "own_entity": {"id": own_entity.id, "name": own_entity.name, "code": own_entity.code} if own_entity else None,
             "buyer": buyer, "seller": seller, "contract": contract, "items": items, "params": params_rows, "zip": zrows, "zip_set": {"id": zs.id if zs else None, "confirmed": bool(zs and zs.confirmed_at), "pricing_mode": zs.pricing_mode if zs else "included", "lines_total": len(zs.lines) if zs else 0},
             "options": [], "totals": totals, "deal_version": {"id": ver.id if ver else None, "no": ver.version_no if ver else None}, "language": language, "sources": src,
-            "package": {"created_on": _fmt_date(date.today()), "author": "", "version": "", "status": STATUS_TITLES["draft"]}, "mirror": mirror}
+            "package": {"created_on": _fmt_date(date.today()), "author": "", "version": "", "status": STATUS_TITLES["draft"]}, "mirror": mirror, "framework": framework}
 
 
 def amount_words(v: float, currency: str) -> str:
@@ -394,7 +400,12 @@ def render_documents(db: Session, ctx: dict, templates: dict[str, Optional[Templ
     num = ctx["contract"]["number"] or "б-н"
     names = {"purchase_contract": f"Договор {num} — {ctx['factory']['short_name']}.docx", "spec_equipment": f"Приложение 1 — Спецификация оборудования — {num}.docx", "spec_zip": f"Приложение 2 — Спецификация ЗИП — {num}.docx"}
     builders = {"purchase_contract": build_purchase_contract, "spec_equipment": build_spec_equipment, "spec_zip": build_spec_zip}
+    if ctx.get("framework"):    # спецификация к рамочному договору: без нового договора, приложения — к спецификации (D-169)
+        sp = ctx["framework"]["spec_number"]
+        names.update({"spec_equipment": f"Спецификация {sp} — оборудование — к договору {num}.docx", "spec_zip": f"Спецификация {sp} — ЗИП — к договору {num}.docx"})
     for kind in PURCHASE_DOCS:
+        if kind == "purchase_contract" and ctx.get("framework"):
+            continue
         path = os.path.join(out_dir, names[kind].replace("/", "-"))
         t = templates.get(kind)
         if t is not None and os.path.isfile(t.file_path):
@@ -418,3 +429,20 @@ def package_payload(pkg: LegalPackage, names: dict[str, str]) -> dict:
 
 def user_names(db: Session) -> dict[str, str]:
     return {u.id: u.display_name for u in db.scalars(select(User)).all()}
+
+
+
+def _framework_ref(db: Session, deal: Deal, fw_id: str, cp_id: str, direction: str, own_entity_id: Optional[str]) -> dict:
+    """Рамочный договор для спецификации: тот же контрагент, направление и компания группы; номер спецификации — существующей или следующей."""
+    from ..models import Contract
+    from .legal_contracts import next_child_number, spec_for_deal
+    fw = db.get(Contract, fw_id)
+    if fw is None or not fw.is_framework or fw.doc_type != "contract":
+        raise HTTPException(422, "Рамочный договор не найден")
+    if fw.cp_id != cp_id or fw.direction != direction or (own_entity_id and fw.own_entity_id and fw.own_entity_id != own_entity_id):
+        raise HTTPException(422, "Рамочный договор заключён с другим контрагентом или другой компанией группы")
+    if fw.status in ("terminated", "closed"):
+        raise HTTPException(422, "Рамочный договор расторгнут или закрыт")
+    spec = spec_for_deal(db, fw, deal.id)
+    return {"id": fw.id, "number": fw.cp_number or fw.number, "registry_number": fw.number, "date": _fmt_date(fw.signed_on),
+            "status": fw.status, "spec_number": spec.number if spec else next_child_number(db, fw, "specification"), "spec_id": spec.id if spec else None}

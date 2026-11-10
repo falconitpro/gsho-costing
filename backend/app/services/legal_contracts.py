@@ -259,6 +259,7 @@ def payload(db: Session, c: Contract, names: Optional[dict] = None, ents: Option
            "direction": c.direction, "direction_title": DIRECTIONS.get(c.direction, ""), "number": c.number, "cp_number": c.cp_number, "title": c.title, "subject": c.subject,
            "status": c.status, "status_title": STATUSES.get(c.status, c.status), "locked": c.status in LOCKED,
            "own_entity_id": c.own_entity_id, "own_entity_name": ents.get(c.own_entity_id or "", ""), "cp_kind": c.cp_kind, "cp_id": c.cp_id, "cp_name": cp_display(db, c), "cp_inn": c.cp_inn,
+           "is_framework": bool(c.is_framework), "framework": framework_summary(db, c) if c.is_framework else None,
            "deal_id": c.deal_id, "deal_number": deal.number if deal else "", "amount": c.amount, "currency": c.currency, "vat_mode": c.vat_mode, "vat_rate": c.vat_rate, "price_type": c.price_type,
            "signed_on": c.signed_on.isoformat() if c.signed_on else None, "valid_to": c.valid_to.isoformat() if c.valid_to else None,
            "days_to_expiry": (c.valid_to - today).days if c.valid_to else None, "sign_method": c.sign_method,
@@ -344,9 +345,12 @@ def _default_entity(db: Session, income: bool) -> Optional[LegalEntity]:
 def upsert_from_package(db: Session, pkg: LegalPackage, deal: Deal, user_id: Optional[str]) -> Contract:
     """Пакет сделки → проект договора в реестре (или обновление ещё не подписанного): стороны, цена, условия оплаты, типовые неустойки."""
     income = pkg.kind == "sale"
+    snap = pkg.snapshot or {}
+    fw_id = (snap.get("framework") or {}).get("id")
+    if fw_id:     # сделка оформляется спецификацией к рамочному договору (D-168)
+        return _upsert_spec(db, pkg, deal, db.get(Contract, fw_id), user_id)
     c = db.scalars(select(Contract).where(Contract.deal_id == deal.id, Contract.cp_id == pkg.counterparty_id, Contract.doc_type == "contract",
                                           Contract.direction == ("income" if income else "expense"))).first()
-    snap = pkg.snapshot or {}
     totals = snap.get("totals") or {}
     if income:
         lines, amount, cur = deal_client_terms(deal)
@@ -909,3 +913,79 @@ def contract_packages(db: Session, c: Contract) -> list[LegalPackage]:
         if p is not None:
             rows = [p, *rows]
     return list(rows)
+
+
+
+# ------------------------------------------------------------------ рамочные договоры и спецификации к ним (D-168…D-170)
+
+def frameworks_for(db: Session, cp_id: str, direction: str, own_entity_id: Optional[str] = None) -> list[Contract]:
+    """Действующие и проектные рамочные договоры с контрагентом (для выбора в мастере пакета)."""
+    q = select(Contract).where(Contract.is_framework.is_(True), Contract.cp_id == cp_id, Contract.direction == direction, Contract.doc_type == "contract",
+                               Contract.status.notin_(("terminated", "closed")))
+    if own_entity_id:
+        q = q.where(Contract.own_entity_id == own_entity_id)
+    return list(db.scalars(q.order_by(Contract.created_at.desc())).all())
+
+
+def framework_specs(db: Session, fw: Contract) -> list[Contract]:
+    return list(db.scalars(select(Contract).where(Contract.parent_id == fw.id, Contract.doc_type == "specification").order_by(Contract.created_at)).all())
+
+
+def next_child_number(db: Session, parent: Contract, doc_type: str) -> str:
+    n = len(db.scalars(select(Contract.id).where(Contract.parent_id == parent.id)).all()) + 1
+    return f"{parent.number}/{'ДС' if doc_type == 'amendment' else 'СП'}-{n}"
+
+
+def spec_for_deal(db: Session, fw: Contract, deal_id: str) -> Optional[Contract]:
+    return db.scalar(select(Contract).where(Contract.parent_id == fw.id, Contract.doc_type == "specification", Contract.deal_id == deal_id))
+
+
+def framework_summary(db: Session, fw: Contract) -> dict:
+    """Спецификации рамочного договора: сколько, суммы по валютам, лимит (сумма договора) и остаток лимита."""
+    specs = framework_specs(db, fw)
+    by_cur: dict[str, float] = {}
+    for x in specs:
+        if x.amount is not None and x.status != "terminated":
+            by_cur[x.currency or "RUB"] = round(by_cur.get(x.currency or "RUB", 0.0) + float(x.amount), 2)
+    used = by_cur.get(fw.currency or "RUB", 0.0)
+    limit = float(fw.amount) if fw.amount is not None else None
+    other = sorted(k for k in by_cur if k != (fw.currency or "RUB"))
+    return {"specs": len(specs), "signed": sum(1 for x in specs if x.status in LOCKED), "by_currency": by_cur, "limit": limit, "currency": fw.currency,
+            "remaining": round(limit - used, 2) if limit is not None else None, "exceeded": limit is not None and used > limit + 0.005,
+            "other_currencies": other}
+
+
+def _upsert_spec(db: Session, pkg: LegalPackage, deal: Deal, fw: Optional[Contract], user_id: Optional[str]) -> Contract:
+    """Пакет сделки → спецификация к рамочному договору (или обновление ещё не подписанной): цена, условия оплаты, сроки — из пакета."""
+    if fw is None or not fw.is_framework:
+        raise ValueError("Рамочный договор не найден")
+    income = pkg.kind == "sale"
+    snap = pkg.snapshot or {}
+    totals = snap.get("totals") or {}
+    lines, amount, cur = deal_client_terms(deal) if income else deal_factory_terms(deal, pkg.counterparty_id)
+    if totals.get("amount") is not None:
+        amount, cur = float(totals["amount"]), totals.get("currency") or cur
+    c = spec_for_deal(db, fw, deal.id)
+    fresh = c is None
+    if fresh:
+        c = Contract(doc_type="specification", parent_id=fw.id, kind=fw.kind, direction=fw.direction, number=next_child_number(db, fw, "specification"),
+                     own_entity_id=fw.own_entity_id, own_profile_id=fw.own_profile_id, own_bank_id=fw.own_bank_id, cp_kind=fw.cp_kind, cp_id=fw.cp_id,
+                     cp_name=fw.cp_name, cp_inn=fw.cp_inn, cp_profile_id=fw.cp_profile_id, deal_id=deal.id, deal_ids=[deal.id],
+                     subject=f"Спецификация к договору {fw.cp_number or fw.number}: сделка {deal.number}", penalties=list(fw.penalties or []),
+                     liability_cap_pct=fw.liability_cap_pct, law=dict(fw.law or {}), curator_id=deal.manager_id, created_by=user_id, source="package",
+                     status="draft", mirror_kind=fw.mirror_kind)
+        db.add(c)
+        if deal.id not in (fw.deal_ids or []):
+            fw.deal_ids = [*(fw.deal_ids or []), deal.id]
+    if c.status in LOCKED:
+        c.package_id = c.package_id or pkg.id
+        return c
+    c.package_id = pkg.id
+    c.amount, c.currency, c.payment_terms = amount, (cur or "RUB").upper(), lines
+    if not c.performance_terms:
+        c.performance_terms = [{"code": "delivery" if income else "readiness", "title": "", "event": "contract", "offset_days": 0, "offset_kind": "calendar", "fixed_on": None,
+                                "note": (snap.get("contract") or {}).get("delivery_term" if income else "production_term") or ""}]
+    hist(c, user_id, "created" if fresh else "package", f"из юридического пакета v{pkg.version_no} — спецификация к рамочному договору {fw.number}")
+    if fresh:
+        hist(fw, user_id, "specification", f"спецификация {c.number}: сделка {deal.number}")
+    return c

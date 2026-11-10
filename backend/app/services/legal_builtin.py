@@ -89,6 +89,9 @@ def _head(doc, ctx: dict, title_key: str, language: str):
         _run(p2, sec[title_key], bold=True, color=ACCENT, size=13)
     p3 = doc.add_paragraph()
     p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if c.get("spec_number") and title_key != "contract":   # спецификация к рамочному договору (D-169)
+        _run(p3, f"Спецификация № {c['spec_number']} к договору № {c.get('number') or '________'} от {c.get('date') or '«___» ________ 20__ г.'}", color=BLACK, size=10)
+        return
     _run(p3, f"№ {c.get('number') or '________'} от {c.get('date') or '«___» ________ 20__ г.'}" + (f", {c['place']}" if c.get("place") else ""), color=BLACK, size=10)
 
 

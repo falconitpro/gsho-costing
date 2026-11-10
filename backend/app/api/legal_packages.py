@@ -59,7 +59,18 @@ class ChoiceIn(BaseModel):
     contract_number: str = ""
     contract_date: Optional[date] = None
     place: str = ""
+    framework_contract_id: Optional[str] = None      # спецификация к рамочному договору вместо нового договора (D-169)
     notes: str = ""
+
+
+def _frameworks(db: Session, cp_id: str, direction: str) -> list[dict]:
+    from ..services import legal_contracts as lc
+    out = []
+    for fw in lc.frameworks_for(db, cp_id, direction):
+        sm = lc.framework_summary(db, fw)
+        out.append({"id": fw.id, "number": fw.number, "cp_number": fw.cp_number, "signed_on": fw.signed_on, "status": fw.status, "own_entity_id": fw.own_entity_id,
+                    "specs": sm["specs"], "limit": sm["limit"], "remaining": sm["remaining"], "currency": fw.currency})
+    return out
 
 
 def _chain(user: CurrentUser) -> bool:
@@ -137,7 +148,8 @@ def purchase_options(deal_id: str, db: Session = Depends(get_db), user: CurrentU
         sup_profiles[s["id"]] = {"profiles": [{"id": p.id, "title": p.title, "is_default": p.is_default, "summary": lp.profile_summary(p), "check_status": p.check_status,
                                                "banks": [{"id": b.id, "title": b.title, "currency": b.currency, "bank_name": b.bank_name, "account": b.account, "swift": b.swift, "verified": b.verified} for b in p.banks if b.status == "active"]} for p in profs if p.is_active],
                                  "default_language": svc.DEFAULT_LANGUAGE.get(s["country"], "ru-en"), "contract_kind": svc.CONTRACT_KIND_BY_COUNTRY.get(s["country"], "purchase_contract_other"),
-                                 "zip_set": {"confirmed": bool(zs and zs.confirmed_at), "lines": len(zs.lines) if zs else 0, "selected": sum(1 for l in (zs.lines if zs else []) if l.get("selected"))}}
+                                 "zip_set": {"confirmed": bool(zs and zs.confirmed_at), "lines": len(zs.lines) if zs else 0, "selected": sum(1 for l in (zs.lines if zs else []) if l.get("selected"))},
+                                 "frameworks": _frameworks(db, s["id"], "expense")}
     db.commit()
     templates = [{"id": t.id, "kind": t.kind, "title": t.title, "version": t.version, "language": t.language, "country": t.country, "unknown": (t.variables or {}).get("unknown", [])}
                  for t in db.scalars(select(Template).where(Template.kind.in_(list(LEGAL_KINDS)), Template.is_active.is_(True), Template.is_example.is_(False)).order_by(Template.kind, Template.version.desc())).all()]
@@ -573,6 +585,7 @@ class SaleChoiceIn(BaseModel):
     templates: dict[str, Optional[str]] = Field(default_factory=dict)
     approved_replacements: list[str] = Field(default_factory=list)
     use_ai: bool = True
+    framework_contract_id: Optional[str] = None      # спецификация к рамочному договору с клиентом (D-169)
     notes: str = ""
 
 
@@ -626,7 +639,8 @@ def sale_options(deal_id: str, db: Session = Depends(get_db), user: CurrentUser 
     return {"sources": sources, "own_entity": {"id": ent.id, "name": ent.name} if ent else None, "own_profiles": own, "client_profiles": client_profiles, "templates": templates,
             "doc_titles": sale.SALE_TITLES, "ai": {"provider": ai.get("provider", "yandexgpt"), "model": ai.get("model", ""), "configured": configured_providers().get(ai.get("provider", "yandexgpt"), False), "title": PROVIDERS.get(ai.get("provider", "yandexgpt"), "")},
             "can_build": (user.has(Role.LAWYER, Role.CD, Role.GD) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id))) and deal.status in LEGAL_STATUSES,
-            "brand_company": deal.kp_brand == "company", "variant": {"id": deal.won_variant_id}, "deal_version": {"id": deal.approved_version_id}}
+            "brand_company": deal.kp_brand == "company", "variant": {"id": deal.won_variant_id}, "deal_version": {"id": deal.approved_version_id},
+            "frameworks": _frameworks(db, deal.client_id, "income")}
 
 
 @router.post("/deals/{deal_id}/legal/sale/upload", status_code=201)
@@ -645,7 +659,7 @@ def sale_upload(deal_id: str, file: UploadFile = File(...), comment: str = Form(
 def sale_preview(deal_id: str, body: SaleChoiceIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Разбор договора заказчика: пункты, план подстановки реквизитов (high — подставится, medium — после подтверждения), замечания правил (+ ИИ), проверки."""
     deal = _deal(db, deal_id, user)
-    ch = sale.SaleChoice(**body.model_dump())
+    ch = sale.SaleChoice(**body.model_dump(exclude={"framework_contract_id"}))
     try:
         ctx = sale.build_sale_context(db, deal, ch)
     except ValueError as e:
@@ -682,11 +696,14 @@ def sale_build(deal_id: str, body: SaleChoiceIn, db: Session = Depends(get_db), 
     """Формирует клиентский пакет: рабочая копия договора заказчика, протокол разногласий (черновик), техническая спецификация."""
     deal = _deal(db, deal_id, user)
     _can_build(deal, user)
-    ch = sale.SaleChoice(**body.model_dump())
+    ch = sale.SaleChoice(**body.model_dump(exclude={"framework_contract_id"}))
     try:
         ctx = sale.build_sale_context(db, deal, ch)
     except ValueError as e:
         raise HTTPException(409, str(e))
+    if body.framework_contract_id:
+        ctx["framework"] = svc._framework_ref(db, deal, body.framework_contract_id, deal.client_id, "income", (ctx.get("own_entity") or {}).get("id"))
+        ctx["contract"] = {**(ctx.get("contract") or {}), "number": ctx["framework"]["number"], "date": ctx["framework"]["date"], "spec_number": ctx["framework"]["spec_number"]}
     templates = _sale_templates(db, body.templates)
     checks = sale.check_sale(ctx, bool(body.source_attachment_id), templates)
     if checks["errors"]:
