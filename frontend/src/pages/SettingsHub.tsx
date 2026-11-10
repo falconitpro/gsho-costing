@@ -7,12 +7,14 @@ import TeamPage from "./TeamPage";
 import AccessPage from "./AccessPage";
 import AdminPage from "./AdminPage";
 import BackupStatusBlock from "../components/BackupStatusBlock";
+import SecuritySettingsPage from "./SecuritySettingsPage";
+import SecurityAdminPage from "./SecurityAdminPage";
 import { WorkplaceSettings } from "./WorkplacePage";
 
 // «Настройки» одним разделом: ставки и нормативы, сотрудники, уровни доступа, администрирование.
 // Доступ к каждому блоку — как и раньше (уровни доступа и администрирование — ЗГД / админ / ФД); блок виден только тем, кому он доступен.
 
-type Sec = "workplace" | "rates" | "team" | "access" | "admin" | "backup";
+type Sec = "workplace" | "security" | "rates" | "team" | "access" | "admin" | "security_admin" | "backup";
 
 export default function SettingsHub({ me }: { me: Me }) {
   const loc = useLocation();
@@ -21,15 +23,17 @@ export default function SettingsHub({ me }: { me: Me }) {
   const perm = (g: string, lvl: number) => (me.perms?.[g] ?? 0) >= lvl;
   const sections: [Sec, string, boolean][] = [
     ["workplace", "Рабочее место", true],
+    ["security", "Безопасность", true],
     ["rates", "Ставки и нормативы", has("admin", "fd", "gd", "cd")],
     ["team", "Сотрудники", true],
     ["access", "Уровни доступа", perm("access_admin", 2)],
     ["admin", "Администрирование", has("admin", "gd", "fd")],
+    ["security_admin", "Безопасность сотрудников", perm("security_admin", 1)],
     ["backup", "Резервные копии", perm("backup_status", 1)],
   ];
   const visible = sections.filter(([, , ok]) => ok);
   const want = new URLSearchParams(loc.search).get("s") as Sec | null;
-  const cur: Sec = visible.some(([k]) => k === want) ? (want as Sec) : visible.find(([k]) => k !== "workplace")?.[0] || "workplace";
+  const cur: Sec = visible.some(([k]) => k === want) ? (want as Sec) : visible.find(([k]) => k !== "workplace" && k !== "security")?.[0] || "workplace";
   return (
     <>
       <div className="row" style={{ alignItems: "baseline", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
@@ -47,6 +51,8 @@ export default function SettingsHub({ me }: { me: Me }) {
       {cur === "access" && <AccessPage me={me} embedded />}
       {cur === "admin" && <AdminPage me={me} embedded />}
       {cur === "backup" && <BackupStatusBlock />}
+      {cur === "security" && <SecuritySettingsPage me={me} onChanged={() => window.dispatchEvent(new CustomEvent("gsho:security-gate"))} />}
+      {cur === "security_admin" && <SecurityAdminPage meId={me.id} />}
     </>
   );
 }

@@ -59,6 +59,9 @@ class User(TimestampMixin, Base):
     prefs: Mapped[dict] = mapped_column(JSONType, default=dict)                # личные настройки интерфейса: {workplace: {order, hidden}}
     password_hash: Mapped[Optional[str]] = mapped_column(String(255))          # вход по паролю (страница входа); пусто — только Microsoft 365
     password_set_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    password_must_change: Mapped[bool] = mapped_column(Boolean, default=False)       # временный пароль администратора: до смены — только смена пароля (04 §4)
+    offboarded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))  # доступ отключён единой операцией (04 §5)
+    offboarded_by: Mapped[Optional[str]] = mapped_column(String(36))
     failed_logins: Mapped[int] = mapped_column(Integer, default=0)             # защита от перебора: 5 ошибок → блок на 15 минут
     locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
@@ -750,6 +753,7 @@ class Task(TimestampMixin, Base):
     due: Mapped[date] = mapped_column(Date)
     done_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     overdue_notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    needs_reassignment: Mapped[bool] = mapped_column(Boolean, default=False)   # исполнитель отключён — задачу нужно передать (04 §5.2)
 
 
 class Approval(Base):
@@ -859,6 +863,107 @@ class ImportMapping(TimestampMixin, Base):
     header_sig: Mapped[list] = mapped_column(JSONType, default=list)   # нормализованные заголовки — по ним узнаём «тот же формат»
     mapping: Mapped[dict] = mapped_column(JSONType, default=dict)      # {header_row, first_row, columns}
     updated_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+
+class AuthSession(Base):
+    """Вход сотрудника на сервере (docs/operations/02 §5): JWT несёт только sid; отзыв действует сразу. Сам токен не хранится."""
+    __tablename__ = "auth_sessions"
+    __table_args__ = (Index("ix_auth_sessions_user_active", "user_id", "revoked_at", "absolute_expires_at"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    sid: Mapped[str] = mapped_column(String(36), unique=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    idle_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    absolute_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[Optional[str]] = mapped_column(String(36))
+    revoke_reason: Mapped[str] = mapped_column(String(16), default="")   # logout | user | admin | password | offboard | mfa_reset | security
+    remember: Mapped[bool] = mapped_column(Boolean, default=False)
+    auth_method: Mapped[str] = mapped_column(String(16), default="password")   # password | oidc | recovery | dev | legacy
+    mfa_level: Mapped[str] = mapped_column(String(16), default="none")         # none | totp | recovery
+    last_mfa_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_step_up_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))   # подтверждение опасного действия (TOTP или пароль)
+    ip_prefix: Mapped[str] = mapped_column(String(64), default="")
+    user_agent_short: Mapped[str] = mapped_column(String(120), default="")
+
+
+class MfaCredential(Base):
+    """TOTP сотрудника: секрет только зашифрованным; новый секрет не заменяет действующий до подтверждения кодом (04 §3.1)."""
+    __tablename__ = "mfa_credentials"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True)
+    secret_ciphertext: Mapped[str] = mapped_column(Text, default="")
+    key_id: Mapped[str] = mapped_column(String(16), default="")
+    enabled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_used_step: Mapped[int] = mapped_column(BigInteger, default=0)       # защита от повторного использования того же кода
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    pending_secret_ciphertext: Mapped[str] = mapped_column(Text, default="")
+    pending_key_id: Mapped[str] = mapped_column(String(16), default="")
+    pending_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class MfaRecoveryCode(Base):
+    __tablename__ = "mfa_recovery_codes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    code_hash: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    used_session_id: Mapped[Optional[str]] = mapped_column(String(36))
+
+
+class MfaChallenge(Base):
+    """Второй шаг входа (mfa_pending): одноразовый, 5 минут, не даёт доступа к CRM (04 §3.2). Хранится только хэш проверочного значения."""
+    __tablename__ = "mfa_challenges"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    verifier_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    remember: Mapped[bool] = mapped_column(Boolean, default=False)
+    auth_method: Mapped[str] = mapped_column(String(16), default="password")
+    ip_prefix: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PasswordHistory(Base):
+    __tablename__ = "password_history"
+    __table_args__ = (UniqueConstraint("user_id", "password_hash", name="uq_password_history"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SecurityEvent(Base):
+    """События безопасности (02 §5): только вставка; без паролей, кодов, токенов и содержимого документов."""
+    __tablename__ = "security_events"
+    __table_args__ = (Index("ix_security_events_actor_type_at", "actor_user_id", "event_type", "occurred_at"),
+                      Index("ix_security_events_subject_at", "subject_user_id", "occurred_at"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    actor_user_id: Mapped[Optional[str]] = mapped_column(String(36))
+    subject_user_id: Mapped[Optional[str]] = mapped_column(String(36))
+    event_type: Mapped[str] = mapped_column(String(32))       # auth | session | mfa | password | offboard | access | download | export
+    action: Mapped[str] = mapped_column(String(48))
+    result: Mapped[str] = mapped_column(String(16), default="success")   # success | denied | error
+    request_id: Mapped[str] = mapped_column(String(36), default="")
+    session_id: Mapped[Optional[str]] = mapped_column(String(36))
+    ip_prefix: Mapped[str] = mapped_column(String(64), default="")
+    entity_type: Mapped[str] = mapped_column(String(32), default="")
+    entity_id: Mapped[str] = mapped_column(String(128), default="")
+    deal_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    format: Mapped[str] = mapped_column(String(16), default="")
+    row_count: Mapped[Optional[int]] = mapped_column(Integer)
+    byte_size: Mapped[Optional[int]] = mapped_column(BigInteger)
+    meta: Mapped[dict] = mapped_column("metadata", JSONType, default=dict)
+    risk_score: Mapped[Optional[int]] = mapped_column(Integer)
+    alert_id: Mapped[Optional[str]] = mapped_column(String(36))
 
 
 class BackupRun(Base):

@@ -75,7 +75,7 @@ def test_success_run_manifest_staging_and_no_secrets(box):
     st = _last(tmp)
     assert st["status"] == "success" and st["reason"] == "manual" and st["storage_provider"] == "local"
     assert re.fullmatch(r"[0-9a-f]{16}", st["snapshot_id"]) and st["check_status"] == "ok" and st["retention_status"] == "ok"
-    assert st["files_count"] == 2 and st["database_bytes"] > 0 and st["schema_revision"].startswith("013_")
+    assert st["files_count"] == 2 and st["database_bytes"] > 0 and re.fullmatch(r"\d{3}_[a-z_]+", st["schema_revision"])
     snaps = _snapshots(env)
     assert len(snaps) == 1 and snaps[0]["id"].startswith(st["snapshot_id"]) and f"run={st['run_key']}" in snaps[0]["tags"]
     assert not any((tmp / "staging").iterdir())           # staging удалён

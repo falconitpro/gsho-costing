@@ -123,40 +123,15 @@ class OidcClient:
         return sorted({mapping[g] for g in groups if g in mapping})
 
 
-# ------------------------------------------------------------------ сессии
+# ------------------------------------------------------------------ сессии (на сервере: services/auth_session.py, docs/operations/04 §2)
 
 REMEMBER_DAYS = 30
 
 
 def password_version(user: User) -> int:
     """Версия пароля — момент его последней смены (мс). Лежит в токене сессии: смена или сброс пароля отзывает все прежние сессии."""
-    at = user.password_set_at
-    return int(at.timestamp() * 1000) if at else 0
-
-
-def issue_session(user: User, s: Settings, remember: bool = False) -> str:
-    """Сессия: 8 ч скользящего срока; «Запомнить меня» — 30 дней (пароль нигде не хранится, только подписанный JWT)."""
-    now = int(time.time())
-    ttl = REMEMBER_DAYS * 86400 if remember else s.session_ttl_hours * 3600
-    claims = {"sub": user.id, "iat": now, "exp": now + ttl, "nonce": secrets.token_hex(4), "pv": password_version(user)}
-    if remember:
-        claims["rem"] = 1
-    return jwt.encode(claims, s.secret_key, algorithm="HS256")
-
-
-def reissue_session(request: Request, resp: Response, user: User, s: Settings) -> None:
-    """Выдать сотруднику новую сессию после смены им своего пароля (сохраняя «Запомнить меня»), чтобы текущий вход не прервался."""
-    remember = False
-    try:
-        remember = bool(jwt.decode(request.cookies.get(SESSION_COOKIE, ""), s.secret_key, algorithms=["HS256"]).get("rem"))
-    except jwt.PyJWTError:
-        pass
-    set_session_cookie(resp, issue_session(user, s, remember), s, remember)
-
-
-def set_session_cookie(resp: Response, token: str, s: Settings, remember: bool = False) -> None:
-    resp.set_cookie(SESSION_COOKIE, token, httponly=True, secure=not s.is_dev, samesite="lax",
-                    max_age=REMEMBER_DAYS * 86400 if remember else s.session_ttl_hours * 3600)
+    from ..services.auth_session import password_version as pv
+    return pv(user)
 
 
 # ------------------------------------------------------------------ пароли (вход по логину и паролю)
@@ -167,6 +142,14 @@ def hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), _PBKDF2_ITER)
     return f"pbkdf2_sha256${_PBKDF2_ITER}${salt}${dk.hex()}"
+
+
+def needs_rehash(stored: Optional[str]) -> bool:
+    try:
+        algo, iters, _, _ = (stored or "").split("$")
+        return algo == "pbkdf2_sha256" and int(iters) < _PBKDF2_ITER
+    except ValueError:
+        return False
 
 
 def verify_password(password: str, stored: Optional[str]) -> bool:
@@ -191,6 +174,13 @@ class CurrentUser:
     observer_scope: dict
     perms: dict[str, int] = field(default_factory=dict)   # группа полей → уровень (0/1/2), см. core/roles.py
     acting_for: set[str] = field(default_factory=set)      # сотрудники, которых пользователь сейчас замещает (заместитель на период)
+    sid: str = ""                                          # текущая сессия (AuthSession.sid)
+    auth_method: str = ""
+    mfa_level: str = "none"
+    step_up_fresh: bool = False                            # подтверждение опасного действия не старше 10 минут
+    password_must_change: bool = False
+    mfa_enabled: bool = False
+    mfa_setup_required: bool = False                       # MFA_POLICY=required, а TOTP ещё не настроен
 
     def has(self, *roles: Role) -> bool:
         return bool(self.roles & set(roles))
@@ -204,16 +194,43 @@ class CurrentUser:
         return self.perms.get(group, 0) >= level
 
 
+# Пока не сменён временный пароль или не настроен обязательный TOTP — доступны только эти адреса (04 §3.3, §4)
+_LIMITED_OK = {"/api/auth/me", "/api/auth/logout", "/api/auth/providers", "/api/auth/password", "/api/auth/change-password",
+               "/api/auth/mfa/setup", "/api/auth/mfa/confirm", "/api/auth/step-up", "/api/auth/dev-users"}
+
+
+def _legacy_allowed(s: Settings) -> bool:
+    from datetime import datetime, timezone
+    if not s.legacy_sessions_until:
+        return False
+    try:
+        until = datetime.fromisoformat(s.legacy_sessions_until.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) < until
+
+
 async def get_current_user(request: Request, response: Response, db: Session = Depends(get_db),
                            s: Settings = Depends(get_settings)) -> CurrentUser:
+    from ..services import auth_session as sess
+    from ..services import mfa as mfa_svc
     user: Optional[User] = None
+    row = None
     if s.auth_provider == "dev" and s.is_dev:
         email = request.headers.get("X-Dev-User", "")
         if email:
             user = db.scalar(select(User).where(User.email == email))
             if user is not None and user.is_active:
-                # dev-стенд: сессия и для обычных ссылок (скачивание КП, Excel, фото) — от выбранного пользователя
-                set_session_cookie(response, issue_session(user, s), s)
+                # dev-стенд: «Войти как» — своя серверная сессия для выбранного пользователя (одна на пользователя, переиспользуется)
+                row = next((r for r in sess.active(db, user.id) if r.auth_method == "dev"), None)
+                if row is None:
+                    row = sess.create(db, user, s, method="dev", request=request)
+                    db.commit()
+                sess.set_cookie(response, row, user, s)
+            else:
+                user = None
     if user is None:
         token = request.cookies.get(SESSION_COOKIE)
         if not token:
@@ -222,16 +239,43 @@ async def get_current_user(request: Request, response: Response, db: Session = D
             claims = jwt.decode(token, s.secret_key, algorithms=["HS256"])
         except jwt.PyJWTError:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Сессия истекла")
-        user = db.get(User, claims["sub"])
+        user = db.get(User, claims.get("sub"))
         if user is None or not user.is_active:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Учётная запись отключена")
         if claims.get("pv", 0) != password_version(user):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Пароль изменён — войдите заново")
-        remember = bool(claims.get("rem"))
-        set_session_cookie(response, issue_session(user, s, remember), s, remember)   # скользящий срок: 8 ч или 30 дней («Запомнить меня»)
+        if not claims.get("sid"):
+            # старый вход без серверной сессии — только в явно заданное окно перехода (LEGACY_SESSIONS_UNTIL), затем отказ
+            if not _legacy_allowed(s):
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Сессия устарела после обновления системы — войдите заново")
+            row = sess.create(db, user, s, remember=bool(claims.get("rem")), method="legacy", request=request)
+            db.commit()
+            sess.set_cookie(response, row, user, s)
+        else:
+            try:
+                row = sess.validate(db, claims, user)
+            except sess.SessionInvalid as e:
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, e.message)
+            if sess.touch(db, row, s):
+                db.commit()
     from ..services.access_service import acting_for, perms_for
-    return CurrentUser(id=user.id, email=user.email, display_name=user.display_name,
-                       roles={Role(r) for r in user.roles}, observer_scope=user.observer_scope or {}, perms=perms_for(db, user), acting_for=acting_for(db, user))
+    mfa_on = mfa_svc.enabled(db, user.id)
+    cu = CurrentUser(id=user.id, email=user.email, display_name=user.display_name,
+                     roles={Role(r) for r in user.roles}, observer_scope=user.observer_scope or {}, perms=perms_for(db, user), acting_for=acting_for(db, user),
+                     sid=row.sid if row else "", auth_method=row.auth_method if row else "", mfa_level=row.mfa_level if row else "none",
+                     step_up_fresh=sess.step_up_fresh(row), password_must_change=bool(user.password_must_change), mfa_enabled=mfa_on,
+                     mfa_setup_required=(s.mfa_policy == "required" and not mfa_on))
+    if (cu.password_must_change or cu.mfa_setup_required) and request.url.path not in _LIMITED_OK:
+        code = "password_change_required" if cu.password_must_change else "mfa_setup_required"
+        msg = "Смените временный пароль, чтобы продолжить" if cu.password_must_change else "Настройте вход с кодом из приложения, чтобы продолжить"
+        raise HTTPException(status.HTTP_403_FORBIDDEN, {"code": code, "message": msg})
+    return cu
+
+
+def require_step_up(user: CurrentUser) -> None:
+    """Опасное действие (отключение сотрудника, сброс TOTP, завершение чужих сессий): подтверждение не старше 10 минут."""
+    if not user.step_up_fresh:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, {"code": "step_up_required", "message": "Подтвердите действие кодом из приложения или паролем"})
 
 
 def require_roles(*roles: Role):

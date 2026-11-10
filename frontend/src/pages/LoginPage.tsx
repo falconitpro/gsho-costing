@@ -56,6 +56,25 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
   const loginEmpty = touched && !login.trim();
   const passEmpty = touched && !password;
 
+  // второй шаг входа (docs/operations/04 §3.2): после пароля или Microsoft 365 — код из приложения либо код восстановления
+  const [mfa, setMfa] = useState(() => new URLSearchParams(window.location.search).get("mfa") === "1");
+  const [code, setCode] = useState("");
+  const [useRecovery, setUseRecovery] = useState(false);
+  async function submitCode(e: FormEvent) {
+    e.preventDefault();
+    if (busy || !code.trim()) return;
+    setBusy(true); setError(""); setInfo("");
+    try {
+      await api.post(useRecovery ? "/api/auth/mfa/recovery" : "/api/auth/mfa/verify", { code: code.trim() });
+      setCode(""); onLoggedIn();
+    } catch (err) {
+      const d = err instanceof ApiError ? (err.detail as { code?: string }) : null;
+      if (d?.code === "mfa_challenge_expired") { setMfa(false); setPassword(""); }
+      setError(err instanceof ApiError ? err.message : "Не удалось выполнить вход. Проверьте подключение и повторите попытку");
+      setBusy(false);
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
@@ -63,8 +82,9 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
     if (!login.trim() || !password) return;
     setBusy(true);
     try {
-      await api.post("/api/auth/password-login", { login: login.trim(), password, remember });
+      const r = await api.post<{ mfa_required?: boolean }>("/api/auth/password-login", { login: login.trim(), password, remember });
       setPassword("");
+      if (r?.mfa_required) { setMfa(true); setBusy(false); return; }
       onLoggedIn();
     } catch (err) {
       const st = err instanceof ApiError ? err.status : 0;
@@ -86,6 +106,28 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
       <main className="bh-main">
         <section className="bh-card" aria-labelledby={`${uid}-h`}>
           <h1 id={`${uid}-h`}>Вход</h1>
+          {mfa ? (
+          <form onSubmit={submitCode} noValidate aria-describedby={error ? ids.err : undefined}>
+            {error && <div className="bh-alert" role="alert" id={ids.err}>{Ic.warn}<span>{error}</span></div>}
+            <label className="bh-field" htmlFor={`${uid}-code`}>
+              <span>{useRecovery ? "Код восстановления" : "Код из приложения"}</span>
+              <div className="bh-input">
+                <span className="ic">{Ic.lock}</span>
+                <input id={`${uid}-code`} name="code" autoFocus inputMode={useRecovery ? "text" : "numeric"} autoComplete="one-time-code" maxLength={useRecovery ? 9 : 6}
+                  placeholder={useRecovery ? "xxxx-xxxx" : "000000"} value={code} disabled={busy}
+                  onChange={(e) => setCode(useRecovery ? e.target.value : e.target.value.replace(/\D/g, ""))} />
+              </div>
+            </label>
+            <div className="bh-row">
+              <button type="button" className="bh-link" onClick={() => { setUseRecovery(!useRecovery); setCode(""); setError(""); }}>{useRecovery ? "Ввести код из приложения" : "Нет доступа к телефону"}</button>
+              <button type="button" className="bh-link" onClick={() => { setMfa(false); setCode(""); setError(""); }}>Другой пользователь</button>
+            </div>
+            <button type="submit" className="bh-submit" disabled={busy || !code.trim()} aria-busy={busy}>
+              <span style={{ display: "inline-flex", alignItems: "center" }}>Подтвердить вход{busy && <span className="bh-spin" aria-hidden="true" />}</span>
+              <span className="arrow" aria-hidden="true">{Ic.arrow}</span>
+            </button>
+          </form>
+          ) : (
           <form onSubmit={submit} noValidate aria-describedby={error ? ids.err : undefined}>
             {error && <div className="bh-alert" role="alert" id={ids.err}>{Ic.warn}<span>{error}</span></div>}
             {info && <div className="bh-alert info" role="status">{Ic.warn}<span>{info}</span></div>}
@@ -117,6 +159,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
               <span className="arrow" aria-hidden="true">{Ic.arrow}</span>
             </button>
           </form>
+          )}
           <div className="bh-secure"><span className="dot" aria-hidden="true" />Защищённый контур БЕРГ-ХАУС</div>
           {prov?.m365 && <div className="bh-alt"><a href={`/api/auth/login`}>Войти через Microsoft 365</a></div>}
           <div className="bh-card-foot">

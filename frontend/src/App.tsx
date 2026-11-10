@@ -14,6 +14,8 @@ import FinanceQuestionPage from "./pages/FinanceQuestionPage";
 import FinancePage from "./pages/FinancePage";
 import BoardPage from "./pages/BoardPage";
 import SettingsHub from "./pages/SettingsHub";
+import SecuritySettingsPage from "./pages/SecuritySettingsPage";
+import StepUpDialog from "./components/StepUpDialog";
 import CounterpartiesPage from "./pages/CounterpartiesPage";
 import LegalPage from "./pages/LegalPage";
 import CatalogHub from "./pages/CatalogHub";
@@ -75,8 +77,10 @@ export default function App() {
     setDevUser("");          // заголовок X-Dev-User нужен только на один запрос переключения — дальше работает cookie сессии
     load();
     const onUnauth = () => { setDevUser(""); setMe(null); MeContext.current = null; };
+    const onGate = () => { load(); };          // смена пароля / настройка TOTP / требование сервера — перечитать профиль
     window.addEventListener("gsho:unauthorized", onUnauth);
-    return () => window.removeEventListener("gsho:unauthorized", onUnauth);
+    window.addEventListener("gsho:security-gate", onGate);
+    return () => { window.removeEventListener("gsho:unauthorized", onUnauth); window.removeEventListener("gsho:security-gate", onGate); };
   }, []);
   if (!checked) return null;
   if (!me) {
@@ -86,6 +90,19 @@ export default function App() {
           <Route path="/login" element={<LoginRoute onLoggedIn={load} />} />
           <Route path="*" element={<RequireLogin />} />
         </Routes>
+      </BrowserRouter>);
+  }
+
+  // временный пароль или обязательный TOTP: пока не выполнено — только этот экран и «Выйти» (сервер закрывает остальное сам)
+  const gate = me.security?.password_must_change ? "password" : me.security?.mfa_setup_required ? "mfa" : null;
+  if (gate) {
+    return (
+      <BrowserRouter>
+        <header className="top"><div className="top-row">
+          <span className="brand"><img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" /></span>
+          <div className="account"><span className="muted">{me.display_name}</span><button className="btn ghost" style={{ padding: "4px 10px" }} onClick={logout}>Выйти</button></div>
+        </div></header>
+        <main><SecuritySettingsPage me={me} focus={gate} onChanged={load} /></main>
       </BrowserRouter>);
   }
 
@@ -138,6 +155,7 @@ export default function App() {
         )}
       </header>
       <FloatingScrollbar />
+      <StepUpDialog />
       <main>
         {me && (
           <Routes>
