@@ -242,16 +242,40 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
 
 type RfqLine = { id: string; no: number; request_line_id: string; number: string; name_ru: string; name_foreign: string; machine_translated: boolean;
   qty: number; unit: string; availability: string; price: number | null; currency: string; lead_days: number | null; moq: number | null;
-  analog_number: string; comment: string; chosen?: boolean };
+  analog_number: string; comment: string; chosen?: boolean;
+  chain?: { supplier_price?: number | null; supplier_currency?: string; group_margin_rub?: number; error?: string; warnings?: string[];
+    pending?: { price: number | null; currency: string } } };
+// зеркальный запрос через компанию группы (D-156): upper — её предложение, lower — её запрос поставщику
+type Mirror = { role: "upper" | "lower"; group_company: string; end_supplier: string; upper_id: string; lower_id: string | null;
+  upper_number: string; lower_number: string; state: string; state_title: string; route: string };
 type Rfq = { id: string; number: string; supplier_id: string; supplier_name: string; language_title: string; status: string; status_title: string;
   due_date: string | null; sent_at: string | null; answered: number; lines: RfqLine[]; lines_count?: number;
-  send_log: { at: string; via: string; ok: boolean; error?: string }[] };
-type Quote = RfqLine & { rfq_number: string; supplier_id: string; supplier_name: string };
+  send_log: { at: string; via: string; ok: boolean; error?: string; from?: string }[]; mirror?: Mirror | null };
+type Quote = RfqLine & { rfq_number: string; supplier_id: string; supplier_name: string; mirror?: Mirror | null; selectable?: boolean };
+const MIRROR_TONE: Record<string, string> = { ok: "var(--good)", waiting: "var(--muted)", no_policy: "var(--bad)", error: "var(--bad)", changed_after_select: "var(--warn, #b7791f)" };
+const rfqTitle = (q: { supplier_name: string; mirror?: Mirror | null }) =>
+  !q.mirror ? q.supplier_name : q.mirror.role === "upper" ? `${q.mirror.group_company} → поставщик ${q.mirror.end_supplier}` : `${q.supplier_name} · запрос от ${q.mirror.group_company}`;
+function MirrorBadge({ m }: { m?: Mirror | null }) {
+  if (!m || m.role !== "upper") return null;
+  return <div style={{ fontSize: 11, color: MIRROR_TONE[m.state] || "var(--muted)" }}>{m.state_title}{m.route && <span className="muted"> · {m.route}</span>}</div>;
+}
+function ChainNote({ l }: { l: RfqLine }) {
+  const c = l.chain;
+  if (!c) return null;
+  if (c.error) return <div style={{ fontSize: 11, color: "var(--bad)" }}>{c.error}</div>;
+  return (<div className="muted" style={{ fontSize: 11 }}>
+    {c.supplier_price != null && <>поставщик {fmtRub(c.supplier_price, 2)} {c.supplier_currency}</>}
+    {c.group_margin_rub != null && <> · маржа группы {fmtRub(c.group_margin_rub, 0)} ₽</>}
+    {c.pending && <div style={{ color: "var(--warn, #b7791f)" }}>новая цена {c.pending.price != null ? `${fmtRub(c.pending.price, 2)} ${c.pending.currency}` : "— нет"} — выберите повторно, чтобы принять</div>}
+    {c.warnings?.map((w) => <div key={w} style={{ color: "var(--bad)" }}>{w}</div>)}
+  </div>);
+}
 const AVAIL: Record<string, string> = { available: "в наличии", on_order: "под заказ", none: "нет", analog: "аналог" };
 
 function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: () => Promise<T>, ok?: string) => Promise<void> }) {
   const [sups, setSups] = useState<{ id: string; name: string; short_name: string; country: string; supplier_status: string; approval_status?: string }[]>([]);
   const [pickSup, setPickSup] = useState<string[]>([]);
+  const [viaGroup, setViaGroup] = useState<Record<string, string[]>>({});
   const [due, setDue] = useState(3);
   const [rfqs, setRfqs] = useState<Rfq[]>([]);
   const [open, setOpen] = useState<Rfq | null>(null);
@@ -264,8 +288,11 @@ function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: ()
   };
   useEffect(() => { api.get<typeof sups>("/api/refs/factories?supplies=parts").then(setSups).catch(() => setSups([])); }, []);
   useEffect(reload, [r]);
-  const run = async (fn: () => Promise<unknown>, ok = "") => { try { const x = await fn(); setErr(ok); if (x && (x as Rfq).lines && (x as Rfq).supplier_id) setOpen(x as Rfq); reload(); } catch (e) { setErr((e as Error).message); } };
+  const run = async (fn: () => Promise<unknown>, ok = "") => { setErr(""); try { const x = await fn(); if (ok) setErr(ok); if (x && (x as Rfq).lines && (x as Rfq).supplier_id) setOpen(x as Rfq); reload(); } catch (e) { setErr((e as Error).message); } };
   const withQuotes = r.lines.filter((l) => quotes[l.id]?.length);
+  const groups = sups.filter((s) => pickSup.includes(s.id) && s.supplier_status === "group_company");
+  const ends = sups.filter((s) => s.supplier_status !== "group_company" && s.approval_status !== "pending");
+  const groupMissing = groups.some((g) => !(viaGroup[g.id] || []).length);
 
   return (
     <>
@@ -275,10 +302,17 @@ function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: ()
         <span className="muted">Отмечено строк: {sel.length}</span>
         <select multiple size={4} style={{ minWidth: 260 }} value={pickSup} onChange={(e) => setPickSup(Array.from(e.target.selectedOptions as ArrayLike<HTMLOptionElement>).map((o: HTMLOptionElement) => o.value))}>
           {sups.map((s) => <option key={s.id} value={s.id} disabled={s.approval_status === "pending"}>{s.short_name || s.name} · {s.country}{s.approval_status === "pending" ? " — на утверждении" : ""}</option>)}</select>
+        {groups.map((g) => (
+          <label key={g.id} style={{ display: "flex", flexDirection: "column", fontSize: 12 }}>через «{g.short_name || g.name}» — конечные поставщики
+            <select multiple size={4} style={{ minWidth: 220 }} value={viaGroup[g.id] || []}
+              onChange={(e) => setViaGroup({ ...viaGroup, [g.id]: Array.from(e.target.selectedOptions as ArrayLike<HTMLOptionElement>).map((o: HTMLOptionElement) => o.value) })}>
+              {ends.map((s) => <option key={s.id} value={s.id}>{s.short_name || s.name} · {s.country}</option>)}</select></label>))}
         <label className="row">ответ за<input type="number" style={{ width: 50 }} value={due} onChange={(e) => setDue(Number(e.target.value))} />дн.</label>
-        <button className="btn" disabled={!sel.length || !pickSup.length} onClick={() => act(async () => {
-          const x = await api.post<{ request: Req }>(`${base}/rfq`, { line_ids: sel, supplier_ids: pickSup, due_days: due }); reload(); return x.request;
-        }, "Запросы созданы — скачайте файл или отправьте поставщику")}>Запросить цены</button>
+        <button className="btn" disabled={!sel.length || !pickSup.length || groupMissing} title={groupMissing ? "Выберите конечных поставщиков для компании группы" : undefined} onClick={() => act(async () => {
+          const via_group = Object.fromEntries(groups.map((g) => [g.id, viaGroup[g.id] || []]));
+          const x = await api.post<{ request: Req }>(`${base}/rfq`, { line_ids: sel, supplier_ids: pickSup, due_days: due, via_group }); reload(); return x.request;
+        }, groups.length ? "Запросы созданы: компания группы запросит цену у поставщиков со своей почты и WeCom — отправьте из её предложения"
+          : "Запросы созданы — скачайте файл или отправьте поставщику")}>Запросить цены</button>
         <span className="muted" style={{ fontSize: 11 }}>Ctrl/⌘ — несколько поставщиков; файл — на языке поставщика. Нет нужного — в разделе «Поставщики» отметьте у него «Запасные части»</span>
       </div>
       {rfqs.length > 0 && (
@@ -287,16 +321,16 @@ function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: ()
           <tbody>{rfqs.map((q) => (
             <tr key={q.id} style={{ background: open?.id === q.id ? "var(--accent-soft)" : undefined }}>
               <td><a href="#" onClick={(e) => { e.preventDefault(); api.get<Rfq>(`/api/parts/rfq/${q.id}`).then(setOpen); }}><b>{q.number}</b></a></td>
-              <td>{q.supplier_name}</td><td>{q.language_title}</td><td className="num">{q.answered} из {q.lines_count ?? q.lines?.length}</td>
+              <td>{rfqTitle(q)}<MirrorBadge m={q.mirror} /></td><td>{q.language_title}</td><td className="num">{q.answered} из {q.lines_count ?? q.lines?.length}</td>
               <td style={{ color: q.due_date && !["answered", "closed"].includes(q.status) && new Date(q.due_date) < new Date() ? "var(--bad)" : undefined }}>{fmtDate(q.due_date)}</td>
               <td>{q.status_title}</td>
               <td><a className="btn ghost" href={`/api/parts/rfq/${q.id}/xlsx`}>Excel</a>
                 {q.status !== "closed" && <>
-                  <button className="btn ghost" onClick={() => run(async () => { const x = await api.post<Rfq & { send_results: { via: string; ok: boolean; error: string }[] }>(`/api/parts/rfq/${q.id}/send`, { only_unanswered: q.status !== "draft" });
+                  {q.mirror?.role !== "lower" && <><button className="btn ghost" onClick={() => run(async () => { const x = await api.post<Rfq & { send_results: { via: string; ok: boolean; error: string }[] }>(`/api/parts/rfq/${q.id}/send`, { only_unanswered: q.status !== "draft" });
                     setErr(x.send_results.map((s) => `${s.via === "mail" ? "почта" : "WeCom"}: ${s.ok ? "отправлено" : s.error}`).join("; ")); return x; })}>{q.status === "draft" ? "отправить" : "напомнить"}</button>
-                  {q.status === "draft" && <button className="btn ghost" onClick={() => run(() => api.post(`/api/parts/rfq/${q.id}/mark-sent`), "Отмечено как отправленное")}>отправлен вручную</button>}
-                  <label className="btn ghost" style={{ cursor: "pointer" }}>ответ из файла<input type="file" accept=".xlsx" style={{ display: "none" }}
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) run(() => api.upload(`/api/parts/rfq/${q.id}/import`, f), "Ответ загружен"); e.target.value = ""; }} /></label>
+                  {q.status === "draft" && <button className="btn ghost" onClick={() => run(() => api.post(`/api/parts/rfq/${q.id}/mark-sent`), "Отмечено как отправленное")}>отправлен вручную</button>}</>}
+                  {q.mirror?.role !== "upper" && <label className="btn ghost" style={{ cursor: "pointer" }}>ответ из файла<input type="file" accept=".xlsx" style={{ display: "none" }}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) run(() => api.upload(`/api/parts/rfq/${q.id}/import`, f), "Ответ загружен"); e.target.value = ""; }} /></label>}
                   <button className="btn ghost" onClick={() => run(() => api.post(`/api/parts/rfq/${q.id}/close`), "Запрос закрыт")}>закрыть</button></>}</td></tr>))}</tbody>
         </table>)}
       {open && <RfqAnswers rfq={open} onSave={(lines) => run(() => api.put(`/api/parts/rfq/${open.id}/answers`, { lines }), "Ответ сохранён")} onClose={() => setOpen(null)} />}
@@ -309,29 +343,54 @@ function SupplierPanel({ r, sel, act }: { r: Req; sel: string[]; act: <T>(fn: ()
             return qs.map((q, i) => (
               <tr key={q.id} style={{ background: l.rfq_line_id === q.id ? "var(--accent-soft)" : undefined, borderTop: i === 0 ? "2px solid var(--line)" : undefined }}>
                 {i === 0 && <><td rowSpan={qs.length}>{l.no}</td><td rowSpan={qs.length}><b>{l.part?.article || l.raw_article}</b><div className="muted" style={{ fontSize: 11 }}>{l.part?.name_ru || l.raw_name} · {l.qty} {l.unit}</div></td></>}
-                <td>{q.supplier_name}<div className="muted" style={{ fontSize: 11 }}>{q.rfq_number}</div></td>
+                <td>{rfqTitle(q)}<div className="muted" style={{ fontSize: 11 }}>{q.rfq_number}</div>{q.mirror?.role === "upper" && <ChainNote l={q} />}</td>
                 <td>{q.availability ? AVAIL[q.availability] : <span className="muted">ждём ответ</span>}{q.analog_number && <div style={{ fontSize: 11 }}>аналог {q.analog_number}</div>}</td>
                 <td className="num">{q.price != null ? `${fmtRub(q.price, 2)} ${q.currency}` : "—"}</td>
                 <td className="num">{q.lead_days ?? "—"}</td><td className="num">{q.moq ?? "—"}</td><td style={{ fontSize: 12 }}>{q.comment}</td>
                 <td>{l.rfq_line_id === q.id ? <span className="badge">выбран</span>
+                  : q.selectable === false ? <span className="muted" style={{ fontSize: 11 }}>выбирается предложение компании группы</span>
                   : q.price != null && q.availability !== "none" && <button className="btn ghost" onClick={() => act(() => api.post<Req>(`${base}/lines/${l.id}/choose`, { rfq_line_id: q.id }), "Поставщик выбран, цена пересчитана")}>выбрать</button>}</td>
               </tr>));
           })}</tbody>
         </table>
-        <p className="muted" style={{ fontSize: 11 }}>Срок клиенту = срок поставщика + перевозка по маршруту. Цена клиенту считается от цены поставщика по маршруту с наценками группы.</p>
+        <p className="muted" style={{ fontSize: 11 }}>Срок клиенту = срок поставщика + перевозка по маршруту. Цена клиенту считается от цены поставщика по маршруту с наценками группы.
+          Предложение компании группы = цена поставщика с наценками группы по маршруту; изменение ответа поставщика после выбора цену в заявке не меняет.</p>
       </>)}
     </>
   );
 }
 
 function RfqAnswers({ rfq, onSave, onClose }: { rfq: Rfq; onSave: (lines: Partial<RfqLine>[]) => void; onClose: () => void }) {
+  if (rfq.mirror?.role === "upper") return <MirrorOffer rfq={rfq} onClose={onClose} />;
+  return <RfqAnswersForm rfq={rfq} onSave={onSave} onClose={onClose} />;
+}
+
+function MirrorOffer({ rfq, onClose }: { rfq: Rfq; onClose: () => void }) {
+  const m = rfq.mirror!;
+  return (
+    <div style={{ border: "1px solid var(--line)", padding: 8, marginTop: 6 }}>
+      <div className="row" style={{ justifyContent: "space-between" }}><b>{rfq.number} · предложение {m.group_company} — поставщик {m.end_supplier}</b><button className="btn ghost" onClick={onClose}>свернуть</button></div>
+      <MirrorBadge m={m} />
+      <div className="muted" style={{ fontSize: 11 }}>Считается из ответа поставщика на запрос {m.lower_number || "компании группы"} по маршруту и наценкам группы — вручную не правится.</div>
+      <table>
+        <thead><tr><th>№</th><th>Номер</th><th>Наименование</th><th className="num">Кол-во</th><th>Наличие</th><th className="num">Цена {m.group_company}</th><th className="num">Срок, дн</th><th className="num">Мин. партия</th><th>Аналог</th></tr></thead>
+        <tbody>{rfq.lines.map((l) => (
+          <tr key={l.id}><td>{l.no}</td><td>{l.number}</td><td>{l.name_ru}</td><td className="num">{l.qty} {l.unit}</td>
+            <td>{l.availability ? AVAIL[l.availability] : <span className="muted">ждём ответ</span>}</td>
+            <td className="num">{l.price != null ? `${fmtRub(l.price, 2)} ${l.currency}` : "—"}<ChainNote l={l} /></td>
+            <td className="num">{l.lead_days ?? "—"}</td><td className="num">{l.moq ?? "—"}</td><td>{l.analog_number}</td></tr>))}</tbody>
+      </table>
+    </div>);
+}
+
+function RfqAnswersForm({ rfq, onSave, onClose }: { rfq: Rfq; onSave: (lines: Partial<RfqLine>[]) => void; onClose: () => void }) {
   const [rows, setRows] = useState<RfqLine[]>(rfq.lines);
   useEffect(() => setRows(rfq.lines), [rfq]);
   const set = (i: number, k: keyof RfqLine, v: unknown) => setRows(rows.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
   return (
     <div style={{ border: "1px solid var(--line)", padding: 8, marginTop: 6 }}>
-      <div className="row" style={{ justifyContent: "space-between" }}><b>{rfq.number} · {rfq.supplier_name} — ответ по строкам</b><button className="btn ghost" onClick={onClose}>свернуть</button></div>
-      {rfq.send_log?.length > 0 && <div className="muted" style={{ fontSize: 11 }}>Отправка: {rfq.send_log.map((s) => `${fmtDate(s.at)} ${s.via}${s.ok ? "" : ` — ${s.error}`}`).join("; ")}</div>}
+      <div className="row" style={{ justifyContent: "space-between" }}><b>{rfq.number} · {rfqTitle(rfq)} — ответ по строкам</b><button className="btn ghost" onClick={onClose}>свернуть</button></div>
+      {rfq.send_log?.length > 0 && <div className="muted" style={{ fontSize: 11 }}>Отправка: {rfq.send_log.map((s) => `${fmtDate(s.at)} ${s.via}${s.from ? ` от ${s.from}` : ""}${s.ok ? "" : ` — ${s.error}`}`).join("; ")}</div>}
       <table>
         <thead><tr><th>№</th><th>Номер у поставщика</th><th>Наименование</th><th className="num">Кол-во</th><th>Наличие</th><th className="num">Цена</th><th>Валюта</th><th className="num">Срок, дн</th><th className="num">Мин. партия</th><th>Аналог</th><th>Комментарий</th></tr></thead>
         <tbody>{rows.map((l, i) => (
