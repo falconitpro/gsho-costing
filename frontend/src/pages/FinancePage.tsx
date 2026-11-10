@@ -234,7 +234,7 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
           <select value={f.currency} onChange={(e) => go({ currency: e.target.value })} aria-label="Валюта">
             <option value="">все валюты</option>{meta.currencies.map((c) => <option key={c}>{c}</option>)}</select>
           <select value={f.source_type} onChange={(e) => go({ source: e.target.value })} aria-label="Источник">
-            <option value="">все источники</option><option value="contract">договоры</option><option value="purchase_order">заказы поставщикам</option><option value="batch">логистические партии</option><option value="calculation">прогноз по расчёту</option></select>
+            <option value="">все источники</option><option value="contract">договоры</option><option value="purchase_order">заказы поставщикам</option><option value="batch">логистические партии</option><option value="calculation">прогноз по расчёту</option><option value="penalty">неустойки</option></select>
           <select value={f.legal_entity_id} onChange={(e) => go({ entity: e.target.value })} aria-label="Компания группы">
             <option value="">все компании группы</option>{meta.entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
           <label className="row" style={{ gap: 4 }} title="Срок по договору, а если он ещё не определён — ожидаемая дата">с <input type="date" value={f.date_from} onChange={(e) => go({ from: e.target.value })} />
@@ -466,6 +466,7 @@ function Liquidity({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSear
           </table></div>)}
       </div>
       <Forecast sp={sp} go={go} stamp={stamp} />
+      <Conversions meta={meta} accounts={accounts || []} stamp={stamp} onChanged={onChanged} />
       <Transactions meta={meta} accounts={accounts || []} sp={sp} go={go} stamp={stamp} onChanged={onChanged} />
     </>
   );
@@ -974,6 +975,111 @@ function ImportForm({ accounts, onDone }: { accounts: Account[]; onDone: () => v
         </table></div>
         {imp.status === "preview" && <button className="btn" style={{ marginTop: 8 }} disabled={busy || pick.size === 0} onClick={confirm}>{busy ? "Загружаю…" : `Загрузить и провести (${pick.size})`}</button>}
       </>}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ конвертации валют
+
+type FxOp = { id: string; status: "posted" | "reversed"; executed_at: string; rate: string; rate_source: string; external_ref: string; fee: string | null; comment: string; reverse_reason: string;
+  sell: { account_title: string; amount: string; currency: string; transaction_id: string }; buy: { account_title: string; amount: string; currency: string; transaction_id: string } };
+
+function Conversions({ meta, accounts, stamp, onChanged }: { meta: Meta; accounts: Account[]; stamp: number; onChanged: () => void }) {
+  const [items, setItems] = useState<FxOp[] | null>(null);
+  const [err, setErr] = useState("");
+  const [open, setOpen] = useState(false);
+  const revKey = useRef(newKey());
+  useEffect(() => { api.get<{ items: FxOp[] }>("/api/finance/fx-operations").then((r) => setItems(r.items)).catch((e) => setErr(errText(e))); }, [stamp]);
+  const reverse = async (op: FxOp) => {
+    const reason = window.prompt("Причина сторно конвертации (обе ноги и комиссия будут сторнированы, записи не удаляются)") || "";
+    if (!reason.trim()) return;
+    try { await api.postIdem(`/api/finance/fx-operations/${op.id}/reverse`, { reason }, revKey.current); revKey.current = newKey(); onChanged(); }
+    catch (e) { setErr(errText(e)); }
+  };
+  const multi = new Set(accounts.map((a) => a.currency)).size > 1;
+  return (
+    <div className="card">
+      <div className="section-head"><h2>Конвертации</h2>
+        {meta.can_edit && multi && <button className="btn add" onClick={() => setOpen((x) => !x)}>Конвертация</button>}</div>
+      <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>Конвертация связывает две реальные операции — списание проданной валюты и зачисление купленной. Это не выручка и не расход; ноги не разносятся на обязательства. Комиссия банка — отдельное списание.</div>
+      {err && <div className="alert error">{err}</div>}
+      {open && <FxForm accounts={accounts} onDone={() => { setOpen(false); onChanged(); }} />}
+      {!multi && <div className="muted" style={{ fontSize: 13 }}>Для конвертации нужны счета минимум в двух валютах.</div>}
+      {items && items.length > 0 && <div style={{ overflowX: "auto" }}><table style={{ fontSize: 13 }}>
+        <thead><tr><th>Дата</th><th>Продано</th><th>Куплено</th><th className="num">Курс</th><th className="num">Комиссия</th><th>Статус</th><th></th></tr></thead>
+        <tbody>{items.map((o) => <tr key={o.id} style={o.status === "reversed" ? { color: "var(--muted)" } : undefined}>
+          <td style={{ whiteSpace: "nowrap" }}>{dt(o.executed_at)}{o.external_ref && <div className="muted" style={{ fontSize: 11 }}>{o.external_ref}</div>}</td>
+          <td>−{fmtMoney(o.sell.amount, o.sell.currency)}<div className="muted" style={{ fontSize: 11 }}>{o.sell.account_title}</div></td>
+          <td>+{fmtMoney(o.buy.amount, o.buy.currency)}<div className="muted" style={{ fontSize: 11 }}>{o.buy.account_title}</div></td>
+          <td className="num" title={o.rate_source}>{o.rate.replace(".", ",")} {o.sell.currency}/{o.buy.currency}</td><td className="num">{o.fee ? fmtMoney(o.fee, o.sell.currency) : "—"}</td>
+          <td>{o.status === "posted" ? <span className="badge ok">проведена</span> : <span className="badge bad" title={o.reverse_reason}>сторнирована</span>}</td>
+          <td>{meta.can_edit && o.status === "posted" && <button className="btn ghost" style={{ padding: "2px 8px" }} onClick={() => reverse(o)}>Сторнировать</button>}</td></tr>)}</tbody></table></div>}
+      {items && items.length === 0 && multi && <div className="muted">Конвертаций пока нет.</div>}
+    </div>
+  );
+}
+
+function FxForm({ accounts, onDone }: { accounts: Account[]; onDone: () => void }) {
+  const [v, setV] = useState({ sell_account_id: accounts.find((a) => a.currency === "RUB")?.id || accounts[0]?.id || "", buy_account_id: "", sell_amount: "", buy_amount: "", rate: "",
+    rate_source: "курс банка по сделке", executed_at: localNow(), external_ref: "", fee_amount: "", comment: "" });
+  const [link, setLink] = useState(false);
+  const [legs, setLegs] = useState<{ sell: Tx[]; buy: Tx[] }>({ sell: [], buy: [] });
+  const [sel, setSel] = useState({ sell: "", buy: "" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const key = useRef(newKey());
+  const sa = accounts.find((a) => a.id === v.sell_account_id), ba = accounts.find((a) => a.id === v.buy_account_id);
+  const buyOptions = accounts.filter((a) => a.currency !== sa?.currency);
+  useEffect(() => {
+    if (!link || !sa || !ba) return;
+    Promise.all([api.get<List<Tx>>(`/api/finance/transactions?account_id=${sa.id}&direction=out&status=posted&unallocated=true`),
+      api.get<List<Tx>>(`/api/finance/transactions?account_id=${ba.id}&direction=in&status=posted&unallocated=true`)])
+      .then(([s, b]) => setLegs({ sell: s.items, buy: b.items })).catch((e) => setErr(errText(e)));
+  }, [link, sa?.id, ba?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const autoRate = Number(v.sell_amount) && Number(v.buy_amount) ? (Number(v.sell_amount) / Number(v.buy_amount)).toFixed(6) : "";
+  const set = (k: keyof typeof v) => (e: { target: { value: string } }) => setV({ ...v, [k]: ["sell_amount", "buy_amount", "rate", "fee_amount"].includes(k) ? e.target.value.replace(",", ".") : e.target.value });
+  const pickLeg = (side: "sell" | "buy", id: string) => {
+    setSel({ ...sel, [side]: id });
+    const tx = legs[side].find((x) => x.id === id);
+    if (tx) setV((cur) => ({ ...cur, [side === "sell" ? "sell_amount" : "buy_amount"]: tx.amount, executed_at: cur.executed_at }));
+  };
+  const submit = async () => {
+    setBusy(true); setErr("");
+    try {
+      await api.postIdem("/api/finance/fx-operations", { ...v, rate: v.rate || autoRate, executed_at: toIso(v.executed_at), fee_amount: v.fee_amount || null,
+        ...(link ? { sell_transaction_id: sel.sell, buy_transaction_id: sel.buy } : {}) }, key.current);
+      key.current = newKey(); onDone();
+    } catch (e) { setErr(errText(e)); } finally { setBusy(false); }
+  };
+  const ready = sa && ba && Number(v.sell_amount) > 0 && Number(v.buy_amount) > 0 && (v.rate || autoRate) && (!link || (sel.sell && sel.buy));
+  return (
+    <div className="card" style={{ background: "#fcfcfc" }}>
+      <b>Новая конвертация</b>
+      {err && <div className="alert error">{err}</div>}
+      <div className="row" style={{ marginTop: 8, alignItems: "flex-end" }}>
+        <label className="f">Продаём со счёта<select value={v.sell_account_id} onChange={(e) => setV({ ...v, sell_account_id: e.target.value, buy_account_id: "" })}>{accounts.map((a) => <option key={a.id} value={a.id}>{a.title} · {a.currency}</option>)}</select></label>
+        <label className="f">Покупаем на счёт<select value={v.buy_account_id} onChange={set("buy_account_id")}><option value="">— выберите —</option>{buyOptions.map((a) => <option key={a.id} value={a.id}>{a.title} · {a.currency}</option>)}</select></label>
+        <label style={{ fontSize: 13 }}><input type="checkbox" checked={link} onChange={(e) => setLink(e.target.checked)} /> операции уже есть (из выписки) — связать</label>
+      </div>
+      {link && sa && ba && <div className="row" style={{ marginTop: 8, alignItems: "flex-end" }}>
+        <label className="f" style={{ flex: "1 1 260px" }}>Списание {sa.currency}<select value={sel.sell} onChange={(e) => pickLeg("sell", e.target.value)}><option value="">— выберите —</option>
+          {legs.sell.map((x) => <option key={x.id} value={x.id}>{dt(x.booked_at)} · {fmtMoney(x.amount, x.currency)} · {x.external_ref || x.purpose}</option>)}</select></label>
+        <label className="f" style={{ flex: "1 1 260px" }}>Зачисление {ba.currency}<select value={sel.buy} onChange={(e) => pickLeg("buy", e.target.value)}><option value="">— выберите —</option>
+          {legs.buy.map((x) => <option key={x.id} value={x.id}>{dt(x.booked_at)} · {fmtMoney(x.amount, x.currency)} · {x.external_ref || x.purpose}</option>)}</select></label>
+      </div>}
+      <div className="row" style={{ marginTop: 8, alignItems: "flex-end" }}>
+        <label className="f">Продано, {sa?.currency || "—"}<input inputMode="decimal" value={v.sell_amount} onChange={set("sell_amount")} disabled={link} /></label>
+        <label className="f">Куплено, {ba?.currency || "—"}<input inputMode="decimal" value={v.buy_amount} onChange={set("buy_amount")} disabled={link} /></label>
+        <label className="f">Курс, {sa?.currency || "—"} за 1 {ba?.currency || "—"}<input inputMode="decimal" value={v.rate} placeholder={autoRate} onChange={set("rate")} /></label>
+        <label className="f">Источник курса<input value={v.rate_source} onChange={set("rate_source")} /></label>
+        <label className="f">Дата и время<input type="datetime-local" value={v.executed_at} onChange={set("executed_at")} /></label>
+      </div>
+      <div className="row" style={{ marginTop: 8, alignItems: "flex-end" }}>
+        <label className="f">Банковский № сделки<input value={v.external_ref} onChange={set("external_ref")} /></label>
+        {!link && <label className="f">Комиссия банка, {sa?.currency || "—"}<input inputMode="decimal" value={v.fee_amount} onChange={set("fee_amount")} /></label>}
+        <label className="f" style={{ flex: "1 1 200px" }}>Комментарий<input value={v.comment} onChange={set("comment")} /></label>
+        <button className="btn" disabled={busy || !ready} onClick={submit}>{busy ? "Сохраняю…" : link ? "Связать" : "Провести конвертацию"}</button>
+      </div>
     </div>
   );
 }

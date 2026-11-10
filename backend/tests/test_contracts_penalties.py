@@ -67,11 +67,13 @@ def test_contract_obligations_and_penalties():
         assert p["status"] == "recognized" and p["amount"] == 9000
         assert k["obligations"]["totals"]["receivable"] == 9000 and k["obligations"]["totals"]["payable"] == 5000 and k["obligations"]["totals"]["net"] == 4000
 
-        # денежный поток: признанная неустойка к получению; оплаченный платёж договора не попадает
+        # денежный поток: признанная неустойка к получению (строка реестра «Финансов», D-132).
+        # Отметка «оплачено» в договоре — старая отметка (D-021, D-117): строка остаётся к получению с флагом «требует сверки»,
+        # а не исчезает, пока ФД не подтвердит платёж банковской операцией (изменение семантики сводки, D-130)
         m = c.get("/api/summary/money", headers=H(FD)).json()
         mine = [r for r in m["rows"] if r.get("deal_number") == k["number"]]
         assert any(r["source"] == "penalty" and r["direction"] == "in" and r["amount"] == 9000 for r in mine)
-        assert not any(r["source"] == "contract" for r in mine)
+        assert all("needs_reconciliation" in r["flags"] for r in mine if r["source"] == "contract" and r["provisional_paid"])
         reg = c.get("/api/legal/contracts?q=Перевозчик-Пени", headers=H(LAW)).json()
         assert reg["items"][0]["exec"]["pen_in"] == 9000 and reg["summary"]["penalties_out_rub"] >= 5000
         assert c.get("/api/workplace", headers=H(FD)).status_code == 200

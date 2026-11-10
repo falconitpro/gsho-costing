@@ -550,6 +550,9 @@ def contract_fact(cid: str, body: FactIn, db: Session = Depends(get_db), user: C
     if body.kind == "pay":   # «Финансы»: старая отметка оплаты — запись «требует сверки», не банковский факт (D-117)
         from ..services.finance import legacy
         fin = legacy.from_contract_pay(db, user.id, c, body.key, data)
+    if body.kind == "pen":   # «Финансы»: предъявленная/признанная неустойка — строка реестра (D-132)
+        db.flush()
+        _finance_sync(db, c, user.id)
     db.commit()
     out = _out(db, user, c)
     if fin and fin.get("status") != "none":

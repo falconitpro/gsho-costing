@@ -118,6 +118,9 @@ def build(db: Session, vis, as_of: date, horizon_days: int = 90, group_by: str =
                                                       FinanceTransaction.status.in_(("needs_reconciliation", "draft", "posted")))).all()
     from .transactions import allocated
     used = allocated(db, [t.id for t in txs])
+    from .fx import leg_ids
+    legs = leg_ids(db, [t.id for t in txs])
+    txs = [t for t in txs if t.id not in legs]
     for t in txs:
         if t.status in ("needs_reconciliation", "draft"):
             p = pending[t.currency]

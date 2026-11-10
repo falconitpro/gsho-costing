@@ -76,29 +76,14 @@ def shipments(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
 
 @router.get("/money")
 def money(days: int = 90, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Поступления и платежи по всем сделкам на горизонте N дней, просроченная дебиторка, аккредитивы и гарантии, кассовая кривая по неделям."""
+    """Поступления и платежи на горизонте N дней, просроченная дебиторка, аккредитивы и гарантии, прогноз остатка по неделям.
+    Адаптер общего сервиса «Финансов» (cashview): кривая — от подтверждённого остатка, все источники и валюты (D-130)."""
     if not user.can("finance_analytics"):
         raise HTTPException(403, "Финансовая аналитика доступна ФД, КД и ЗГД")
     today = date.today()
-    horizon = today + timedelta(days=days)
-    names = _names(db)
-    rows, receivables, guarantees = [], [], []
+    guarantees = []
     for d in _deals(db, user):
         sts = db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == d.id)).all()
-        for s in sts:
-            kind = {"client_advance": "in", "client_final": "in", "factory_advance": "out", "factory_final": "out"}.get(s.code)
-            if not kind or s.actual_on:
-                continue
-            on = s.refined_on or s.planned_on
-            if on is None:
-                continue
-            row = {"deal_id": d.id, "deal_number": d.number, "client": d.client.name if d.client else "", "manager": names.get(d.manager_id, ""),
-                   "title": s.title, "direction": kind, "on": on, "amount": s.amount, "currency": s.currency,
-                   "overdue_days": (today - on).days if on < today else 0}
-            if on < today and kind == "in":
-                receivables.append(row)
-            if on <= horizon:
-                rows.append(row)
         bg = d.bank_guarantee or {}
         if bg.get("required") or bg.get("amount"):
             guarantees.append({"deal_id": d.id, "deal_number": d.number, "client": d.client.name if d.client else "", "kind": "банковская гарантия", **{k: bg.get(k) for k in ("amount", "currency", "until", "status", "bank")}})
@@ -106,36 +91,9 @@ def money(days: int = 90, db: Session = Depends(get_db), user: CurrentUser = Dep
         if lc is not None:
             guarantees.append({"deal_id": d.id, "deal_number": d.number, "client": d.client.name if d.client else "", "kind": "аккредитив",
                                "amount": None, "currency": "", "until": None, "status": "открыт" if lc.actual_on else f"план {(lc.refined_on or lc.planned_on or today):%d.%m}", "bank": ""})
-    if user.has(Role.FD, Role.GD, Role.CD, Role.LAWYER, Role.ADMIN):
-        from ..services.legal_contracts import money_rows
-        seen = {d.id for d in _deals(db, user)}
-        for r in money_rows(db, today, horizon):
-            if r["deal_id"] is None or r["deal_id"] in seen:
-                rows.append(r)
-                if r["overdue_days"] and r["direction"] == "in":
-                    receivables.append(r)
-    rows.sort(key=lambda r: r["on"])
-    # кривая по неделям (в рублях — суммы в RUB; валютные суммы показываются отдельно)
-    weeks: dict[str, dict[str, float]] = {}
-    for r in rows:
-        if r["currency"] != "RUB" or not r["amount"]:
-            continue
-        wk = (r["on"] - timedelta(days=r["on"].weekday())).isoformat()
-        w = weeks.setdefault(wk, {"in": 0.0, "out": 0.0})
-        w[r["direction"]] += float(r["amount"])
-    curve, cum = [], 0.0
-    for wk in sorted(weeks):
-        cum += weeks[wk]["in"] - weeks[wk]["out"]
-        curve.append({"week": wk, "in": round(weeks[wk]["in"], 2), "out": round(weeks[wk]["out"], 2), "cum": round(cum, 2)})
-    # запчасти: заказано клиентами и ещё не отгружено — ожидаемые поступления без договорной даты (оплата по счёту / отгрузке)
-    from ..services import parts_deals
-    parts = [{"id": p["id"], "number": p["number"], "client": p["client_name"], "manager": p["manager_name"], "amount": p["ordered_rub"], "lines": p["lines"], "urgent": p["urgent"], "url": p["url"]}
-             for p in parts_deals.rows(db, user, include_closed=False) if p["block"] == "won" and p["ordered_rub"]]
-    return {"rows": rows, "receivables": receivables, "guarantees": guarantees, "curve": curve,
-            "parts": {"rows": sorted(parts, key=lambda x: -x["amount"]), "sum_rub": round(sum(x["amount"] for x in parts), 2)},
-            "totals": {"in_rub": round(sum(float(r["amount"] or 0) for r in rows if r["direction"] == "in" and r["currency"] == "RUB"), 2),
-                       "out_rub": round(sum(float(r["amount"] or 0) for r in rows if r["direction"] == "out" and r["currency"] == "RUB"), 2),
-                       "receivable_count": len(receivables), "min_cum": min((c["cum"] for c in curve), default=0.0)}}
+    # строки, дебиторка, кривая, запчасти и итоги — общий сервис «Финансов» (адаптер, D-130); гарантии и аккредитивы — как раньше
+    from ..services.finance.cashview import summary_money
+    return {**summary_money(db, user, days), "guarantees": guarantees}
 
 
 # ------------------------------------------------------------------ Сервис

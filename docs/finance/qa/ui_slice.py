@@ -112,12 +112,29 @@ with sync_playwright() as pw:
     p.screenshot(path=S+"23_import_preview.png", full_page=True)
     p.get_by_role("button", name=re.compile(r"Загрузить и провести \(2\)")).click(); p.get_by_text("Загружено операций: 2").wait_for()
     p.locator("tbody tr").filter(has_text="9001").first.wait_for(); p.screenshot(path=S+"24_import_done.png", full_page=True)
+    # конвертация валют (этап 4): CNY-счёт через форму → конвертация с комиссией
+    p.goto(U+"/finance?tab=liquidity"); p.get_by_text("Счета и остатки").wait_for()
+    p.locator(".section-head").filter(has_text="Счета и остатки").get_by_role("button").click()
+    sel=p.locator("label:has-text('Банковский профиль') select"); sel.wait_for(); sel.select_option(label=re.compile("CNY")) if False else sel.select_option(index=[i for i,o in enumerate(sel.locator("option").all_inner_texts()) if "CNY" in o and "уже есть" not in o][0])
+    p.get_by_role("button", name="Создать счёт").click(); p.get_by_text("Валютный CNY").first.wait_for()
+    p.locator(".section-head").filter(has_text="Конвертации").get_by_role("button", name="Конвертация").click()
+    fx=p.locator(".card").filter(has_text="Новая конвертация").last
+    fx.locator("label:has-text('Покупаем на счёт') select").select_option(index=1)
+    fx.locator("label:has-text('Продано') input").fill("128182"); fx.locator("label:has-text('Куплено') input").fill("10000")
+    fx.locator("label:has-text('Комиссия банка') input").fill("500"); fx.locator("label:has-text('Банковский № сделки') input").fill("FX-77")
+    fx.get_by_role("button", name="Провести конвертацию").click()
+    p.locator(".card").filter(has_text="Конвертации").locator("td .badge", has_text="проведена").first.wait_for()
+    p.locator(".section-head").filter(has_text="Конвертации").scroll_into_view_if_needed(); p.screenshot(path=S+"25_fx_conversion.png", full_page=True)
+    # «Сводка → Деньги» у ФД — переход в «Финансы» (D-130)
+    p.goto(U+"/summary?kind=money"); p.wait_for_url(re.compile("/finance")); p.get_by_role("heading", name="Финансы").wait_for()
     # мобильная ширина
     m=ctx.new_page(); watch(m,"fd-mobile"); m.set_viewport_size({"width":390,"height":844}); m.goto(U+"/finance?tab=calendar"); m.get_by_text("АО «Алданзолото»").first.wait_for(); m.screenshot(path=S+"11_mobile_calendar.png", full_page=False)
     # КД: раздел по умолчанию закрыт (D-116) — пункта меню нет, на странице пояснение, запросов к API нет
     cd=as_user(b.new_context(viewport={"width":1440,"height":900}),"cd@example.com"); cd.goto(U+"/finance"); cd.get_by_text("доступен при праве").wait_for()
     assert cd.locator("header nav").get_by_text("Финансы").count()==0
     cd.screenshot(path=S+"12_cd_denied.png")
+    cd.goto(U+"/summary?kind=money"); cd.get_by_text("Сводка · Деньги").wait_for(); cd.get_by_text("минимум прогнозного остатка").wait_for()
+    assert "/summary" in cd.url; cd.screenshot(path=S+"26_cd_summary_money.png", full_page=True)
     # менеджер: пункта нет, страница — сообщение
     mg=as_user(b.new_context(viewport={"width":1440,"height":900}),"manager@example.com"); mg.goto(U+"/finance"); mg.get_by_text("доступен при праве").wait_for()
     assert mg.locator("header nav").get_by_text("Финансы").count()==0

@@ -20,7 +20,8 @@ type Data = {
   focus: { title: string; text: string; action: string; url: string; tone: string } | null;
   today: { events: Ev[]; week: { date: string; wd: string; day: number; today: boolean; count: number; tones: string[] }[] };
   upcoming: Ev[]; tasks: TaskRow[]; tasks_total: number; tasks_overdue: number; deals: DealRow[]; approvals: Approval[]; attention: Att[];
-  money: { curve: { week: string; label: string; in: number; out: number; net: number; cum: number }[]; receivable_sum: number; receivable_count: number; min_cum: number; min_week: string } | null;
+  money: { curve: { week: string; label: string; in: number; out: number; net: number; cum: number | null }[]; receivable_sum: number; receivable_count: number; min_cum: number | null; min_week: string;
+    balance_status?: "confirmed" | "partial" | "unknown"; url?: string } | null;
   funnel: { code: string; title: string; count: number; parts?: number }[]; team: { name: string; open: number; exec: number; overdue: number; share: number }[];
   notifications: { id: string; text: string; at: string | null; read: boolean; deal_id: string | null }[];
   legal: { lawyer_review: number; commercial_review: number; poa_active: number; poa_expiring: number; poa_no_scan: number;
@@ -156,9 +157,10 @@ export default function WorkplacePage({ me }: { me: Me }) {
         </div>) : null;
       case "money": return d.money && (
         <div key={code} data-block={code} className="wp-card">
-          <div className="wp-head"><h2>Денежный поток, 8 недель</h2><Link to="/summary?kind=money" className="muted">подробно →</Link></div>
+          <div className="wp-head"><h2>Денежный поток, 8 недель</h2><Link to={d.money.url || "/summary?kind=money"} className="muted">подробно →</Link></div>
           <div className="row muted" style={{ fontSize: 12, gap: 14, marginBottom: 8 }}><span>дебиторка просрочена: <b style={{ color: d.money.receivable_count ? "var(--bad)" : "inherit" }}>{d.money.receivable_count ? `${money(d.money.receivable_sum)} ₽ · ${d.money.receivable_count}` : "нет"}</b></span>
-            {d.money.min_cum < 0 && <span>минимум потока: <b style={{ color: "var(--warn)" }}>{money(d.money.min_cum)} ₽ · {d.money.min_week}</b></span>}</div>
+            {d.money.min_cum == null ? <span>прогнозный остаток: <b style={{ color: "var(--warn)" }}>остаток счетов не подтверждён</b></span>
+              : <span>минимум прогнозного остатка: <b style={{ color: d.money.min_cum < 0 ? "var(--bad)" : "inherit" }}>{money(d.money.min_cum)} ₽ · {d.money.min_week}</b></span>}</div>
           <Bars curve={d.money.curve} />
         </div>);
       case "funnel": { const mx = Math.max(1, ...d.funnel.map((f) => f.count)); return (
@@ -237,16 +239,16 @@ export default function WorkplacePage({ me }: { me: Me }) {
   );
 }
 
-function Bars({ curve }: { curve: { label: string; in: number; out: number; net: number; cum: number }[] }) {
+function Bars({ curve }: { curve: { label: string; in: number; out: number; net: number; cum: number | null }[] }) {
   const mx = Math.max(1, ...curve.map((c) => Math.max(c.in, c.out)));
   return (
     <div>
       <div className="wp-bars">{curve.map((c) => (
-        <div key={c.label} title={`поступления ${money(c.in)} · платежи ${money(c.out)} · накопленно ${money(c.cum)}`}>
+        <div key={c.label} title={`поступления ${money(c.in)} · платежи ${money(c.out)} · прогнозный остаток ${c.cum == null ? "не подтверждён" : money(c.cum)}`}>
           <small style={{ color: c.net < 0 ? "var(--bad)" : "var(--ok)" }}>{c.in || c.out ? (c.net >= 0 ? "+" : "−") + money(Math.abs(c.net)) : ""}</small>
           <div className="pair"><div style={{ height: `${Math.round(70 * c.in / mx)}px`, background: "#15803d" }} /><div style={{ height: `${Math.round(70 * c.out / mx)}px`, background: "#ff3131", opacity: .85 }} /></div>
           <small className="muted">{c.label}</small></div>))}</div>
-      <div className="row muted" style={{ fontSize: 11, gap: 12, marginTop: 6 }}><span><i className="wp-sw" style={{ background: "#15803d" }} />поступления от клиентов</span><span><i className="wp-sw" style={{ background: "#ff3131" }} />платежи заводам</span><span>RUB, план по этапам исполнения</span></div>
+      <div className="row muted" style={{ fontSize: 11, gap: 12, marginTop: 6 }}><span><i className="wp-sw" style={{ background: "#15803d" }} />поступления</span><span><i className="wp-sw" style={{ background: "#ff3131" }} />платежи</span><span>RUB · договоры, заказы, партии, прогноз расчёта</span></div>
     </div>);
 }
 

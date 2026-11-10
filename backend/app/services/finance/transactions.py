@@ -199,6 +199,9 @@ def allocate(db: Session, user, vis, tx_id: str, items: list[dict], status: str,
         raise HTTPException(409, "Сторнированную операцию и сторно не разносят")
     if tx.withdrawn_at:
         raise HTTPException(409, "Запись отозвана — разнесение недоступно")
+    from .fx import leg_ids
+    if tx.id in leg_ids(db, [tx.id]):
+        raise HTTPException(409, "Операция — нога конвертации или комиссия: на обязательства не разносится")
     if status == "confirmed" and tx.status != "posted":
         raise HTTPException(409, "Подтвердить разнесение можно только для проведённой операции")
     ob_ids = sorted({str(i["obligation_id"]) for i in items})
@@ -301,16 +304,17 @@ def alloc_dto(al: FinanceAllocation, tx: Optional[FinanceTransaction] = None, ob
     return out
 
 
-LEGACY_TITLES = {"execution_legacy": "старая отметка: этап исполнения", "contract_legacy": "старая отметка: договор", "planfact_legacy": "старая отметка: план/факт",
+LEGACY_TITLES = {"fx": "конвертация валют", "fx_fee": "комиссия за конвертацию", "bank_import": "из выписки",
+                 "execution_legacy": "старая отметка: этап исполнения", "contract_legacy": "старая отметка: договор", "planfact_legacy": "старая отметка: план/факт",
                  "purchase_order_legacy": "старая отметка: заказ поставщику", "batch_legacy": "старая отметка: партия"}
 
 
-def tx_dto(tx: FinanceTransaction, used: Decimal, account_title: str = "") -> dict:
-    movable = tx.status in ("posted", "draft", "needs_reconciliation") and tx.origin_type != "reversal" and not tx.withdrawn_at
+def tx_dto(tx: FinanceTransaction, used: Decimal, account_title: str = "", fx_leg: bool = False) -> dict:
+    movable = tx.status in ("posted", "draft", "needs_reconciliation") and tx.origin_type != "reversal" and not tx.withdrawn_at and not fx_leg
     return {"id": tx.id, "account_id": tx.account_id, "account_title": account_title, "direction": tx.direction, "amount": s(tx.amount), "currency": tx.currency,
             "booked_at": tx.booked_at.isoformat(), "value_date": tx.value_date.isoformat() if tx.value_date else None,
             "counterparty_name": tx.counterparty_name, "purpose": tx.purpose, "external_ref": tx.external_ref, "status": tx.status, "origin_type": tx.origin_type,
             "reversal_of_id": tx.reversal_of_id, "reversed_by_id": tx.reversed_by_id, "note": tx.note,
             "allocated": s(used), "unallocated": s(max(tx.amount - used, ZERO)) if movable else s(ZERO),
             "posted_at": tx.posted_at.isoformat() if tx.posted_at else None,
-            "withdrawn": bool(tx.withdrawn_at), "withdrawn_reason": tx.withdrawn_reason, "origin_title": LEGACY_TITLES.get(tx.origin_type, "")}
+            "withdrawn": bool(tx.withdrawn_at), "withdrawn_reason": tx.withdrawn_reason, "origin_title": LEGACY_TITLES.get(tx.origin_type, ""), "fx_leg": fx_leg}

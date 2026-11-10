@@ -77,3 +77,5 @@ res={{"variants":{{var.id:{{"base":{{"payment_dates":[{{"no":1,"event":"contract
 v=DealVersion(deal_id=deal.id,version_no=1,reason="approval",calc_input={{}},calc_result=res); db.add(v); db.flush()
 deal.approved_version_id=v.id; deal.won_variant_id=var.id; deal.status=DealStatus.CONTRACT; db.commit()'''],cwd=os.environ.get("BACKEND_DIR", "backend"),env=env,check=True,capture_output=True)
 print("sync", c.post("/api/finance/sync?dry_run=false",headers=H("fd@example.com")).json()["created"])
+# банковский профиль CNY той же компании — счёт создаётся в браузерном сценарии (конвертация)
+print("bank cny", c.post(f"/api/legal/profiles/{prof['id']}/banks",headers=H(GD),json={"title":"Валютный CNY","currency":"CNY","bank_name":"Bank of China (Moscow)","account":"40702156900000000777","swift":"BKCHRUMM"}).status_code)
