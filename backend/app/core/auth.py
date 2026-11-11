@@ -257,6 +257,9 @@ async def get_current_user(request: Request, response: Response, db: Session = D
             background = request.headers.get("x-background-request") == "1" or request.url.path == "/api/auth/session-status"
             if not background and sess.touch(db, row, s):
                 db.commit()
+    # кто выполняет запрос — для журнала скачиваний (core/download_audit.py), даже если ниже доступ будет ограничен
+    request.state.audit_user_id = user.id
+    request.state.audit_sid = row.sid if row else None
     from ..services.access_service import acting_for, perms_for
     mfa_on = mfa_svc.enabled(db, user.id)
     cu = CurrentUser(id=user.id, email=user.email, display_name=user.display_name,

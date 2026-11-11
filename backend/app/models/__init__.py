@@ -16,6 +16,7 @@ from typing import Any, Optional
 from sqlalchemy import (
     JSON, BigInteger, Boolean, CheckConstraint, Date, DateTime, Enum as SAEnum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func,
 )
+from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -964,6 +965,35 @@ class SecurityEvent(Base):
     meta: Mapped[dict] = mapped_column("metadata", JSONType, default=dict)
     risk_score: Mapped[Optional[int]] = mapped_column(Integer)
     alert_id: Mapped[Optional[str]] = mapped_column(String(36))
+
+
+class SecurityAlert(Base):
+    """Предупреждение безопасности (02 «security_alerts», 04 §7.3): одна открытая запись на правило и сотрудника, повторы — счётчик.
+    Без закрытого содержимого: только сводка, обезличенные детали и ссылка на последнее событие."""
+    __tablename__ = "security_alerts"
+    __table_args__ = (CheckConstraint("status IN ('new', 'acknowledged', 'resolved')", name="ck_security_alert_status"),
+                      CheckConstraint("severity IN ('low', 'medium', 'high', 'critical')", name="ck_security_alert_severity"),
+                      Index("ix_security_alerts_status_seen", "status", "last_seen_at"),
+                      Index("uq_security_alert_open", "rule_key", sa_text("COALESCE(subject_user_id, '')"), unique=True,
+                            postgresql_where=sa_text("status <> 'resolved'")))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    rule_key: Mapped[str] = mapped_column(String(48))
+    rule_version: Mapped[str] = mapped_column(String(16), default="")
+    severity: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), default="new")
+    subject_user_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
+    summary: Mapped[str] = mapped_column(String(300), default="")
+    details_sanitized: Mapped[dict] = mapped_column(JSONType, default=dict)
+    last_event_id: Mapped[Optional[str]] = mapped_column(String(36))
+    acknowledged_by: Mapped[Optional[str]] = mapped_column(String(36))
+    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    ack_comment: Mapped[str] = mapped_column(Text, default="")
+    resolved_by: Mapped[Optional[str]] = mapped_column(String(36))
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    resolution_comment: Mapped[str] = mapped_column(Text, default="")
 
 
 class AccessReviewCampaign(Base):

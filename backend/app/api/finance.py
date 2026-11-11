@@ -899,6 +899,9 @@ def export_xlsx(kind: str = Query(..., pattern="^(obligations|debt|liquidity|eco
     if kind == "debt" and group_by not in (None, "counterparty", "deal"):
         raise HTTPException(422, "group_by для задолженности: counterparty | deal")
     data, name, n, did = ex.build(db, user, vis, kind, params)
+    from ..core.download_audit import note   # журнал выгрузок: число строк и фильтры по белому списку (04 §7.2)
+    note(entity_type="finance_" + kind, row_count=n, deal_id=did or deal_id,
+         filters={k: (v.isoformat() if isinstance(v, date) else v) for k, v in params.items() if v not in (None, "", False)})
     _audit(db, user.id, did or deal_id, "finance_export", kind, "export",
            after={"kind": kind, "rows": n, "filters": {k: (v.isoformat() if isinstance(v, date) else v) for k, v in params.items() if v not in (None, "", False)}})
     db.commit()

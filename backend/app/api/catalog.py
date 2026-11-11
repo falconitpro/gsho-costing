@@ -56,9 +56,17 @@ def catalog_image(attachment_id: str, db: Session = Depends(get_db), user: Curre
     if att is None or att.folder == "04_cost":
         raise HTTPException(404)
     s = get_settings()
+    from ..core.download_audit import note
+    note(entity_type="attachment", entity_id=att.id)
+    if s.storage_provider == "s3":
+        # короткая ссылка после проверки (04 §9): не сохранённый storage_url; inline — только для безопасных типов
+        from .. import adapters
+        from ..core.files import INLINE_TYPES
+        inline = os.path.splitext(att.file_name)[1].lower() in INLINE_TYPES
+        note(presigned=True, inline=inline)
+        return RedirectResponse(adapters.storage(s).presigned(att.storage_path, att.file_name, inline=inline), status_code=307,
+                                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
     if s.storage_provider != "local":
-        if att.storage_url:
-            return RedirectResponse(att.storage_url)
         raise HTTPException(404)
     full = os.path.join(s.storage_local_root, att.storage_path)
     if not os.path.isfile(full):

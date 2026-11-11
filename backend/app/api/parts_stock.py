@@ -575,4 +575,6 @@ def balances_xlsx(q: str = "", warehouse_id: str = "", only_positive: bool = Tru
     fd, path = tempfile.mkstemp(suffix=".xlsx")
     os.close(fd)
     wb.save(path)
+    from ..core.download_audit import note
+    note(entity_type="stock_balances", row_count=len(d["rows"]))
     return FileResponse(path, filename=f"ostatki-{date.today():%Y%m%d}.xlsx", background=BackgroundTask(os.unlink, path))

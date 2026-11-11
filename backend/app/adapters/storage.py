@@ -188,6 +188,9 @@ class YandexDiskStorage(StorageAdapter):
         raise NotImplementedError
 
 
+PRESIGN_TTL = 300   # секунд: срок подписанной ссылки на файл в S3 (04 §9)
+
+
 class S3Storage(StorageAdapter):
     """S3-совместимое хранилище (Yandex Object Storage / MinIO в РФ) — рекомендуемая альтернатива."""
 
@@ -205,10 +208,22 @@ class S3Storage(StorageAdapter):
     def upload(self, local_path, folder, subfolder_key, file_name):   # pragma: no cover
         key = f"{folder}/{DEAL_SUBFOLDERS[subfolder_key]}/{file_name}"
         self._client().upload_file(local_path, self.s.s3_bucket, key)
+        # в базе — только адрес системы: подписанная ссылка создаётся при каждом скачивании после проверки прав (04 §9)
         return StoredFile(path=key, url=self.link(key), sha256=sha256_file(local_path), size=os.path.getsize(local_path))
 
-    def link(self, stored_path):   # pragma: no cover
-        return self._client().generate_presigned_url("get_object", Params={"Bucket": self.s.s3_bucket, "Key": stored_path}, ExpiresIn=3600)
+    def link(self, stored_path):
+        """Постоянный адрес — маршрут системы с проверкой прав; не подписанная ссылка хранилища."""
+        return f"/api/files/{stored_path}"
+
+    def presigned(self, stored_path: str, file_name: str, inline: bool = False) -> str:
+        """Подписанная ссылка на 5 минут (04 §9, FILE-06); вызывать только после проверки прав на объект.
+        Небезопасные для показа типы — всегда «скачать» (response-content-disposition=attachment)."""
+        from urllib.parse import quote
+        disp = "inline" if inline else "attachment"
+        return self._client().generate_presigned_url(
+            "get_object", ExpiresIn=PRESIGN_TTL,
+            Params={"Bucket": self.s.s3_bucket, "Key": stored_path, "ResponseContentDisposition": f"{disp}; filename*=UTF-8''{quote(file_name)}",
+                    "ResponseCacheControl": "private, no-store"})
 
     def set_permissions(self, folder, subfolder_key, allowed_user_ids):
         return None   # доступ только через presigned-ссылки, выдаваемые сервером по ролям

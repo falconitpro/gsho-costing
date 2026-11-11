@@ -138,6 +138,9 @@ def update_user(user_id: str, body: dict, request: Request, db: Session = Depend
             raise HTTPException(422, "Неизвестная роль")
         if u.id == user.id and set(body["roles"]) != set(u.roles or []):
             raise HTTPException(409, "Свои роли не меняются: роли сотруднику назначает другой администратор или ЗГД")
+        if {"gd", "admin"} & (set(body["roles"]) - set(u.roles or [])):
+            from ..core.auth import require_step_up
+            require_step_up(user)   # повышение до ЗГД/администратора — с подтверждением (09 §1)
     if body.get("is_active") is False and u.id == user.id:
         raise HTTPException(409, "Нельзя отключить свою учётную запись")
     # включение/отключение доступа — только единой операцией безопасности (04 §5.1, OFF-02): сессии, замещения, исключения прав, задачи
@@ -165,6 +168,11 @@ def update_user(user_id: str, body: dict, request: Request, db: Session = Depend
         if k in UserIn.model_fields and k != "external_id":
             setattr(u, k, v)
     audit(db, user.id, None, "user", u.id, "update", {k: before.get(k) for k in body}, body)
+    if "roles" in body and set(before.get("roles") or []) != set(u.roles or []):
+        from ..services import security_events as sev
+        sev.record(db, "access", "roles_changed", actor_id=user.id, subject_id=u.id, request=request, session_id=user.sid, entity_type="user", entity_id=u.id,
+                   meta={"roles_added": sorted(set(u.roles or []) - set(before.get("roles") or [])),
+                         "roles_removed": sorted(set(before.get("roles") or []) - set(u.roles or []))})
     db.commit()
     return serialize(u)
 
@@ -292,7 +300,10 @@ def hs_export(db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN))
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";")
     w.writerow(["code", "description", "duty_pct", "vat_pct", "util_fee", "licence", "certification"])
-    for h in db.scalars(select(HsCode).where(HsCode.valid_to.is_(None)).order_by(HsCode.code)).all():
+    rows = db.scalars(select(HsCode).where(HsCode.valid_to.is_(None)).order_by(HsCode.code)).all()
+    from ..core.download_audit import note
+    note(entity_type="hs_codes", row_count=len(rows))
+    for h in rows:
         w.writerow([h.code, h.description, h.duty_pct, h.vat_pct, "да" if h.util_fee else "нет", "да" if h.licence_required else "нет", ", ".join(h.certification or [])])
     return Response(("\ufeff" + buf.getvalue()).encode("utf-8"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": "attachment; filename=hs_codes.csv"})
@@ -491,19 +502,30 @@ def access_matrix(db: Session = Depends(get_db), user: CurrentUser = Depends(_ac
     return data
 
 
+# группы прав безопасности: повышение уровня требует подтверждения не старше 10 минут (09 §1)
+SECURITY_GROUPS = {"security_admin", "security_audit", "access_admin", "backup_status"}
+
+
 class AccessRuleIn(BaseModel):
     level: int
 
 
 @router.put("/access/{role}/{group}")
-def access_set_rule(role: str, group: str, body: AccessRuleIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
+def access_set_rule(role: str, group: str, body: AccessRuleIn, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
     from ..services import access_service
+    from ..services import security_events as sev
     try:
         before = access_service.rules(db).get(role, {}).get(group)
+        if group in SECURITY_GROUPS and body.level > (before or 0):
+            from ..core.auth import require_step_up
+            require_step_up(user)
         access_service.set_rule(db, role, group, body.level, user.id)
     except ValueError as e:
         raise HTTPException(422, str(e))
     audit(db, user.id, None, "access_rule", f"{role}/{group}", "update", {"level": before}, {"level": body.level})
+    if before != body.level:
+        sev.record(db, "access", "rule_changed", actor_id=user.id, request=request, session_id=user.sid, entity_type="access_rule", entity_id=f"{role}/{group}",
+                   meta={"role": role, "group": group, "before": before, "after": body.level})
     db.commit()
     return {"role": role, "group": group, "level": body.level}
 
@@ -517,7 +539,7 @@ class AccessOverrideIn(BaseModel):
 
 
 @router.post("/access/overrides", status_code=201)
-def access_set_override(body: AccessOverrideIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
+def access_set_override(body: AccessOverrideIn, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
     from datetime import datetime
     from ..services import access_service
     u = db.get(User, body.user_id)
@@ -529,23 +551,32 @@ def access_set_override(body: AccessOverrideIn, db: Session = Depends(get_db), u
             valid_to = datetime.fromisoformat(body.valid_to)
         except ValueError:
             raise HTTPException(422, "Срок действия: дата в формате ГГГГ-ММ-ДД")
+    if body.group in SECURITY_GROUPS and body.level > access_service.perms_for(db, u).get(body.group, 0):
+        from ..core.auth import require_step_up
+        require_step_up(user)   # исключение, повышающее права безопасности, — с подтверждением (09 §1)
     try:
         row = access_service.set_override(db, u, body.group, body.level, valid_to, body.comment, user.id)
     except ValueError as e:
         raise HTTPException(422, str(e))
     db.flush()
     audit(db, user.id, None, "access_override", row.id, "set", after=body.model_dump())
+    from ..services import security_events as sev
+    sev.record(db, "access", "override_set", actor_id=user.id, subject_id=u.id, request=request, session_id=user.sid, entity_type="access_override",
+               entity_id=row.id, meta={"group": body.group, "level": body.level, "temporary": bool(valid_to)})
     db.commit()
     return serialize(row)
 
 
 @router.delete("/access/overrides/{override_id}", status_code=204)
-def access_delete_override(override_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
+def access_delete_override(override_id: str, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
     from ..models import AccessUserOverride
+    from ..services import security_events as sev
     row = db.get(AccessUserOverride, override_id)
     if row is None:
         return
     audit(db, user.id, None, "access_override", row.id, "delete", before=serialize(row))
+    sev.record(db, "access", "override_deleted", actor_id=user.id, subject_id=row.user_id, request=request, session_id=user.sid,
+               entity_type="access_override", entity_id=row.id, meta={"group": row.field_group, "level": row.level})
     db.delete(row)
     db.commit()
 
