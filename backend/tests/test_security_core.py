@@ -581,3 +581,29 @@ def test_old_30_day_session_is_cut_to_12_hours():
     r = c.get("/api/auth/me")
     assert r.status_code == 401 and "Срок сессии истёк" in r.json()["detail"]
     assert all(x["sid"] != sid for x in login(email).get("/api/auth/sessions").json()["items"])
+
+
+@pytest.mark.parametrize("raw,status", [
+    ("", "dev"), ("  {k}  ", "ok"), ('"{k}"', "ok"), ("'{k}'\n", "ok"), ("q3V…Xk=", "invalid"), ("abc", "invalid"), ("{k}{k}", "invalid"),
+])
+def test_mfa_key_status_and_normalization(monkeypatch, raw, status):
+    """Ключ с пробелами/кавычками по краям принимается; многоточие из примера или неполная строка — «задан неверно»."""
+    import base64, os as _os
+    k = base64.b64encode(_os.urandom(32)).decode()
+    s = get_settings()
+    monkeypatch.setattr(s, "mfa_encryption_key", raw.format(k=k))
+    assert mfa_svc.key_status(s) == status
+    if status == "ok":
+        blob, kid = mfa_svc.encrypt("SECRET", s)
+        assert kid == "env1" and mfa_svc.decrypt(blob, kid, s) == "SECRET"
+    if status == "invalid":
+        with pytest.raises(Exception) as e:
+            mfa_svc.encrypt("SECRET", s)
+        assert "задан неверно" in str(e.value.detail)
+
+
+def test_mfa_key_missing_in_prod_is_reported(monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "mfa_encryption_key", "")
+    monkeypatch.setattr(s, "env", "prod")
+    assert mfa_svc.key_status(s) == "missing" and not mfa_svc.available(s)
