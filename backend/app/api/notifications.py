@@ -16,9 +16,10 @@ from ..models import Deal, NotificationLog
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 EVENT_TITLES = {"task": "Задача", "task_new": "Задача", "task_overdue": "Просрочка", "legal_doc": "Документы", "acceptance": "Приёмка",
                 "rework": "Доработка", "approval": "Утверждение", "parts_sla": "Запчасти", "to_reminder": "ТО машины",
-                "backup": "Резервные копии", "security": "Безопасность"}
+                "backup": "Резервные копии", "security": "Безопасность",
+                "access_review": "Пересмотр прав"}
 # куда ведёт уведомление без сделки (события эксплуатации)
-EVENT_ROUTES = {"backup": "/settings?s=backup", "security": "/settings?s=security_admin"}
+EVENT_ROUTES = {"backup": "/settings?s=backup", "security": "/settings?s=security_admin", "access_review": "/settings?s=access_review"}
 
 
 def _base(db: Session, user: CurrentUser):
