@@ -406,3 +406,41 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .aud-dl dt { font-size: 12px; color: var(--muted); }
 .aud-dl dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 480px) { .aud-filters .sec-field { min-width: calc(50% - 6px); flex: 1; } }
+
+/* Поддержка (docs/operations/10 §5) */
+.sup-btn { position: relative; padding: 4px 10px; }
+.sup-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.sup-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sup-files { margin: 8px 0; }
+.sup-file-list { list-style: none; padding: 0; margin: 6px 0; font-size: 13px; }
+.sup-file-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; overflow-wrap: anywhere; }
+.sup-tech { margin: 8px 0; font-size: 14px; }
+.sup-tech summary { cursor: pointer; color: var(--muted); }
+.sup-empty { padding: 20px 0; text-align: center; }
+.sup-unread td:first-child, .sup-card.sup-unread { border-left: 3px solid var(--accent); }
+.sup-subj { font-weight: 600; overflow-wrap: anywhere; }
+.sup-mobile { display: none; }
+.sup-card { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font: inherit; cursor: pointer; min-height: 44px; }
+.sup-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin: 6px 0 10px; }
+.sup-head h2 { overflow-wrap: anywhere; }
+.sup-actions { gap: 6px; flex-wrap: wrap; }
+.sup-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; }
+.sup-thread { min-width: 0; }
+.sup-msg { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; background: #fff; }
+.sup-msg.specialist { background: #f6f9fc; }
+.sup-msg-head { font-size: 13px; margin-bottom: 4px; }
+.sup-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sup-sys { font-size: 12px; color: var(--muted); text-align: center; margin: 6px 0 10px; }
+.sup-composer { border-top: 1px solid var(--line); padding-top: 10px; position: sticky; bottom: 0; background: #fff; }
+.sup-composer textarea, .sec-field textarea { width: 100%; font: inherit; }
+.sup-side { min-width: 0; }
+.sup-admin-box { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.sup-kpis { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
+.sup-kpi { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: #fff; cursor: pointer; font: inherit; text-align: left; min-width: 110px; }
+.sup-kpi.bad { border-color: #e2b4b4; background: #fbeeee; }
+@media (max-width: 768px) {
+  .sup-layout { grid-template-columns: 1fr; }
+  .sup-desktop { display: none; }
+  .sup-mobile { display: block; }
+}
+@media (max-width: 480px) { .sup-grid2 { grid-template-columns: 1fr; } }

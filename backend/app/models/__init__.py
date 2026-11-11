@@ -856,6 +856,7 @@ class NotificationLog(Base):
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     error: Mapped[str] = mapped_column(Text, default="")
     read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))   # канал «в системе»: когда прочитано
+    link: Mapped[Optional[str]] = mapped_column(String(300))   # куда ведёт уведомление (поддержка: /support/<id>); без содержимого
 
 
 class ImportMapping(TimestampMixin, Base):
@@ -1034,6 +1035,77 @@ class AppMarker(Base):
     value: Mapped[str] = mapped_column(String(64))
     set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     app_env: Mapped[str] = mapped_column(String(32), default="")
+
+
+class SupportNumberSequence(Base):
+    """Счётчик номеров обращений по году (02 §7): берётся с блокировкой строки, без count+1."""
+    __tablename__ = "support_number_sequences"
+    year: Mapped[int] = mapped_column(Integer, primary_key=True)
+    next_value: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class SupportTicket(Base):
+    """Обращение в поддержку внутри CRM (05, 02 §7). Только «в системе», без почты."""
+    __tablename__ = "support_tickets"
+    __table_args__ = (CheckConstraint("category IN ('error', 'question', 'access', 'improvement')", name="ck_support_category"),
+                      CheckConstraint("requested_urgency IN ('normal', 'high', 'critical')", name="ck_support_urgency"),
+                      CheckConstraint("priority IN ('low', 'normal', 'high', 'critical')", name="ck_support_priority"),
+                      CheckConstraint("status IN ('new', 'in_progress', 'waiting_reporter', 'resolved', 'closed')", name="ck_support_status"),
+                      UniqueConstraint("reporter_id", "idempotency_key", name="uq_support_idempotency"),
+                      Index("ix_support_reporter_activity", "reporter_id", "last_activity_at"),
+                      Index("ix_support_status_priority_activity", "status", "priority", "last_activity_at"),
+                      Index("ix_support_assignee_status", "assignee_id", "status"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(16), unique=True)
+    reporter_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    assignee_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    category: Mapped[str] = mapped_column(String(16))
+    requested_urgency: Mapped[str] = mapped_column(String(16), default="normal")
+    priority: Mapped[str] = mapped_column(String(16), default="normal")
+    subject: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text)
+    current_route: Mapped[str] = mapped_column(String(300), default="")
+    app_commit: Mapped[str] = mapped_column(String(40), default="")
+    correlation_id: Mapped[str] = mapped_column(String(40), default="")
+    client_metadata: Mapped[dict] = mapped_column(JSONType, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="new")
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(64))
+    first_response_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    reopened_from_id: Mapped[Optional[str]] = mapped_column(String(36))
+
+
+class SupportMessage(Base):
+    """Сообщение обращения: неизменяемое. kind=system пишет только сервер."""
+    __tablename__ = "support_messages"
+    __table_args__ = (CheckConstraint("kind IN ('user', 'specialist', 'system')", name="ck_support_message_kind"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    ticket_id: Mapped[str] = mapped_column(ForeignKey("support_tickets.id"), index=True)
+    author_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    kind: Mapped[str] = mapped_column(String(16))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SupportAttachment(Base):
+    """Вложение обращения (D-051): своё хранение вне attachments — у тех deal_id обязателен, а доступ к файлам сделок идёт
+    через can_see_deal. Здесь доступ только через обращение (автор или поддержка); файл принят только после проверки."""
+    __tablename__ = "support_attachments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    ticket_id: Mapped[str] = mapped_column(ForeignKey("support_tickets.id"), index=True)
+    message_id: Mapped[Optional[str]] = mapped_column(ForeignKey("support_messages.id"))
+    file_name: Mapped[str] = mapped_column(String(255))
+    storage_path: Mapped[str] = mapped_column(String(1024))
+    sha256: Mapped[str] = mapped_column(String(64))
+    size: Mapped[int] = mapped_column(BigInteger, default=0)
+    scan_status: Mapped[str] = mapped_column(String(20), default="legacy_unscanned")
+    scan_id: Mapped[Optional[str]] = mapped_column(String(36))
+    uploaded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class AccessReviewCampaign(Base):

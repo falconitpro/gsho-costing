@@ -21,6 +21,9 @@ export class ApiError extends Error {
 
 /** Подтверждение опасного действия (step-up, docs/operations/04): диалог регистрирует обработчик; запрос повторяется один раз после успеха. */
 let stepUpHandler: (() => Promise<boolean>) | null = null;
+let lastError: { requestId: string; at: string; path: string } | null = null;
+export const getLastError = () => lastError;
+
 export function setStepUpHandler(h: (() => Promise<boolean>) | null) { stepUpHandler = h; }
 const detailCode = (d: unknown) => (d && typeof d === "object" ? (d as { code?: string }).code : undefined);
 
@@ -38,7 +41,11 @@ async function request<T>(method: string, url: string, body?: unknown, form?: Fo
     if (code === "step_up_required" && stepUpHandler && (await stepUpHandler())) return request<T>(method, url, body, form, extra, true);
     if (code === "password_change_required" || code === "mfa_setup_required") window.dispatchEvent(new CustomEvent("gsho:security-gate"));
   }
-  if (!res.ok) throw new ApiError(res.status, data?.detail ?? data);
+  if (!res.ok) {
+    // ID запроса последней ошибки — подставляется в «Сообщить в поддержку» (без ответа сервера и подробностей)
+    lastError = { requestId: res.headers.get("X-Request-ID") || "", at: new Date().toISOString(), path: url.split("?")[0] };
+    throw new ApiError(res.status, data?.detail ?? data);
+  }
   return data as T;
 }
 
@@ -52,6 +59,8 @@ export const api = {
   del: <T>(url: string) => request<T>("DELETE", url),
   /** POST с ключом идемпотентности (раздел «Финансы»: повтор запроса с тем же ключом не создаёт дубль). */
   postIdem: <T>(url: string, body: unknown, key: string) => request<T>("POST", url, body, undefined, { "Idempotency-Key": key }),
+  /** multipart с несколькими файлами и необязательными заголовками (поддержка: Idempotency-Key). */
+  form: <T>(url: string, fd: FormData, headers?: Record<string, string>) => request<T>("POST", url, undefined, fd, headers),
   upload: <T>(url: string, file: File, extra?: Record<string, string>) => {
     const fd = new FormData();
     fd.append("file", file);

@@ -503,7 +503,7 @@ def access_matrix(db: Session = Depends(get_db), user: CurrentUser = Depends(_ac
 
 
 # группы прав безопасности: повышение уровня требует подтверждения не старше 10 минут (09 §1)
-SECURITY_GROUPS = {"security_admin", "security_audit", "access_admin", "backup_status"}
+SECURITY_GROUPS = {"security_admin", "security_audit", "access_admin", "backup_status", "support_admin"}
 
 
 class AccessRuleIn(BaseModel):

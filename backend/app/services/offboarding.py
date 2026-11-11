@@ -14,7 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser, require_step_up
-from ..models import AccessUserOverride, NotificationLog, Task, User
+from ..models import AccessUserOverride, NotificationLog, SupportTicket, Task, User
 from . import auth_session as sess
 from . import security_events as sev
 
@@ -49,8 +49,14 @@ def preview(db: Session, user: User) -> dict:
                         + (1 if user.deputy_id and (user.deputy_to is None or user.deputy_to >= today) else 0),
         "finance_questions_open": len(db.scalars(select(FinanceQuestion.id).where(FinanceQuestion.assignee_id == user.id,
                                                                                 FinanceQuestion.status.in_(["open", "answered"]))).all()),
-        "support_tickets_assigned": 0,   # появится с внутренней поддержкой (этап 4): заявки снимаются с исполнителя
+        "support_tickets_assigned": len(db.scalars(select(SupportTicket.id).where(SupportTicket.assignee_id == user.id,
+                                                                                SupportTicket.status != "closed")).all()),
     }
+
+
+def _unassign_support(db: Session, user: User) -> int:
+    from .support import unassign_offboarded
+    return unassign_offboarded(db, user)
 
 
 # --- шаги (отдельными функциями, чтобы тест мог «уронить» любой и проверить откат, OFF-04)
@@ -115,7 +121,7 @@ def offboard(db: Session, actor: CurrentUser, user_id: str, request: Optional[Re
         "overrides_ended": _end_overrides(db, user),
         "tasks_flagged": _flag_tasks(db, user),
         "finance_questions_open": before["finance_questions_open"],   # не закрываются автоматически — видны ответственному (04 §5.2 п. 9)
-        "support_tickets_unassigned": 0,
+        "support_tickets_unassigned": _unassign_support(db, user),
     }
     user.is_active, user.offboarded_at, user.offboarded_by = False, _now(), actor.id
     audit(db, actor.id, None, "user", user.id, "offboard", {"is_active": True}, {"is_active": False, **counts}, reason[:300])

@@ -17,7 +17,10 @@ router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 EVENT_TITLES = {"task": "Задача", "task_new": "Задача", "task_overdue": "Просрочка", "legal_doc": "Документы", "acceptance": "Приёмка",
                 "rework": "Доработка", "approval": "Утверждение", "parts_sla": "Запчасти", "to_reminder": "ТО машины",
                 "backup": "Резервные копии", "security": "Безопасность",
-                "access_review": "Пересмотр прав", "security_alert": "Предупреждение безопасности"}
+                "access_review": "Пересмотр прав", "security_alert": "Предупреждение безопасности",
+                "support_ticket_created": "Поддержка", "support_ticket_assigned": "Поддержка", "support_message_reporter": "Поддержка",
+                "support_message_specialist": "Поддержка", "support_waiting_reporter": "Поддержка", "support_resolved": "Поддержка",
+                "support_reopened": "Поддержка", "support_unassigned_offboard": "Поддержка"}
 # куда ведёт уведомление без сделки (события эксплуатации)
 EVENT_ROUTES = {"backup": "/settings?s=backup", "security": "/settings?s=security_admin", "access_review": "/settings?s=access_review",
                 "security_alert": "/settings?s=security_audit"}
@@ -40,7 +43,7 @@ def list_notifications(limit: int = 50, db: Session = Depends(get_db), user: Cur
     deals = {d.id: d.number for d in db.scalars(select(Deal).where(Deal.id.in_({r.deal_id for r in rows if r.deal_id}))).all()} if rows else {}
     return {"unread": sum(1 for r in rows if r.read_at is None),
             "items": [{"id": r.id, "at": r.at.isoformat() if r.at else None, "event": r.event, "event_title": EVENT_TITLES.get(r.event, r.event),
-                       "text": r.text, "deal_id": r.deal_id, "deal_number": deals.get(r.deal_id, ""), "url": EVENT_ROUTES.get(r.event), "read": r.read_at is not None} for r in rows]}
+                       "text": r.text, "deal_id": r.deal_id, "deal_number": deals.get(r.deal_id, ""), "url": r.link or EVENT_ROUTES.get(r.event), "read": r.read_at is not None} for r in rows]}
 
 
 class ReadIn(BaseModel):
