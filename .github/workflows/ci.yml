@@ -27,7 +27,25 @@ jobs:
       - name: restic, shellcheck, pg_dump 16 — для тестов резервного копирования (docs/operations/03)
         # pg_dump/pg_restore той же версии, что сервер (postgres:16): клиент 17+ пишет в дамп SET transaction_timeout, которого нет в 16
         run: |
-          sudo apt-get update -q && sudo apt-get install -y -q restic shellcheck postgresql-client-16
+          # Зеркала Ubuntu с раннеров GitHub бывают недоступны (11.11.2026 не резолвились ни azure.archive, ни archive.ubuntu.com).
+          # Поэтому apt — одна короткая попытка, а для недостающего — замены без apt (D-054):
+          #   shellcheck — из PyPI (shellcheck-py), restic — официальный релиз с GitHub, pg_dump/pg_restore/psql 16 — из образа
+          #   postgres:16, уже скачанного для сервиса БД (тот же major, что сервер; файлы /tmp и рабочего каталога доступны).
+          timeout 240 sh -c 'sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 update -q &&
+            sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=15 install -y -q restic shellcheck postgresql-client-16' || echo "apt недоступен — замены"
+          command -v shellcheck || pip install -q shellcheck-py
+          if ! command -v restic; then
+            curl -fsSL https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 | bunzip2 > /tmp/restic
+            sudo install -m 0755 /tmp/restic /usr/local/bin/restic
+          fi
+          if [ ! -x /usr/lib/postgresql/16/bin/pg_dump ]; then
+            sudo mkdir -p /usr/lib/postgresql/16/bin
+            for t in pg_dump pg_restore psql createdb dropdb; do
+              printf '#!/bin/sh\nexec docker run --rm -i --network host -u "$(id -u):$(id -g)" -v /tmp:/tmp -v "$HOME:$HOME" -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$PWD" -e PGHOST -e PGPORT -e PGUSER -e PGDATABASE -e PGPASSWORD -e PGPASSFILE -e PGOPTIONS postgres:16 %s "$@"\n' "$t" | sudo tee /usr/lib/postgresql/16/bin/$t >/dev/null
+              sudo chmod 0755 /usr/lib/postgresql/16/bin/$t
+            done
+          fi
+          restic version && shellcheck --version | head -2 && /usr/lib/postgresql/16/bin/pg_dump --version
           echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
       - name: pytest
         run: |
