@@ -367,3 +367,21 @@ def test_database_marker_blocks_test_env_on_production_data():
             environment.check(db, _s(env="dev"))
         m.value = saved or "synthetic"
         db.commit()
+
+
+def test_load_smoke_script_passes_and_fails_when_scanner_down(capsys):
+    """FILE-08: скрипт нагрузочной проверки для сервера — PASS с антивирусом, код 2 без него; в базу не пишет."""
+    from app.core.config import get_settings
+    from scripts import load_smoke
+    fake, s = FakeClamd(), get_settings()
+    old = (s.clamd_host, s.clamd_port)
+    s.clamd_host, s.clamd_port = "127.0.0.1", fake.port
+    try:
+        assert load_smoke.main(["--files", "6", "--mb", "1", "--workers", "3"]) == 0
+        out = capsys.readouterr().out
+        assert "ИТОГ: PASS" in out and "найдена в 1 из 1" in out and fake.scanned == 6
+        fake.sock.close()
+        s.clamd_port = 1
+        assert load_smoke.main(["--files", "1"]) == 2
+    finally:
+        s.clamd_host, s.clamd_port = old
