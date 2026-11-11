@@ -14,7 +14,7 @@ def main() -> int:
     from app.core.config import get_settings
     from app.services import file_scanner, scanner_status
     s = get_settings()
-    st = scanner_status.status(s)
+    st = scanner_status.status(s, probe=True)
     print(f"режим FILE_SCAN={s.file_scan}, clamd {s.clamd_host}:{s.clamd_port}")
     try:
         v = file_scanner.version(s.clamd_host, s.clamd_port)

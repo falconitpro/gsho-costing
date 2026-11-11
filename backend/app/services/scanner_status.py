@@ -14,9 +14,10 @@ from . import file_scanner
 STALE_HOURS = 48
 
 
-def status(s: Settings) -> dict:
+def status(s: Settings, probe: bool = False) -> dict:
+    """probe=True — опросить clamd даже при FILE_SCAN=off (проверка перед включением)."""
     out = {"mode": s.file_scan, "available": None, "engine": "", "signatures": None, "signatures_at": None, "age_hours": None, "stale": False, "error": ""}
-    if s.file_scan != "clamav":
+    if s.file_scan != "clamav" and not probe:
         return out
     try:
         v = file_scanner.version(s.clamd_host, s.clamd_port, timeout=5.0)
