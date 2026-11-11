@@ -9,7 +9,8 @@ from datetime import date
 from sqlalchemy import select
 
 from app.db import SessionLocal, init_db
-from app.models import Client, Factory, FxRate, HsCode, LegalEntity, MarkupPolicy, PaymentScheme, RouteStep, SupplyRoute, User
+from app.models import Client, Factory, FxRate, HsCode, User
+from scripts.reference import SCHEMES, payment_schemes, seed_parts_setup  # noqa: F401  (справочники без демо-данных — общие с рабочим режимом)
 
 TEST_LOGIN = "evgeniy@dobrov.pro"
 TEST_PASSWORD = "test2027"          # пароль тестового входа на стенд (только dev)
@@ -34,15 +35,6 @@ HS = [
     ("8430410000", "Машины бурильные самоходные", 0.0, 22.0, True, ["ТР ТС 010/2011", "ЭПБ"]),
     ("8428330000", "Конвейеры ленточные", 0.0, 22.0, False, ["ТР ТС 010/2011"]),
 ]
-SCHEMES = [
-    ("30/70", [{"no": 1, "share_pct": 30, "event": "contract", "offset_days": 10}, {"no": 2, "share_pct": 70, "event": "delivery", "offset_days": 10}]),
-    ("100 % предоплата", [{"no": 1, "share_pct": 100, "event": "contract", "offset_days": 10}]),
-    ("20/70/10 с гарантией", [{"no": 1, "share_pct": 20, "event": "contract", "offset_days": 10, "guarantee": "advance_return", "guarantee_pct": 100, "guarantee_months": 6},
-                             {"no": 2, "share_pct": 70, "event": "readiness", "offset_days": 5},
-                             {"no": 3, "share_pct": 10, "event": "commissioning", "offset_days": 10}]),
-]
-
-
 DEV_PASSWORD = "berghaus-demo-2026"
 
 
@@ -77,9 +69,7 @@ def run() -> None:
         for code, desc, duty, vat, util, cert in HS:
             if not db.scalar(select(HsCode).where(HsCode.code == code, HsCode.valid_to.is_(None))):
                 db.add(HsCode(code=code, description=desc, duty_pct=duty, vat_pct=vat, util_fee=util, certification=cert, valid_from=date(2026, 1, 1)))
-        for name, lines in SCHEMES:
-            if not db.scalar(select(PaymentScheme).where(PaymentScheme.name == name)):
-                db.add(PaymentScheme(name=name, lines=lines))
+        payment_schemes(db)
         seed_parts_setup(db)
         mark_supplies(db)           # раздел «Поставщики»: ГШО / запасные части — по фактическому использованию
         parts_manufacturer_paus(db)  # разово (05.11.2026): у всех запчастей каталога производитель PAUS, Германия
@@ -97,57 +87,6 @@ def run() -> None:
             db.add(FxRate(on=date.today(), currency="EUR", rate=98.0, source="cbr"))
         db.commit()
     print("seed: ok")
-
-
-# запчасти, шаг 1: компании группы и типовые маршруты (вариант В: Китай → FCA склад экспедитора в CNY;
-# Киргизия → DAP склад РФ в валюте закупки). Названия компаний — заготовки, их правят КД и ЗГД.
-ENTITIES = [
-    ("ru", "Компания в РФ", "RU", "RUB", "physical", True),
-    ("kg", "Компания в Киргизии", "KG", "KGS", "virtual", False),
-    ("cn", "Компания в Китае", "CN", "CNY", "none", False),
-]
-ROUTES = [   # (название, страна поставщика, [(продавец, покупатель, Incoterms, место, валюта, выпуск)])
-    ("Поставщик КНР → РФ", "CN", [(None, "ru", "FCA", "склад экспедитора в КНР", "CNY", "RU")]),
-    ("Поставщик КНР → компания в Китае → РФ", "CN", [(None, "cn", "EXW", "склад поставщика", "CNY", ""),
-                                                   ("cn", "ru", "FCA", "склад экспедитора в КНР", "CNY", "RU")]),
-    ("Поставщик КНР → компания в Китае → Киргизия → РФ", "CN", [(None, "cn", "EXW", "склад поставщика", "CNY", ""),
-                                                              ("cn", "kg", "FCA", "склад экспедитора в КНР", "CNY", "KG"),
-                                                              ("kg", "ru", "DAP", "склад РФ", "CNY", "")]),
-    ("Поставщик Германии → Киргизия → РФ", "DE", [(None, "kg", "FCA", "склад поставщика", "EUR", "KG"),
-                                                 ("kg", "ru", "DAP", "склад РФ", "EUR", "")]),
-    ("Поставщик Германии → РФ", "DE", [(None, "ru", "FCA", "склад поставщика", "EUR", "RU")]),
-    ("Поставщик Киргизии → Киргизия → РФ", "KG", [(None, "kg", "EXW", "склад поставщика", "KGS", "KG"),
-                                                 ("kg", "ru", "DAP", "склад РФ", "KGS", "")]),
-]
-
-
-def seed_parts_setup(db) -> None:
-    by_code = {}
-    for code, name, country, cur, wh, sells in ENTITIES:
-        e = db.scalar(select(LegalEntity).where(LegalEntity.code == code))
-        if e is None:
-            e = LegalEntity(code=code, name=name, country=country, currency=cur, warehouse=wh, sells_to_clients=sells)
-            db.add(e)
-            db.flush()
-        by_code[code] = e.id
-    for name, country, steps in ROUTES:
-        if db.scalar(select(SupplyRoute).where(SupplyRoute.name == name)):
-            continue
-        r = SupplyRoute(name=name, supplier_country=country)
-        for i, (seller, buyer, inc, place, cur, customs) in enumerate(steps, start=1):
-            r.steps.append(RouteStep(no=i, seller_entity_id=by_code[seller] if seller else None, buyer_entity_id=by_code[buyer],
-                                     incoterms=inc, place=place, currency=cur, customs_country=customs))
-        db.add(r)
-    db.flush()
-    # стартовая политика наценок — черновиком: в силу вступает только после виз ЗГД и ФД
-    if not db.scalar(select(MarkupPolicy)):
-        db.add(MarkupPolicy(version_no=1, status="draft", reason="Стартовые ставки: компания в Китае 5 %, компания в Киргизии 6 %",
-                            rules={"default": {by_code["cn"]: 5.0, by_code["kg"]: 6.0}, "by_group": [], "by_supplier": [], "min_margin_pct": None}))
-        db.flush()
-
-
-if __name__ == "__main__":
-    run()
 
 
 def mark_supplies(db) -> int:
@@ -232,3 +171,21 @@ def parts_supplier_grp(db) -> int:
                           details={"updated": n, "supplier_id": grp.id, "supplier_created": created, "route_id": route.id, "backup": backup}))
     db.flush()
     return n
+
+
+def main(argv: list[str]) -> None:
+    """Запуск из выкладки стенда. В базе, где уже есть сотрудники, ничего не делает: с 05.11.2026 этот запуск падал
+    (блок стоял выше функций, ошибка глушилась), стенд с тех пор живёт без него — и возобновлять его нельзя: он выдал бы
+    общий демо-пароль учётным записям без пароля и вернул бы удалённые демо-записи. Принудительно: --force."""
+    init_db()
+    with SessionLocal() as db:
+        populated = db.scalar(select(User).limit(1)) is not None
+    if populated and "--force" not in argv:
+        print("seed: пропущено — в базе уже есть сотрудники (демо-данные добавляются только в пустую базу; принудительно: --force)")
+        return
+    run()
+
+
+if __name__ == "__main__":
+    import sys
+    main(sys.argv[1:])
