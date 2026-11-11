@@ -181,6 +181,9 @@ def overdue_report(date_from: Optional[date] = None, date_to: Optional[date] = N
 
 # ------------------------------------------------------------------ файлы (локальное хранилище)
 
+BLOCKED_SCAN = {"infected", "error", "pending"}   # 04 §8: заражённые и непроверенные новые файлы не выдаются (D-049)
+
+
 @router.get("/files/{path:path}")
 def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     s = get_settings()
@@ -198,6 +201,8 @@ def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depen
     restricted = (att and att.folder == "04_cost") or (ver and path == ver.excel_path)
     if restricted and not user.can("cost_files"):
         raise HTTPException(403, "Папка «04 Расчёт себестоимости» недоступна для роли")
+    if att is not None and att.scan_status in BLOCKED_SCAN:
+        raise HTTPException(410, "Файл заблокирован проверкой безопасности — обратитесь к администратору")
     # журнал скачиваний (core/download_audit.py): объект и сделка — без пути хранения и имени файла
     note(entity_type="attachment" if att else "deal_version", entity_id=att.id if att else ver.id, deal_id=deal.id)
     if s.storage_provider == "s3":

@@ -31,13 +31,18 @@ sudo -E bash -c 'set -a; . /etc/gsho/restore.env; set +a; \
 
 ## 3. Запуск приложения на восстановленной копии (smoke)
 
-На этапе 1 `APP_ENV=recovery` в приложении ещё нет (появится с проверками окружения на этапе 3). Для smoke — backend из того же commit, что в manifest, с отключёнными внешними каналами:
+Backend из того же commit, что в manifest, в режиме `APP_ENV=recovery` (D-050): приложение само проверит, что почта, мессенджер и запись в S3 выключены, и не запустит фоновые задания (напоминания, уведомления, импорт курсов). Восстановленная база получит отметку `recovery` — тестовый стенд на ней потом не запустится.
 
 ```text
-APP_ENV=prod  AUTH_PROVIDER=dev  STORAGE_PROVIDER=local   # при APP_ENV=prod переключателя ролей нет — только вход по паролю  STORAGE_LOCAL_ROOT=/srv/recovery/run1/.../storage
+APP_ENV=recovery  AUTH_PROVIDER=dev  STORAGE_PROVIDER=local  STORAGE_LOCAL_ROOT=/srv/recovery/run1/.../storage
 MAIL_PROVIDER=console  MESSENGER_PROVIDER=console  TRANSLATOR_PROVIDER=<не задавать ключи>  SECRET_KEY=<новый случайный>
+FILE_SCAN=off   # в recovery антивирус не обязателен: новые файлы в копию не загружаем
 DATABASE_URL=postgresql+psycopg://<recovery-user>@localhost/gsho_recovery
 ```
+
+Переключателя ролей вне `APP_ENV=dev` нет — вход только по паролю. Если backend не стартует с сообщением «UnsafeEnvironment», в тексте указано, какую настройку исправить.
+
+Если копия снята с базы, где ещё нет `app_markers` (до SQL `016b`), сначала примените `backend/migrations/016b_file_scanning.sql` к восстановленной базе — recovery без отметки не запускается.
 
 Проверить: `GET /api/health`, вход под учётной записью владельца, открытие 2–3 сделок и вложений. Исходящий трафик ВМ лучше закрыть группой безопасности.
 

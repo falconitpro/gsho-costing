@@ -23,11 +23,13 @@ const ACTIONS: Record<string, string> = {
   totp_failed: "неверный код", recovery_failed: "неверный код восстановления", admin_reset: "сброс администратором", change: "смена пароля", admin_temporary: "временный пароль",
   offboard: "доступ отключён", reactivate: "доступ включён", rule_changed: "уровень роли изменён", override_set: "исключение прав задано", override_deleted: "исключение прав удалено",
   roles_changed: "роли изменены", acknowledged: "предупреждение взято в работу", resolved: "предупреждение закрыто",
+  infected: "найдена угроза — файл не принят", scan_error: "проверка не удалась — файл не принят", down: "антивирус не отвечает", stale: "базы устарели",
+  review_overdue: "пересмотр просрочен",
   review_created: "создан пересмотр прав", review_keep: "пересмотр: оставить", review_change: "пересмотр: изменено", review_disable: "пересмотр: отключить",
   review_skipped: "пересмотр: пропуск", review_reopened: "пересмотр: решение отменено", review_completed: "пересмотр завершён", review_cancelled: "пересмотр отменён",
 };
 const DETAIL: Record<string, string> = { count_10min: "событий за 10 минут", threshold: "порог", rows: "строк в выгрузке", group: "группа прав", role: "роль", level: "уровень",
-  before: "было", after: "стало", roles_added: "добавлены роли", roles_removed: "сняты роли", action: "действие" };
+  before: "было", after: "стало", threat: "угроза", error: "ошибка", hours: "часов без обновления", pending: "не решено", roles_added: "добавлены роли", roles_removed: "сняты роли", action: "действие" };
 const dt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 const errText = (e: unknown) => (e instanceof ApiError ? e.message : "Не удалось выполнить действие");
 const size = (b: number | null) => (b == null ? "" : b < 1024 ? `${b} Б` : b < 1048576 ? `${Math.round(b / 1024)} КБ` : `${(b / 1048576).toFixed(1)} МБ`);
@@ -185,8 +187,42 @@ function EventsTab({ user, clearUser }: { user: { id: string; name: string } | n
   );
 }
 
+type Scanner = { mode: string; available: boolean | null; engine: string; signatures: number | null; signatures_at: string | null; age_hours: number | null;
+  stale: boolean; error: string; attachments: Record<string, number>;
+  recent: { id: string; at: string; source: string; file_name: string; status: string; detected_name: string; error: string; size: number }[] };
+const SCAN: Record<string, [string, string]> = { clean: ["чистый", "ok"], infected: ["угроза", "bad"], error: ["не проверен", "warn"], pending: ["проверяется", "info"],
+  legacy_unscanned: ["не проверялся", ""] };
+
+function ScannerTab() {
+  const [d, setD] = useState<Scanner | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => { api.get<Scanner>("/api/security/scanner").then(setD).catch((x) => setErr(errText(x))); }, []);
+  if (err) return <div className="alert error" role="alert">{err}</div>;
+  if (!d) return <span className="muted">Загрузка…</span>;
+  const total = Object.values(d.attachments).reduce((a, b) => a + b, 0);
+  return (
+    <>
+      {d.mode !== "clamav" ? <div className="alert info">Проверка загрузок антивирусом выключена (FILE_SCAN=off): новые файлы принимаются без проверки и помечаются «не проверялся».
+        Включение — по инструкции <code>deploy/clamav/install.md</code>.</div>
+        : d.available === false ? <div className="alert error" role="alert">Антивирус не отвечает ({d.error}) — новые файлы не принимаются, пока он не заработает.</div>
+        : <div className={`alert ${d.stale ? "warn" : "ok"}`}>Антивирус работает: ClamAV {d.engine}, базы {d.signatures}{d.signatures_at ? ` от ${dt(d.signatures_at)}` : ""}
+          {d.age_hours != null && ` (${Math.round(d.age_hours)} ч назад)`}{d.stale && " — базы устарели, проверьте обновление"}.</div>}
+      <p style={{ marginBottom: 6 }}>Файлы сделок: всего {total}{Object.entries(d.attachments).map(([k, n]) => <span key={k}> · <span className={`badge ${(SCAN[k] || [k, ""])[1]}`}>{(SCAN[k] || [k])[0]}</span> {n}</span>)}</p>
+      <h4 style={{ margin: "12px 0 6px" }}>Последние проверки</h4>
+      {d.recent.length === 0 ? <p className="muted">Проверок ещё не было.</p> : <div className="backup-table"><table className="aud-table">
+        <thead><tr><th>Когда</th><th>Файл</th><th>Источник</th><th>Результат</th></tr></thead>
+        <tbody>{d.recent.map((r) => <tr key={r.id}>
+          <td style={{ whiteSpace: "nowrap" }}>{dt(r.at)}</td><td>{r.file_name}<div className="muted" style={{ fontSize: 12 }}>{size(r.size)}</div></td>
+          <td>{r.source === "upload" ? "загрузка" : "хранилище"}</td>
+          <td><span className={`badge ${(SCAN[r.status] || [r.status, ""])[1]}`}>{(SCAN[r.status] || [r.status])[0]}</span>{r.detected_name && <div style={{ fontSize: 12 }}>{r.detected_name}</div>}
+            {r.error && <div className="muted" style={{ fontSize: 12 }}>{r.error}</div>}</td>
+        </tr>)}</tbody></table></div>}
+    </>
+  );
+}
+
 export default function SecurityAuditPage() {
-  const [tab, setTab] = useState<"alerts" | "events">("alerts");
+  const [tab, setTab] = useState<"alerts" | "events" | "scanner">("alerts");
   const [user, setUser] = useState<{ id: string; name: string } | null>(null);
   return (
     <div className="card">
@@ -195,8 +231,11 @@ export default function SecurityAuditPage() {
       <div className="row aud-tabs" role="tablist">
         <button role="tab" aria-selected={tab === "alerts"} className={`btn ${tab === "alerts" ? "" : "secondary"}`} onClick={() => setTab("alerts")}>Предупреждения</button>
         <button role="tab" aria-selected={tab === "events"} className={`btn ${tab === "events" ? "" : "secondary"}`} onClick={() => setTab("events")}>Журнал событий</button>
+        <button role="tab" aria-selected={tab === "scanner"} className={`btn ${tab === "scanner" ? "" : "secondary"}`} onClick={() => setTab("scanner")}>Проверка файлов</button>
       </div>
-      {tab === "alerts" ? <AlertsTab onUser={(id, name) => { setUser({ id, name }); setTab("events"); }} /> : <EventsTab user={user} clearUser={() => setUser(null)} />}
+      {tab === "alerts" && <AlertsTab onUser={(id, name) => { setUser({ id, name }); setTab("events"); }} />}
+      {tab === "events" && <EventsTab user={user} clearUser={() => setUser(null)} />}
+      {tab === "scanner" && <ScannerTab />}
     </div>
   );
 }

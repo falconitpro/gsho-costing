@@ -111,6 +111,12 @@ async def _daily_jobs() -> None:
                 remind_reviews(db)
         except Exception as e:   # pragma: no cover
             log.warning("access review reminders failed: %s", e)
+        try:   # антивирус: доступность и свежесть баз (docs/operations/04 §8.2)
+            from .services import scanner_status
+            with SessionLocal() as db:
+                scanner_status.hourly(db, settings)
+        except Exception as e:   # pragma: no cover
+            log.warning("scanner check failed: %s", e)
         try:   # резервные копии: перенос статуса с хоста, «нет копии дольше 26 ч», уведомления в системе (docs/operations/03 §5)
             from .services.backup_status import refresh as refresh_backups
             with SessionLocal() as db:
@@ -124,14 +130,26 @@ async def _daily_jobs() -> None:
 async def lifespan(app: FastAPI):
     if settings.is_dev:
         init_db()
-    task = asyncio.create_task(_daily_jobs())
+    # класс данных и опасные сочетания настроек (04 §10): при нарушении backend не стартует
+    from .core import environment
+    from .db import SessionLocal
+    with SessionLocal() as db:
+        environment.check(db, settings)
+    # recovery-копия для drill: никаких фоновых заданий (напоминания, уведомления, импорт курсов)
+    task = asyncio.create_task(_daily_jobs()) if settings.env != "recovery" else None
     yield
-    task.cancel()
+    if task:
+        task.cancel()
 
 
 app = FastAPI(title="Модуль расчёта себестоимости и маржинальности поставок ГШО", version="0.1.0", lifespan=lifespan,
               docs_url="/api/docs" if settings.is_dev else None, openapi_url="/api/openapi.json" if settings.is_dev else None)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+# Проверка загрузок (04 §8): добавлена раньше лимита размера — значит, работает внутри него (413 до чтения тела)
+from .core.upload_gate import UploadGateMiddleware  # noqa: E402
+app.add_middleware(UploadGateMiddleware)
 
 
 @app.middleware("http")
@@ -174,4 +192,5 @@ async def unhandled(request: Request, exc: Exception):   # pragma: no cover
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "env": settings.env, "auth": settings.auth_provider, "storage": settings.storage_provider}
+    return {"status": "ok", "env": settings.env, "auth": settings.auth_provider, "storage": settings.storage_provider, "file_scan": settings.file_scan}
+

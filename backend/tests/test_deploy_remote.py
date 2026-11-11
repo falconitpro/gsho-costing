@@ -26,7 +26,7 @@ def sandbox(tmp_path):
     log = tmp_path / "calls.log"
     _stub(bin_, "git", f'echo "git $*" >> {log}; [ "$1" = rev-parse ] && echo abc1234; exit 0\n')
     _stub(bin_, "docker", f'echo "docker $*" >> {log}\n'
-                          'case "$*" in *is_dev*) exit "${STUB_IS_DEV_RC:-0}" ;; esac; exit 0\n')
+                          'case "$*" in *is_dev*) exit "${STUB_IS_DEV_RC:-0}" ;; *"ps -q clamav"*) echo "${STUB_CLAMAV_ID:-}" ;; esac; exit 0\n')
     _stub(bin_, "backup", f'echo "backup $*" >> {log}; exit "${{STUB_BACKUP_RC:-0}}"\n')
     # не root (как в CI) — деплой зовёт `sudo -n <backup>`; заглушка проверяет -n и запускает команду с тем же окружением
     _stub(bin_, "sudo", f'echo "sudo $*" >> {log}; [ "$1" = -n ] || exit 97; shift; exec "$@"\n')
@@ -85,3 +85,14 @@ def test_seed_only_in_dev(sandbox, is_dev_rc, seeded):
     tmp, env, log = sandbox
     assert _deploy(env, STUB_IS_DEV_RC=str(is_dev_rc)).returncode == 0
     assert any("scripts.seed" in x for x in _calls(log)) is seeded
+
+
+def test_scanner_rebuilt_only_if_owner_started_it(sandbox):
+    tmp, env, log = sandbox
+    assert _deploy(env).returncode == 0
+    up = [x for x in _calls(log) if " up -d " in x]
+    assert up and "clamav" not in up[-1] and "--profile" not in up[-1]
+    log.unlink()
+    assert _deploy(env, STUB_CLAMAV_ID="abc123").returncode == 0
+    up = [x for x in _calls(log) if " up -d " in x]
+    assert up[-1].endswith("backend frontend caddy clamav") and "--profile scanner" in up[-1]

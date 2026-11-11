@@ -388,7 +388,7 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 @media (max-width: 768px) { .ar-grid { grid-template-columns: 1fr; } .ar-roles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ar-actions { white-space: normal; } }
 
 /* «Журнал и предупреждения» (docs/operations/10 «Алерты») */
-.aud-tabs { gap: 6px; margin: 4px 0 12px; }
+.aud-tabs { gap: 6px; margin: 4px 0 12px; flex-wrap: wrap; }
 .aud-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
 .aud-chip { border: 1px solid var(--line); background: var(--card, #fff); border-radius: 999px; padding: 6px 12px; min-height: 36px; cursor: pointer; font: inherit; font-size: 14px; }
 .aud-chip b { font-size: 16px; margin-right: 2px; }

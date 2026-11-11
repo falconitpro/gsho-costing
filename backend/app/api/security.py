@@ -167,7 +167,8 @@ def _parse_day(v: Optional[str], end: bool = False) -> Optional[datetime]:
 
 
 EVENT_TYPE_TITLES = {"auth": "Вход", "session": "Сессии", "mfa": "Код из приложения", "password": "Пароль", "offboard": "Отключение доступа",
-                     "access": "Права доступа", "download": "Скачивание файла", "export": "Выгрузка", "alert": "Предупреждения", "backup": "Резервные копии"}
+                     "access": "Права доступа", "download": "Скачивание файла", "export": "Выгрузка", "alert": "Предупреждения", "backup": "Резервные копии",
+                     "file": "Проверка файла", "scanner": "Антивирус"}
 
 
 def _event_dto(db: Session, e: SecurityEvent, names: dict) -> dict:
@@ -406,3 +407,13 @@ def alert_ack(aid: str, body: AlertActionIn, request: Request, db: Session = Dep
 @router.post("/alerts/{aid}/resolve")
 def alert_resolve(aid: str, body: AlertActionIn, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     return _alert_action(db, aid, body, user, request, "resolve")
+
+
+# ------------------------------------------------------------------ проверка файлов (04 §8)
+
+@router.get("/scanner")
+def scanner(db: Session = Depends(get_db), user: CurrentUser = Depends(_audit_reader)):
+    """Антивирус: режим, доступность, свежесть баз; статусы файлов и последние проверки (без путей хранения)."""
+    from ..core.config import get_settings
+    from ..services import scanner_status
+    return scanner_status.summary(db, get_settings())

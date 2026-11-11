@@ -55,6 +55,8 @@ def catalog_image(attachment_id: str, db: Session = Depends(get_db), user: Curre
     att = db.get(Attachment, attachment_id) if used else None
     if att is None or att.folder == "04_cost":
         raise HTTPException(404)
+    if att.scan_status in ("infected", "error", "pending"):
+        raise HTTPException(410, "Файл заблокирован проверкой безопасности")
     s = get_settings()
     from ..core.download_audit import note
     note(entity_type="attachment", entity_id=att.id)

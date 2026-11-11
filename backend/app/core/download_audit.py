@@ -41,7 +41,7 @@ _FILE_MARKERS = re.compile(r"file_response\(|FileResponse\(|StreamingResponse\(|
 _FILE_PATH = re.compile(r"(export|download|\.xlsx|\.docx|/xlsx|/docx|/file|/files|/zip|/photo|/print|/preview|/card|test-render|/images/)", re.I)
 _SAFE_FILTER_KEYS = {"kind", "as_of", "direction", "currency", "status", "source_type", "date_from", "date_to", "group_by", "horizon_days",
                      "queue", "reconciliation", "include_inactive", "legal_entity_id", "contract_id", "deal_id"}
-_DENIED = {401, 403, 404}
+_DENIED = {401, 403, 404, 410}
 _EXT = re.compile(r"\.([A-Za-z0-9]{1,8})\"?\s*$")
 
 _file_routes: Optional[set[str]] = None
