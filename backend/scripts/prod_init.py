@@ -4,6 +4,8 @@
     python -m scripts.prod_init schema                   # таблицы по моделям; после неё — SQL backend/migrations по порядку
     python -m scripts.prod_init reference                # справочники без демо-данных (схемы оплаты, компании группы, маршруты)
     python -m scripts.prod_init admin --email a@b --name "Фамилия Имя"   # первый пользователь (ЗГД) с временным паролем
+    python -m scripts.prod_init adopt --yes              # база перенесена со стенда: сбросить пароли, коды, сессии и служебные данные
+    python -m scripts.prod_init fx                       # заменить курсы ЦБ в базе загруженными с cbr.ru (CNY, USD, EUR с 2014 г.)
 
 Демо-данные (scripts.seed) в рабочую базу не попадают. Временный пароль печатается один раз и нигде не сохраняется;
 при первом входе система потребует его сменить.
@@ -118,6 +120,82 @@ def admin(email: str, name: str, force: bool = False) -> int:
     return 0
 
 
+# Перенос со стенда (deploy/production/transfer.md): сделки, справочники, сотрудники и права остаются; сбрасывается всё,
+# что относится ко входу на стенд, и служебные данные стенда. Журнал действий (audit_log) и журнал безопасности не трогаем.
+ADOPT_CLEAR = ["auth_sessions", "mfa_challenges", "mfa_recovery_codes", "mfa_credentials", "password_history", "notifications",
+               "ai_feedback", "ai_tool_audits", "ai_messages", "ai_conversations", "ai_usage_daily", "briefing_item_states",
+               "access_review_items", "access_review_campaigns", "backup_runs"]
+
+
+def adopt(yes: bool = False, force: bool = False) -> int:
+    from sqlalchemy import text
+
+    from app.db import SessionLocal, engine
+    from app.models import User
+    tables = set(inspect(engine).get_table_names())
+    if "users" not in tables or "app_markers" not in tables:
+        print("база не подготовлена: сначала deploy/production/init-db.sh --existing")
+        return 1
+    with SessionLocal() as db:
+        marker = db.execute(text("select value from app_markers where key = 'data_classification'")).scalar()
+        if marker == "production" and not force:
+            print("база уже помечена как рабочая — сброс паролей и кодов на ней остановил бы работу сотрудников. Остановлено.")
+            return 1
+        users = db.scalar(select(func.count()).select_from(User))
+        counts = {t: db.execute(text(f'select count(*) from "{t}"')).scalar() for t in ADOPT_CLEAR if t in tables}
+        with_pw = db.scalar(select(func.count()).select_from(User).where(User.password_hash.is_not(None)))
+        print(f"сотрудников: {users}, с паролем: {with_pw}; сделок: {db.execute(text('select count(*) from deals')).scalar()}")
+        print("будет очищено:", ", ".join(f"{t} {n}" for t, n in counts.items() if n) or "нечего")
+        if not yes:
+            print("Ничего не изменено. Чтобы выполнить, добавьте --yes")
+            return 0
+        for t in ADOPT_CLEAR:
+            if t in tables:
+                db.execute(text(f'delete from "{t}"'))
+        db.execute(text("update users set password_hash = null, password_set_at = null, password_must_change = false, "
+                        "failed_logins = 0, locked_until = null"))
+        from app.services.deal_service import audit
+        audit(db, None, None, "system", "production", "adopt_from_stand",
+              after={"users": users, "passwords_reset": with_pw, "cleared": {t: n for t, n in counts.items() if n}, "by": "scripts.prod_init"})
+        db.commit()
+    print("Готово: пароли, коды из приложения и сессии сброшены; сделки, справочники, сотрудники и права на месте.")
+    print("Дальше: python -m scripts.prod_init fx, затем python -m scripts.prod_init admin --email … --name …")
+    return 0
+
+
+def fx(currencies=("CNY", "USD", "EUR"), source=None) -> int:
+    """Курсы ЦБ заново с cbr.ru. На стенде первые курсы были выдуманными, а дозагрузка истории пропускает даты, которые уже есть, —
+    поэтому в перенесённой базе они могли остаться. Валюта заменяется только если загрузка удалась: при сбое сети прежние курсы целы."""
+    from datetime import date
+
+    from sqlalchemy import delete
+
+    from app import adapters
+    from app.db import SessionLocal
+    from app.models import FxRate
+    src = source or adapters.fx_source()
+    bad = 0
+    for cur in currencies:
+        try:
+            pts = src.history(cur, date(2014, 1, 1), date.today())
+        except Exception as e:  # noqa: BLE001
+            pts, err = [], type(e).__name__
+        else:
+            err = ""
+        if len(pts) < 200:      # с 2014 года рабочих дней тысячи; меньше — это сбой, а не история
+            print(f"  {cur}: НЕ загружено ({err or f'получено {len(pts)} значений'}) — прежние курсы оставлены")
+            bad += 1
+            continue
+        with SessionLocal() as db:
+            old = db.scalar(select(func.count()).select_from(FxRate).where(FxRate.currency == cur, FxRate.source == "cbr"))
+            db.execute(delete(FxRate).where(FxRate.currency == cur, FxRate.source == "cbr"))
+            db.add_all([FxRate(on=d, currency=cur, rate=r, source="cbr") for d, r in dict(pts).items()])
+            db.commit()
+        print(f"  {cur}: было {old}, загружено {len(dict(pts))} (с {min(d for d, _ in pts)} по {max(d for d, _ in pts)})")
+    print("ИТОГ:", "курсы заменены" if not bad else f"не загружено валют: {bad} — повторите позже; ручные курсы не затронуты")
+    return 0 if not bad else 1
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Подготовка рабочей базы")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -128,9 +206,17 @@ def main(argv=None) -> int:
     a.add_argument("--email", required=True)
     a.add_argument("--name", required=True)
     a.add_argument("--force", action="store_true")
+    d = sub.add_parser("adopt")
+    d.add_argument("--yes", action="store_true")
+    d.add_argument("--force", action="store_true")
+    sub.add_parser("fx")
     ns = ap.parse_args(argv)
     if ns.cmd == "admin":
         return admin(ns.email, ns.name, ns.force)
+    if ns.cmd == "adopt":
+        return adopt(ns.yes, ns.force)
+    if ns.cmd == "fx":
+        return fx()
     return {"check": check, "schema": schema, "reference": reference}[ns.cmd]()
 
 
