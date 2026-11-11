@@ -28,7 +28,12 @@ if [ "${BACKUP_REQUIRED:-false}" = "true" ]; then
 fi
 
 timeout 120 git fetch -q origin main && git reset -q --hard origin/main
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build backend frontend caddy
+# антивирус (deploy/clamav): если владелец его уже запустил — пересобираем вместе с остальными; сам деплой его не включает
+SERVICES=(backend frontend caddy); PROFILE=()
+if [ -n "$(docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile scanner ps -q clamav 2>/dev/null)" ]; then
+  SERVICES+=(clamav); PROFILE=(--profile scanner)
+fi
+docker compose -f docker-compose.yml -f docker-compose.prod.yml "${PROFILE[@]}" up -d --build "${SERVICES[@]}"
 docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1 || true   # Caddyfile смонтирован файлом — изменения подхватываются перезагрузкой конфига
 for _ in $(seq 1 30); do docker compose exec -T backend python -c "import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health')" >/dev/null 2>&1 && break; sleep 3; done
 # демо-данные — только на стенде с APP_ENV=dev; в рабочем режиме (APP_ENV=prod) seed не запускается (03 §9)

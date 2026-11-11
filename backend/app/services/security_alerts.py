@@ -51,6 +51,9 @@ RULES = {r.key: r for r in (
     Rule("offboard", "Отключение или включение доступа сотрудника", "high", subject="subject"),
     Rule("password_admin_reset", "Временный пароль выдан администратором", "high", subject="subject"),
     Rule("access_review_overdue", "Пересмотр прав просрочен", "medium", subject="subject"),
+    Rule("file_infected", "Антивирус нашёл угрозу в файле", "critical"),
+    Rule("scanner_unavailable", "Проверка файлов недоступна", "high", subject="subject"),
+    Rule("scanner_stale", "Антивирусные базы устарели", "high", subject="subject"),
 )}
 
 
@@ -90,6 +93,12 @@ def match(db: Session, ev: SecurityEvent) -> list[tuple[str, str, dict, str]]:
                           extra=lambda q: q.where(SecurityEvent.meta["inline"].as_boolean().is_not(True)))
         if n > DOWNLOAD_BURST:
             hits.append(("download_burst", "high", {"count_10min": n, "threshold": DOWNLOAD_BURST}, f"{n} скачиваний закрытых файлов за 10 минут"))
+    if t == "file" and a == "infected":
+        hits.append(("file_infected", "critical", {"threat": (ev.meta or {}).get("threat"), "route": (ev.meta or {}).get("route")},
+                     f"Антивирус нашёл «{(ev.meta or {}).get('threat')}» — файл не принят"))
+    if t == "file" and a == "scan_error":
+        hits.append(("scanner_unavailable", "high", {"error": (ev.meta or {}).get("error"), "route": (ev.meta or {}).get("route")},
+                     "Проверка файла не удалась — файл не принят"))
     if res == "success":
         if t == "access" and a in ACCESS_ACTIONS:
             hits.append(("access_change", "high", {"action": a, **{k: v for k, v in (ev.meta or {}).items() if k in ("group", "role", "level", "before", "after", "roles_added", "roles_removed")}},
@@ -99,6 +108,10 @@ def match(db: Session, ev: SecurityEvent) -> list[tuple[str, str, dict, str]]:
             hits.append(("mfa_reset", "critical", {}, "Администратор сбросил вход с кодом из приложения"))
         elif t == "offboard" and a in ("offboard", "reactivate"):
             hits.append(("offboard", "high", {"action": a}, "Доступ сотрудника отключён" if a == "offboard" else "Доступ сотрудника снова включён"))
+        elif t == "scanner" and a == "stale":
+            hits.append(("scanner_stale", "high", {"hours": (ev.meta or {}).get("hours")}, f"Антивирусные базы не обновлялись {(ev.meta or {}).get('hours')} ч"))
+        elif t == "scanner" and a == "down":
+            hits.append(("scanner_unavailable", "high", {"error": (ev.meta or {}).get("error")}, "Антивирус не отвечает — новые файлы не принимаются"))
         elif t == "access" and a == "review_overdue":
             hits.append(("access_review_overdue", "medium", {"pending": (ev.meta or {}).get("pending")}, f"Пересмотр прав просрочен, не решено сотрудников — {(ev.meta or {}).get('pending')}"))
         elif t == "password" and a == "admin_temporary":

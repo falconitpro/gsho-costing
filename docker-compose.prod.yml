@@ -42,6 +42,22 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on: [frontend, backend]
+  clamav:
+    # Антивирус для загрузок (docs/operations/04 §8.2, deploy/clamav/install.md). Запускается только явно:
+    #   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile scanner up -d --build clamav
+    # затем FILE_SCAN=clamav в backend/.env. Порт наружу не публикуется.
+    profiles: ["scanner"]
+    build:
+      context: ./deploy/clamav
+      args:
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-http://mirror.yandex.ru/debian}
+    expose: ["3310"]
+    volumes:
+      - clamav_db:/var/lib/clamav
+    mem_limit: 2g
+    cpus: 1.5
+    restart: unless-stopped
 volumes:
   caddy_data:
   caddy_config:
+  clamav_db:

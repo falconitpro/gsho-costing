@@ -804,6 +804,9 @@ class Attachment(Base):
     size: Mapped[int] = mapped_column(Integer, default=0)
     uploaded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # проверка антивирусом (04 §8, D-049): clean | infected | error | legacy_unscanned (загружен без проверки) | generated (создан системой)
+    scan_status: Mapped[str] = mapped_column(String(20), default="legacy_unscanned", server_default="legacy_unscanned")
+    scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class FeedEntry(Base):
@@ -994,6 +997,43 @@ class SecurityAlert(Base):
     resolved_by: Mapped[Optional[str]] = mapped_column(String(36))
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     resolution_comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class AttachmentScan(Base):
+    """Результат проверки файла (02 §6): при загрузке (route, uploaded_by) или проверкой хранилища (storage_path).
+    Без содержимого файла; заражённый образец не хранится — только хэш, размер, имя сигнатуры (D-049)."""
+    __tablename__ = "attachment_scans"
+    __table_args__ = (CheckConstraint("status IN ('pending', 'clean', 'infected', 'error', 'legacy_unscanned')", name="ck_attachment_scan_status"),
+                      Index("ix_attachment_scans_status_created", "status", "created_at"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    attachment_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    quarantine_key: Mapped[str] = mapped_column(String(64), unique=True, default=lambda: uuid.uuid4().hex)
+    source: Mapped[str] = mapped_column(String(16), default="upload")      # upload | storage
+    route: Mapped[str] = mapped_column(String(160), default="")
+    storage_path: Mapped[str] = mapped_column(String(1024), default="")
+    file_name: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    engine: Mapped[str] = mapped_column(String(16), default="clamav")
+    engine_version: Mapped[str] = mapped_column(String(32), default="")
+    signature_version: Mapped[str] = mapped_column(String(32), default="")
+    sha256: Mapped[str] = mapped_column(String(64), default="", index=True)
+    size: Mapped[int] = mapped_column(BigInteger, default=0)
+    detected_name: Mapped[str] = mapped_column(String(120), default="")
+    attempts: Mapped[int] = mapped_column(Integer, default=1)
+    last_error_code: Mapped[str] = mapped_column(String(32), default="")
+    uploaded_by: Mapped[Optional[str]] = mapped_column(String(36))
+    scanned_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class AppMarker(Base):
+    """Служебные отметки базы (04 §10.1): класс данных, с которым база запускалась. Проверяется при старте backend."""
+    __tablename__ = "app_markers"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(64))
+    set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    app_env: Mapped[str] = mapped_column(String(32), default="")
 
 
 class AccessReviewCampaign(Base):

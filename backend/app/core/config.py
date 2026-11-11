@@ -75,9 +75,24 @@ class Settings:
     cbr_daily_url: str = field(default_factory=lambda: _env("CBR_DAILY_URL", "https://www.cbr.ru/scripts/XML_daily.asp"))
     cbr_dynamic_url: str = field(default_factory=lambda: _env("CBR_DYNAMIC_URL", "https://www.cbr.ru/scripts/XML_dynamic.asp"))
 
+    # Проверка загрузок антивирусом (04 §8, D-049): off | clamav. В production off запрещён (проверка при старте).
+    file_scan: str = field(default_factory=lambda: _env("FILE_SCAN", "off"))
+    clamd_host: str = field(default_factory=lambda: _env("CLAMD_HOST", "clamav"))
+    clamd_port: int = field(default_factory=lambda: int(_env("CLAMD_PORT", "3310")))
+    clamd_timeout: int = field(default_factory=lambda: int(_env("CLAMD_TIMEOUT", "120")))    # секунд на файл
+    quarantine_dir: str = field(default_factory=lambda: _env("QUARANTINE_DIR", "./data/quarantine"))   # вне STORAGE_LOCAL_ROOT
+    # Класс данных (04 §10.1): production | synthetic | recovery; пусто — по APP_ENV
+    data_classification: str = field(default_factory=lambda: _env("DATA_CLASSIFICATION", ""))
+
     @property
     def is_dev(self) -> bool:
         return self.env == "dev"
+
+    @property
+    def classification(self) -> str:
+        if self.data_classification:
+            return self.data_classification
+        return {"prod": "production", "production": "production", "recovery": "recovery"}.get(self.env, "synthetic")
 
 
 @lru_cache
