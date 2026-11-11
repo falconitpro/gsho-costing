@@ -84,6 +84,14 @@ class Settings:
     # Класс данных (04 §10.1): production | synthetic | recovery; пусто — по APP_ENV
     data_classification: str = field(default_factory=lambda: _env("DATA_CLASSIFICATION", ""))
 
+    # Помощник CRM (docs/operations/06, D-055): по умолчанию без внешней модели; провайдер не наследуется от юридического LLM
+    assistant_provider: str = field(default_factory=lambda: _env("ASSISTANT_PROVIDER", "none"))
+    assistant_model: str = field(default_factory=lambda: _env("ASSISTANT_MODEL", ""))
+    assistant_context_policy: str = field(default_factory=lambda: _env("ASSISTANT_CONTEXT_POLICY", "deny_external"))   # deny_external | allow_minimized
+    assistant_retention_days: int = field(default_factory=lambda: int(_env("ASSISTANT_HISTORY_RETENTION_DAYS", "30")))
+    assistant_daily_limit: int = field(default_factory=lambda: int(_env("ASSISTANT_DAILY_REQUEST_LIMIT", "100")))
+    assistant_minute_limit: int = field(default_factory=lambda: int(_env("ASSISTANT_MINUTE_LIMIT", "10")))
+
     @property
     def is_dev(self) -> bool:
         return self.env == "dev"

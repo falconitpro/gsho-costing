@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api import acceptance, admin, briefing, finance, auth, catalog, model_docs, notifications, operations, security, summary, support, legal_profiles, legal_templates, legal_packages, legal_poa, legal_contracts, legal_claims, workplace, deal_trash, deals, documents, execution, images_options, logistics, parts_catalog, parts_fleet, parts_po, parts_requests, parts_rfq, parts_inventory, parts_setup, parts_reports, parts_stock, parts_warranty, pricing, references, service, tasks_files_planfact, team, tech_params
+from .api import acceptance, admin, assistant, briefing, finance, auth, catalog, model_docs, notifications, operations, security, summary, support, legal_profiles, legal_templates, legal_packages, legal_poa, legal_contracts, legal_claims, workplace, deal_trash, deals, documents, execution, images_options, logistics, parts_catalog, parts_fleet, parts_po, parts_requests, parts_rfq, parts_inventory, parts_setup, parts_reports, parts_stock, parts_warranty, pricing, references, service, tasks_files_planfact, team, tech_params
 from .core.config import get_settings
 from .db import init_db
 
@@ -111,6 +111,12 @@ async def _daily_jobs() -> None:
                 remind_reviews(db)
         except Exception as e:   # pragma: no cover
             log.warning("access review reminders failed: %s", e)
+        try:   # помощник CRM: стирание содержимого по сроку хранения и удалённых диалогов (docs/operations/06 §7)
+            from .services import assistant as _ai
+            with SessionLocal() as db:
+                _ai.purge(db, settings)
+        except Exception as e:   # pragma: no cover
+            log.warning("assistant purge failed: %s", e)
         try:   # антивирус: доступность и свежесть баз (docs/operations/04 §8.2)
             from .services import scanner_status
             with SessionLocal() as db:
@@ -186,7 +192,7 @@ from .core.download_audit import DownloadAuditMiddleware  # noqa: E402
 app.add_middleware(DownloadAuditMiddleware)
 
 for r in (auth.router, deals.router, logistics.router, service.router, pricing.router, references.router, admin.router, tasks_files_planfact.router,
-          execution.router, tech_params.router, catalog.router, images_options.router, team.router, documents.router, deal_trash.router, parts_setup.router, parts_catalog.router, parts_requests.router, parts_rfq.router, parts_po.router, parts_stock.router, parts_inventory.router, parts_fleet.router, parts_warranty.router, parts_reports.router, model_docs.router, acceptance.router, notifications.router, summary.router, legal_profiles.router, legal_templates.router, legal_packages.router, legal_poa.router, legal_contracts.router, legal_claims.router, workplace.router, finance.router, finance.deal_router, operations.router, security.router, support.router, briefing.router):
+          execution.router, tech_params.router, catalog.router, images_options.router, team.router, documents.router, deal_trash.router, parts_setup.router, parts_catalog.router, parts_requests.router, parts_rfq.router, parts_po.router, parts_stock.router, parts_inventory.router, parts_fleet.router, parts_warranty.router, parts_reports.router, model_docs.router, acceptance.router, notifications.router, summary.router, legal_profiles.router, legal_templates.router, legal_packages.router, legal_poa.router, legal_contracts.router, legal_claims.router, workplace.router, finance.router, finance.deal_router, operations.router, security.router, support.router, briefing.router, assistant.router):
     app.include_router(r)
 
 
