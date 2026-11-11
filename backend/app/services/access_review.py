@@ -187,6 +187,9 @@ def remind(db: Session, today: Optional[date] = None) -> list[str]:
         for uid in security_admin_ids(db):
             db.add(NotificationLog(user_id=uid, deal_id=None, event="access_review", channel="app", status="sent", text=text))
         db.add(IntegrationLog(system="access_review", operation=key, ok=True, details={"pending": pending}))
+        if left < 0:   # просрочка — ещё и предупреждение безопасности в журнале (D-042, 04 §7.3)
+            from . import security_events as sev
+            sev.record(db, "access", "review_overdue", entity_type="access_review", entity_id=c.id, meta={"pending": pending, "days_overdue": -left})
         sent.append(key)
     db.commit()
     return sent

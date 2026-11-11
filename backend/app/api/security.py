@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -153,10 +153,42 @@ def reactivate_user(user_id: str, body: ConfirmIn, request: Request, db: Session
     return offboarding.reactivate(db, user, user_id, request, confirm_name=body.confirm_name)
 
 
+def _parse_day(v: Optional[str], end: bool = False) -> Optional[datetime]:
+    if not v:
+        return None
+    try:
+        d = date.fromisoformat(v)
+    except ValueError:
+        raise HTTPException(422, "Дата в формате ГГГГ-ММ-ДД")
+    from datetime import time as _time, timedelta as _td
+    from zoneinfo import ZoneInfo
+    t = datetime.combine(d, _time.min, tzinfo=ZoneInfo("Europe/Moscow"))
+    return t + _td(days=1) if end else t
+
+
+EVENT_TYPE_TITLES = {"auth": "Вход", "session": "Сессии", "mfa": "Код из приложения", "password": "Пароль", "offboard": "Отключение доступа",
+                     "access": "Права доступа", "download": "Скачивание файла", "export": "Выгрузка", "alert": "Предупреждения", "backup": "Резервные копии"}
+
+
+def _event_dto(db: Session, e: SecurityEvent, names: dict) -> dict:
+    def nm(uid):
+        if not uid:
+            return None
+        if uid not in names:
+            u = db.get(User, uid)
+            names[uid] = u.display_name if u else uid
+        return names[uid]
+    return {"id": e.id, "at": e.occurred_at.isoformat() if e.occurred_at else None, "type": e.event_type, "type_title": EVENT_TYPE_TITLES.get(e.event_type, e.event_type),
+            "action": e.action, "result": e.result, "actor_user_id": e.actor_user_id, "actor_name": nm(e.actor_user_id),
+            "subject_user_id": e.subject_user_id, "subject_name": nm(e.subject_user_id), "ip_prefix": e.ip_prefix, "request_id": e.request_id,
+            "entity_type": e.entity_type, "entity_id": e.entity_id, "deal_id": e.deal_id, "format": e.format, "row_count": e.row_count,
+            "byte_size": e.byte_size, "alert_id": e.alert_id, "meta": e.meta or {}}
+
+
 @router.get("/events")
-def events(user_id: Optional[str] = None, event_type: Optional[str] = None, result: Optional[str] = None, limit: int = 50, offset: int = 0,
-           db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Журнал событий (security_audit ≥ READ). Полный экран журнала и предупреждения — этап 3."""
+def events(user_id: Optional[str] = None, event_type: Optional[str] = None, result: Optional[str] = None, date_from: Optional[str] = None,
+           date_to: Optional[str] = None, limit: int = 50, offset: int = 0, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Журнал событий (security_audit ≥ READ): вход, сессии, права, скачивания и выгрузки — без содержимого файлов."""
     if not user.can("security_audit", 1):
         raise HTTPException(403, "Нет доступа к журналу безопасности")
     q = select(SecurityEvent)
@@ -166,11 +198,14 @@ def events(user_id: Optional[str] = None, event_type: Optional[str] = None, resu
         q = q.where(SecurityEvent.event_type == event_type)
     if result in ("success", "denied", "error"):
         q = q.where(SecurityEvent.result == result)
+    if (f := _parse_day(date_from)) is not None:
+        q = q.where(SecurityEvent.occurred_at >= f)
+    if (t := _parse_day(date_to, end=True)) is not None:
+        q = q.where(SecurityEvent.occurred_at < t)
     total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = db.scalars(q.order_by(SecurityEvent.occurred_at.desc()).offset(max(0, offset)).limit(max(1, min(limit, 200)))).all()
-    return {"total": int(total), "items": [{"id": e.id, "at": e.occurred_at.isoformat() if e.occurred_at else None, "type": e.event_type, "action": e.action,
-                                            "result": e.result, "actor_user_id": e.actor_user_id, "subject_user_id": e.subject_user_id,
-                                            "ip_prefix": e.ip_prefix, "entity_type": e.entity_type, "entity_id": e.entity_id, "meta": e.meta or {}} for e in rows]}
+    names: dict = {}
+    return {"total": int(total), "items": [_event_dto(db, e, names) for e in rows], "types": EVENT_TYPE_TITLES}
 
 
 # ------------------------------------------------------------------ пересмотр прав (04 §6, 13 §10)
@@ -276,3 +311,98 @@ def cancel_review(cid: str, body: CompleteIn, db: Session = Depends(get_db), use
     sev.record(db, "access", "review_cancelled", actor_id=user.id, session_id=user.sid, entity_type="access_review", entity_id=c.id)
     db.commit()
     return _campaign_dto(db, c)
+
+
+# ------------------------------------------------------------------ предупреждения безопасности (04 §7.3, 09 §5)
+
+from ..models import SecurityAlert  # noqa: E402
+from ..services import security_alerts as alerts_svc  # noqa: E402
+
+
+class AlertActionIn(BaseModel):
+    comment: str
+
+
+def _audit_reader(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if not user.can("security_audit", 1):
+        raise HTTPException(403, "Нет доступа к журналу безопасности")
+    return user
+
+
+@router.get("/alerts")
+def alerts(status: Optional[str] = None, severity: Optional[str] = None, user_id: Optional[str] = None, rule: Optional[str] = None,
+           date_from: Optional[str] = None, date_to: Optional[str] = None, limit: int = 50, offset: int = 0,
+           db: Session = Depends(get_db), user: CurrentUser = Depends(_audit_reader)):
+    q = select(SecurityAlert)
+    if status == "open":
+        q = q.where(SecurityAlert.status != "resolved")
+    elif status in ("new", "acknowledged", "resolved"):
+        q = q.where(SecurityAlert.status == status)
+    if severity in alerts_svc.SEVERITY_RANK:
+        q = q.where(SecurityAlert.severity == severity)
+    if user_id:
+        q = q.where(SecurityAlert.subject_user_id == user_id)
+    if rule in alerts_svc.RULES:
+        q = q.where(SecurityAlert.rule_key == rule)
+    if (f := _parse_day(date_from)) is not None:
+        q = q.where(SecurityAlert.last_seen_at >= f)
+    if (t := _parse_day(date_to, end=True)) is not None:
+        q = q.where(SecurityAlert.first_seen_at < t)
+    total = db.scalar(select(func.count()).select_from(q.subquery())) or 0
+    open_counts = dict(db.execute(select(SecurityAlert.severity, func.count()).where(SecurityAlert.status != "resolved").group_by(SecurityAlert.severity)).all())
+    rows = db.scalars(q.order_by(SecurityAlert.last_seen_at.desc()).offset(max(0, offset)).limit(max(1, min(limit, 200)))).all()
+    names: dict = {}
+    return {"total": int(total), "items": [alerts_svc.dto(db, a, names) for a in rows],
+            "open_by_severity": {k: int(open_counts.get(k, 0)) for k in alerts_svc.SEVERITY_RANK},
+            "rules": [{"key": r.key, "title": r.title, "severity": r.severity} for r in alerts_svc.RULES.values()],
+            "rules_version": alerts_svc.RULES_VERSION, "can_act": user.can("security_admin", 2), "step_up_fresh": user.step_up_fresh}
+
+
+@router.get("/alerts/{aid}")
+def alert_card(aid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_audit_reader)):
+    a = db.get(SecurityAlert, aid)
+    if a is None:
+        raise HTTPException(404, "Предупреждение не найдено")
+    evs = db.scalars(select(SecurityEvent).where(SecurityEvent.alert_id == a.id).order_by(SecurityEvent.occurred_at.desc()).limit(50)).all()
+    names: dict = {}
+    return {**alerts_svc.dto(db, a, names), "events": [_event_dto(db, e, names) for e in evs],
+            "can_act": user.can("security_admin", 2), "step_up_fresh": user.step_up_fresh}
+
+
+def _alert_action(db: Session, aid: str, body: AlertActionIn, user: CurrentUser, request: Request, action: str) -> dict:
+    if not user.can("security_admin", 2):
+        raise HTTPException(403, "Отметить предупреждение может администратор безопасности")
+    comment = (body.comment or "").strip()
+    if len(comment) < 3:
+        raise HTTPException(422, "Напишите комментарий: что проверено и что решили")
+    a = db.execute(select(SecurityAlert).where(SecurityAlert.id == aid).with_for_update()).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(404, "Предупреждение не найдено")
+    if a.status == "resolved":
+        raise HTTPException(409, "Предупреждение уже закрыто")
+    now = datetime.now(timezone.utc)
+    if action == "ack":
+        if a.status == "acknowledged":
+            raise HTTPException(409, "Предупреждение уже взято в работу")
+        a.status, a.acknowledged_by, a.acknowledged_at, a.ack_comment = "acknowledged", user.id, now, comment[:2000]
+    else:
+        if a.severity == "critical":
+            require_step_up(user)   # критическое закрывается только с подтверждением (09 §1)
+        if a.acknowledged_at is None:
+            a.acknowledged_by, a.acknowledged_at = user.id, now
+        a.status, a.resolved_by, a.resolved_at, a.resolution_comment = "resolved", user.id, now, comment[:2000]
+    sev.record(db, "alert", "acknowledged" if action == "ack" else "resolved", actor_id=user.id, subject_id=a.subject_user_id, request=request,
+               session_id=user.sid, entity_type="security_alert", entity_id=a.id, meta={"rule": a.rule_key, "severity": a.severity, "comment_length": len(comment)})
+    audit(db, user.id, None, "security_alert", a.id, action, None, {"status": a.status})
+    db.commit()
+    return alerts_svc.dto(db, a)
+
+
+@router.post("/alerts/{aid}/ack")
+def alert_ack(aid: str, body: AlertActionIn, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    return _alert_action(db, aid, body, user, request, "ack")
+
+
+@router.post("/alerts/{aid}/resolve")
+def alert_resolve(aid: str, body: AlertActionIn, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    return _alert_action(db, aid, body, user, request, "resolve")

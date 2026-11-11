@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..calc.types import COST_ITEMS
 from ..core.auth import CurrentUser, get_current_user, require_roles
+from ..core.download_audit import note
 from ..core.files import file_response
 from ..core.config import get_settings
 from ..core.roles import Role
@@ -183,7 +184,7 @@ def overdue_report(date_from: Optional[date] = None, date_to: Optional[date] = N
 @router.get("/files/{path:path}")
 def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     s = get_settings()
-    if s.storage_provider != "local":
+    if s.storage_provider not in ("local", "s3"):
         raise HTTPException(404, "Файлы выдаются ссылками хранилища")
     att = db.scalar(select(Attachment).where(Attachment.storage_path == path))
     ver = None if att else db.scalar(select(DealVersion).where((DealVersion.excel_path == path) | (DealVersion.excel_manager_path == path) | (DealVersion.kp_path == path)))
@@ -197,6 +198,16 @@ def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depen
     restricted = (att and att.folder == "04_cost") or (ver and path == ver.excel_path)
     if restricted and not user.can("cost_files"):
         raise HTTPException(403, "Папка «04 Расчёт себестоимости» недоступна для роли")
+    # журнал скачиваний (core/download_audit.py): объект и сделка — без пути хранения и имени файла
+    note(entity_type="attachment" if att else "deal_version", entity_id=att.id if att else ver.id, deal_id=deal.id)
+    if s.storage_provider == "s3":
+        # права проверены выше — только теперь короткая ссылка (5 минут); в ответе и журнале её нет, кроме Location
+        from fastapi.responses import RedirectResponse
+        from .. import adapters
+        name = att.file_name if att else os.path.basename(path)
+        note(presigned=True)
+        url = adapters.storage(s).presigned(path, name, inline=False)
+        return RedirectResponse(url, status_code=307, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
     full = os.path.join(s.storage_local_root, path)
     if ver is not None and path in (ver.excel_path, ver.excel_manager_path):
         # Excel версии собирается заново по сохранённому расчёту (цифры те же) — в текущем формате подписей

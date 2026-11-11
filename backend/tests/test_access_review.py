@@ -166,5 +166,8 @@ def test_reminders_in_app_once_and_overdue():
         notes = db.scalars(select(NotificationLog).where(NotificationLog.event == "access_review", NotificationLog.user_id == gd_id)).all()
         assert len(notes) == 1 and notes[0].channel == "app" and "до срока 7 дн." in notes[0].text
         assert ar.remind(db, today=date.today() + timedelta(days=8)) == [f"{cid}:overdue"]
+        from app.models import SecurityAlert
+        al = db.scalar(select(SecurityAlert).where(SecurityAlert.rule_key == "access_review_overdue", SecurityAlert.status != "resolved"))
+        assert al is not None and al.severity == "medium"   # D-042: просрочка — и в журнале предупреждений
     bell = c.get("/api/notifications", headers=H(GD)).json()["items"]
     assert any(x["event"] == "access_review" and x["url"] == "/settings?s=access_review" for x in bell)

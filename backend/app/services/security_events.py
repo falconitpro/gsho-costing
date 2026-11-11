@@ -1,4 +1,4 @@
-"""Запись событий безопасности (docs/operations/02 §5, 04 §7.2).
+"""Запись событий безопасности (docs/operations/02 §5, 04 §7.2); каждое событие проверяется правилами предупреждений (04 §7.3).
 
 Без паролей, TOTP- и recovery-кодов, токенов, cookie, подписанных URL и содержимого документов: metadata проходит фильтр
 по ключам и значениям. IP хранится префиксом (/24 для IPv4, /48 для IPv6).
@@ -72,9 +72,11 @@ def record(db: Session, event_type: str, action: str, *, result: str = "success"
            subject_id: Optional[str] = None, request: Optional[Request] = None, session_id: Optional[str] = None,
            entity_type: str = "", entity_id: str = "", deal_id: Optional[str] = None, fmt: str = "",
            row_count: Optional[int] = None, byte_size: Optional[int] = None, meta: Optional[dict] = None) -> SecurityEvent:
-    ev = SecurityEvent(event_type=event_type, action=action, result=result, actor_user_id=actor_id, subject_user_id=subject_id,
+    ev = SecurityEvent(id=str(uuid.uuid4()), event_type=event_type, action=action, result=result, actor_user_id=actor_id, subject_user_id=subject_id,
                        request_id=request_id(request), session_id=session_id, ip_prefix=ip_prefix(request),
                        entity_type=entity_type, entity_id=str(entity_id or "")[:128], deal_id=deal_id, format=fmt,
                        row_count=row_count, byte_size=byte_size, meta=sanitize_meta(meta))
+    from .security_alerts import evaluate   # правила предупреждений (04 §7.3) — в той же транзакции, до вставки (журнал неизменяем)
+    ev.alert_id = evaluate(db, ev)
     db.add(ev)
     return ev

@@ -17,9 +17,10 @@ router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 EVENT_TITLES = {"task": "Задача", "task_new": "Задача", "task_overdue": "Просрочка", "legal_doc": "Документы", "acceptance": "Приёмка",
                 "rework": "Доработка", "approval": "Утверждение", "parts_sla": "Запчасти", "to_reminder": "ТО машины",
                 "backup": "Резервные копии", "security": "Безопасность",
-                "access_review": "Пересмотр прав"}
+                "access_review": "Пересмотр прав", "security_alert": "Предупреждение безопасности"}
 # куда ведёт уведомление без сделки (события эксплуатации)
-EVENT_ROUTES = {"backup": "/settings?s=backup", "security": "/settings?s=security_admin", "access_review": "/settings?s=access_review"}
+EVENT_ROUTES = {"backup": "/settings?s=backup", "security": "/settings?s=security_admin", "access_review": "/settings?s=access_review",
+                "security_alert": "/settings?s=security_audit"}
 
 
 def _base(db: Session, user: CurrentUser):
