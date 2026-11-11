@@ -445,7 +445,7 @@ def me(user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_
             "roles": [{"code": r.value, "title": ROLE_TITLES[r]} for r in sorted(user.roles, key=lambda r: r.value)],
             "perms": user.perms,
             "security": {"mfa_enabled": user.mfa_enabled, "mfa_policy": s.mfa_policy, "mfa_required": s.mfa_policy == "required",
-                         "mfa_setup_required": user.mfa_setup_required, "mfa_available": mfa_svc.available(s),
+                         "mfa_setup_required": user.mfa_setup_required, "mfa_available": mfa_svc.available(s), "mfa_key_status": mfa_svc.key_status(s),
                          "password_must_change": user.password_must_change,
                          "recovery_left": mfa_svc.recovery_left(db, user.id) if user.mfa_enabled else 0,
                          "session_mfa": user.mfa_level}}

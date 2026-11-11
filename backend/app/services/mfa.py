@@ -42,27 +42,43 @@ def _now() -> datetime:
 
 # ------------------------------------------------------------------ шифрование секрета
 
+def _normalize(raw: str) -> str:
+    """Прощаем типичные ошибки вставки: пробелы, переводы строк, кавычки по краям («KEY="..."»)."""
+    k = (raw or "").strip()
+    if len(k) >= 2 and k[0] == k[-1] and k[0] in "'\"":
+        k = k[1:-1].strip()
+    return k
+
+
+def key_status(s: Optional[Settings] = None) -> str:
+    """ok — ключ задан и верный; dev — ключа нет, стенд использует временный (APP_ENV=dev); missing — нет ключа; invalid — задан неверно."""
+    s = s or get_settings()
+    k = _normalize(s.mfa_encryption_key)
+    if not k:
+        return "dev" if s.is_dev else "missing"
+    try:
+        return "ok" if k.isascii() and len(base64.b64decode(k, validate=True)) == 32 else "invalid"
+    except Exception:  # noqa: BLE001
+        return "invalid"
+
+
+KEY_HINT = ("Ключ шифрования задан неверно: в backend/.env нужна строка MFA_ENCRYPTION_KEY= с результатом команды "
+            "«openssl rand -base64 32» (44 символа, без кавычек и пробелов) — обратитесь к администратору")
+
+
 def _key(s: Settings) -> tuple[bytes, str]:
-    if s.mfa_encryption_key:
-        try:
-            k = base64.b64decode(s.mfa_encryption_key)
-        except Exception:  # noqa: BLE001
-            k = b""
-        if len(k) != 32:
-            raise HTTPException(503, "Ключ шифрования TOTP задан неверно (MFA_ENCRYPTION_KEY: base64, 32 байта) — обратитесь к администратору")
-        return k, "env1"
-    if s.is_dev:
+    st = key_status(s)
+    if st == "ok":
+        return base64.b64decode(_normalize(s.mfa_encryption_key)), "env1"
+    if st == "dev":
         return hashlib.sha256(b"gsho-mfa-dev|" + s.secret_key.encode()).digest(), "dev"
+    if st == "invalid":
+        raise HTTPException(503, KEY_HINT)
     raise HTTPException(503, "Вход с кодом из приложения не настроен на сервере (нет MFA_ENCRYPTION_KEY) — обратитесь к администратору")
 
 
 def available(s: Optional[Settings] = None) -> bool:
-    s = s or get_settings()
-    try:
-        _key(s)
-        return True
-    except HTTPException:
-        return False
+    return key_status(s) in ("ok", "dev")
 
 
 def encrypt(secret: str, s: Optional[Settings] = None) -> tuple[str, str]:

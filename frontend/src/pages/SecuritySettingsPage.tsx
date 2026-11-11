@@ -12,6 +12,10 @@ const fmt = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit",
 const when = (iso: string | null) => (iso ? fmt.format(new Date(iso)) : "—");
 const METHOD: Record<string, string> = { password: "пароль", oidc: "Microsoft 365", dev: "тестовый стенд", legacy: "до обновления", recovery: "код восстановления" };
 const errText = (e: unknown) => (e instanceof ApiError ? e.message : "Не удалось выполнить действие");
+/** Почему включение недоступно — разные подсказки для «не задан» и «задан неверно» (ключ сюда не попадает). */
+const keyProblem = (st?: string) => st === "invalid"
+  ? "Ключ шифрования на сервере задан неверно: в backend/.env нужна строка MFA_ENCRYPTION_KEY= с результатом команды «openssl rand -base64 32» (44 символа, без кавычек и пробелов). После правки перезапустите backend."
+  : "На сервере не задан ключ шифрования (MFA_ENCRYPTION_KEY в backend/.env) — включение недоступно. Обратитесь к администратору.";
 
 function Qr({ text }: { text: string }) {
   const svg = useMemo(() => { const q = qrcode(0, "M"); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); }, [text]);
@@ -139,7 +143,7 @@ export default function SecuritySettingsPage({ me, focus, onChanged }: { me: Me;
   if (focus === "mfa") return (
     <div className="card sec-gate"><h2 style={{ marginTop: 0 }}>Нужен вход с кодом из приложения</h2>
       <p>В организации включён обязательный второй шаг входа. Настройте его — после этого откроются все разделы.</p>
-      {!sec?.mfa_available && <div className="alert error">На сервере не настроен ключ шифрования — обратитесь к администратору.</div>}
+      {!sec?.mfa_available && <div className="alert error">{keyProblem(sec?.mfa_key_status)}</div>}
       <button className="btn" onClick={() => setWizard(true)} disabled={!sec?.mfa_available}>Настроить</button>
       {wizard && <MfaWizard me={me} onClose={(changed) => { setWizard(false); if (changed) onChanged(); }} />}
     </div>);
@@ -155,7 +159,7 @@ export default function SecuritySettingsPage({ me, focus, onChanged }: { me: Me;
         </div>
         <p className="muted">{sec?.mfa_enabled ? `После пароля система спрашивает код из приложения. Кодов восстановления осталось: ${sec.recovery_left}.` : "Второй шаг входа защищает от украденного пароля."}
           {sec?.mfa_required ? " В организации он обязателен." : ""}</p>
-        {!sec?.mfa_available && <div className="alert warn">На сервере не настроен ключ шифрования — включение недоступно.</div>}
+        {!sec?.mfa_available && <div className="alert warn">{keyProblem(sec?.mfa_key_status)}</div>}
         {sec?.mfa_enabled && <button className="btn secondary" onClick={() => act(async () => setCodes((await api.post<{ recovery_codes: string[] }>("/api/auth/mfa/recovery/regenerate")).recovery_codes))}>Новые коды восстановления</button>}
       </div>
 

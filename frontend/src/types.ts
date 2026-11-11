@@ -11,7 +11,7 @@ export interface Me {
 
 /** Состояние безопасности входа (docs/operations/04): без секретов. */
 export interface MeSecurity {
-  mfa_enabled: boolean; mfa_policy: "optional" | "required"; mfa_required: boolean; mfa_setup_required: boolean; mfa_available: boolean;
+  mfa_enabled: boolean; mfa_policy: "optional" | "required"; mfa_required: boolean; mfa_setup_required: boolean; mfa_available: boolean; mfa_key_status?: "ok" | "dev" | "missing" | "invalid";
   password_must_change: boolean; recovery_left: number; session_mfa: string;
 }
 
