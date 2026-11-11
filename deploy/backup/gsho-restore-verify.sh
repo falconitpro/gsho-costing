@@ -69,6 +69,8 @@ if [ -n "$PGDB" ]; then
   if [ -n "$cli" ] && [ "$cli" -gt "$((srv / 10000))" ]; then
     echo "pg_restore $cli новее сервера PostgreSQL $((srv / 10000)) — нужен клиент той же версии (postgresql-client-$((srv / 10000)))" >&2; exit 2
   fi
+  # в дампе есть права (GRANT/REVOKE) для роли приложения gsho; на чистом PostgreSQL её нет — создаём без входа (11.11.2026, D-061)
+  psql -d postgres -qc "DO \$\$ BEGIN CREATE ROLE gsho NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END \$\$;"
   createdb "$PGDB"
   pg_restore --no-owner --exit-on-error -d "$PGDB" "$DIR/db.dump"
   echo "  таблиц: $(psql -d "$PGDB" -Atc "select count(*) from information_schema.tables where table_schema='public'")"
