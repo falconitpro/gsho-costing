@@ -376,6 +376,7 @@ def test_transfer_order_and_final_instructions(tbox):
     assert idx("restic restore") < idx("pg_restore") < idx("tar -xf") < idx("init-db --existing") < idx("prod_init adopt --yes") < idx("prod_init fx") < idx("db_inventory")
     assert "db.dump: OK" in p.stdout and "ПЕРЕНОС ЗАВЕРШЁН" in p.stdout and "rm -f" in p.stdout
     assert not any("up -d backend" in x or "up -d --build" in x for x in c)            # CRM скрипт не запускает
+    assert all("--no-lock" in x for x in c if x.startswith(("restic snapshots", "restic restore")))   # ключ только для чтения не ставит блокировку
 
 
 def test_transfer_refuses_running_crm_non_empty_db_bad_checksum_and_latest(tbox):
