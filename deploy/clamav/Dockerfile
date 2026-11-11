@@ -11,5 +11,7 @@ COPY clamd.conf freshclam.conf /etc/clamav/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod 0755 /entrypoint.sh
 EXPOSE 3310
-HEALTHCHECK --interval=60s --timeout=10s --start-period=900s --retries=3 CMD clamdscan --config-file=/etc/clamav/clamd.conf --ping 3 || exit 1
+# clamdscan в образ не входит (пакет clamav-daemon) — проверка здоровья командой PING по TCP средствами Python
+HEALTHCHECK --interval=60s --timeout=10s --start-period=900s --retries=3 \
+  CMD python3 -c "import socket;s=socket.create_connection(('127.0.0.1',3310),5);s.sendall(b'zPING\\0');r=s.recv(16);exit(0 if r.startswith(b'PONG') else 1)"
 ENTRYPOINT ["/entrypoint.sh"]
