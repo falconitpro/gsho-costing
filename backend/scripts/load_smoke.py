@@ -18,6 +18,7 @@ import statistics
 import sys
 import threading
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -47,7 +48,13 @@ def main(argv=None) -> int:
     def scan(i: int) -> None:
         body = os.urandom(1024 * 1024) * a.mb          # несжимаемые данные — худший случай для антивируса
         if i % 6 == 5:
-            body = body[: len(body) // 2] + eicar       # каждый шестой — с тестовой сигнатурой в середине потока
+            # Каждый шестой — архив без сжатия: большой файл и рядом тестовая сигнатура отдельным файлом.
+            # Настоящий ClamAV узнаёт EICAR только как целый файл (в середине потока не ищет), а архивы распаковывает.
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+                z.writestr("payload.bin", body[: len(body) // 2])
+                z.writestr("eicar.com", eicar)
+            body = buf.getvalue()
         t = time.monotonic()
         res = file_scanner.scan_stream(io.BytesIO(body), s.clamd_host, s.clamd_port, timeout=float(s.clamd_timeout))
         dt = time.monotonic() - t
