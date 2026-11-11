@@ -101,6 +101,7 @@ FIELD_GROUPS: dict[str, tuple[str, set[str]]] = {
     "backup_status": ("Резервные копии: статус и история", set()),
     "security_admin": ("Безопасность сотрудников: сессии, сброс TOTP, отключение доступа, пересмотр прав", set()),
     "security_audit": ("Журнал событий безопасности (без содержимого обращений и диалогов)", set()),
+    "support_admin": ("Поддержка: очередь обращений сотрудников, ответы и назначение (READ — видеть, EDIT — отвечать)", set()),
     "legal_docs": ("Документы клиента и юридические (тендерная документация, договор, протокол разногласий)", set()),
     "legal_profiles": ("Юридические профили контрагентов и БЕРГ-ХАУС, банковские реквизиты", set()),
 }
@@ -122,7 +123,7 @@ DEFAULT_MATRIX: dict[Role, dict[str, int]] = {
               "client_price_history": READ, "finance_analytics": READ, "finance_section": READ, "payment_terms": EDIT, "local_options": EDIT, "tech_params": EDIT, "images": EDIT,
               "kp_images_select": EDIT, "catalog": EDIT, "glossary": EDIT, "factory_offers": EDIT, "cost_files": READ, "intragroup_chain": EDIT,
               "execution": EDIT, "execution_payments": EDIT, "execution_close": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_docs": EDIT, "legal_profiles": EDIT, "backup_status": READ,
-              "security_admin": EDIT, "security_audit": READ},
+              "security_admin": EDIT, "security_audit": READ, "support_admin": EDIT},
     Role.ADMIN: {"tech_params": READ, "images": READ, "catalog": READ, "glossary": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_profiles": EDIT,
                  "backup_status": READ, "security_admin": EDIT, "security_audit": READ},
     Role.OBSERVER: {"price": READ, "payment_terms": READ, "tech_params": READ, "images": READ, "execution": READ},

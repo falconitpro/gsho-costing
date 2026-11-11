@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api import acceptance, admin, finance, auth, catalog, model_docs, notifications, operations, security, summary, legal_profiles, legal_templates, legal_packages, legal_poa, legal_contracts, legal_claims, workplace, deal_trash, deals, documents, execution, images_options, logistics, parts_catalog, parts_fleet, parts_po, parts_requests, parts_rfq, parts_inventory, parts_setup, parts_reports, parts_stock, parts_warranty, pricing, references, service, tasks_files_planfact, team, tech_params
+from .api import acceptance, admin, finance, auth, catalog, model_docs, notifications, operations, security, summary, support, legal_profiles, legal_templates, legal_packages, legal_poa, legal_contracts, legal_claims, workplace, deal_trash, deals, documents, execution, images_options, logistics, parts_catalog, parts_fleet, parts_po, parts_requests, parts_rfq, parts_inventory, parts_setup, parts_reports, parts_stock, parts_warranty, pricing, references, service, tasks_files_planfact, team, tech_params
 from .core.config import get_settings
 from .db import init_db
 
@@ -136,7 +136,10 @@ async def lifespan(app: FastAPI):
     with SessionLocal() as db:
         environment.check(db, settings)
     # recovery-копия для drill: никаких фоновых заданий (напоминания, уведомления, импорт курсов)
-    task = asyncio.create_task(_daily_jobs()) if settings.env != "recovery" else None
+    # в тестах фоновый цикл не запускается: его шаги проверяются напрямую, а запуск при каждом TestClient(app)
+    # гонялся с тестами (напоминания о доверенностях успевали уйти до проверки)
+    import sys
+    task = asyncio.create_task(_daily_jobs()) if settings.env != "recovery" and "pytest" not in sys.modules else None
     yield
     if task:
         task.cancel()
@@ -166,7 +169,10 @@ async def security_headers_and_upload_limit(request: Request, call_next):
         limit = LIMIT_MEDIA if ("/acceptance/" in path and "/files" in path) or "/photos" in path or "/photo" in path else LIMIT_DOCUMENT
         if length > limit:
             return JSONResponse(status_code=413, content={"detail": f"Файл больше допустимого размера ({limit // MB} МБ)"})
+    from .services.security_events import request_id
+    rid = request_id(request)       # один ID на запрос: в журнале безопасности и в ответе (для «Сообщить в поддержку»)
     response = await call_next(request)
+    response.headers.setdefault("X-Request-ID", rid)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -180,7 +186,7 @@ from .core.download_audit import DownloadAuditMiddleware  # noqa: E402
 app.add_middleware(DownloadAuditMiddleware)
 
 for r in (auth.router, deals.router, logistics.router, service.router, pricing.router, references.router, admin.router, tasks_files_planfact.router,
-          execution.router, tech_params.router, catalog.router, images_options.router, team.router, documents.router, deal_trash.router, parts_setup.router, parts_catalog.router, parts_requests.router, parts_rfq.router, parts_po.router, parts_stock.router, parts_inventory.router, parts_fleet.router, parts_warranty.router, parts_reports.router, model_docs.router, acceptance.router, notifications.router, summary.router, legal_profiles.router, legal_templates.router, legal_packages.router, legal_poa.router, legal_contracts.router, legal_claims.router, workplace.router, finance.router, finance.deal_router, operations.router, security.router):
+          execution.router, tech_params.router, catalog.router, images_options.router, team.router, documents.router, deal_trash.router, parts_setup.router, parts_catalog.router, parts_requests.router, parts_rfq.router, parts_po.router, parts_stock.router, parts_inventory.router, parts_fleet.router, parts_warranty.router, parts_reports.router, model_docs.router, acceptance.router, notifications.router, summary.router, legal_profiles.router, legal_templates.router, legal_packages.router, legal_poa.router, legal_contracts.router, legal_claims.router, workplace.router, finance.router, finance.deal_router, operations.router, security.router, support.router):
     app.include_router(r)
 
 

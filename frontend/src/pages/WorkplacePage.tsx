@@ -222,6 +222,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
       <header className="wp-top">
         <div><h1>{d.user.greeting}, {d.user.first_name || d.user.name}</h1><div className="muted" style={{ fontSize: 13 }}>{d.date.text} · {d.user.role_title} · {d.today.events.length} событий сегодня{d.tasks_overdue ? ` · ${d.tasks_overdue} задач просрочено` : ""}</div></div>
         <div className="row" style={{ gap: 8 }}>
+          <button className="btn ghost" onClick={() => nav("/support?new=1&from=/")} title="Обращение в поддержку внутри CRM">Сообщить о проблеме</button>
           {d.quick[0] && <button className="btn add" onClick={() => nav(d.quick[0].url)}>{d.quick[0].title}</button>}
         </div>
       </header>

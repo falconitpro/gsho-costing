@@ -1,3 +1,4 @@
+import { SupportAdmin, SupportButton, SupportList, SupportTicketRoute } from "./pages/SupportPage";
 import { useEffect, useState } from "react";
 import FloatingScrollbar from "./components/FloatingScrollbar";
 import NotificationBell from "./components/NotificationBell";
@@ -129,6 +130,7 @@ export default function App() {
                 </select>
               </label>
             )}
+            {me && <SupportButton />}
             {me && <NotificationBell />}
             {me && (
               <div className="me" title={`${me.display_name} — ${me.roles.map((r) => r.title).join(", ")}`}>
@@ -177,6 +179,9 @@ export default function App() {
 
             <Route path="/team" element={<Navigate to="/settings?s=team" replace />} />
             <Route path="/settings" element={<SettingsHub me={me} />} />
+            <Route path="/support" element={<SupportList />} />
+            <Route path="/support/admin" element={<SupportAdmin />} />
+            <Route path="/support/:id" element={<SupportTicketRoute />} />
             <Route path="/catalog" element={<CatalogHub me={me} />} />
             <Route path="/factories" element={<Navigate to="/counterparties?type=suppliers" replace />} />
             <Route path="/supply" element={<SupplyPage me={me} />} />
