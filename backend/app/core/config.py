@@ -27,6 +27,12 @@ class Settings:
     oidc_redirect_uri: str = field(default_factory=lambda: _env("OIDC_REDIRECT_URI", "http://localhost:8000/api/auth/callback"))
     oidc_group_role_map: str = field(default_factory=lambda: _env("OIDC_GROUP_ROLE_MAP", ""))  # "groupId:role,groupId:role"
 
+    # Безопасность входа (docs/operations/04 §2–3, D-032…)
+    session_absolute_hours: int = field(default_factory=lambda: int(_env("SESSION_ABSOLUTE_HOURS", "24")))   # обычный вход: не дольше суток
+    mfa_policy: str = field(default_factory=lambda: _env("MFA_POLICY", "optional"))                          # optional | required
+    mfa_encryption_key: str = field(default_factory=lambda: _env("MFA_ENCRYPTION_KEY", ""))                  # base64, 32 байта; в рабочем режиме обязателен
+    legacy_sessions_until: str = field(default_factory=lambda: _env("LEGACY_SESSIONS_UNTIL", ""))            # ISO-время: до него принимаются старые cookie без sid
+
     # Хранилище: local | sharepoint | yandex_disk | s3
     storage_provider: str = field(default_factory=lambda: _env("STORAGE_PROVIDER", "local"))
     storage_local_root: str = field(default_factory=lambda: _env("STORAGE_LOCAL_ROOT", "./data/storage"))

@@ -7,7 +7,7 @@ import os
 from datetime import date
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -126,7 +126,7 @@ def create_user(body: UserIn, db: Session = Depends(get_db), user: CurrentUser =
 
 
 @router.patch("/users/{user_id}")
-def update_user(user_id: str, body: dict, db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN)):
+def update_user(user_id: str, body: dict, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN)):
     u = db.get(User, user_id)
     if u is None:
         raise HTTPException(404)
@@ -140,6 +140,17 @@ def update_user(user_id: str, body: dict, db: Session = Depends(get_db), user: C
             raise HTTPException(409, "Свои роли не меняются: роли сотруднику назначает другой администратор или ЗГД")
     if body.get("is_active") is False and u.id == user.id:
         raise HTTPException(409, "Нельзя отключить свою учётную запись")
+    # включение/отключение доступа — только единой операцией безопасности (04 §5.1, OFF-02): сессии, замещения, исключения прав, задачи
+    want_active = body.pop("is_active", None)
+    if want_active is not None and bool(want_active) != bool(u.is_active):
+        from ..services import offboarding
+        if want_active is False:
+            offboarding.offboard(db, user, u.id, request, require_name=False, reason="карточка сотрудника: снят флажок «активен»")
+        else:
+            offboarding.reactivate(db, user, u.id, request, require_name=False)
+        db.refresh(u)
+        if not body:
+            return serialize(u)
     if "email" in body:
         email = str(body["email"] or "").strip().lower()
         if "@" not in email:
@@ -159,7 +170,7 @@ def update_user(user_id: str, body: dict, db: Session = Depends(get_db), user: C
 
 
 @router.delete("/users/{user_id}")
-def delete_user(user_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN)):
+def delete_user(user_id: str, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN)):
     """Удаление сотрудника — администратор или ЗГД. Если на сотрудника есть ссылки (сделки, задачи, визы, журнал…), учётная запись
     отключается (данные и история сохраняются); иначе удаляется. Себя удалить нельзя."""
     from sqlalchemy.exc import IntegrityError
@@ -172,12 +183,19 @@ def delete_user(user_id: str, db: Session = Depends(get_db), user: CurrentUser =
     name = u.display_name
     used = (db.scalar(select(Deal.id).where(Deal.manager_id == u.id).limit(1)) or db.scalar(select(Task.id).where(Task.assignee_id == u.id).limit(1))
             or db.scalar(select(Approval.id).where(Approval.user_id == u.id).limit(1)) or db.scalar(select(AuditLog.id).where(AuditLog.user_id == u.id).limit(1)))
+    from ..services import offboarding
+    from ..models import AuthSession, MfaChallenge, MfaCredential, MfaRecoveryCode, PasswordHistory
     if used:
-        u.is_active = False
-        u.deputy_id = None
-        audit(db, user.id, None, "user", u.id, "deactivate", {"name": name}, {"is_active": False}, "сотрудник участвует в сделках/задачах — отключён, история сохранена")
-        db.commit()
-        return {"deleted": False, "deactivated": True, "message": f"«{name}» участвует в сделках, задачах или журнале — учётная запись отключена, история сохранена"}
+        if u.is_active:
+            offboarding.offboard(db, user, u.id, request, require_name=False, reason="удаление сотрудника, на которого есть ссылки")
+        return {"deleted": False, "deactivated": True, "message": f"«{name}» участвует в сделках, задачах или журнале — доступ отключён, история сохранена"}
+    if u.is_active:
+        from ..core.auth import require_step_up
+        require_step_up(user)
+    for model in (AuthSession, MfaChallenge, MfaCredential, MfaRecoveryCode, PasswordHistory):   # служебные записи входа удаляются вместе с учётной записью
+        for row in db.scalars(select(model).where(model.user_id == u.id)).all():
+            db.delete(row)
+    db.flush()
     try:
         audit(db, user.id, None, "user", u.id, "delete", {"name": name, "email": u.email})
         for other in db.scalars(select(User).where(User.deputy_id == u.id)).all():
@@ -186,11 +204,9 @@ def delete_user(user_id: str, db: Session = Depends(get_db), user: CurrentUser =
         db.commit()
     except IntegrityError:
         db.rollback()
-        u = db.get(User, user_id)
-        u.is_active = False
-        audit(db, user.id, None, "user", u.id, "deactivate", {"name": name}, {"is_active": False}, "есть ссылки — отключён")
-        db.commit()
-        return {"deleted": False, "deactivated": True, "message": f"На «{name}» есть ссылки в данных — учётная запись отключена"}
+        if db.get(User, user_id).is_active:
+            offboarding.offboard(db, user, user_id, request, require_name=False, reason="удаление сотрудника: есть ссылки в данных")
+        return {"deleted": False, "deactivated": True, "message": f"На «{name}» есть ссылки в данных — доступ отключён"}
     return {"deleted": True, "deactivated": False, "message": f"Сотрудник «{name}» удалён"}
 
 

@@ -21,6 +21,13 @@ from app.main import app  # noqa: E402
 from scripts.seed import run as seed  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
+
+def _step_up(c, email):
+    """Подтверждение опасного действия (docs/operations/04, D-034): пароль демо-учётной записи."""
+    from scripts.seed import DEV_PASSWORD, TEST_LOGIN, TEST_PASSWORD
+    r = c.post("/api/auth/step-up", headers={"X-Dev-User": email}, json={"password": TEST_PASSWORD if email == TEST_LOGIN else DEV_PASSWORD})
+    assert r.status_code == 200, r.text
+
 ADM, GD, CD, MGR = "admin@example.com", "evgeniy@dobrov.pro", "cd@example.com", "manager@example.com"
 
 
@@ -59,10 +66,12 @@ def test_users_add_edit_confirm_delete():
         assert c.delete(f"/api/admin/users/{u['id']}", headers=H(CD)).status_code == 403
         me = next(x for x in c.get("/api/admin/users", headers=H(ADM)).json() if x["email"] == ADM)
         assert c.delete(f"/api/admin/users/{me['id']}", headers=H(ADM)).status_code == 409
+        _step_up(c, GD)
         r = c.delete(f"/api/admin/users/{u['id']}", headers=H(GD)).json()
         assert r["deactivated"] and not r["deleted"]
         assert next(x for x in c.get("/api/admin/users", headers=H(ADM)).json() if x["id"] == u["id"])["is_active"] is False
         # совсем новый сотрудник без следов (аудит его создания — на админе) — удаляется
         fresh = c.post("/api/admin/users", headers=H(ADM), json={"email": f"fresh.{tag}@example.com", "display_name": "Временный", "roles": ["observer"]}).json()
+        _step_up(c, ADM)
         r = c.delete(f"/api/admin/users/{fresh['id']}", headers=H(ADM)).json()
         assert r["deleted"] and all(x["id"] != fresh["id"] for x in c.get("/api/admin/users", headers=H(ADM)).json())

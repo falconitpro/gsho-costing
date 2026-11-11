@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 
 import pytest
@@ -21,6 +22,19 @@ from app.main import app  # noqa: E402
 from scripts.seed import DEV_PASSWORD, TEST_LOGIN, TEST_PASSWORD, run as seed  # noqa: E402
 
 H = lambda email: {"X-Dev-User": email}   # noqa: E731
+NEW, RESET = "Kx7-polar-river-42", "Reset-tundra-2026"   # политика: 12+ символов, буква и цифра (docs/operations/04 §4)
+
+
+def _restore(email):
+    """Вернуть демо-пароль напрямую в БД: повторно задать его через API нельзя — история паролей (так и задумано)."""
+    from datetime import datetime, timezone
+    from app.db import SessionLocal
+    from app.models import PasswordHistory, User
+    with SessionLocal() as db:
+        u = db.query(User).filter(User.email == email).one()
+        u.password_hash, u.password_set_at, u.password_must_change = hash_password(DEV_PASSWORD), datetime.now(timezone.utc), False
+        db.query(PasswordHistory).filter(PasswordHistory.user_id == u.id).delete()
+        db.commit()
 MGR, GD, LOG = "manager@example.com", TEST_LOGIN, "logist@example.com"
 
 
@@ -43,7 +57,7 @@ def test_password_login_flow():
         r = c.post("/api/auth/password-login", json={"login": MGR.upper(), "password": DEV_PASSWORD, "remember": True})
         assert r.status_code == 200 and SESSION_COOKIE in r.cookies
         set_cookie = r.headers["set-cookie"]
-        assert "Max-Age=2592000" in set_cookie and "HttpOnly" in set_cookie
+        assert re.search(r"Max-Age=259(2000|1999)", set_cookie) and "HttpOnly" in set_cookie
         me = c.get("/api/auth/me").json()
         assert me["email"] == MGR
         # переключатель «Войти как» — только после входа; тестовая учётная запись входит по паролю
@@ -57,37 +71,37 @@ def test_password_login_flow():
         assert c.post("/api/auth/logout").status_code == 200
         c.cookies.clear()
         assert c.get("/api/auth/me").status_code == 401
-        # без «Запомнить меня» — сессия 8 часов
+        # без «Запомнить меня» — cookie на абсолютный срок 24 ч, бездействие 8 ч проверяет сервер (docs/operations/04 §2.2)
         r = c.post("/api/auth/password-login", json={"login": MGR, "password": DEV_PASSWORD, "remember": False})
-        assert "Max-Age=28800" in r.headers["set-cookie"]
+        assert re.search(r"Max-Age=86(400|399)", r.headers["set-cookie"])
         c.cookies.clear()
 
         # смена своего пароля: нужен текущий, проверка сложности
-        assert c.post("/api/auth/password", headers=H(LOG), json={"current_password": "bad", "new_password": "NewPass123"}).status_code == 403
+        assert c.post("/api/auth/password", headers=H(LOG), json={"current_password": "bad", "new_password": NEW}).status_code == 403
         assert c.post("/api/auth/password", headers=H(LOG), json={"current_password": DEV_PASSWORD, "new_password": "short"}).status_code == 422
-        assert c.post("/api/auth/password", headers=H(LOG), json={"current_password": DEV_PASSWORD, "new_password": "NewPass123"}).status_code == 200
+        assert c.post("/api/auth/password", headers=H(LOG), json={"current_password": DEV_PASSWORD, "new_password": NEW}).status_code == 200
         c.cookies.clear()
-        assert c.post("/api/auth/password-login", json={"login": LOG, "password": "NewPass123"}).status_code == 200
+        assert c.post("/api/auth/password-login", json={"login": LOG, "password": NEW}).status_code == 200
         c.cookies.clear()
 
         # блокировка после 5 ошибок; сброс пароля ЗГД снимает блок
         uid = next(u for u in c.get("/api/team", headers=H(GD)).json()["users"] if u["email"] == LOG)["id"]
         for _ in range(5):
             assert c.post("/api/auth/password-login", json={"login": LOG, "password": "nope-nope"}).status_code == 401
-        assert c.post("/api/auth/password-login", json={"login": LOG, "password": "NewPass123"}).status_code == 429
-        assert c.put(f"/api/auth/users/{uid}/password", headers=H(MGR), json={"new_password": "Reset12345"}).status_code == 403
-        assert c.put(f"/api/auth/users/{uid}/password", headers=H(GD), json={"new_password": "Reset12345"}).status_code == 200
+        assert c.post("/api/auth/password-login", json={"login": LOG, "password": NEW}).status_code == 429
+        assert c.put(f"/api/auth/users/{uid}/password", headers=H(MGR), json={"new_password": RESET}).status_code == 403
+        assert c.put(f"/api/auth/users/{uid}/password", headers=H(GD), json={"new_password": RESET}).status_code == 200
         c.cookies.clear()
-        assert c.post("/api/auth/password-login", json={"login": LOG, "password": "Reset12345"}).status_code == 200
+        assert c.post("/api/auth/password-login", json={"login": LOG, "password": RESET}).status_code == 200
         c.cookies.clear()
-        c.post("/api/auth/password", headers=H(LOG), json={"current_password": "Reset12345", "new_password": DEV_PASSWORD})
+        _restore(LOG)
 
 
 def test_password_change_revokes_sessions():
     """Смена или сброс пароля отзывает прежние сессии сотрудника; при смене своего пароля текущая сессия продолжается."""
     seed()
     SRV = "service@example.com"
-    new_pw, reset_pw = "Changed12345", "Reset12345"
+    new_pw, reset_pw = "Changed-taiga-77", RESET
     with TestClient(app, base_url="http://testserver") as c1, TestClient(app, base_url="http://testserver") as c2, TestClient(app, base_url="http://testserver") as gd:
         for c in (c1, c2):
             assert c.post("/api/auth/password-login", json={"login": SRV, "password": DEV_PASSWORD}).status_code == 200
@@ -105,5 +119,5 @@ def test_password_change_revokes_sessions():
         assert c1.get("/api/auth/me").status_code == 401 and c2.get("/api/auth/me").status_code == 401
         assert c1.post("/api/auth/password-login", json={"login": SRV, "password": reset_pw}).status_code == 200
         assert c1.get("/api/auth/me").status_code == 200
-        # возвращаем демо-пароль
-        assert gd.put(f"/api/auth/users/{uid}/password", headers=H(GD), json={"new_password": DEV_PASSWORD}).status_code == 200
+        assert c1.get("/api/auth/me").json()["security"]["password_must_change"] is True   # временный пароль администратора
+        _restore(SRV)

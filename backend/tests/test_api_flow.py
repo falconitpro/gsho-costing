@@ -398,6 +398,13 @@ def test_low_margin_goes_to_fd_visa(client, tmp_path):
     assert any(d["id"] == did for d in board["rework"]["deals"])
 
 
+
+def _step_up(c, email):
+    """Подтверждение опасного действия (docs/operations/04, D-034): пароль демо-учётной записи."""
+    from scripts.seed import DEV_PASSWORD, TEST_LOGIN, TEST_PASSWORD
+    r = c.post("/api/auth/step-up", headers={"X-Dev-User": email}, json={"password": TEST_PASSWORD if email == TEST_LOGIN else DEV_PASSWORD})
+    assert r.status_code == 200, r.text
+
 GD, ADM = "evgeniy@dobrov.pro", "admin@example.com"
 
 
@@ -773,6 +780,8 @@ def test_admin_screens_and_overdue(client, tmp_path):
     assert client.patch(f"/api/admin/users/{adm['id']}", headers=H(ADM), json={"is_active": False}).status_code == 409
     nu = _ok(client.post("/api/admin/users", headers=H(ADM), json={"email": "new.logist@example.com", "display_name": "Новый Логист", "roles": ["logistician"]}), 201)
     assert client.post("/api/admin/users", headers=H(ADM), json={"email": "new.logist@example.com", "display_name": "Дубль", "roles": ["logistician"]}).status_code == 409
+    assert client.patch(f"/api/admin/users/{nu['id']}", headers=H(ADM), json={"is_active": False}).json()["detail"]["code"] == "step_up_required"
+    _step_up(client, ADM)
     _ok(client.patch(f"/api/admin/users/{nu['id']}", headers=H(ADM), json={"is_active": False}))
     # ТН ВЭД: ручной код, загрузка CSV (с ошибочной строкой), выгрузка
     _ok(client.post("/api/admin/hs", headers=H(ADM), json={"code": "8429 52 1000", "description": "Экскаваторы гусеничные", "duty_pct": 5, "vat_pct": 22, "util_fee": True}), 201)
@@ -971,6 +980,7 @@ def test_gd_adds_employee_and_access(client):
     _ok(client.post("/api/admin/access/overrides", headers=H(GD), json={"user_id": u["id"], "group": "legal_docs", "level": 1, "comment": "тест"}), 201)
     perms = {p["group"]: p["level"] for p in _ok(client.get(f"/api/admin/access/preview?user_id={u['id']}", headers=H(GD)))["perms"]}
     assert perms["legal_docs"] == 1
+    _step_up(client, GD)
     _ok(client.patch(f"/api/admin/users/{u['id']}", headers=H(GD), json={"is_active": False}))
     assert not any(x["id"] == u["id"] for x in _ok(client.get("/api/team", headers=H(GD)))["users"])
     assert any(x["id"] == u["id"] and not x["is_active"] for x in _ok(client.get("/api/team?include_inactive=true", headers=H(GD)))["users"])

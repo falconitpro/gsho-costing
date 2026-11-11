@@ -6,6 +6,13 @@ export interface Me {
   display_name: string;
   roles: { code: RoleCode; title: string }[];
   perms?: Record<string, number>;   // группа доступа → 0 не видит / 1 видит / 2 редактирует (задача 11)
+  security?: MeSecurity;
+}
+
+/** Состояние безопасности входа (docs/operations/04): без секретов. */
+export interface MeSecurity {
+  mfa_enabled: boolean; mfa_policy: "optional" | "required"; mfa_required: boolean; mfa_setup_required: boolean; mfa_available: boolean;
+  password_must_change: boolean; recovery_left: number; session_mfa: string;
 }
 
 /** Право по группе доступа (см. core/roles.py). */

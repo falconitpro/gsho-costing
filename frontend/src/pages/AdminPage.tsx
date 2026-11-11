@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import OffboardDialog from "../components/OffboardDialog";
 import { api, fmtDate, fmtRub } from "../api";
 import { COST_ITEMS, type Me } from "../types";
 import { AUDIT_ACTION, AUDIT_ENTITY, INTEGRATION, OPERATION, STATUS, lbl } from "../labels";
@@ -51,6 +52,7 @@ function Users({ me }: { me: Me }) {
   const [msg, setMsg] = useState("");
   const [q, setQ] = useState("");
   const [nu, setNu] = useState({ email: "", display_name: "", roles: [] as string[] });
+  const [access, setAccess] = useState<{ u: U; mode: "offboard" | "reactivate" } | null>(null);   // отключение — единой операцией безопасности
   const load = () => api.get<U[]>("/api/admin/users").then(setRows).catch((e) => setMsg(e.message));
   useEffect(() => { load(); api.get<Role[]>("/api/auth/roles").then(setRoles); }, []);
   const patch = (u: U, body: Partial<U>) => api.patch(`/api/admin/users/${u.id}`, body).then(() => { setMsg(`Сохранено: ${u.display_name}`); load(); }).catch((e) => setMsg(e.message));
@@ -74,10 +76,12 @@ function Users({ me }: { me: Me }) {
               disabled={u.id === me.id && ["admin", "gd"].includes(r.code)} onChange={() => patch(u, { roles: toggle(u.roles, r.code) })} /></td>)}
             <td><input inputMode="decimal" defaultValue={u.visa_limit_rub ?? ""} style={{ width: 110 }} placeholder="—"
               onBlur={(e) => { const v = e.target.value.trim(); const n = v ? Number(v.replace(/\s/g, "").replace(",", ".")) : null; if (n !== u.visa_limit_rub) patch(u, { visa_limit_rub: n }); }} /></td>
-            <td style={{ textAlign: "center" }}><input type="checkbox" checked={u.is_active} disabled={u.id === me.id} onChange={() => patch(u, { is_active: !u.is_active })} /></td>
+            <td style={{ textAlign: "center" }}><input type="checkbox" checked={u.is_active} disabled={u.id === me.id} onChange={() => setAccess({ u, mode: u.is_active ? "offboard" : "reactivate" })}
+              aria-label={u.is_active ? `Отключить доступ: ${u.display_name}` : `Включить доступ: ${u.display_name}`} /></td>
             <td className="muted" style={{ fontSize: 12 }}>{u.last_seen_at ? fmtDate(u.last_seen_at) : "—"}</td>
           </tr>))}</tbody>
       </table>
+      {access && <OffboardDialog user={access.u} mode={access.mode} onClose={() => setAccess(null)} onDone={() => { setMsg(`${access.mode === "offboard" ? "Доступ отключён" : "Доступ включён"}: ${access.u.display_name}`); load(); }} />}
       <h3>Добавить сотрудника</h3>
       <div className="row" style={{ flexWrap: "wrap" }}>
         <input placeholder="e-mail (логин)" value={nu.email} onChange={(e) => setNu({ ...nu, email: e.target.value })} />
