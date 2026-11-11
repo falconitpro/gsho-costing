@@ -27,18 +27,19 @@ BLOCKS: dict[str, str] = {
     "kpis": "Показатели", "focus": "Главное сейчас", "today": "Сегодня и неделя", "tasks": "Задачи и поручения", "deals": "Сделки — требуют действия",
     "approvals": "Ждут моего решения", "attention": "Требует вмешательства", "money": "Денежный поток", "funnel": "Воронка квартала",
     "team": "Команда · нагрузка", "notifications": "Уведомления", "deadlines": "Ближайшие сроки", "legal": "Юридический блок", "quick": "Быстрые действия",
+    "briefing": "Ваши приоритеты",
 }
 ROLE_BLOCKS: dict[str, list[str]] = {
-    "manager":      ["kpis", "focus", "today", "tasks", "deals", "funnel", "notifications", "deadlines", "quick"],
-    "cd":           ["kpis", "focus", "approvals", "today", "tasks", "deals", "funnel", "team", "attention", "notifications", "deadlines", "quick"],
-    "gd":           ["kpis", "focus", "approvals", "attention", "money", "today", "tasks", "team", "legal", "notifications", "deadlines", "quick"],
-    "fd":           ["kpis", "focus", "money", "approvals", "attention", "today", "tasks", "notifications", "deadlines", "quick"],
-    "lawyer":       ["kpis", "focus", "legal", "today", "tasks", "approvals", "notifications", "deadlines", "quick"],
-    "logistician":  ["kpis", "focus", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
-    "service_head": ["kpis", "focus", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
-    "purchasing":   ["kpis", "focus", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
-    "admin":        ["kpis", "approvals", "today", "tasks", "notifications", "quick"],
-    "observer":     ["kpis", "deals", "funnel", "notifications"],
+    "manager":      ["kpis", "focus", "briefing", "today", "tasks", "deals", "funnel", "notifications", "deadlines", "quick"],
+    "cd":           ["kpis", "focus", "briefing", "approvals", "today", "tasks", "deals", "funnel", "team", "attention", "notifications", "deadlines", "quick"],
+    "gd":           ["kpis", "focus", "briefing", "approvals", "attention", "money", "today", "tasks", "team", "legal", "notifications", "deadlines", "quick"],
+    "fd":           ["kpis", "focus", "briefing", "money", "approvals", "attention", "today", "tasks", "notifications", "deadlines", "quick"],
+    "lawyer":       ["kpis", "focus", "briefing", "legal", "today", "tasks", "approvals", "notifications", "deadlines", "quick"],
+    "logistician":  ["kpis", "focus", "briefing", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
+    "service_head": ["kpis", "focus", "briefing", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
+    "purchasing":   ["kpis", "focus", "briefing", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
+    "admin":        ["kpis", "briefing", "approvals", "today", "tasks", "notifications", "quick"],
+    "observer":     ["kpis", "briefing", "deals", "funnel", "notifications"],
 }
 APPROVAL_STATUS_ROLE = {DealStatus.CD_APPROVAL: Role.CD, DealStatus.FD_VISA: Role.FD, DealStatus.GD_VISA: Role.GD}
 WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
@@ -114,8 +115,8 @@ def _action_for(d: Deal, user: CurrentUser, today: date, tasks_by_deal: dict[str
     return "", ""
 
 
-@router.get("")
-def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
+    """Рабочее место без сводки и данные для неё (те же, уже отфильтрованные по правам списки) — для /api/workplace и /api/briefing."""
     now = datetime.now(timezone.utc)
     local = now + timedelta(hours=3)          # московское время: дата и приветствие — по нему, а не по UTC сервера
     today = local.date()
@@ -393,16 +394,41 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
     all_required = settings_service.get(db, "workplace_blocks") or {}
     required = all_required.get(role, [])
     prefs = ((u.prefs if u else None) or {}).get("workplace", {})
-    order = [b for b in (prefs.get("order") or []) if b in default_order] + [b for b in default_order if b not in (prefs.get("order") or [])]
+    saved = [b for b in (prefs.get("order") or []) if b in default_order]
+    if saved and "briefing" in default_order and "briefing" not in saved:
+        # новая сводка в сохранённой раскладке: один раз после «Главное сейчас», остальной порядок не трогаем (07 §2)
+        at = saved.index("focus") + 1 if "focus" in saved else (saved.index("kpis") + 1 if "kpis" in saved else 0)
+        saved = saved[:at] + ["briefing"] + saved[at:]
+    order = saved + [b for b in default_order if b not in saved]
     hidden = [b for b in (prefs.get("hidden") or []) if b in default_order and b not in required]
     greeting = "Доброе утро" if 5 <= local.hour < 12 else "Добрый день" if 12 <= local.hour < 18 else "Добрый вечер"
     first = (user.display_name or "").split()
-    return {"user": {"name": user.display_name, "first_name": first[1] if len(first) > 1 and role != "observer" else (first[0] if first else ""), "role": role, "role_title": ROLE_TITLES.get(Role(role), role), "greeting": greeting},
+    out = {"user": {"name": user.display_name, "first_name": first[1] if len(first) > 1 and role != "observer" else (first[0] if first else ""), "role": role, "role_title": ROLE_TITLES.get(Role(role), role), "greeting": greeting},
             "date": {"iso": today.isoformat(), "text": f"{WEEKDAYS[today.weekday()]}, {today.day} {MONTHS[today.month - 1]}", "weekday": today.weekday()},
             "layout": {"order": order, "hidden": hidden, "required": required, "available": [{"code": b, "title": BLOCKS[b]} for b in default_order], "can_lock": user.has(Role.GD), "role_required": all_required if user.has(Role.GD) else {}, "roles": {k: ROLE_TITLES.get(Role(k), k) for k in ROLE_BLOCKS}, "role_blocks": ROLE_BLOCKS, "all_blocks": BLOCKS},
             "kpis": kpis, "focus": focus, "today": {"events": today_events, "week": week}, "upcoming": upcoming, "tasks": tasks[:10], "tasks_total": len(tasks), "tasks_overdue": len(overdue_tasks),
             "deals": deal_rows, "approvals": approvals, "attention": attention, "money": money, "funnel": funnel, "team": team, "notifications": notifications, "legal": legal,
             "fin": fin, "quick": _quick(user)}
+    ctx = {"today": today, "local": local, "tasks": tasks, "approvals": approvals, "poas": poas, "cin": cin, "claims": claims, "money": money}
+    return out, ctx
+
+
+@router.get("")
+def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    out, ctx = build(db, user)
+    out["briefing"] = briefing_block(db, user, ctx)
+    return out
+
+
+def briefing_block(db: Session, user: CurrentUser, ctx: dict) -> dict:
+    """Сводка «Ваши приоритеты» (07): её сбой не ломает рабочее место."""
+    from ..services import briefing
+    try:
+        return briefing.build(db, user, ctx)
+    except Exception:   # noqa: BLE001
+        import logging
+        logging.getLogger("gsho.briefing").exception("briefing failed")
+        return {"error": True, "generated_at": datetime.now(timezone.utc).isoformat(), "items": [], "warnings": ["Сводка сейчас не рассчитана — попробуйте обновить"]}
 
 
 def _quick(user: CurrentUser) -> list[dict]:

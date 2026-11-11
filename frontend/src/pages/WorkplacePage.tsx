@@ -1,3 +1,4 @@
+import BriefingBlock, { type Briefing } from "../components/BriefingBlock";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api";
@@ -27,6 +28,7 @@ type Data = {
   legal: { lawyer_review: number; commercial_review: number; poa_active: number; poa_expiring: number; poa_no_scan: number;
     contracts_review: number; contracts_signing: number; contracts_expiring: number; contracts_no_scan: number; contracts_visas: number; claims_open?: number; claims_signing?: number; claims_answer_overdue?: number } | null;
   fin: boolean; quick: { title: string; url: string }[];
+  briefing?: Briefing;
 };
 
 const TONE_BG: Record<string, string> = { bad: "var(--bad-bg)", warn: "var(--warn-bg)", info: "var(--info-bg)", ok: "var(--ok-bg)", "": "#fafafa" };
@@ -35,10 +37,11 @@ const TONE_DOT: Record<string, string> = { bad: "#ff3131", warn: "#f59e0b", info
 // Раскладка по трём колонкам подбирается по оценке высоты блоков: «Сегодня» — слева сверху, «Главное сейчас» — в центре сверху,
 // остальные блоки (в порядке пользователя) ставятся в самую короткую колонку, широкие таблицы — только в центр.
 const PIN: Record<string, 0 | 1 | 2> = { today: 0, focus: 1 };
-const WIDE = new Set(["deals", "money", "approvals"]);
+const WIDE = new Set(["briefing", "deals", "money", "approvals"]);
 const estimate = (d: Data, b: string): number => {
   switch (b) {
     case "focus": return d.focus ? 150 : 0;
+    case "briefing": return d.briefing ? 90 + 96 * Math.max(1, d.briefing.items.length) : 0;
     case "today": return 130 + 58 * d.today.events.length + (d.today.events.length ? 0 : 30);
     case "tasks": return 70 + (d.tasks.length ? 54 * d.tasks.length : 30);
     case "deals": return 80 + (d.deals.length ? 62 * d.deals.length : 30);
@@ -107,6 +110,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
           <div style={{ color: "var(--muted)", marginTop: 6 }}>{d.focus.text}</div>
           <div className="row" style={{ marginTop: 14, gap: 8 }}><button className="btn" onClick={() => nav(d.focus!.url)}>{d.focus.action}</button></div>
         </div>);
+      case "briefing": return d.briefing && <div key={code} data-block={code}><BriefingBlock initial={d.briefing} /></div>;
       case "today": return (
         <div key={code} data-block={code} className="wp-card">
           <div className="wp-head"><h2>Сегодня</h2><Link to="/tasks" className="muted">неделя →</Link></div>

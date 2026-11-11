@@ -1108,6 +1108,22 @@ class SupportAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class BriefingItemState(Base):
+    """Отметки пользователя на элементах сводки (02 §9): закрепить, отложить, скрыть — для конкретной версии источника.
+    Существенное изменение источника (срок, статус, остаток, исполнитель) даёт новую подпись — элемент возвращается."""
+    __tablename__ = "briefing_item_states"
+    __table_args__ = (UniqueConstraint("user_id", "item_key", name="uq_briefing_state_user_item"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    item_key: Mapped[str] = mapped_column(String(120))
+    source_signature: Mapped[str] = mapped_column(String(64))
+    pinned_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    snoozed_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    hidden_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class AccessReviewCampaign(Base):
     """Пересмотр прав (docs/operations/04 §6, 02): ежеквартальная кампания по активным сотрудникам."""
     __tablename__ = "access_review_campaigns"

@@ -444,3 +444,18 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
   .sup-mobile { display: block; }
 }
 @media (max-width: 480px) { .sup-grid2 { grid-template-columns: 1fr; } }
+
+/* «Ваши приоритеты» (docs/operations/07) */
+.brf-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.brf-item { position: relative; border: 1px solid var(--line); border-left: 4px solid #a1a1aa; border-radius: 8px; padding: 8px 10px; background: #fff; }
+.brf-item.bad { border-left-color: #ff3131; } .brf-item.warn { border-left-color: #f59e0b; } .brf-item.info { border-left-color: #2563eb; }
+.brf-top { display: flex; align-items: center; gap: 8px; }
+.brf-more { margin-left: auto; padding: 0 8px; min-height: 32px; min-width: 36px; }
+.brf-title { display: block; border: 0; background: none; padding: 2px 0; margin: 2px 0; font: inherit; font-weight: 700; text-align: left; cursor: pointer; color: inherit; overflow-wrap: anywhere; }
+.brf-title:hover { text-decoration: underline; }
+.brf-reason { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.brf-advice { font-size: 13px; margin-top: 2px; }
+.brf-menu { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; border-top: 1px dashed var(--line); padding-top: 6px; }
+.brf-menu .btn { font-size: 13px; min-height: 36px; }
+.brf-states { list-style: none; padding: 0; margin: 0 0 10px; }
+.brf-states li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
