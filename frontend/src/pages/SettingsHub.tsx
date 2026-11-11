@@ -9,12 +9,13 @@ import AdminPage from "./AdminPage";
 import BackupStatusBlock from "../components/BackupStatusBlock";
 import SecuritySettingsPage from "./SecuritySettingsPage";
 import SecurityAdminPage from "./SecurityAdminPage";
+import AccessReviewPage from "./AccessReviewPage";
 import { WorkplaceSettings } from "./WorkplacePage";
 
 // «Настройки» одним разделом: ставки и нормативы, сотрудники, уровни доступа, администрирование.
 // Доступ к каждому блоку — как и раньше (уровни доступа и администрирование — ЗГД / админ / ФД); блок виден только тем, кому он доступен.
 
-type Sec = "workplace" | "security" | "rates" | "team" | "access" | "admin" | "security_admin" | "backup";
+type Sec = "workplace" | "security" | "rates" | "team" | "access" | "admin" | "security_admin" | "access_review" | "backup";
 
 export default function SettingsHub({ me }: { me: Me }) {
   const loc = useLocation();
@@ -29,6 +30,7 @@ export default function SettingsHub({ me }: { me: Me }) {
     ["access", "Уровни доступа", perm("access_admin", 2)],
     ["admin", "Администрирование", has("admin", "gd", "fd")],
     ["security_admin", "Безопасность сотрудников", perm("security_admin", 1)],
+    ["access_review", "Пересмотр прав", perm("security_admin", 1)],
     ["backup", "Резервные копии", perm("backup_status", 1)],
   ];
   const visible = sections.filter(([, , ok]) => ok);
@@ -53,6 +55,7 @@ export default function SettingsHub({ me }: { me: Me }) {
       {cur === "backup" && <BackupStatusBlock />}
       {cur === "security" && <SecuritySettingsPage me={me} onChanged={() => window.dispatchEvent(new CustomEvent("gsho:security-gate"))} />}
       {cur === "security_admin" && <SecurityAdminPage meId={me.id} />}
+      {cur === "access_review" && <AccessReviewPage />}
     </>
   );
 }

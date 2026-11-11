@@ -780,6 +780,12 @@ def test_admin_screens_and_overdue(client, tmp_path):
     assert client.patch(f"/api/admin/users/{adm['id']}", headers=H(ADM), json={"is_active": False}).status_code == 409
     nu = _ok(client.post("/api/admin/users", headers=H(ADM), json={"email": "new.logist@example.com", "display_name": "Новый Логист", "roles": ["logistician"]}), 201)
     assert client.post("/api/admin/users", headers=H(ADM), json={"email": "new.logist@example.com", "display_name": "Дубль", "roles": ["logistician"]}).status_code == 409
+    from app.db import SessionLocal as _SU
+    from app.models import AuthSession, User as _U
+    with _SU() as db:   # подтверждение живёт 10 минут в общей dev-сессии — другие тесты могли его оставить
+        for row in db.query(AuthSession).filter(AuthSession.user_id == db.query(_U.id).filter(_U.email == ADM).scalar_subquery()):
+            row.last_step_up_at = None
+        db.commit()
     assert client.patch(f"/api/admin/users/{nu['id']}", headers=H(ADM), json={"is_active": False}).json()["detail"]["code"] == "step_up_required"
     _step_up(client, ADM)
     _ok(client.patch(f"/api/admin/users/{nu['id']}", headers=H(ADM), json={"is_active": False}))

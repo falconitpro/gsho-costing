@@ -105,6 +105,12 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("claims ladder failed: %s", e)
+        try:   # пересмотр прав: напоминания в системе за 14/7/1 день и о просрочке (docs/operations/04 §6)
+            from .services.access_review import remind as remind_reviews
+            with SessionLocal() as db:
+                remind_reviews(db)
+        except Exception as e:   # pragma: no cover
+            log.warning("access review reminders failed: %s", e)
         try:   # резервные копии: перенос статуса с хоста, «нет копии дольше 26 ч», уведомления в системе (docs/operations/03 §5)
             from .services.backup_status import refresh as refresh_backups
             with SessionLocal() as db:

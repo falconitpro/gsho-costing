@@ -171,3 +171,108 @@ def events(user_id: Optional[str] = None, event_type: Optional[str] = None, resu
     return {"total": int(total), "items": [{"id": e.id, "at": e.occurred_at.isoformat() if e.occurred_at else None, "type": e.event_type, "action": e.action,
                                             "result": e.result, "actor_user_id": e.actor_user_id, "subject_user_id": e.subject_user_id,
                                             "ip_prefix": e.ip_prefix, "entity_type": e.entity_type, "entity_id": e.entity_id, "meta": e.meta or {}} for e in rows]}
+
+
+# ------------------------------------------------------------------ пересмотр прав (04 §6, 13 §10)
+
+from datetime import date as _date  # noqa: E402
+
+from ..models import AccessReviewCampaign, AccessReviewItem  # noqa: E402
+from ..services import access_review as ar  # noqa: E402
+
+
+class CampaignIn(BaseModel):
+    title: str = ""
+    period_start: _date
+    period_end: _date
+    due_date: _date
+    roles: list[str] = []
+
+
+class DecisionIn(BaseModel):
+    decision: str
+    comment: str = ""
+
+
+class CompleteIn(BaseModel):
+    note: str = ""
+
+
+def _campaign(db: Session, cid: str) -> AccessReviewCampaign:
+    c = db.get(AccessReviewCampaign, cid)
+    if c is None:
+        raise HTTPException(404, "Кампания не найдена")
+    return c
+
+
+def _campaign_dto(db: Session, c: AccessReviewCampaign) -> dict:
+    return {"id": c.id, "title": c.title, "period_start": c.period_start.isoformat(), "period_end": c.period_end.isoformat(),
+            "due_date": c.due_date.isoformat(), "status": c.status, "scope": c.scope or {}, "created_at": c.created_at.isoformat() if c.created_at else None,
+            "completed_at": c.completed_at.isoformat() if c.completed_at else None, "completion_note": c.completion_note, "progress": ar.progress(db, c)}
+
+
+@router.get("/access-reviews")
+def list_reviews(db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
+    rows = db.scalars(select(AccessReviewCampaign).order_by(AccessReviewCampaign.created_at.desc())).all()
+    return {"items": [_campaign_dto(db, c) for c in rows], "can_edit": user.can("security_admin", 2)}
+
+
+@router.post("/access-reviews", status_code=201)
+def create_review(body: CampaignIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    c = ar.create(db, user, body.title, body.period_start, body.period_end, body.due_date, body.roles or None)
+    return _campaign_dto(db, c)
+
+
+@router.get("/access-reviews/{cid}")
+def get_review(cid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
+    c = _campaign(db, cid)
+    names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    out = []
+    for i in db.scalars(select(AccessReviewItem).where(AccessReviewItem.campaign_id == c.id)).all():
+        u = db.get(User, i.user_id)
+        cur = ar.snapshot(db, u)
+        snap = i.snapshot or {}
+        out.append({"id": i.id, "user_id": i.user_id, "snapshot": snap, "current_diff": ar.diff(snap, cur), "decision": i.decision,
+                    "reviewer": names.get(i.reviewer_id or "", ""), "reviewed_at": i.reviewed_at.isoformat() if i.reviewed_at else None,
+                    "comment": i.comment, "changes": i.changes or {}, "is_self": i.user_id == user.id,
+                    "second_reviewer_needed": i.user_id == user.id and ar.needs_second_reviewer(snap)})
+    out.sort(key=lambda x: (x["decision"] != "pending", x["snapshot"].get("display_name", "")))
+    from ..core.roles import FIELD_GROUPS
+    return {**_campaign_dto(db, c), "items": out, "can_edit": user.can("security_admin", 2),
+            "group_titles": {g: t for g, (t, _) in FIELD_GROUPS.items()}, "sensitive_groups": list(ar.SENSITIVE)}
+
+
+@router.post("/access-reviews/{cid}/items/{iid}/decision")
+def decide_item(cid: str, iid: str, body: DecisionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    item = db.get(AccessReviewItem, iid)
+    if item is None or item.campaign_id != cid:
+        raise HTTPException(404, "Сотрудник в кампании не найден")
+    item = ar.decide(db, user, item, body.decision, body.comment)
+    return {"ok": True, "decision": item.decision, "changes": item.changes}
+
+
+@router.post("/access-reviews/{cid}/items/{iid}/reopen")
+def reopen_item(cid: str, iid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    item = db.get(AccessReviewItem, iid)
+    if item is None or item.campaign_id != cid:
+        raise HTTPException(404, "Сотрудник в кампании не найден")
+    ar.reopen(db, user, item)
+    return {"ok": True}
+
+
+@router.post("/access-reviews/{cid}/complete")
+def complete_review(cid: str, body: CompleteIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    return _campaign_dto(db, ar.complete(db, user, _campaign(db, cid), body.note))
+
+
+@router.post("/access-reviews/{cid}/cancel")
+def cancel_review(cid: str, body: CompleteIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    c = _campaign(db, cid)
+    if c.status != "open":
+        raise HTTPException(409, "Кампания уже закрыта")
+    if len((body.note or "").strip()) < 5:
+        raise HTTPException(422, "Укажите причину отмены")
+    c.status, c.completed_at, c.completed_by, c.completion_note = "cancelled", ar._now(), user.id, body.note.strip()[:2000]
+    sev.record(db, "access", "review_cancelled", actor_id=user.id, session_id=user.sid, entity_type="access_review", entity_id=c.id)
+    db.commit()
+    return _campaign_dto(db, c)

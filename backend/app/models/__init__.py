@@ -966,6 +966,41 @@ class SecurityEvent(Base):
     alert_id: Mapped[Optional[str]] = mapped_column(String(36))
 
 
+class AccessReviewCampaign(Base):
+    """Пересмотр прав (docs/operations/04 §6, 02): ежеквартальная кампания по активным сотрудникам."""
+    __tablename__ = "access_review_campaigns"
+    __table_args__ = (CheckConstraint("status IN ('draft', 'open', 'completed', 'cancelled')", name="ck_access_review_campaign_status"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String(200))
+    period_start: Mapped[date] = mapped_column(Date)
+    period_end: Mapped[date] = mapped_column(Date)
+    due_date: Mapped[date] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    scope: Mapped[dict] = mapped_column(JSONType, default=dict)            # {"roles": [...]} или {} — все активные
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    completed_by: Mapped[Optional[str]] = mapped_column(String(36))
+    completion_note: Mapped[str] = mapped_column(Text, default="")
+
+
+class AccessReviewItem(Base):
+    """Сотрудник в кампании: снимок прав на старте (без паролей, секретов TOTP и токенов) и решение."""
+    __tablename__ = "access_review_items"
+    __table_args__ = (UniqueConstraint("campaign_id", "user_id", name="uq_access_review_item"),
+                      CheckConstraint("decision IN ('pending', 'keep', 'change', 'disable', 'skipped')", name="ck_access_review_item_decision"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("access_review_campaigns.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    snapshot: Mapped[dict] = mapped_column(JSONType, default=dict)
+    decision: Mapped[str] = mapped_column(String(16), default="pending")
+    reviewer_id: Mapped[Optional[str]] = mapped_column(String(36))
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    changes: Mapped[dict] = mapped_column(JSONType, default=dict)         # для change: фактическая разница прав на момент решения
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
 class BackupRun(Base):
     """Запуск резервного копирования на хосте (docs/operations/02 §4, D-024…D-027).
 

@@ -368,3 +368,21 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .sec-result li { margin: 3px 0; }
 @media (max-width: 560px) { .sec-qr-row { grid-template-columns: 1fr; } .sec-qr { margin: 0 auto; } .sec-codes { columns: 1; } .sec-modal-body { padding: 12px; } .sec-overlay { padding: 12px 8px; } }
 .sec-overlay.top { z-index: 90; }   /* подтверждение — поверх окна, из которого вызвано */
+/* Пересмотр прав (docs/operations/04 §6) */
+.ar-progress { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 6px 0; }
+.ar-progress > div { height: 100%; background: var(--ok); }
+.ar-progress.small { height: 6px; margin: 2px 0 4px; }
+.ar-table td { vertical-align: top; }
+.ar-name { padding: 0; font-weight: 600; text-align: left; }
+.ar-flags .badge { margin: 0 4px 4px 0; display: inline-block; }
+.ar-actions { white-space: nowrap; }
+.ar-actions .btn { margin: 0 4px 4px 0; }
+.ar-detail td { background: #fafafa; }
+.ar-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.ar-grid h4 { margin: 4px 0 6px; font-size: 14px; }
+.ar-list { margin: 0; padding-left: 18px; font-size: 13px; }
+.ar-list li.sens { font-weight: 600; }
+.ar-form { margin-top: 10px; }
+.ar-form textarea { width: 100%; max-width: 640px; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.ar-roles { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin: 8px 0; }
+@media (max-width: 768px) { .ar-grid { grid-template-columns: 1fr; } .ar-roles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ar-actions { white-space: normal; } }
