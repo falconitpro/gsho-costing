@@ -1,7 +1,8 @@
 """Сессии на сервере (docs/operations/04 §2, 02 §5).
 
 JWT в cookie `gsho_session` несёт sub, sid, iat, exp, nonce, pv, mfa. Каждая проверка смотрит запись AuthSession:
-не отозвана, не истекла по бездействию (8 ч; «Запомнить меня» — 30 дн.) и по абсолютному сроку (24 ч; «Запомнить меня» — 30 дн.).
+не отозвана, не истекла по бездействию (8 ч) и по абсолютному сроку (12 ч). «Запомнить меня» срок не продлевает —
+браузер только подставляет логин (D-041).
 last_seen обновляется не чаще раза в 60 секунд. Сам токен на сервере не хранится.
 """
 from __future__ import annotations
@@ -21,7 +22,6 @@ from ..core.config import Settings
 from ..models import AuthSession, MfaChallenge, User
 from . import security_events as sev
 
-REMEMBER_DAYS = 30
 TOUCH_EVERY = timedelta(seconds=60)
 STEP_UP_TTL = timedelta(minutes=10)
 COOKIE = "gsho_session"
@@ -36,9 +36,8 @@ def password_version(user: User) -> int:
     return int(at.timestamp() * 1000) if at else 0
 
 
-def _limits(s: Settings, remember: bool) -> tuple[timedelta, timedelta]:
-    if remember:
-        return timedelta(days=REMEMBER_DAYS), timedelta(days=REMEMBER_DAYS)
+def _limits(s: Settings, remember: bool = False) -> tuple[timedelta, timedelta]:
+    """Одинаково для всех входов: «Запомнить меня» больше не даёт 30-дневную сессию (решение владельца 11.11.2026, D-041)."""
     return timedelta(hours=s.session_ttl_hours), timedelta(hours=max(s.session_absolute_hours, s.session_ttl_hours))
 
 
@@ -47,7 +46,7 @@ def create(db: Session, user: User, s: Settings, *, remember: bool = False, meth
     idle, absolute = _limits(s, remember)
     t = now()
     row = AuthSession(sid=str(uuid.uuid4()), user_id=user.id, created_at=t, last_seen_at=t, idle_expires_at=t + idle,
-                      absolute_expires_at=t + absolute, remember=remember, auth_method=method, mfa_level=mfa_level,
+                      absolute_expires_at=t + absolute, remember=False, auth_method=method, mfa_level=mfa_level,
                       last_mfa_at=t if mfa_level != "none" else None, last_step_up_at=t if mfa_level != "none" else None,
                       ip_prefix=sev.ip_prefix(request), user_agent_short=sev.user_agent_short(request))
     db.add(row)
@@ -58,8 +57,6 @@ def create(db: Session, user: User, s: Settings, *, remember: bool = False, meth
 def token(row: AuthSession, user: User, s: Settings) -> str:
     claims = {"sub": user.id, "sid": row.sid, "iat": int(time.time()), "exp": int(row.absolute_expires_at.timestamp()),
               "nonce": secrets.token_hex(4), "pv": password_version(user), "mfa": row.mfa_level}
-    if row.remember:
-        claims["rem"] = 1
     return jwt.encode(claims, s.secret_key, algorithm="HS256")
 
 
@@ -74,22 +71,30 @@ def issue(db: Session, resp: Response, user: User, s: Settings, **kw) -> AuthSes
     return row
 
 
+def effective(row: AuthSession, s: Settings) -> tuple[datetime, datetime]:
+    """Сроки по действующим правилам: входы, выданные раньше (например, 30-дневные «Запомнить меня»), тоже ограничены сразу."""
+    idle, absolute = _limits(s)
+    abs_end = min(row.absolute_expires_at, row.created_at + absolute) if row.created_at else row.absolute_expires_at
+    return min(row.idle_expires_at, (row.last_seen_at or row.created_at) + idle if (row.last_seen_at or row.created_at) else row.idle_expires_at), abs_end
+
+
 class SessionInvalid(Exception):
     def __init__(self, message: str):
         super().__init__(message)
         self.message = message
 
 
-def validate(db: Session, claims: dict, user: User) -> AuthSession:
+def validate(db: Session, claims: dict, user: User, s: Settings) -> AuthSession:
     row = db.scalar(select(AuthSession).where(AuthSession.sid == str(claims.get("sid") or "")))
     t = now()
     if row is None or row.user_id != user.id:
         raise SessionInvalid("Сессия не найдена — войдите заново")
     if row.revoked_at is not None:
         raise SessionInvalid("Сессия завершена — войдите заново")
-    if row.absolute_expires_at <= t:
+    idle_end, abs_end = effective(row, s)
+    if abs_end <= t:
         raise SessionInvalid("Срок сессии истёк — войдите заново")
-    if row.idle_expires_at <= t:
+    if idle_end <= t:
         raise SessionInvalid("Сессия истекла из-за бездействия — войдите заново")
     return row
 
@@ -98,9 +103,11 @@ def touch(db: Session, row: AuthSession, s: Settings) -> bool:
     t = now()
     if row.last_seen_at and t - row.last_seen_at < TOUCH_EVERY:
         return False
-    idle, _ = _limits(s, row.remember)
+    idle, _ = _limits(s)
+    _, abs_end = effective(row, s)
     row.last_seen_at = t
-    row.idle_expires_at = min(t + idle, row.absolute_expires_at)
+    row.absolute_expires_at = abs_end
+    row.idle_expires_at = min(t + idle, abs_end)
     return True
 
 
@@ -121,9 +128,11 @@ def revoke_all(db: Session, user_id: str, reason: str, by: Optional[str], except
 
 
 def active(db: Session, user_id: str) -> list[AuthSession]:
-    t = now()
-    return db.scalars(select(AuthSession).where(AuthSession.user_id == user_id, AuthSession.revoked_at.is_(None), AuthSession.absolute_expires_at > t,
+    from ..core.config import get_settings
+    st, t = get_settings(), now()
+    rows = db.scalars(select(AuthSession).where(AuthSession.user_id == user_id, AuthSession.revoked_at.is_(None), AuthSession.absolute_expires_at > t,
                                                 AuthSession.idle_expires_at > t).order_by(AuthSession.last_seen_at.desc().nullslast())).all()
+    return [r for r in rows if min(effective(r, st)) > t]   # по действующим правилам, а не по сроку, записанному при входе
 
 
 def dto(row: AuthSession, current_sid: Optional[str] = None) -> dict:

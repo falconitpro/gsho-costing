@@ -58,7 +58,7 @@ def no_overflow(p, tag):
 
 def password_login(p, email, pw=PW):
     p.goto(U + "/login")
-    p.get_by_label("Логин").fill(email)
+    p.get_by_label("Логин", exact=True).fill(email)
     p.locator("input[name=password]").fill(pw)
     p.get_by_role("button", name="Войти в систему").click()
 

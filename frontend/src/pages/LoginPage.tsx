@@ -39,10 +39,13 @@ function Background() {
 
 export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [prov, setProv] = useState<Providers | null>(null);
-  const [login, setLogin] = useState("");
+  // «Запомнить логин» (D-041): браузер помнит только e-mail, вход по-прежнему по паролю и коду; сессию галочка не продлевает
+  const saved = (() => { try { return localStorage.getItem("gsho.savedLogin") || ""; } catch { return ""; } })();
+  const [login, setLogin] = useState(saved);
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [remember, setRemember] = useState(true);
+  const rememberLogin = (value: string) => { try { if (remember) localStorage.setItem("gsho.savedLogin", value); else localStorage.removeItem("gsho.savedLogin"); } catch { /* приватный режим */ } };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -51,7 +54,10 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
   const uid = useId();
   const ids = { login: `${uid}-login`, pass: `${uid}-pass`, err: `${uid}-err`, lerr: `${uid}-lerr`, perr: `${uid}-perr` };
   useEffect(() => { api.get<Providers>("/api/auth/providers").then(setProv).catch(() => setProv({ password: true, m365: false, dev: false, support: "Для восстановления доступа обратитесь к администратору системы" })); }, []);
-  useEffect(() => { document.title = "Вход — CRM БЕРГ-ХАУС"; loginRef.current?.focus(); }, []);
+  useEffect(() => {
+    document.title = "Вход — CRM БЕРГ-ХАУС";
+    if (saved) document.querySelector<HTMLInputElement>("input[name=password]")?.focus(); else loginRef.current?.focus();   // логин запомнен — сразу к паролю
+  }, [saved]);
 
   const loginEmpty = touched && !login.trim();
   const passEmpty = touched && !password;
@@ -82,7 +88,8 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
     if (!login.trim() || !password) return;
     setBusy(true);
     try {
-      const r = await api.post<{ mfa_required?: boolean }>("/api/auth/password-login", { login: login.trim(), password, remember });
+      const r = await api.post<{ mfa_required?: boolean }>("/api/auth/password-login", { login: login.trim(), password, remember: false });
+      rememberLogin(login.trim());
       setPassword("");
       if (r?.mfa_required) { setMfa(true); setBusy(false); return; }
       onLoggedIn();
@@ -151,7 +158,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
               {passEmpty && <div className="bh-field-err" id={ids.perr}>{Ic.warn}Укажите пароль</div>}
             </label>
             <div className="bh-row">
-              <label className="bh-check"><input type="checkbox" name="remember" checked={remember} onChange={(e) => setRemember(e.target.checked)} /><span className="box">{Ic.check}</span><span>Запомнить меня</span></label>
+              <label className="bh-check"><input type="checkbox" name="remember" checked={remember} onChange={(e) => setRemember(e.target.checked)} /><span className="box">{Ic.check}</span><span>Запомнить логин</span></label>
               <button type="button" className="bh-link" onClick={() => { setError(""); setInfo(support); }}>Забыли пароль?</button>
             </div>
             <button type="submit" className="bh-submit" disabled={busy} aria-busy={busy}>

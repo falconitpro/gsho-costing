@@ -57,7 +57,7 @@ def test_password_login_flow():
         r = c.post("/api/auth/password-login", json={"login": MGR.upper(), "password": DEV_PASSWORD, "remember": True})
         assert r.status_code == 200 and SESSION_COOKIE in r.cookies
         set_cookie = r.headers["set-cookie"]
-        assert re.search(r"Max-Age=259(2000|1999)", set_cookie) and "HttpOnly" in set_cookie
+        assert re.search(r"Max-Age=43(200|199)", set_cookie) and "HttpOnly" in set_cookie   # «Запомнить» сессию не продлевает: 12 ч (D-041)
         me = c.get("/api/auth/me").json()
         assert me["email"] == MGR
         # переключатель «Войти как» — только после входа; тестовая учётная запись входит по паролю
@@ -71,9 +71,9 @@ def test_password_login_flow():
         assert c.post("/api/auth/logout").status_code == 200
         c.cookies.clear()
         assert c.get("/api/auth/me").status_code == 401
-        # без «Запомнить меня» — cookie на абсолютный срок 24 ч, бездействие 8 ч проверяет сервер (docs/operations/04 §2.2)
+        # cookie на абсолютный срок 12 ч, бездействие 8 ч проверяет сервер (D-041)
         r = c.post("/api/auth/password-login", json={"login": MGR, "password": DEV_PASSWORD, "remember": False})
-        assert re.search(r"Max-Age=86(400|399)", r.headers["set-cookie"])
+        assert re.search(r"Max-Age=43(200|199)", r.headers["set-cookie"])
         c.cookies.clear()
 
         # смена своего пароля: нужен текущий, проверка сложности

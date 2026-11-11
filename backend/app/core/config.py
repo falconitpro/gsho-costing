@@ -28,7 +28,7 @@ class Settings:
     oidc_group_role_map: str = field(default_factory=lambda: _env("OIDC_GROUP_ROLE_MAP", ""))  # "groupId:role,groupId:role"
 
     # Безопасность входа (docs/operations/04 §2–3, D-032…)
-    session_absolute_hours: int = field(default_factory=lambda: int(_env("SESSION_ABSOLUTE_HOURS", "24")))   # обычный вход: не дольше суток
+    session_absolute_hours: int = field(default_factory=lambda: int(_env("SESSION_ABSOLUTE_HOURS", "12")))   # вход не дольше 12 ч (D-041)
     mfa_policy: str = field(default_factory=lambda: _env("MFA_POLICY", "optional"))                          # optional | required
     mfa_encryption_key: str = field(default_factory=lambda: _env("MFA_ENCRYPTION_KEY", ""))                  # base64, 32 байта; в рабочем режиме обязателен
     legacy_sessions_until: str = field(default_factory=lambda: _env("LEGACY_SESSIONS_UNTIL", ""))            # ISO-время: до него принимаются старые cookie без sid

@@ -16,6 +16,7 @@ import BoardPage from "./pages/BoardPage";
 import SettingsHub from "./pages/SettingsHub";
 import SecuritySettingsPage from "./pages/SecuritySettingsPage";
 import StepUpDialog from "./components/StepUpDialog";
+import SessionExpiryWarning from "./components/SessionExpiryWarning";
 import CounterpartiesPage from "./pages/CounterpartiesPage";
 import LegalPage from "./pages/LegalPage";
 import CatalogHub from "./pages/CatalogHub";
@@ -156,6 +157,7 @@ export default function App() {
       </header>
       <FloatingScrollbar />
       <StepUpDialog />
+      <SessionExpiryWarning />
       <main>
         {me && (
           <Routes>

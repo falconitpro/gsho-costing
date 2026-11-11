@@ -125,9 +125,6 @@ class OidcClient:
 
 # ------------------------------------------------------------------ сессии (на сервере: services/auth_session.py, docs/operations/04 §2)
 
-REMEMBER_DAYS = 30
-
-
 def password_version(user: User) -> int:
     """Версия пароля — момент его последней смены (мс). Лежит в токене сессии: смена или сброс пароля отзывает все прежние сессии."""
     from ..services.auth_session import password_version as pv
@@ -195,7 +192,7 @@ class CurrentUser:
 
 
 # Пока не сменён временный пароль или не настроен обязательный TOTP — доступны только эти адреса (04 §3.3, §4)
-_LIMITED_OK = {"/api/auth/me", "/api/auth/logout", "/api/auth/providers", "/api/auth/password", "/api/auth/change-password",
+_LIMITED_OK = {"/api/auth/me", "/api/auth/session-status", "/api/auth/logout", "/api/auth/providers", "/api/auth/password", "/api/auth/change-password",
                "/api/auth/mfa/setup", "/api/auth/mfa/confirm", "/api/auth/step-up", "/api/auth/dev-users"}
 
 
@@ -248,15 +245,17 @@ async def get_current_user(request: Request, response: Response, db: Session = D
             # старый вход без серверной сессии — только в явно заданное окно перехода (LEGACY_SESSIONS_UNTIL), затем отказ
             if not _legacy_allowed(s):
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Сессия устарела после обновления системы — войдите заново")
-            row = sess.create(db, user, s, remember=bool(claims.get("rem")), method="legacy", request=request)
+            row = sess.create(db, user, s, method="legacy", request=request)
             db.commit()
             sess.set_cookie(response, row, user, s)
         else:
             try:
-                row = sess.validate(db, claims, user)
+                row = sess.validate(db, claims, user, s)
             except sess.SessionInvalid as e:
                 raise HTTPException(status.HTTP_401_UNAUTHORIZED, e.message)
-            if sess.touch(db, row, s):
+            # статус сессии для предупреждения «скоро выход» не считается активностью — иначе опрос продлевал бы вход бесконечно
+            background = request.headers.get("x-background-request") == "1" or request.url.path == "/api/auth/session-status"
+            if not background and sess.touch(db, row, s):
                 db.commit()
     from ..services.access_service import acting_for, perms_for
     mfa_on = mfa_svc.enabled(db, user.id)
