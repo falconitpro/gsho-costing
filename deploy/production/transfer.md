@@ -29,6 +29,8 @@ sudo nano /etc/gsho/restore.env
 sudo chmod 0600 /etc/gsho/restore.env
 ```
 
+Ключ только читает хранилище, поэтому скрипт вызывает restic с `--no-lock`; если вручную проверять доступ, тоже добавляйте `--no-lock` — иначе будет `Access Denied`.
+
 Содержимое `restore.env` — те же четыре строки, что на ВМ восстановления (`deploy/backup/recovery-smoke.md`, шаг 1): `RESTIC_REPOSITORY`, `RESTIC_PASSWORD`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, плюс `AWS_DEFAULT_REGION=ru-central1`.
 
 ## 3. Перенос

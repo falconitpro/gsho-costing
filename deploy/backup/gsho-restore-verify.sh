@@ -9,6 +9,8 @@
 # Отказывается работать, если в окружении есть признаки production-стенда (каталог /opt/gsho-costing с запущенным backend).
 set -Eeuo pipefail
 umask 077
+# --no-lock: ключ восстановления только читает хранилище (sa-gsho-restore, storage.viewer) и не может поставить блокировку;
+# без флага restic ждёт и падает с «unable to create lock in backend: Access Denied» (11.11.2026, D-059).
 
 SNAP=""; TARGET=""; PGDB=""
 for a in "$@"; do
@@ -33,8 +35,8 @@ mkdir -p "$TARGET"
 
 t0=$(date +%s)
 echo "== Снимок"
-restic snapshots --compact "$SNAP"
-restic restore "$SNAP" --target "$TARGET" --quiet
+restic snapshots --no-lock --compact "$SNAP"
+restic restore --no-lock "$SNAP" --target "$TARGET" --quiet
 DIR=$(find "$TARGET" -type f -name manifest.json -path '*gsho-backup*' -printf '%h\n' | head -1)
 [ -n "$DIR" ] || { echo "в снимке нет manifest.json" >&2; exit 1; }
 

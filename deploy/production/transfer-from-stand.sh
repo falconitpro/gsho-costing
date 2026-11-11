@@ -6,6 +6,8 @@
 # Сделки, справочники, сотрудники и права переносятся как есть. В базу, где уже есть сотрудники, скрипт ничего не пишет.
 set -Eeuo pipefail
 umask 077
+# --no-lock: ключ восстановления только читает хранилище (sa-gsho-restore, storage.viewer) и не может поставить блокировку;
+# без флага restic ждёт и падает с «unable to create lock in backend: Access Denied» (11.11.2026, D-059).
 cd "${GSHO_DIR:-/opt/gsho-costing}"
 SNAP=""
 for a in "$@"; do case "$a" in --snapshot=*) SNAP="${a#--snapshot=}" ;; *) echo "неизвестный аргумент: $a" >&2; exit 2 ;; esac; done
@@ -32,8 +34,8 @@ set -a
 . "$ENVF"
 set +a
 echo "== снимок $SNAP"
-restic snapshots --compact "$SNAP"
-restic restore "$SNAP" --target "$T" --quiet
+restic snapshots --no-lock --compact "$SNAP"
+restic restore --no-lock "$SNAP" --target "$T" --quiet
 DIR="$(find "$T" -type f -name manifest.json -path '*gsho-backup*' -printf '%h\n' | head -1)"
 [ -n "$DIR" ] || { echo "в снимке нет manifest.json" >&2; exit 1; }
 echo "== контрольные суммы"
