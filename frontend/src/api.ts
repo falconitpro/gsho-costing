@@ -44,6 +44,8 @@ async function request<T>(method: string, url: string, body?: unknown, form?: Fo
 
 export const api = {
   get: <T>(url: string) => request<T>("GET", url),
+  /** Фоновый опрос (колокольчик, курсы, прогресс): сервер не считает его активностью, иначе открытая вкладка не давала бы выйти по бездействию (D-041). */
+  bg: <T>(url: string) => request<T>("GET", url, undefined, undefined, { "X-Background-Request": "1" }),
   post: <T>(url: string, body?: unknown) => request<T>("POST", url, body),
   put: <T>(url: string, body?: unknown) => request<T>("PUT", url, body),
   patch: <T>(url: string, body?: unknown) => request<T>("PATCH", url, body),

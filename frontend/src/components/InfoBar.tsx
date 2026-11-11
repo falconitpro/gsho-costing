@@ -26,7 +26,7 @@ export default function InfoBar() {
   }, []);
   useEffect(() => {
     let alive = true;
-    const load = () => api.get<{ rates: Rate[] }>("/api/refs/fx-today").then((d) => { if (alive) setRates(d.rates); }).catch(() => { /* курсы ещё не загружены — блок показывает только дату и время */ });
+    const load = () => api.bg<{ rates: Rate[] }>("/api/refs/fx-today").then((d) => { if (alive) setRates(d.rates); }).catch(() => { /* курсы ещё не загружены — блок показывает только дату и время */ });
     load();
     const t = setInterval(load, 30 * 60_000);
     return () => { alive = false; clearInterval(t); };

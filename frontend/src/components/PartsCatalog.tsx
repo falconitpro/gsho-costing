@@ -290,7 +290,7 @@ type PhotoState = { running: boolean; processed?: number; total?: number; with_i
 function MsPhotos() {
   const [st, setSt] = useState<PhotoState | null>(null);
   const [err, setErr] = useState("");
-  const load = () => api.get<PhotoState>("/api/parts/import/moysklad-photos").then(setSt).catch((e) => setErr((e as Error).message));
+  const load = () => api.bg<PhotoState>("/api/parts/import/moysklad-photos").then(setSt).catch((e) => setErr((e as Error).message));
   useEffect(() => { load(); }, []);
   useEffect(() => { if (!st?.running) return; const t = setInterval(load, 3000); return () => clearInterval(t); }, [st?.running]);
   async function start() {

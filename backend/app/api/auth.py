@@ -424,6 +424,21 @@ def mfa_disable(body: MfaDisableIn, request: Request, db: Session = Depends(get_
     return {"ok": True}
 
 
+@router.get("/session-status")
+def session_status(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user), s: Settings = Depends(get_settings)):
+    """Когда закончится текущий вход: для предупреждения за 5 минут. Сам запрос активностью не считается (D-041)."""
+    row = db.scalar(select(sess.AuthSession).where(sess.AuthSession.sid == user.sid)) if user.sid else None
+    if row is None:
+        return {"session": False}
+    now = sess.now()
+    idle_end, abs_end = sess.effective(row, s)
+    ends = min(idle_end, abs_end)
+    return {"session": True, "now": now.isoformat(), "idle_expires_at": idle_end.isoformat(),
+            "absolute_expires_at": abs_end.isoformat(), "ends_at": ends.isoformat(),
+            "reason": "absolute" if abs_end <= idle_end else "idle",
+            "seconds_left": max(0, int((ends - now).total_seconds()))}
+
+
 @router.get("/me")
 def me(user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db), s: Settings = Depends(get_settings)):
     return {"id": user.id, "email": user.email, "display_name": user.display_name,

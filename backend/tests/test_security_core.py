@@ -162,7 +162,7 @@ def test_idle_absolute_and_touch_throttle():   # SEC-04
     sid = c.get("/api/auth/sessions").json()["items"][0]["sid"]
     with SessionLocal() as db:
         s = db.scalar(select(AuthSession).where(AuthSession.sid == sid))
-        assert (s.absolute_expires_at - s.created_at) == timedelta(hours=24) and (s.idle_expires_at - s.created_at) == timedelta(hours=8)
+        assert (s.absolute_expires_at - s.created_at) == timedelta(hours=12) and (s.idle_expires_at - s.created_at) == timedelta(hours=8)
         first_seen = s.last_seen_at
     c.get("/api/auth/me")
     with SessionLocal() as db:
@@ -189,7 +189,7 @@ def test_idle_absolute_and_touch_throttle():   # SEC-04
     sid3 = next(x["sid"] for x in rc.get("/api/auth/sessions").json()["items"] if x["current"])
     with SessionLocal() as db:
         s = db.scalar(select(AuthSession).where(AuthSession.sid == sid3))
-        assert s.remember and (s.absolute_expires_at - s.created_at) == timedelta(days=30)
+        assert not s.remember and (s.absolute_expires_at - s.created_at) == timedelta(hours=12)   # галочка сессию не продлевает (D-041)
 
 
 def test_jwt_without_sid_forged_and_foreign_sid_rejected(monkeypatch):
@@ -423,12 +423,13 @@ def _arrange_offboard_target():
     uid, email, name = make_user(roles=("manager",))
     deputy_of_id, _, _ = make_user()
     u = login(email)
+    api = TestClient(app, base_url="http://testserver")
+    cl = api.get("/api/refs/clients", headers=H(MGR)).json()[0]
+    deal = api.post("/api/deals", headers=H(MGR), json={"client_id": cl["id"], "site": "тест отключения"}).json()
     with SessionLocal() as db:
         db.add(AccessUserOverride(user_id=uid, field_group="legal_docs", level=1, comment="тест"))
         db.get(User, deputy_of_id).deputy_id = uid                   # он замещает другого
-        from app.models import Deal
-        deal = db.scalars(select(Deal)).first()
-        db.add(Task(deal_id=deal.id, role="manager", assignee_id=uid, title="задача отключаемого", due=date.today()))
+        db.add(Task(deal_id=deal["id"], role="manager", assignee_id=uid, title="задача отключаемого", due=date.today()))
         db.commit()
     return uid, email, name, u, deputy_of_id
 
@@ -539,3 +540,44 @@ def test_no_secret_canaries_in_events_or_audit():
         blob = " ".join(str(e.meta) + e.action + e.entity_id for e in db.scalars(select(SecurityEvent).where(SecurityEvent.subject_user_id == uid)).all())
         blob += " ".join(str(x.after) for x in db.scalars(select(AuditLog).where(AuditLog.entity_id == uid)).all())
     assert CANARY not in blob and secret not in blob and not any(cd in blob for cd in codes)
+
+
+def test_session_status_does_not_extend_and_reports_reason():
+    """D-041: опрос для предупреждения «скоро выход» не считается активностью."""
+    _, email, _ = make_user()
+    c = login(email)
+    sid = c.get("/api/auth/sessions").json()["items"][0]["sid"]
+    with SessionLocal() as db:
+        s = db.scalar(select(AuthSession).where(AuthSession.sid == sid))
+        s.last_seen_at = s.last_seen_at - timedelta(hours=7, minutes=57)
+        s.idle_expires_at = s.idle_expires_at - timedelta(hours=7, minutes=57)
+        db.commit()
+    for _ in range(3):
+        st = c.get("/api/auth/session-status").json()
+        assert st["session"] and st["reason"] == "idle" and 0 < st["seconds_left"] <= 180
+    # фоновые опросы (колокольчик, курсы) тоже не продлевают вход — иначе открытая вкладка никогда не выходила бы по бездействию
+    assert c.get("/api/notifications/unread-count", headers={"X-Background-Request": "1"}).status_code == 200
+    assert c.get("/api/auth/session-status").json()["seconds_left"] <= 180
+    with SessionLocal() as db:
+        s = db.scalar(select(AuthSession).where(AuthSession.sid == sid))
+        s.last_seen_at = s.last_seen_at - timedelta(minutes=1)   # чтобы следующий обычный запрос продлил
+        db.commit()
+    assert c.get("/api/auth/me").status_code == 200              # «Продолжить работу»
+    st = c.get("/api/auth/session-status").json()
+    assert st["seconds_left"] > 7 * 3600
+
+
+def test_old_30_day_session_is_cut_to_12_hours():
+    """Входы, выданные до D-041 с «Запомнить меня» на 30 дней, ограничиваются сразу — по времени входа."""
+    _, email, _ = make_user()
+    c = login(email)
+    sid = c.get("/api/auth/sessions").json()["items"][0]["sid"]
+    t = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        s = db.scalar(select(AuthSession).where(AuthSession.sid == sid))
+        s.created_at, s.remember = t - timedelta(hours=13), True
+        s.absolute_expires_at, s.idle_expires_at = s.created_at + timedelta(days=30), t + timedelta(days=29)
+        db.commit()
+    r = c.get("/api/auth/me")
+    assert r.status_code == 401 and "Срок сессии истёк" in r.json()["detail"]
+    assert all(x["sid"] != sid for x in login(email).get("/api/auth/sessions").json()["items"])

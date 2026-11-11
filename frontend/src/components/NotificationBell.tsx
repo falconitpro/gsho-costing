@@ -12,7 +12,7 @@ export default function NotificationBell() {
   const [items, setItems] = useState<Item[]>([]);
   const nav = useNavigate();
   const box = useRef<HTMLDivElement>(null);
-  const poll = () => api.get<{ unread: number }>("/api/notifications/unread-count").then((r) => setUnread(r.unread)).catch(() => undefined);
+  const poll = () => api.bg<{ unread: number }>("/api/notifications/unread-count").then((r) => setUnread(r.unread)).catch(() => undefined);
   useEffect(() => { poll(); const t = setInterval(poll, 60000); return () => clearInterval(t); }, []);
   useEffect(() => {
     if (!open) return;
