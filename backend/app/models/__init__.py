@@ -1124,6 +1124,86 @@ class BriefingItemState(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class AiConversation(Base):
+    """Диалог помощника CRM (02 §8): доступен только владельцу; удаление мягкое, содержимое стирается по сроку хранения."""
+    __tablename__ = "ai_conversations"
+    __table_args__ = (Index("ix_ai_conversations_owner_last", "owner_id", "last_message_at"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    title: Mapped[str] = mapped_column(String(120), default="")
+    default_mode: Mapped[str] = mapped_column(String(16), default="crm")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    last_message_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class AiMessage(Base):
+    __tablename__ = "ai_messages"
+    __table_args__ = (CheckConstraint("role IN ('user', 'assistant', 'system_notice')", name="ck_ai_message_role"),
+                      CheckConstraint("status IN ('complete', 'fallback', 'error')", name="ck_ai_message_status"),
+                      UniqueConstraint("conversation_id", "client_request_id", name="uq_ai_message_request"),
+                      Index("ix_ai_messages_conversation_created", "conversation_id", "created_at"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("ai_conversations.id"))
+    role: Mapped[str] = mapped_column(String(16))
+    mode: Mapped[str] = mapped_column(String(16), default="crm")
+    content: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="complete")
+    provider: Mapped[str] = mapped_column(String(32), default="none")
+    model: Mapped[str] = mapped_column(String(64), default="")
+    sources: Mapped[list] = mapped_column(JSONType, default=list)
+    warnings: Mapped[list] = mapped_column(JSONType, default=list)
+    facts: Mapped[list] = mapped_column(JSONType, default=list)
+    request_id: Mapped[str] = mapped_column(String(40), default="")
+    client_request_id: Mapped[Optional[str]] = mapped_column(String(64))
+    reply_to_id: Mapped[Optional[str]] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    purged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class AiToolAudit(Base):
+    """Технический след вызова инструмента: обезличенные аргументы, число и ID результатов — без самих данных."""
+    __tablename__ = "ai_tool_audits"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    message_id: Mapped[Optional[str]] = mapped_column(String(36))
+    actor_user_id: Mapped[str] = mapped_column(String(36), index=True)
+    tool_name: Mapped[str] = mapped_column(String(48))
+    arguments_sanitized: Mapped[dict] = mapped_column(JSONType, default=dict)
+    result_status: Mapped[str] = mapped_column(String(16), default="ok")
+    result_count: Mapped[int] = mapped_column(Integer, default=0)
+    entity_ids: Mapped[list] = mapped_column(JSONType, default=list)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiFeedback(Base):
+    __tablename__ = "ai_feedback"
+    __table_args__ = (UniqueConstraint("message_id", "user_id", name="uq_ai_feedback"),
+                      CheckConstraint("rating IN ('positive', 'negative')", name="ck_ai_feedback_rating"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    message_id: Mapped[str] = mapped_column(ForeignKey("ai_messages.id"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    rating: Mapped[str] = mapped_column(String(16))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiUsageDaily(Base):
+    """Счётчик запросов за день и за текущую минуту — атомарно, одной строкой (лимиты проверяются до ответа)."""
+    __tablename__ = "ai_usage_daily"
+    user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    usage_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    request_count: Mapped[int] = mapped_column(Integer, default=0)
+    token_in: Mapped[int] = mapped_column(Integer, default=0)
+    token_out: Mapped[int] = mapped_column(Integer, default=0)
+    minute_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    minute_count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class AccessReviewCampaign(Base):
     """Пересмотр прав (docs/operations/04 §6, 02): ежеквартальная кампания по активным сотрудникам."""
     __tablename__ = "access_review_campaigns"

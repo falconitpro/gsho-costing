@@ -1,3 +1,4 @@
+import AssistantDrawer from "./components/AssistantDrawer";
 import { SupportAdmin, SupportButton, SupportList, SupportTicketRoute } from "./pages/SupportPage";
 import { useEffect, useState } from "react";
 import FloatingScrollbar from "./components/FloatingScrollbar";
@@ -53,6 +54,7 @@ function LoginRoute({ onLoggedIn }: { onLoggedIn: () => Promise<void> }) {
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [checked, setChecked] = useState(false);          // сессия проверена: до этого ничего не показываем, чтобы рабочее место не мелькало
+  const [aiOpen, setAiOpen] = useState(false);            // помощник CRM: открыт ли (черновик сохраняется, пока вкладка открыта)
   const [devUsers, setDevUsers] = useState<{ email: string; display_name: string; roles: string[] }[]>([]);
 
   async function load() {
@@ -130,6 +132,7 @@ export default function App() {
                 </select>
               </label>
             )}
+            {me && perm("assistant_use") && <button className="btn ghost ai-btn" onClick={() => setAiOpen(!aiOpen)} aria-expanded={aiOpen} title="Помощник CRM">Помощник</button>}
             {me && <SupportButton />}
             {me && <NotificationBell />}
             {me && (
@@ -159,6 +162,7 @@ export default function App() {
       </header>
       <FloatingScrollbar />
       <StepUpDialog />
+      {me && perm("assistant_use") && <AssistantDrawer open={aiOpen} onClose={() => setAiOpen(false)} />}
       <SessionExpiryWarning />
       <main>
         {me && (
