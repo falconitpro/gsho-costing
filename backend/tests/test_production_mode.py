@@ -229,7 +229,7 @@ def test_update_asks_and_cancels(box):
 @pytest.mark.skipif(not shutil.which("shellcheck"), reason="shellcheck не установлен")
 def test_production_scripts_pass_shellcheck():
     files = sorted((ROOT / "deploy/production").glob("*.sh"))
-    assert len(files) == 3
+    assert len(files) == 4
     for f in files:
         assert subprocess.run(["bash", "-n", str(f)]).returncode == 0, f
     p = subprocess.run(["shellcheck", "-f", "gcc", *map(str, files)], capture_output=True, text=True, env={**os.environ, "LC_ALL": "C.UTF-8"})
@@ -247,3 +247,147 @@ def test_db_inventory_is_read_only_and_has_no_secrets(capsys):
     assert not any(h in out for h in hashes) and "pbkdf2" not in out
     with SessionLocal() as db:
         assert db.scalar(select(func.count()).select_from(User)) == before
+
+
+# ------------------------------------------------------------------ перенос со стенда: adopt, fx
+
+def test_adopt_dry_run_changes_nothing_and_refuses_production_database(capsys):
+    """Сам сброс паролей на общей тестовой базе не выполняем (он нужен другим тестам) — полный прогон в docs/operations/qa_production_adopt.py.
+    Здесь: без --yes ничего не меняется; на базе с отметкой production команда отказывается."""
+    from app.models import AppMarker
+    seed()
+    with SessionLocal() as db:
+        with_pw = db.scalar(select(func.count()).select_from(User).where(User.password_hash.is_not(None)))
+        m = db.get(AppMarker, "data_classification")
+        old = m.value if m else None
+    assert with_pw > 0
+    assert prod_init.adopt() == 0
+    out = capsys.readouterr().out
+    assert "Ничего не изменено" in out and "будет очищено" in out
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(User).where(User.password_hash.is_not(None))) == with_pw
+        m = db.get(AppMarker, "data_classification")
+        if m is None:
+            m = AppMarker(key="data_classification", value="production", app_env="prod")
+            db.add(m)
+        m.value = "production"
+        db.commit()
+    try:
+        assert prod_init.adopt(yes=True) == 1
+        assert "уже помечена как рабочая" in capsys.readouterr().out
+        with SessionLocal() as db:
+            assert db.scalar(select(func.count()).select_from(User).where(User.password_hash.is_not(None))) == with_pw
+    finally:
+        with SessionLocal() as db:
+            m = db.get(AppMarker, "data_classification")
+            if old is None:
+                db.delete(m)
+            else:
+                m.value = old
+            db.commit()
+
+
+def test_adopt_never_touches_business_or_audit_tables():
+    keep = {"users", "deals", "deal_versions", "positions", "clients", "factories", "parts", "attachments", "attachment_scans", "tasks", "audit_log",
+            "security_events", "security_alerts", "access_rules", "contracts", "fx_rates", "support_tickets", "support_messages"}
+    assert not keep & set(prod_init.ADOPT_CLEAR)
+    assert {"auth_sessions", "mfa_credentials", "mfa_recovery_codes", "password_history"} <= set(prod_init.ADOPT_CLEAR)
+
+
+def test_fx_reload_replaces_only_on_success(capsys):
+    from datetime import date, timedelta
+
+    from app.models import FxRate
+
+    class Src:
+        def __init__(self, n):
+            self.n = n
+
+        def history(self, cur, start, end):
+            if self.n < 0:
+                raise OSError("network")
+            return [(date(2020, 1, 1) + timedelta(days=i), 10.0 + i / 1000) for i in range(self.n)]
+
+    cur = "ZZT"
+    with SessionLocal() as db:
+        db.query(FxRate).filter(FxRate.currency == cur).delete()
+        db.add_all([FxRate(on=date(2019, 1, 1), currency=cur, rate=1.0, source="cbr"), FxRate(on=date(2019, 1, 2), currency=cur, rate=2.0, source="manual", comment="руч.")])
+        db.commit()
+    try:
+        assert prod_init.fx((cur,), Src(-1)) == 1 and prod_init.fx((cur,), Src(5)) == 1      # сбой сети и подозрительно короткий ответ
+        with SessionLocal() as db:
+            assert db.scalar(select(func.count()).select_from(FxRate).where(FxRate.currency == cur)) == 2   # прежние курсы целы
+        assert prod_init.fx((cur,), Src(300)) == 0
+        with SessionLocal() as db:
+            rows = db.scalars(select(FxRate).where(FxRate.currency == cur)).all()
+            assert len([r for r in rows if r.source == "cbr"]) == 300 and not any(r.on == date(2019, 1, 1) for r in rows if r.source == "cbr")
+            assert [r.rate for r in rows if r.source == "manual"] == [2.0]                         # ручные курсы не затронуты
+    finally:
+        with SessionLocal() as db:
+            db.query(FxRate).filter(FxRate.currency == cur).delete()
+            db.commit()
+
+
+# ------------------------------------------------------------------ deploy/production/transfer-from-stand.sh
+
+TRANSFER = ROOT / "deploy/production/transfer-from-stand.sh"
+
+
+@pytest.fixture()
+def tbox(tmp_path):
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    log = tmp_path / "calls.log"
+    snap = tmp_path / "snapdata/var/lib/gsho-backup/staging/gsho-backup"
+    snap.mkdir(parents=True)
+    for n in ("db.dump", "files.tar", "manifest.json"):
+        (snap / n).write_text(n)
+    subprocess.run("sha256sum db.dump files.tar manifest.json > SHA256SUMS", shell=True, cwd=snap, check=True)
+    _stub(bin_, "restic", f'''echo "restic $*" >> {log}
+if [ "$1" = restore ]; then while [ $# -gt 0 ]; do [ "$1" = --target ] && cp -a {tmp_path}/snapdata/. "$2"/; shift; done; fi
+exit 0
+''')
+    _stub(bin_, "docker", f'''echo "docker $*" >> {log}
+case "$*" in
+  *"ps -q backend"*) echo "${{STUB_BACKEND_ID:-}}" ;;
+  *"information_schema.tables"*) echo "${{STUB_TABLES:-0}}" ;;
+  *pg_restore*|*"tar -xf"*) cat > /dev/null ;;
+esac
+exit 0
+''')
+    (tmp_path / "deploy/production").mkdir(parents=True)
+    (tmp_path / "deploy/production/init-db.sh").write_text(f'echo "init-db $*" >> {log}\n')
+    (tmp_path / "restore.env").write_text("RESTIC_REPOSITORY=s3:example\nRESTIC_PASSWORD=x\n")
+    env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "GSHO_DIR": str(tmp_path), "GSHO_RESTORE_ENV": str(tmp_path / "restore.env"),
+           "GSHO_TRANSFER_DIR": str(tmp_path / "transfer")}
+    return tmp_path, env, log
+
+
+def _transfer(env, *args, **extra):
+    return subprocess.run(["bash", str(TRANSFER), *args], env={**env, **extra}, capture_output=True, text=True, timeout=60)
+
+
+def test_transfer_order_and_final_instructions(tbox):
+    tmp, env, log = tbox
+    p = _transfer(env, "--snapshot=9d720133")
+    assert p.returncode == 0, p.stderr
+    c = _calls(log)
+    idx = lambda needle: next(i for i, x in enumerate(c) if needle in x)   # noqa: E731
+    assert idx("restic restore") < idx("pg_restore") < idx("tar -xf") < idx("init-db --existing") < idx("prod_init adopt --yes") < idx("prod_init fx") < idx("db_inventory")
+    assert "db.dump: OK" in p.stdout and "ПЕРЕНОС ЗАВЕРШЁН" in p.stdout and "rm -f" in p.stdout
+    assert not any("up -d backend" in x or "up -d --build" in x for x in c)            # CRM скрипт не запускает
+
+
+def test_transfer_refuses_running_crm_non_empty_db_bad_checksum_and_latest(tbox):
+    tmp, env, log = tbox
+    p = _transfer(env, "--snapshot=9d720133", STUB_BACKEND_ID="abc")
+    assert p.returncode == 3 and "уже запущена" in p.stderr and not any("restic" in x or "pg_restore" in x for x in _calls(log))
+    log.unlink()
+    p = _transfer(env, "--snapshot=9d720133", STUB_TABLES="113")
+    assert p.returncode == 3 and "база не пустая" in p.stderr and not any("restic" in x or "pg_restore" in x for x in _calls(log))
+    assert _transfer(env, "--snapshot=latest").returncode == 2
+    assert _transfer(env, "--snapshot=9d720133", GSHO_RESTORE_ENV=str(tmp / "missing")).returncode == 2
+    log.unlink()
+    (tmp / "snapdata/var/lib/gsho-backup/staging/gsho-backup/db.dump").write_text("повреждено")
+    p = _transfer(env, "--snapshot=9d720133")
+    assert p.returncode != 0 and not any("pg_restore" in x or "adopt" in x for x in _calls(log))   # при несовпадении суммы база не трогается
