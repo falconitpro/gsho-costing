@@ -23,12 +23,15 @@ from ..models import User
 from ..services.deal_service import audit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+OIDC_PROVIDERS = ("entra", "yandex", "keycloak")   # AUTH_PROVIDER=password — только логин и пароль (+ код из приложения)
 
 
 @router.get("/login")
 def login(s: Settings = Depends(get_settings)):
     if s.auth_provider == "dev":
         raise HTTPException(400, "В dev-режиме используйте заголовок X-Dev-User (см. /api/auth/dev-users)")
+    if s.auth_provider not in OIDC_PROVIDERS:
+        raise HTTPException(404, "Вход через внешнюю учётную запись не подключён — используйте логин и пароль")
     state = secrets.token_urlsafe(16)
     resp = RedirectResponse(OidcClient(s).authorize_url(state))
     resp.set_cookie("oidc_state", state, httponly=True, max_age=600)
@@ -37,6 +40,8 @@ def login(s: Settings = Depends(get_settings)):
 
 @router.get("/callback")
 async def callback(request: Request, code: str, state: str, db: Session = Depends(get_db), s: Settings = Depends(get_settings)):
+    if s.auth_provider not in OIDC_PROVIDERS:
+        raise HTTPException(404, "Вход через внешнюю учётную запись не подключён")
     if request.cookies.get("oidc_state") != state:
         raise HTTPException(400, "Неверный state")
     client = OidcClient(s)
@@ -115,7 +120,7 @@ def _ip_blocked(ip: str) -> bool:
 @router.get("/providers")
 def providers(s: Settings = Depends(get_settings)):
     """Какие способы входа доступны странице входа: пароль — всегда; Microsoft 365 — когда настроен OIDC; dev — тестовый стенд."""
-    return {"password": True, "m365": s.auth_provider != "dev", "dev": bool(s.is_dev and s.auth_provider == "dev"), "support": SUPPORT_TEXT}
+    return {"password": True, "m365": s.auth_provider in OIDC_PROVIDERS, "dev": bool(s.is_dev and s.auth_provider == "dev"), "support": SUPPORT_TEXT}
 
 
 @router.post("/password-login")

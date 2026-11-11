@@ -336,12 +336,16 @@ def _s(**kw) -> Settings:
     return dataclasses.replace(get_settings(), **kw)
 
 
+PROD_KEYS = {"secret_key": "s" * 64, "mfa_encryption_key": "a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=",
+             "database_url": "postgresql+psycopg://gsho:own-strong-password@db:5432/gsho"}
+
+
 def test_unsafe_config_combinations_refused():
     assert environment.config_problems(_s(env="dev")) == []
     assert environment.config_problems(_s(env="dev", data_classification="production"))
     p = environment.config_problems(_s(env="production", auth_provider="dev", file_scan="off"))
     assert any("AUTH_PROVIDER=dev" in x for x in p) and any("FILE_SCAN=clamav" in x for x in p)
-    assert environment.config_problems(_s(env="production", auth_provider="password", file_scan="clamav")) == []
+    assert environment.config_problems(_s(env="production", auth_provider="password", file_scan="clamav", **PROD_KEYS)) == []
     assert environment.config_problems(_s(env="prod", auth_provider="password", file_scan="off"))   # в проекте рабочий режим — prod
     p = environment.config_problems(_s(env="recovery", mail_provider="smtp", messenger_provider="wecom", storage_provider="s3"))
     assert len(p) == 3
