@@ -32,7 +32,10 @@ services:
     ports:
       - "80:80"
 
+  # Старые локальные копии (на том же сервере). Отключены этапом 8 (D-062): копии идут в Yandex Object Storage
+  # (deploy/backup). Запуск только явно: docker compose --profile legacy-backup up -d backup. Том backups не удалять.
   backup:
+    profiles: ["legacy-backup"]
     image: postgres:16
     entrypoint: ["/bin/sh", "-c"]
     # ежедневный дамп БД и архив файлов; хранение 90 дней
