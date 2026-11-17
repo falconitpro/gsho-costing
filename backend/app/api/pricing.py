@@ -90,6 +90,8 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     data = {
         "input": inp.model_dump(mode="json"), "result": res.model_dump(mode="json"),
         "approval_flags": approval_flags(res), "threshold_pct": inp.thresholds.margin_threshold_pct,
+        "threshold_by_variant": {vid: inp.thresholds.margin_for((sc.get("base").price_rub if sc.get("base") else None)) for vid, sc in res.variants.items()},
+        "margin_scale": [st.model_dump() for st in inp.thresholds.margin_scale],
         "factory_price_history": [serialize(h) for h in price_hist], "client_kp_history": client_kp_history,
         "warnings": res.warnings + warn_lower, "comments": comments, "cd_checks": checks, "terms": terms, "production": production,
         "can_edit_production": user.has(Role.CD, Role.GD),
@@ -887,7 +889,14 @@ def kp_revisions(deal_id: str, db: Session = Depends(get_db), user: CurrentUser 
                  "configuration": "; ".join(o.get("name", "") for p in deal.positions if p.id in v.position_ids for o in (p.options or [])) or "базовая"}
                 for v in deal.variants if v.in_kp and v.price_rub is not None]
     return {"rows": rows, "variants": variants, "can_edit": user.has(Role.CD, Role.GD) and deal.status in (DealStatus.APPROVED, DealStatus.KP_SENT),
-            "threshold_pct": settings_service.get(db, "margin_threshold_pct")}
+            "threshold_pct": _thr_for(db, sum(v["price_rub"] or 0 for v in variants) or None)}
+
+
+def _thr_for(db: Session, price_rub: Optional[float]) -> float:
+    from ..calc.types import OverheadStep, Thresholds
+    s = settings_service.get_all(db)
+    return Thresholds(margin_threshold_pct=s["margin_threshold_pct"],
+                      margin_scale=[OverheadStep(**o) for o in (s.get("margin_threshold_scale") or []) if o.get("pct") is not None]).margin_for(price_rub)
 
 
 class KpRevisionIn(BaseModel):
@@ -900,7 +909,8 @@ def kp_revision_preview(deal_id: str, body: KpRevisionIn, db: Session = Depends(
     deal = get_deal_or_404(db, deal_id, user)
     _cd_gd(user)
     ver = _approved_version(db, deal)
-    return {"variants": revision_totals(deal, ver, body.changes), "threshold_pct": settings_service.get(db, "margin_threshold_pct")}
+    totals = revision_totals(deal, ver, body.changes)
+    return {"variants": totals, "threshold_pct": _thr_for(db, sum((t.get("total") or 0) for t in totals.values()) or None)}
 
 
 @router.post("/kp/revisions", status_code=201)

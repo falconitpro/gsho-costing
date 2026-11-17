@@ -115,6 +115,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
     default_factory = _lines(s.get("default_factory_payment_scheme") or [])
     default_client = _lines(s.get("default_client_payment_scheme") or [])
     thresholds = Thresholds(margin_threshold_pct=s["margin_threshold_pct"], cash_gap_limit_rub=s["cash_gap_limit_rub"],
+                            margin_scale=[OverheadStep(**o) for o in (s.get("margin_threshold_scale") or []) if o.get("pct") is not None],
                             gd_deal_limit_rub=s["gd_deal_limit_rub"], factory_price_deviation_pct=s["price_deviation_pct"],
                             logistics_deviation_pct=s["logistics_deviation_pct"], plan_fact_deviation_pct=s["plan_fact_deviation_pct"])
     wr = s["warranty_reserve_pct_by_type"]

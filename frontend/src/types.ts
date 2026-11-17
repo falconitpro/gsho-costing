@@ -114,6 +114,7 @@ export interface CalcResponse {
   fd_declined?: { comment: string; at: string | null; user: string } | null;
   input: { base_currency: string; calc_date?: string; fx: { as_of: string; rates: Record<string, number>; source: string; note?: string }; thresholds: { margin_threshold_pct: number } };
   result: { variants: Record<string, Record<string, ScenarioResult>>; fx_components: FxComponent[]; approval: { financial: boolean; general: boolean; reasons: string[] }; warnings: string[] };
+  threshold_by_variant?: Record<string, number>; margin_scale?: { up_to_rub: number | null; pct: number }[];
   sales_vat_pct?: number; contract_currency?: { code: string; source: string; rate: number | null };
   production?: Record<string, import("./components/ProductionTermBlock").ProductionInfo>; can_edit_production?: boolean;
   approval_flags: Record<string, boolean>; threshold_pct: number; warnings: string[]; comments: { from: string; item: string; ref: string; comment: string }[];

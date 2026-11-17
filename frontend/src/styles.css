@@ -118,9 +118,14 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; colo
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; overflow-x: auto; }
 .tabs button { background: none; border: 0; padding: 8px 12px; cursor: pointer; font-family: inherit; font-size: 14px; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tabs button.active { border-color: var(--accent); font-weight: 700; }
-/* экран «Расчёт и утверждение»: вкладки в две строки, чтобы все помещались без прокрутки */
-.tabs.tabs-compact { flex-wrap: wrap; overflow-x: visible; align-items: flex-end; }
-.tabs.tabs-compact button { white-space: normal; padding: 6px 10px; font-size: 13px; line-height: 1.2; text-align: center; }
+/* экран «Расчёт и утверждение»: вкладки — отдельные кнопки равной ширины на всю строку, текст по центру (D-067) */
+.tabs.tabs-compact { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; border-bottom: 0; overflow: visible; margin-bottom: 14px; }
+.tabs.tabs-compact button { display: flex; align-items: center; justify-content: center; text-align: center; white-space: normal; min-height: 52px; padding: 6px 8px;
+  font-size: 13px; line-height: 1.25; color: var(--ink); background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  transition: background .15s, border-color .15s, box-shadow .15s; }
+.tabs.tabs-compact button:hover { border-color: var(--accent); background: var(--accent-soft); }
+.tabs.tabs-compact button.active { border: 1px solid var(--accent); background: var(--accent); color: #fff; font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,.12); }
+@media (max-width: 900px) { .tabs.tabs-compact { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
 .alert { padding: 10px 12px; border-radius: 6px; margin: 8px 0; }
 .alert.error { background: var(--bad-bg); color: var(--bad); border-left: 4px solid var(--bad); }
 .alert.warn { background: var(--warn-bg); color: #5c3d00; border-left: 4px solid var(--warn); }

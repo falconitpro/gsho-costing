@@ -185,7 +185,9 @@ class ExcelExporter:
         ws = self.wb.create_sheet("Сводка")
         ws["A1"] = f"Сводка по сделке {self.inp.deal_no}"
         ws["A1"].font = Font(bold=True, size=14, color=ACCENT)
-        ws["A2"] = f"Дата расчёта: {self.inp.calc_date:%d.%m.%Y}; базовая валюта: {self.inp.base_currency}; порог маржи: {self.inp.thresholds.margin_threshold_pct} %"
+        ws["A2"] = f"Дата расчёта: {self.inp.calc_date:%d.%m.%Y}; базовая валюта: {self.inp.base_currency}; порог маржи: " + (
+            "; ".join(f"до {st.up_to_rub:,.0f} ₽ — {st.pct:g} %" if st.up_to_rub is not None else f"свыше — {st.pct:g} %" for st in self.inp.thresholds.margin_scale)
+            if self.inp.thresholds.margin_scale else f"{self.inp.thresholds.margin_threshold_pct} %")
         ws["A3"] = "Маржа считается от выручки без НДС (M% = (P−C)/P); наценка от себестоимости — справочно."
         row = 5
         for v in self.inp.variants:

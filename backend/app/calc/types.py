@@ -210,11 +210,21 @@ DEFAULT_OVERHEAD_SCALE = [
 
 class Thresholds(BaseModel):
     margin_threshold_pct: float = 3.0
+    margin_scale: list["OverheadStep"] = Field(default_factory=list)   # порог маржи по цене сделки без НДС, ₽ (D-067); пусто — margin_threshold_pct
     cash_gap_limit_rub: Optional[float] = None   # лимит ФД
     gd_deal_limit_rub: Optional[float] = None    # лимит суммы сделки для визы ЗГД
     factory_price_deviation_pct: float = 10.0
     logistics_deviation_pct: float = 15.0
     plan_fact_deviation_pct: float = 10.0
+
+    def margin_for(self, price_rub: Optional[float]) -> float:
+        """Порог маржи для сделки этой стоимости: первая ступень, где цена ≤ «до», последняя — «свыше»."""
+        if not self.margin_scale or price_rub is None:
+            return self.margin_threshold_pct
+        for step in self.margin_scale:
+            if step.up_to_rub is None or price_rub <= step.up_to_rub:
+                return step.pct
+        return self.margin_scale[-1].pct
 
 
 class ServiceSummary(BaseModel):
@@ -431,6 +441,7 @@ class VariantScenarioResult(BaseModel):
     cost_total_rub: float
     cost_total_base_ccy: float
     price_rub: Optional[float]
+    margin_threshold_pct: Optional[float] = None   # порог маржи для этой цены (шкала по стоимости сделки, D-067)
     margin_pct: Optional[float]
     markup_pct: Optional[float]
     profit_rub: Optional[float]
