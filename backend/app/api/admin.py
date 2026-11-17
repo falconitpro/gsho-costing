@@ -29,7 +29,7 @@ SETTINGS_READ = require_roles(Role.ADMIN, Role.FD, Role.GD, Role.CD)
 CD_KEYS = {"external_commission_pct", "manager_commission_pct", "door_to_door_border_pct"}
 
 # ключи, которые может менять ФД (ставки стоимости денег, порог маржи, ΔK/Δt, лимиты)
-FD_KEYS = {"margin_threshold_pct", "scenario_dk", "scenario_dt", "use_historical_volatility", "vol_multipliers", "fx_weights",
+FD_KEYS = {"margin_threshold_pct", "margin_threshold_scale", "scenario_dk", "scenario_dt", "use_historical_volatility", "vol_multipliers", "fx_weights",
            "fx_history_years", "key_rate_pct", "pboc_rate_pct", "foreign_rates_pct", "fx_expert_points", "financing_rate_pct",
            "deposit_rate_pct", "conversion_fee_pct", "transfer_fee", "guarantee_rate_pct", "cash_gap_limit_rub",
            "overhead_actual_pct_last_year", "warranty_reserve_pct_by_type", "unplanned_reserve_pct"}
@@ -67,6 +67,15 @@ def set_setting(key: str, body: SettingIn, db: Session = Depends(get_db), user: 
         raise HTTPException(403, "Этот параметр меняет " + ("КД или ЗГД" if key in CD_KEYS else "ФД, ЗГД или администратор" if key in FD_KEYS else "ЗГД или администратор"))
     if key == "fx_expert_points":
         body.value = settings_service.expert_points(body.value)
+    if key == "margin_threshold_scale":   # D-067: ступени по цене сделки, «свыше» (пустое «до») — последней
+        try:
+            rows = [{"up_to_rub": None if r.get("up_to_rub") in (None, "") else float(r["up_to_rub"]), "pct": float(r["pct"])}
+                    for r in (body.value or []) if r.get("pct") not in (None, "")]
+        except (TypeError, ValueError, AttributeError):
+            raise HTTPException(422, "Шкала порога маржи: в каждой строке — «цена до» (число или пусто) и «порог, %»")
+        if sum(r["up_to_rub"] is None for r in rows) > 1:
+            raise HTTPException(422, "Шкала порога маржи: строка «свыше» (пустое «до») может быть только одна")
+        body.value = sorted(rows, key=lambda r: (r["up_to_rub"] is None, r["up_to_rub"] or 0))
     if key in ("gd_deal_limit_rub", "overhead_scale") and not user.has(Role.GD, Role.ADMIN):
         raise HTTPException(403, "Лимит и шкалу накладных утверждает ЗГД")
     before = settings_service.get(db, key)

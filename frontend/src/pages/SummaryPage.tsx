@@ -190,7 +190,7 @@ function Service({ data, t }: { data: Record<string, unknown>; t: Record<string,
       {table(pnr, "Пусконаладка (ПНР)")}
       <div className="grid cols-2" style={{ marginTop: 10 }}>
         <div className="card"><b>Напоминания о ТО</b>
-          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{rem.map((r, i) => <tr key={i}><td><Link to="/counterparties?type=clients">{r.machine || "машина"}</Link></td><td>{r.client}</td><td>{r.to_hours} м·ч</td><td style={{ whiteSpace: "nowrap" }}>{d(r.due_on)}{late(r.overdue_days)}</td></tr>)}
+          <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{rem.map((r, i) => <tr key={i}><td><Link to="/legal?tab=counterparties&type=clients">{r.machine || "машина"}</Link></td><td>{r.client}</td><td>{r.to_hours} м·ч</td><td style={{ whiteSpace: "nowrap" }}>{d(r.due_on)}{late(r.overdue_days)}</td></tr>)}
             {rem.length === 0 && <tr><td className="muted">Напоминаний нет</td></tr>}</tbody></table></div>
         <div className="card"><b>Открытые претензии заводам</b>
           <table style={{ marginTop: 6, fontSize: 13 }}><tbody>{claims.map((c) => <tr key={c.id}><td><Link to="/supply?tab=claims">{c.number}</Link></td><td>{c.factory}</td><td>{c.status}</td><td>{d(c.created_at)}</td></tr>)}

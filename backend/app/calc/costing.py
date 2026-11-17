@@ -393,7 +393,7 @@ def _sensitivity(inp: DealCalcInput, variant: VariantInput, scen: ScenarioParams
     d_margin = (up.margin_pct or 0) - (base.margin_pct or 0)
     d_rub = (up.profit_rub or 0) - (base.profit_rub or 0)
     # линейная экстраполяция: при каком множителе курса маржа = порог
-    thr = inp.thresholds.margin_threshold_pct
+    thr = inp.thresholds.margin_for(base.price_rub)
     factor = None
     if abs(d_margin) > 1e-9:
         factor = 1.0 + ((thr - (base.margin_pct or 0)) / d_margin) * 0.01
@@ -428,9 +428,13 @@ def calc_deal(inp: DealCalcInput) -> DealCalcResult:
             results[v.id][scen.name.value] = r
         base = results[v.id][ScenarioName.BASE.value]
         pess = results[v.id].get(ScenarioName.PESSIMISTIC.value)
-        if base.margin_pct is not None and base.margin_pct < thr.margin_threshold_pct:
+        m_thr = thr.margin_for(base.price_rub)
+        for r_ in results[v.id].values():
+            r_.margin_threshold_pct = thr.margin_for(r_.price_rub)
+        if base.margin_pct is not None and base.margin_pct < m_thr:
             approval.financial = True
-            approval.reasons.append(f"Вариант «{v.name}»: маржа базового сценария {base.margin_pct:.2f} % ниже порога {thr.margin_threshold_pct} %.")
+            approval.reasons.append(f"Вариант «{v.name}»: маржа базового сценария {base.margin_pct:.2f} % ниже порога {m_thr:g} %"
+                                    + (" (для сделки этой стоимости)." if thr.margin_scale else "."))
         if pess and pess.margin_pct is not None and pess.margin_pct < 0:
             warnings.append(f"Вариант «{v.name}»: маржа пессимистичного сценария отрицательна ({pess.margin_pct:.2f} %).")
         if thr.cash_gap_limit_rub is not None and -base.cash_gap.amount_rub > thr.cash_gap_limit_rub:

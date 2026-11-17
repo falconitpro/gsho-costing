@@ -19,7 +19,7 @@ import SettingsHub from "./pages/SettingsHub";
 import SecuritySettingsPage from "./pages/SecuritySettingsPage";
 import StepUpDialog from "./components/StepUpDialog";
 import SessionExpiryWarning from "./components/SessionExpiryWarning";
-import CounterpartiesPage from "./pages/CounterpartiesPage";
+import CounterpartiesRedirect from "./pages/CounterpartiesPage";
 import LegalPage from "./pages/LegalPage";
 import CatalogHub from "./pages/CatalogHub";
 import SupplyPage from "./pages/PartsSetupPage";
@@ -151,8 +151,7 @@ export default function App() {
             {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
             {has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager") && <NavLink to="/summary">Сводка</NavLink>}
             {perm("finance_section") && <NavLink to="/finance">Финансы</NavLink>}
-            <NavLink to="/counterparties">Контрагенты</NavLink>
-            {has("cd", "fd", "gd", "lawyer", "admin", "manager") ? <NavLink to="/legal">Юридический блок</NavLink> : !has("observer") && <NavLink to="/legal?tab=contracts">Договоры</NavLink>}
+            <NavLink to="/legal">Юридический блок</NavLink>
 
             <NavLink to="/catalog">Каталог</NavLink>
             {has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head") && <NavLink to="/supply">Снабжение и склад</NavLink>}
@@ -177,9 +176,9 @@ export default function App() {
             <Route path="/board" element={<BoardPage />} />
             <Route path="/summary" element={<SummaryPage me={me} />} />
             <Route path="/finance" element={<FinancePage me={me} />} />
-            <Route path="/counterparties" element={<CounterpartiesPage me={me} />} />
+            <Route path="/counterparties" element={<CounterpartiesRedirect />} />
             <Route path="/legal" element={<LegalPage me={me} />} />
-            <Route path="/clients" element={<Navigate to="/counterparties?type=clients" replace />} />
+            <Route path="/clients" element={<CounterpartiesRedirect type="clients" />} />
 
             <Route path="/team" element={<Navigate to="/settings?s=team" replace />} />
             <Route path="/settings" element={<SettingsHub me={me} />} />
@@ -187,7 +186,7 @@ export default function App() {
             <Route path="/support/admin" element={<SupportAdmin />} />
             <Route path="/support/:id" element={<SupportTicketRoute />} />
             <Route path="/catalog" element={<CatalogHub me={me} />} />
-            <Route path="/factories" element={<Navigate to="/counterparties?type=suppliers" replace />} />
+            <Route path="/factories" element={<CounterpartiesRedirect type="suppliers" />} />
             <Route path="/supply" element={<SupplyPage me={me} />} />
             <Route path="/parts/setup" element={<Navigate to="/supply" replace />} />
             <Route path="/access" element={<Navigate to="/settings?s=access" replace />} />

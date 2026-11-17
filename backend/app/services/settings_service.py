@@ -11,6 +11,7 @@ from ..models import RateSetting
 
 DEFAULTS: dict[str, Any] = {
     "margin_threshold_pct": 3.0,
+    "margin_threshold_scale": [],      # порог маржи по стоимости сделки (D-067): [{up_to_rub, pct}], пусто — «Порог маржи» для всех
     "scenario_dk": {"pessimistic": 5.0, "optimistic": -3.0},
     "scenario_dt": {"pessimistic": 30, "optimistic": -10},
     "use_historical_volatility": True,
@@ -178,6 +179,9 @@ META: dict[str, dict] = {
     # Маржа и визы
     "margin_threshold_pct": {"group": "Маржа и визы", "title": "Порог маржи", "unit": "%", "type": "number",
                              "help": "Если маржа сделки ниже порога, нужна виза финансового директора."},
+    "margin_threshold_scale": {"group": "Маржа и визы", "title": "Порог маржи по стоимости сделки", "type": "table",
+                               "help": "Разный порог для сделок разной стоимости (цена без НДС, ₽): первая подходящая строка «до»; последняя строка с пустым «до» — «свыше». Пусто — для всех сделок действует «Порог маржи».",
+                               "columns": [{"key": "up_to_rub", "label": "Цена сделки до, ₽ (без НДС)", "type": "number", "nullable": True}, {"key": "pct", "label": "Порог маржи, %", "type": "number"}]},
     "cash_gap_limit_rub": {"group": "Маржа и визы", "title": "Лимит кассового разрыва", "unit": "₽", "type": "number", "nullable": True,
                            "help": "Кассовый разрыв больше лимита требует визы ФД. Пусто — лимита нет."},
     "gd_deal_limit_rub": {"group": "Маржа и визы", "title": "Сумма сделки для визы ЗГД", "unit": "₽", "type": "number", "nullable": True,
