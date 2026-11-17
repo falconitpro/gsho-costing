@@ -38,7 +38,7 @@ TRANSITION_ROLES = {"lawyer_review": {"manager", "lawyer", "cd", "gd"}, "commerc
 DEFAULT_LANGUAGE = {"CN": "ru-zh", "KG": "ru"}
 CONTRACT_KIND_BY_COUNTRY = {"CN": "purchase_contract_cn", "KG": "purchase_contract_kg"}
 
-UNIT_TITLES = {"calendar_days": "календарных дней", "working_days": "рабочих дней", "weeks": "недель"}
+UNIT_TITLES = {"calendar_days": "календарных дней", "working_days": "рабочих дней", "weeks": "недель", "months": "месяцев"}
 START_TITLES = {"factory_contract": "с даты подписания договора", "factory_prepayment": "с даты получения аванса"}
 
 

@@ -40,11 +40,12 @@ export const EVENT_TITLES: Record<string, string> = {
   factory_prepayment: "предоплата заводу", readiness: "готовность на заводе", shipment: "отгрузка", border: "пересечение границы (CMR)",
   declaration: "выпуск ДТ", delivery: "поставка клиенту", commissioning: "ПНР", runtime: "наработка",
 };
-export const TERM_UNITS: Record<string, string> = { calendar_days: "календарных дней", working_days: "рабочих дней", weeks: "недель", date: "конкретная дата" };
+export const TERM_UNITS: Record<string, string> = { calendar_days: "календарных дней", working_days: "рабочих дней", weeks: "недель", months: "месяцев", date: "конкретная дата" };
 export const PRODUCTION_START: Record<string, string> = { factory_contract: "с подписания контракта с заводом", factory_prepayment: "с предоплаты заводу" };
 export const DELIVERY_START: Record<string, string> = { client_contract: "с подписания контракта", client_prepayment: "с аванса клиента", lc_opened: "с открытия аккредитива" };
 
-export interface ProductionTerm { value?: number | null; unit?: string; fixed_date?: string | null; start_event?: string }
+export interface ProductionTerm { value?: number | null; unit?: string; fixed_date?: string | null; start_event?: string;
+  source?: string; set_by?: string | null; set_at?: string | null; comment?: string; fixed?: boolean }   // откуда срок и зафиксирован ли КД / ЗГД (D-065)
 export interface DeliveryTerm { unit?: string; start_event?: string }
 
 export interface TechParamRow {
@@ -112,6 +113,7 @@ export interface CalcResponse {
   fd_declined?: { comment: string; at: string | null; user: string } | null;
   input: { base_currency: string; calc_date?: string; fx: { as_of: string; rates: Record<string, number>; source: string; note?: string }; thresholds: { margin_threshold_pct: number } };
   result: { variants: Record<string, Record<string, ScenarioResult>>; fx_components: FxComponent[]; approval: { financial: boolean; general: boolean; reasons: string[] }; warnings: string[] };
+  production?: Record<string, import("./components/ProductionTermBlock").ProductionInfo>; can_edit_production?: boolean;
   approval_flags: Record<string, boolean>; threshold_pct: number; warnings: string[]; comments: { from: string; item: string; ref: string; comment: string }[];
   factory_price_history?: { model: string; unit_price: number; currency: string; on: string }[];
   client_kp_history?: { deal: string; variant: string; price_rub: number; status: string; version_no?: number; on?: string }[]; status: string;

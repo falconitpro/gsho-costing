@@ -78,6 +78,10 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
         if (p.price_reference or {}).get("comment"):
             comments.append({"from": "менеджер", "item": "цена завода", "ref": p.designation, "comment": p.price_reference["comment"]})
     checks = cd_checks(_cd_deal_dict(deal))
+    from ..services import production_term as pterm
+    names = {u.id: u.display_name or u.email for u in db.scalars(select(User)).all()}
+    production = {p.id: {**pterm.info(p, names), "model": p.designation} for p in deal.positions}
+    warn_lower += [f"Срок производства не задан: {p['model']} — расчёт по {pterm.DEFAULT_DAYS} календарных дней" for p in production.values() if p["missing"]]
     terms = {}
     for vid, scen in res.variants.items():
         terms[vid] = [{"position_id": pc.position_id, "model": next((p.designation for p in deal.positions if p.id == pc.position_id), ""),
@@ -87,7 +91,8 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
         "input": inp.model_dump(mode="json"), "result": res.model_dump(mode="json"),
         "approval_flags": approval_flags(res), "threshold_pct": inp.thresholds.margin_threshold_pct,
         "factory_price_history": [serialize(h) for h in price_hist], "client_kp_history": client_kp_history,
-        "warnings": res.warnings + warn_lower, "comments": comments, "cd_checks": checks, "terms": terms,
+        "warnings": res.warnings + warn_lower, "comments": comments, "cd_checks": checks, "terms": terms, "production": production,
+        "can_edit_production": user.has(Role.CD, Role.GD),
         "status": deal.status.value, "scenario_override": deal.scenario_override, "kp_brand": deal.kp_brand, "kp_images_mode": deal.kp_images_mode,
         "payment_terms": {"client_payments": deal.client_payments, "client_payment_wishes": deal.client_payment_wishes, "bank_guarantee": deal.bank_guarantee,
                           "default_client": settings_service.get(db, "default_client_payment_scheme"),
@@ -118,6 +123,53 @@ class PaymentTermsIn(BaseModel):
     bank_guarantee: Optional[dict] = None                        # {enabled, mode: one_time_pct|annual_pct|fixed, value}
     delivery_terms: Optional[dict[str, dict]] = None             # position_id → {unit, start_event} (задача 3, правка КД)
     accept_wishes: bool = False                                  # отметка «пожелания клиента приняты»
+
+
+class ProductionTermIn(BaseModel):
+    value: Optional[float] = None
+    unit: str = "calendar_days"            # calendar_days | working_days | weeks | months | date
+    fixed_date: Optional[date] = None
+    start_event: str = "factory_contract"  # factory_contract | factory_prepayment
+    comment: str = ""
+
+
+@router.put("/positions/{pos_id}/production-term")
+def set_production_term(deal_id: str, pos_id: str, body: ProductionTermIn, db: Session = Depends(get_db),
+                        user: CurrentUser = Depends(require_roles(Role.CD, Role.GD))):
+    """Срок производства — правка КД или ЗГД (D-065): фиксирует значение, история — в журнале действий."""
+    from ..services import production_term as pterm
+    deal = get_deal_or_404(db, deal_id, user)
+    pos = db.get(Position, pos_id)
+    if pos is None or pos.deal_id != deal.id:
+        raise HTTPException(404)
+    if deal.status in (DealStatus.CLOSED,) or deal.archived_at:
+        raise HTTPException(409, "Сделка закрыта — срок производства не меняется")
+    raw = body.model_dump()
+    if not pterm.normalize(raw):
+        raise HTTPException(422, "Укажите срок производства: значение больше нуля или конкретную дату")
+    if not body.comment.strip():
+        raise HTTPException(422, "Укажите причину изменения срока производства")
+    changed = pterm.set_term(db, pos, raw, user.id, "cd" if user.has(Role.CD) else "gd", body.comment.strip())
+    reset = price_changed_after_visa(DealState(status=deal.status, service_flag=deal.service_flag)) if changed else None
+    if reset:   # срок меняет даты платежей и стоимость денег — визы сбрасываются, как при изменении условий оплаты
+        for a in db.scalars(select(Approval).where(Approval.deal_id == deal.id, Approval.reset_at.is_(None))).all():
+            a.reset_at = datetime.now(timezone.utc)
+        apply_transition(db, deal, reset, user.id)
+    if changed:
+        db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"Срок производства {pos.designation}: {pterm.text(pos.production_term)}",
+                         body=body.comment.strip(), user_id=user.id))
+    db.commit()
+    return {"changed": changed, "production": pterm.info(pos), "status": deal.status.value}
+
+
+@router.get("/positions/{pos_id}/production-term/history")
+def production_term_history(deal_id: str, pos_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from ..services import production_term as pterm
+    deal = get_deal_or_404(db, deal_id, user)
+    pos = db.get(Position, pos_id)
+    if pos is None or pos.deal_id != deal.id:
+        raise HTTPException(404)
+    return {"current": pterm.info(pos), "history": pterm.history(db, pos)}
 
 
 @router.post("/payment-terms")

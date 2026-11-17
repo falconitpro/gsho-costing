@@ -36,6 +36,7 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
   const [priceComment, setPriceComment] = useState("");
   const [advance, setAdvance] = useState({ pct: 30, days: 5 });
   const [prod, setProd] = useState<{ value: string; unit: string; fixed_date: string; start_event: string }>({ value: String(position?.production_term?.value ?? position?.production_days ?? 90), unit: position?.production_term?.unit || "calendar_days", fixed_date: position?.production_term?.fixed_date || "", start_event: position?.production_term?.start_event || "factory_contract" });
+  const prodFixed = !!position?.production_term?.fixed;   // зафиксирован КД / ЗГД — меняется только на экране «Расчёт и утверждение»
   const [dterm, setDterm] = useState<{ unit: string; start_event: string }>({ unit: position?.delivery_term?.unit || "calendar_days", start_event: position?.delivery_term?.start_event || "client_contract" });
   const [tree, setTree] = useState<Tree>([]);
   const [countries, setCountries] = useState<string[]>([]);
@@ -92,7 +93,15 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
     return () => clearTimeout(t);
   }, [factoryId, refModel, execId]);
 
-  const set = (code: string, v: string) => setVals((s) => ({ ...s, [code]: v }));
+  const set = (code: string, v: string) => {
+    setVals((s) => ({ ...s, [code]: v }));
+    // строка 14.1 таблицы и поле «Срок производства» — одно значение (D-065): ввод в таблице = календарные дни
+    if (code === "14.1" && !prodFixed && Number(v) > 0) setProd((p) => (p.unit === "date" ? p : { ...p, value: v, unit: "calendar_days" }));
+  };
+  const setProdVal = (patch: Partial<typeof prod>) => {
+    const next = { ...prod, ...patch }; setProd(next);
+    if (next.unit === "calendar_days" && Number(next.value) > 0) setVals((s) => ({ ...s, "14.1": next.value }));
+  };
   const num = (code: string) => { const n = Number((vals[code] || "").replace(/\s/g, "").replace(",", ".")); return isNaN(n) ? null : n; };
   // из каталога цену можно не вводить — подставится последнее предложение завода по модели
   const valid = (factoryId || vals["0.7"]) && vals["1.2"] && ((num("13.5") || 0) > 0 || !!execId) && (num("13.4") || 0) > 0;
@@ -232,10 +241,10 @@ export default function PositionForm({ dealId, position, onDone, onCancel }: { d
           </select></label>
         <label className="f">Срок производства (задача 3): значение, единица, точка отсчёта
           <div className="row">
-            {prod.unit !== "date" ? <input type="number" value={prod.value} style={{ width: 80 }} onChange={(e) => setProd({ ...prod, value: e.target.value })} /> : <input type="date" value={prod.fixed_date} onChange={(e) => setProd({ ...prod, fixed_date: e.target.value })} />}
-            <select value={prod.unit} onChange={(e) => setProd({ ...prod, unit: e.target.value })}>{Object.entries(TERM_UNITS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
-            {prod.unit !== "date" && <select value={prod.start_event} onChange={(e) => setProd({ ...prod, start_event: e.target.value })}>{Object.entries(PRODUCTION_START).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>}
-          </div></label>
+            {prod.unit !== "date" ? <input type="number" value={prod.value} disabled={prodFixed} style={{ width: 80 }} onChange={(e) => setProdVal({ value: e.target.value })} /> : <input type="date" value={prod.fixed_date} disabled={prodFixed} onChange={(e) => setProdVal({ fixed_date: e.target.value })} />}
+            <select value={prod.unit} disabled={prodFixed} onChange={(e) => setProdVal({ unit: e.target.value })}>{Object.entries(TERM_UNITS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+            {prod.unit !== "date" && <select value={prod.start_event} disabled={prodFixed} onChange={(e) => setProdVal({ start_event: e.target.value })}>{Object.entries(PRODUCTION_START).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>}
+          </div>{prodFixed && <span className="muted">зафиксирован КД / ЗГД{position?.production_term?.comment ? `: ${position.production_term.comment}` : ""} — изменить можно на экране «Расчёт и утверждение»</span>}</label>
         <label className="f">Срок поставки клиенту: единицы и точка отсчёта (значение считает система: +10 %, до целой недели; КД может изменить)
           <div className="row">
             <select value={dterm.unit} onChange={(e) => setDterm({ ...dterm, unit: e.target.value })}>{["calendar_days", "working_days", "weeks"].map((k) => <option key={k} value={k}>{TERM_UNITS[k]}</option>)}</select>

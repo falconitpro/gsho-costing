@@ -30,6 +30,13 @@ START_TITLES = {"client_contract": "с даты подписания контр�
                 "lc_opened": "с даты открытия аккредитива"}
 
 
+def add_months(d: date, months: int) -> date:
+    import calendar
+    m = d.month - 1 + months
+    y, m = d.year + m // 12, m % 12 + 1
+    return d.replace(year=y, month=m, day=min(d.day, calendar.monthrange(y, m)[1]))
+
+
 def production_end(term: Optional[ProductionTerm], fallback_days: int, start: date, cal: WorkCalendar, dt_days: int = 0) -> date:
     """Дата готовности на заводе от точки отсчёта (с учётом Δt сценария, как раньше)."""
     if term is None or (term.unit != "date" and not term.value):
@@ -41,6 +48,11 @@ def production_end(term: Optional[ProductionTerm], fallback_days: int, start: da
     if term.unit == "working_days":
         end = cal.add_working_days(start, int(round(v)))
         return end + timedelta(days=dt_days) if dt_days > 0 else cal.add_working_days(end, int(dt_days))
+    if term.unit == "months":   # календарные месяцы: 15.01 + 3 мес. = 15.04 (конец месяца — последний день), дробная часть — × 30,44 дня
+        whole = int(v)
+        end = add_months(start, whole) + timedelta(days=int(round((v - whole) * 30.44)))
+        days = (end - start).days
+        return start + timedelta(days=days + max(dt_days, -days // 2))
     days = int(round(v * 7)) if term.unit == "weeks" else int(round(v))
     return start + timedelta(days=days + max(dt_days, -days // 2))
 

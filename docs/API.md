@@ -68,6 +68,8 @@
 | POST | `/deals/{id}/logistics/batches` | логист | Создать партию: маршрут, транспортные единицы, сроки, общие статьи, распределение (`cost/weight/volume`), позиции; сверка с историей — 422, если нужен комментарий |
 | PATCH | `/deals/{id}/logistics/batches/{bid}` | логист | Изменить партию и состав |
 | DELETE | `/deals/{id}/logistics/batches/{bid}` | логист | Удалить лишнюю партию: её позиции становятся нераспределёнными, строки платежей выводятся из итогов |
+| PUT | `/deals/{id}/positions/{pid}/production-term` | КД, ЗГД | Срок производства: `value`, `unit` (`calendar_days`/`working_days`/`weeks`/`months`/`date`), `fixed_date`, `start_event`, обязательный `comment`; фиксирует срок (автоматические источники и менеджер не перезаписывают); после виз — визы сбрасываются |
+| GET | `/deals/{id}/positions/{pid}/production-term/history` | все с доступом к сделке | Текущий срок (откуда, кем, когда) и история изменений |
 | PUT | `/deals/{id}/logistics/positions/{pid}` | логист | Статьи позиции, код ТН ВЭД (ставки из справочника; ручная ставка — с комментарием), утильсбор, сертификация |
 | GET | `/deals/{id}/logistics/history/{item}?route=&machine_type=` | логист | Последние 5 значений и среднее по статье |
 | POST | `/deals/{id}/logistics/complete` | логист | Проверки (ТН ВЭД, партии; партия с расходами без позиций — 422; партия без стоимости доставки — 422 с `confirm: no_delivery_cost`, повтор с `{"no_delivery_cost": true}`) → история логистики → «Расчёт сформирован» или ожидание сервиса |

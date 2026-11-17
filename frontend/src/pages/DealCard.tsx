@@ -133,7 +133,7 @@ export default function DealCard({ me }: { me: Me }) {
   const posTerm = (p: Position) => {
     const t = p.production_term || {};
     const prod = t.unit === "date" ? `до ${fmtDate(t.fixed_date)}` : `${t.value ?? p.production_days} ${TERM_UNITS[t.unit || "calendar_days"]}`;
-    return `${prod} ${PRODUCTION_START[t.start_event || "factory_contract"]}`;
+    return `${prod} ${PRODUCTION_START[t.start_event || "factory_contract"]}${t.fixed ? " · зафиксирован КД / ЗГД" : ""}`;
   };
 
   return (

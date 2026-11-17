@@ -332,7 +332,8 @@ class MirrorPosition:
         self.options_price = None
         self.currency = (lo.currency or pos.currency or "CNY").upper()
         self.basis = lo.basis or pos.basis
-        self.production_term = lo.production_term or pos.production_term
+        from .production_term import normalize
+        self.production_term = normalize(lo.production_term) or normalize(pos.production_term)
         self.factory_payments = list(lo.factory_payments or [])
         self.factory_payments_offer = list(lo.factory_payments or [])
         self.model = lo.model or pos.model
