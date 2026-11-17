@@ -66,6 +66,8 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
         warn_lower.append("Условия оплаты клиента не заданы — расчёт по типовой схеме (30 % после подписания, 70 % аккредитивом после CMR).")
     if base_any and base_any.defaults_used.get("factory_payments"):
         warn_lower.append("График оплаты заводу не задан КД — расчёт по типовой схеме (30 % в течение 14 раб. дней после контракта, 70 % после готовности).")
+    from .logistics import batch_problems
+    warn_lower += [x["message"] for x in batch_problems(deal)]
     factories = {f.id: f.name for f in db.scalars(select(Factory)).all()}
     warn_lower += kp_brand_check(deal, factories, db)
     comments = []

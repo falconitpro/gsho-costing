@@ -147,6 +147,50 @@ def update_batch(deal_id: str, batch_id: str, body: BatchIn, db: Session = Depen
     return serialize(b)
 
 
+@router.delete("/batches/{batch_id}", status_code=204)
+def delete_batch(deal_id: str, batch_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(LOGIST)):
+    """Лишняя партия (например, созданная пустой): позиции становятся нераспределёнными, строки платежей выводятся из итогов."""
+    deal = get_deal_or_404(db, deal_id, user)
+    _ensure_logistics_stage(deal)
+    b = db.get(Batch, batch_id)
+    if b is None or b.deal_id != deal.id:
+        raise HTTPException(404)
+    for p in deal.positions:
+        if p.batch_id == b.id:
+            p.batch_id = None
+    from ..services.finance.sources import sync_batch
+    sync_batch(db, b, user.id, deleted=True)
+    audit(db, user.id, deal.id, "batch", b.id, "delete", before=serialize(b))
+    db.delete(b)
+    db.commit()
+
+
+def delivery_cost(items: dict) -> float:
+    """Сумма введённых статей доставки партии (в валютах ввода — только для проверки «введено ли что-то»)."""
+    it = items or {}
+    money = lambda k: float(((it.get(k) or {}).get("amount") or 0) if isinstance(it.get(k), dict) else (it.get(k) or 0))   # noqa: E731
+    return money("door_to_door") + money("intl_freight") + money("rf_delivery_rub") + money("broker_rub")
+
+
+def batch_problems(deal: Deal) -> list[dict]:
+    """Партии, расходы которых не попадут в расчёт себестоимости: без позиций (расходы есть) или с позициями без стоимости доставки."""
+    out = []
+    for b in deal.batches:
+        members = [p for p in deal.positions if p.batch_id == b.id]
+        cost = delivery_cost(b.items)
+        if not members and cost:
+            out.append({"batch": b.name, "kind": "no_positions",
+                        "message": f"Партия «{b.name}»: расходы введены, но позиций в партии нет — в себестоимость они не попадут. Выберите позиции или удалите партию."})
+        elif members and not cost:
+            out.append({"batch": b.name, "kind": "no_cost",
+                        "message": f"Партия «{b.name}»: стоимость доставки не введена — в себестоимости доставка, брокер и страховка от партии равны нулю."})
+    return out
+
+
+class CompleteIn(BaseModel):
+    no_delivery_cost: bool = False      # логист подтверждает: доставка в этой сделке действительно не оплачивается нами
+
+
 @router.put("/positions/{pos_id}")
 def update_position_logistics(deal_id: str, pos_id: str, body: PositionLogisticsIn, db: Session = Depends(get_db),
                               user: CurrentUser = Depends(LOGIST)):
@@ -239,7 +283,7 @@ def item_history(deal_id: str, item: str, route: str = "", machine_type: str = "
 
 
 @router.post("/complete")
-def complete(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(LOGIST)):
+def complete(deal_id: str, body: Optional[CompleteIn] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(LOGIST)):
     deal = get_deal_or_404(db, deal_id, user)
     _ensure_logistics_stage(deal)
     missing = [p.designation for p in deal.positions if not (p.logistics or {}).get("hs_code")]
@@ -254,6 +298,17 @@ def complete(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
             db.flush()
         for p in unbatched:
             p.batch_id = b0.id
+        db.flush()
+        db.refresh(deal)
+    # расходы партии без позиций теряются, партия без стоимости доставки даёт ноль в себестоимости — не отправляем молча
+    probs = batch_problems(deal)
+    lost = [x for x in probs if x["kind"] == "no_positions"]
+    if lost:
+        db.rollback()
+        raise HTTPException(422, {"message": lost[0]["message"], "problems": probs})
+    if any(x["kind"] == "no_cost" for x in probs) and not (body and body.no_delivery_cost):
+        db.rollback()
+        raise HTTPException(422, {"message": "; ".join(x["message"] for x in probs), "problems": probs, "confirm": "no_delivery_cost"})
     st = DealState(status=deal.status, service_flag=deal.service_flag, logistics_done=deal.logistics_done, service_done=deal.service_done)
     tr = block_completed(st, "logistics", date.today(), sla(db))
     deal.logistics_done = True
