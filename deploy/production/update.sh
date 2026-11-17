@@ -41,7 +41,7 @@ echo "== копия перед обновлением"
 ENV_FILE="${BACKUP_ENV_FILE:-/etc/gsho/backup.env}"
 backup() {
   if [ -z "${RESTIC_REPOSITORY:-}" ] && [ -f "$ENV_FILE" ] && command -v systemd-run >/dev/null; then
-    systemd-run --quiet --pipe --wait --collect -p EnvironmentFile="$ENV_FILE" "$BIN" --reason=pre_deploy
+    systemd-run --quiet --pipe --wait --collect -p EnvironmentFile="$ENV_FILE" -p Environment=HOME=/root "$BIN" --reason=pre_deploy
   else
     "$BIN" --reason=pre_deploy
   fi
