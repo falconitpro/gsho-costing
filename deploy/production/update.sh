@@ -37,8 +37,17 @@ if [ -z "$YES" ]; then
 fi
 
 echo "== копия перед обновлением"
-rc=0; "$BIN" --reason=pre_deploy || rc=$?
-if [ "$rc" = 75 ]; then sleep "${GSHO_BACKUP_RETRY_SLEEP:-60}"; rc=0; "$BIN" --reason=pre_deploy || rc=$?; fi
+# настройки копии — из того же файла, что у ежедневной копии по расписанию (systemd читает его так же, как gsho-backup.service)
+ENV_FILE="${BACKUP_ENV_FILE:-/etc/gsho/backup.env}"
+backup() {
+  if [ -z "${RESTIC_REPOSITORY:-}" ] && [ -f "$ENV_FILE" ] && command -v systemd-run >/dev/null; then
+    systemd-run --quiet --pipe --wait --collect -p EnvironmentFile="$ENV_FILE" "$BIN" --reason=pre_deploy
+  else
+    "$BIN" --reason=pre_deploy
+  fi
+}
+rc=0; backup || rc=$?
+if [ "$rc" = 75 ]; then sleep "${GSHO_BACKUP_RETRY_SLEEP:-60}"; rc=0; backup || rc=$?; fi
 if [ "$rc" != 0 ]; then echo "ОСТАНОВЛЕНО: копия не создана (код $rc) — ничего не изменено" >&2; exit 1; fi
 
 if [ -n "$NEW_SQL" ]; then
