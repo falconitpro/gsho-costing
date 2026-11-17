@@ -1,3 +1,4 @@
+import TemplateEditor from "../components/TemplateEditor";
 import { useEffect, useState } from "react";
 import { lbl, CATALOG_STATUS, GLOSSARY_KIND } from "../labels";
 import { api, fmtDate, fmtRub, designation } from "../api";
@@ -11,7 +12,6 @@ type Exec = { id: string; name: string; brand_name: string; status: string; tech
   factory_prices?: { on: string; unit_price: number; currency: string; production_term: { value?: number; unit?: string }; source: string; deal_id: string }[];
   client_prices?: { on: string; deal_number: string; unit_price_rub: number; total_rub: number; qty: number; outcome: string | null; delivery_term: string }[] };
 type Gl = { id: string; term_ru: string; term_zh: string; kind: string; status: string };
-type TplRow = { id?: string; no: number; code: string; name_ru: string; name_zh: string; unit: string; required: boolean; section: string };
 
 /** Задача 7: каталог производитель → тип → модель → исполнение, подтверждение КД/ЗГД, история цен; задача 4: глоссарий и шаблоны (обязательность). */
 export default function CatalogPage({ me, embedded, openModelId }: { me: Me; embedded?: boolean; openModelId?: string }) {
@@ -31,16 +31,13 @@ export default function CatalogPage({ me, embedded, openModelId }: { me: Me; emb
   const [glQ, setGlQ] = useState("");
   const [glNew, setGlNew] = useState({ term_ru: "", term_zh: "", kind: "param" });
   const [types, setTypes] = useState<{ id: string; name: string; status: string }[]>([]);
-  const [tplType, setTplType] = useState("");
-  const [tpl, setTpl] = useState<TplRow[]>([]);
   const [msg, setMsg] = useState("");
   const editor = can(me, "catalog", 2);
   const contributor = me.roles.some((r) => ["manager", "cd", "gd"].includes(r.code));
   const loadTree = () => api.get<Tree>(`/api/catalog/tree?include_pending=${editor}`).then(setTree);
   const loadGl = () => api.get<Gl[]>(`/api/refs/glossary?q=${encodeURIComponent(glQ)}`).then(setGl).catch(() => setGl([]));
-  const loadTpl = () => api.get<{ rows: TplRow[] }>(`/api/refs/tech-param-templates?machine_type_id=${tplType}`).then((r) => setTpl(r.rows));
   useEffect(() => { loadTree(); api.get<typeof types>("/api/refs/machine-types").then(setTypes); if (editor) api.get<typeof pending>("/api/catalog/pending").then(setPending); }, []);
-  useEffect(() => { if (tab === "glossary") loadGl(); if (tab === "templates") loadTpl(); if (tab === "archive") loadArchive(); }, [tab, tplType]);
+  useEffect(() => { if (tab === "glossary") loadGl(); if (tab === "archive") loadArchive(); }, [tab]);
   const loadArchive = () => api.get<typeof archive>("/api/catalog/archive").then(setArchive).catch(() => setArchive({ models: [], executions: [] }));
   const allModels = tree.flatMap((f) => f.types.flatMap((t) => t.models.map((m) => ({ ...m, machine_type: t.machine_type, factory: f.factory, factory_id: f.factory_id }))));
   const allExecs = allModels.flatMap((m) => m.executions.map((e) => ({ ...e, model: m.model, factory: m.factory })));
@@ -153,23 +150,7 @@ export default function CatalogPage({ me, embedded, openModelId }: { me: Me; emb
               {gl.length === 0 && <tr><td colSpan={5} className="muted">Пусто</td></tr>}</tbody></table>
         </div>
       )}
-      {tab === "templates" && (
-        <div className="card">
-          <p className="muted">Перечень технических характеристик по типу машины и обязательность параметров (задают КД и ЗГД). Общий шаблон — фиксированные параметры RFQ (разделы 1–11). Менеджер может изменить обязательность в конкретной сделке.</p>
-          <div className="row"><select value={tplType} onChange={(e) => setTplType(e.target.value)}><option value="">Общий шаблон</option>{types.map((t) => <option key={t.id} value={t.id}>{t.name}{t.status === "pending" ? " (на подтверждение)" : ""}</option>)}</select>
-            {editor && <button className="btn add" onClick={() => { const n = prompt("Новый тип машины:"); if (n) api.post("/api/refs/machine-types", { name: n }).then(() => api.get<typeof types>("/api/refs/machine-types").then(setTypes)); }}>Тип машины</button>}
-            {editor && <button className="btn" onClick={() => api.put(`/api/refs/tech-param-templates?machine_type_id=${tplType}`, tpl).then(() => setMsg("Шаблон сохранён")).catch((e) => setMsg(e.message))}>Сохранить шаблон</button>}
-            {editor && <button className="btn add" onClick={() => setTpl([...tpl, { no: (tpl[tpl.length - 1]?.no || 0) + 1, code: "", name_ru: "", name_zh: "", unit: "", required: false, section: "" }])}>Строка</button>}</div>
-          <table style={{ marginTop: 8 }}><thead><tr><th>№</th><th>Код</th><th>Параметр</th><th>参数</th><th>Ед.</th><th>Обязательный</th>{editor && <th />}</tr></thead>
-            <tbody>{tpl.map((r, i) => (
-              <tr key={r.id || i}><td>{r.no}</td><td>{r.code}</td>
-                <td>{editor ? <input value={r.name_ru} style={{ width: "100%", padding: 3 }} onChange={(e) => setTpl(tpl.map((x, j) => j === i ? { ...x, name_ru: e.target.value } : x))} /> : r.name_ru}</td>
-                <td>{editor ? <input value={r.name_zh} style={{ width: "100%", padding: 3 }} onChange={(e) => setTpl(tpl.map((x, j) => j === i ? { ...x, name_zh: e.target.value } : x))} /> : r.name_zh}</td>
-                <td>{editor ? <input value={r.unit} style={{ width: 70, padding: 3 }} onChange={(e) => setTpl(tpl.map((x, j) => j === i ? { ...x, unit: e.target.value } : x))} /> : r.unit}</td>
-                <td><input type="checkbox" checked={r.required} disabled={!editor} onChange={(e) => setTpl(tpl.map((x, j) => j === i ? { ...x, required: e.target.checked } : x))} /></td>
-                {editor && <td><button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => setTpl(tpl.filter((_, j) => j !== i))}>×</button></td>}</tr>))}</tbody></table>
-        </div>
-      )}
+      {tab === "templates" && <TemplateEditor editor={editor} types={types} onTypesChanged={() => api.get<typeof types>("/api/refs/machine-types").then(setTypes)} />}
     </>
   );
 }

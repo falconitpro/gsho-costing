@@ -535,3 +535,35 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .pf-full .pf-inline { max-width: 100%; }
 .pf-zh { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 @media (max-width: 640px) { .pf-field.pf-full { grid-column: auto; } }
+
+/* ------------------------------------------------------------------ редактор шаблона технических характеристик (D-070) */
+.te-bar { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.te-type { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 280px; }
+.te-type select { font-size: 14px; color: var(--ink); }
+.te-spacer { flex: 1 1 auto; }
+.te-copy { max-width: 200px; }
+.te-help { font-size: 13px; margin: 10px 0; }
+.te-help kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; font-size: 11px; background: #fafafa; }
+.te-import { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.te-tools { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.te-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.te-table td { padding: 3px 5px; vertical-align: middle; }
+.te-table td input:not([type=checkbox]) { width: 100%; min-width: 0; padding: 5px 7px; }
+.te-table tr.te-empty td input { background: #fffbe6; }
+.te-block td { background: var(--accent-soft); border-top: 2px solid var(--accent); padding: 6px 6px; }
+.te-block-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.te-caret { border: 0; background: none; cursor: pointer; font-size: 14px; padding: 0 2px; }
+.te-block-name { font-weight: 700; font-size: 14px; width: 320px; max-width: 45%; padding: 4px 8px; background: #fff; }
+.te-all { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.te-acts { display: inline-flex; gap: 2px; justify-content: flex-end; width: 100%; }
+.te-acts button { border: 1px solid var(--line); background: #fff; border-radius: 5px; min-width: 26px; height: 26px; padding: 0 6px; cursor: pointer; font-size: 13px; line-height: 1; color: var(--ink); }
+.te-acts button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.te-acts button:disabled { opacity: .35; cursor: default; }
+.te-acts button.te-del:hover { background: var(--accent); color: #fff; }
+.te-block .te-acts { width: auto; }
+.te-code { font-size: 11px; }
+.te-newblock { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.te-newblock input { width: 360px; }
+.te-save { position: sticky; bottom: 0; z-index: 5; background: #fff; border-top: 2px solid var(--accent); padding: 8px; margin-top: 10px; display: flex; gap: 10px; align-items: center; }
+.pf-table tr.pf-own td { background: #fbfbf4; }
+.pf-table .pf-sec td .te-acts button { font-weight: 400; }

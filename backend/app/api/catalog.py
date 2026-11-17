@@ -519,15 +519,55 @@ class TemplateRowIn(BaseModel):
     section: str = ""
 
 
-@router.get("/refs/tech-param-templates")
-def templates(machine_type_id: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+def _tpl_rows(db: Session, machine_type_id: str) -> tuple[list[dict], bool]:
+    """Строки шаблона по типу (или общего, если своего нет); блок — раздел, для строк RFQ без блока — по коду (D-070)."""
+    rows = []
     if machine_type_id:
         rows = db.scalars(select(TechParamTemplate).where(TechParamTemplate.machine_type_id == machine_type_id).order_by(TechParamTemplate.no)).all()
-        if rows:
-            return {"machine_type_id": machine_type_id, "rows": [serialize(r) for r in rows], "inherited": False}
-    rows = tps.ensure_general_template(db)
-    db.commit()
-    return {"machine_type_id": None, "rows": [serialize(r) for r in rows], "inherited": bool(machine_type_id)}
+    inherited = bool(machine_type_id) and not rows
+    if not rows:
+        rows = tps.ensure_general_template(db)
+        db.commit()
+    out = [serialize(r) for r in rows]
+    for r in out:
+        r["section"] = tps.block_name(r.get("code") or "", r.get("section") or "")
+    return out, inherited
+
+
+@router.get("/refs/tech-param-templates")
+def templates(machine_type_id: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    rows, inherited = _tpl_rows(db, machine_type_id)
+    return {"machine_type_id": (machine_type_id or None) if not inherited else None, "rows": rows, "inherited": inherited}
+
+
+@router.get("/refs/tech-param-templates/file")
+def template_file(machine_type_id: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Шаблон в Excel — поправить в таблице и загрузить обратно (D-070)."""
+    import os
+    import tempfile
+    from ..services import template_excel
+    rows, _ = _tpl_rows(db, machine_type_id)
+    mt = db.get(MachineType, machine_type_id) if machine_type_id else None
+    name = f"Шаблон ТХ — {mt.name if mt else 'общий'}.xlsx"
+    path = os.path.join(tempfile.mkdtemp(), "template.xlsx")
+    template_excel.export(rows, path, name[:-5])
+    return file_response(path, name, inline=False)
+
+
+@router.post("/refs/tech-param-templates/parse")
+async def template_parse(file: UploadFile = File(...), user: CurrentUser = Depends(_catalog_editor)):
+    """Разбор файла Excel в строки шаблона — без сохранения: строки открываются в редакторе, их можно поправить и сохранить."""
+    from ..services import template_excel
+    if not (file.filename or "").lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(422, "Нужен файл Excel (.xlsx)")
+    path = _tmp_upload(file)
+    try:
+        res = template_excel.parse(path)
+    except Exception as e:   # повреждённый или не тот файл
+        raise HTTPException(422, f"Не удалось прочитать файл: {e}")
+    if not res["rows"]:
+        raise HTTPException(422, "В файле не найдено ни одного параметра")
+    return res
 
 
 @router.put("/refs/tech-param-templates")
@@ -536,7 +576,11 @@ def save_template(rows: list[TemplateRowIn], machine_type_id: str = "", db: Sess
     existing = db.scalars(select(TechParamTemplate).where(TechParamTemplate.machine_type_id == mt_id)).all()
     by_id = {r.id: r for r in existing}
     keep = set()
-    for r in rows:
+    rows = [r for r in rows if r.name_ru.strip()]          # пустые строки не сохраняются
+    if not rows:
+        raise HTTPException(422, "В шаблоне нет ни одного параметра")
+    for i, r in enumerate(rows, 1):                      # порядок — как на экране (D-070)
+        r.no, r.name_ru, r.section = i, r.name_ru.strip(), r.section.strip()[:255]
         row = by_id.get(r.id) if r.id else None
         if row is None:
             row = TechParamTemplate(machine_type_id=mt_id, **r.model_dump(exclude={"id"}))
