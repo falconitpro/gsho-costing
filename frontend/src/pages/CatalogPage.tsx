@@ -15,7 +15,7 @@ type Gl = { id: string; term_ru: string; term_zh: string; kind: string; status: 
 
 /** Задача 7: каталог производитель → тип → модель → исполнение, подтверждение КД/ЗГД, история цен; задача 4: глоссарий и шаблоны (обязательность). */
 export default function CatalogPage({ me, embedded, openModelId }: { me: Me; embedded?: boolean; openModelId?: string }) {
-  const [tab, setTab] = useState<"tree" | "add" | "pending" | "glossary" | "templates" | "archive">("tree");
+  const [tab, setTab] = useState<"tree" | "add" | "pending" | "glossary" | "templates" | "archive">(() => (new URLSearchParams(window.location.search).get("tab") === "templates" ? "templates" : "tree"));
   const [mergeExec, setMergeExec] = useState("");
   const [selType, setSelType] = useState("");
   const [selBrand, setSelBrand] = useState("");
@@ -57,7 +57,7 @@ export default function CatalogPage({ me, embedded, openModelId }: { me: Me; emb
       <div className="tabs">
         <button className={tab === "tree" ? "active" : ""} onClick={() => setTab("tree")}>Тип → бренд → модель → исполнение</button>
         {contributor && <button className={tab === "add" ? "active" : ""} onClick={() => setTab("add")}>+ Добавить оборудование</button>}
-        {editor && <button className={tab === "pending" ? "active" : ""} onClick={() => setTab("pending")}>На подтверждение ({pending.length})</button>}
+        {editor && <button className={tab === "pending" ? "active" : ""} onClick={() => setTab("pending")}>На подтверждение ({pending.length + types.filter((t) => t.status === "pending").length})</button>}
         {can(me, "glossary") && <button className={tab === "glossary" ? "active" : ""} onClick={() => setTab("glossary")}>Глоссарий RU ↔ CN</button>}
         <button className={tab === "templates" ? "active" : ""} onClick={() => setTab("templates")}>Шаблоны технических характеристик</button>
         {editor && <button className={tab === "archive" ? "active" : ""} onClick={() => setTab("archive")}>Архив</button>}
@@ -128,6 +128,7 @@ export default function CatalogPage({ me, embedded, openModelId }: { me: Me; emb
         </div>
       )}
       {tab === "add" && <CatalogAdd editor={editor} onAdded={(m) => { setMsg(m); loadTree(); if (editor) api.get<typeof pending>("/api/catalog/pending").then(setPending); }} />}
+      {tab === "pending" && <PendingTypes types={types} reload={() => api.get<typeof types>("/api/refs/machine-types").then(setTypes)} />}
       {tab === "pending" && (
         <div className="card">
           <table><thead><tr><th>Исполнение</th><th>Модель</th><th>Из сделки</th><th>Предложено</th><th /></tr></thead>
@@ -188,3 +189,32 @@ function CompareTable({ ids, onClose }: { ids: string[]; onClose: () => void }) 
     </div>
   );
 }
+
+/** Новые типы техники на утверждение (D-071): утвердить (можно исправить название) или отклонить с переводом позиций на другой тип. */
+function PendingTypes({ types, reload }: { types: { id: string; name: string; status: string }[]; reload: () => void }) {
+  const pend = types.filter((t) => t.status === "pending");
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [repl, setRepl] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState("");
+  if (!pend.length) return null;
+  const run = (p: Promise<unknown>, ok: string) => p.then(() => { setMsg(ok); reload(); }).catch((e) => setMsg((e as Error).message));
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <h3 style={{ marginTop: 0 }}>Новые типы техники</h3>
+      <p className="muted" style={{ marginTop: 0 }}>Предложены менеджерами при вводе заявки. Пока тип не утверждён и у него нет своего шаблона, позиции заполняются по типовому шаблону.</p>
+      {msg && <div className="alert ok">{msg}</div>}
+      <table><thead><tr><th>Тип (можно исправить)</th><th>Если отклонить — перевести позиции на</th><th /></tr></thead>
+        <tbody>{pend.map((t) => (
+          <tr key={t.id}>
+            <td><input value={names[t.id] ?? t.name} style={{ width: "100%" }} onChange={(e) => setNames({ ...names, [t.id]: e.target.value })} /></td>
+            <td><select value={repl[t.id] || ""} onChange={(e) => setRepl({ ...repl, [t.id]: e.target.value })}>
+              <option value="">— не переводить (если позиций нет) —</option>
+              {types.filter((x) => x.status !== "pending").map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></td>
+            <td className="row" style={{ gap: 6 }}>
+              <button className="btn" onClick={() => run(api.post(`/api/refs/machine-types/${t.id}/approve`, { name: names[t.id] ?? t.name }), `Тип «${names[t.id] ?? t.name}» утверждён`)}>Утвердить</button>
+              <button className="btn ghost" onClick={() => run(api.post(`/api/refs/machine-types/${t.id}/reject`, { replace_with: repl[t.id] || null }), `Тип «${t.name}» отклонён`)}>Отклонить</button>
+            </td>
+          </tr>))}</tbody></table>
+    </div>);
+}
+

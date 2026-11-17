@@ -46,7 +46,9 @@ export default function DealCard({ me }: { me: Me }) {
   const [rfqFile, setRfqFile] = useState<File | null>(null);
   const [priceComment, setPriceComment] = useState("");
   const [variantName, setVariantName] = useState("");
-  const [posForm, setPosForm] = useState<"new" | Position | null>(null);
+  // D-071: из формы новой сделки — сразу заявка по выбранному типу техники
+  const startPos = (() => { const q = new URLSearchParams(window.location.search); return q.get("newpos") === "1" ? { type: q.get("type") || "", qty: q.get("qty") || "1" } : null; })();
+  const [posForm, setPosForm] = useState<"new" | Position | null>(startPos ? "new" : null);
   // несколько позиций: наименование в перечне открывает таблицу технических характеристик этой позиции ниже
   const [activePos, setActivePos] = useState<string>("");
   const openPos = (id: string) => { setActivePos(id); setTimeout(() => document.getElementById("pos-" + id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50); };
@@ -295,7 +297,8 @@ export default function DealCard({ me }: { me: Me }) {
             </table>
           </div>
           {editable && posForm && (
-            <PositionForm dealId={deal.id} position={posForm === "new" ? undefined : posForm} onDone={() => { setPosForm(null); load(); }} onCancel={() => setPosForm(null)} />
+            <PositionForm dealId={deal.id} position={posForm === "new" ? undefined : posForm} initial={posForm === "new" && startPos ? startPos : undefined}
+              onDone={() => { setPosForm(null); if (startPos) window.history.replaceState(null, "", window.location.pathname); load(); }} onCancel={() => setPosForm(null)} />
           )}
           {editable && (
             <div className="card">
