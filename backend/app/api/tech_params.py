@@ -278,7 +278,9 @@ def send_request(deal_id: str, pos_id: str, body: RequestIn, db: Session = Depen
     deal = get_deal_or_404(db, deal_id, user)
     _can_edit(user, deal)
     pos = _pos(db, deal, pos_id)
-    ids = body.factory_ids or [pos.factory_id]
+    ids = [i for i in (body.factory_ids or [pos.factory_id]) if i]
+    if not ids:
+        raise HTTPException(422, "Выберите завод (один или несколько), которому отправить запрос")
     client_files = [i for i in (pos.image_rows or []) if i.id in body.image_ids and i.source == "client"]
     if client_files and not body.client_files_checked:
         raise HTTPException(422, {"message": "На файлах клиента могут быть его название, логотип и контакты. Проверьте файлы перед отправкой заводу.",

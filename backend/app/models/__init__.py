@@ -466,7 +466,7 @@ class Position(TimestampMixin, Base):
     __tablename__ = "positions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
-    factory_id: Mapped[str] = mapped_column(ForeignKey("factories.id"))
+    factory_id: Mapped[Optional[str]] = mapped_column(ForeignKey("factories.id"))   # пусто — завод ещё не выбран (до ответа завода, D-069)
     equipment_model_id: Mapped[Optional[str]] = mapped_column(ForeignKey("equipment_models.id"))
     machine_type: Mapped[str] = mapped_column(String(255), default="")
     trademark: Mapped[str] = mapped_column(String(128), default="")            # торговая марка оборудования (по заводу)

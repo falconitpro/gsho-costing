@@ -49,7 +49,7 @@ def test_purchase_package_flow():
                                                                         "production_term": {"value": 90, "unit": "calendar_days", "start_event": "factory_prepayment"}, "warranty_months": 12, "factory_payments": pay,
                                                                         "options": [{"code": "12.1", "name": "Кондиционер"}, {"code": "12.2", "name": "Система пожаротушения"}]})
         c.post(f"/api/deals/{d['id']}/positions", headers=H(MGR), json={"factory_id": f1["id"], "model": "SHL-4000", "machine_type": "ПДМ", "qty": 1, "unit_price": 2200000, "currency": "CNY", "basis": "FCA", "factory_payments": pay})
-        c.post(f"/api/deals/{d['id']}/positions", headers=H(MGR), json={"factory_id": f2["id"], "model": "ZL50", "qty": 1, "unit_price": 100000, "currency": "USD"})
+        c.post(f"/api/deals/{d['id']}/positions", headers=H(MGR), json={"factory_id": f2["id"], "model": "ZL50", "machine_type": "погрузчик", "qty": 1, "unit_price": 100000, "currency": "USD"})
         base = f"/api/deals/{d['id']}/legal"
 
         # до выигрыша формировать нельзя; варианты доступны

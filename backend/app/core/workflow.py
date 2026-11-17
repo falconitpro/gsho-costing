@@ -150,11 +150,11 @@ def manager_checks(deal: dict[str, Any]) -> list[str]:
     positions = deal.get("positions") or []
     if not positions:
         errors.append("Нет позиций оборудования.")
+    from ..services import request_fields as rf
+    req = deal.get("required_calc") or rf.DEFAULT["calc"]   # «Настройки → Заявка» (D-069)
     for i, p in enumerate(positions, 1):
-        for key, title in (("factory", "завод"), ("model", "модель"), ("qty", "количество"),
-                           ("unit_price", "цена"), ("currency", "валюта")):
-            if not p.get(key):
-                errors.append(f"Позиция {i}: не заполнено поле «{title}».")
+        for title in rf.missing(req, p):
+            errors.append(f"Позиция {i}: не заполнено поле «{title.lower()}».")
         # задача 4: обязательные технические характеристики должны быть заполнены (значение завода)
         missing = [r.get("name_ru") or r.get("code") or "?" for r in (p.get("tech_param_rows") or [])
                    if r.get("required") and not r.get("local_ru") and not (r.get("value_ru") or r.get("value_zh"))]
@@ -185,8 +185,8 @@ def manager_check_items(deal: dict[str, Any]) -> list[dict[str, Any]]:
     if general:
         out.append({"group": "Сделка", "tab": "main", "position_id": None, "fields": general, "tech": []})
     for i, p in enumerate(positions, 1):
-        fields = [title for key, title in (("factory", "Завод"), ("model", "Модель"), ("qty", "Количество"), ("unit_price", "Цена"), ("currency", "Валюта"))
-                  if not p.get(key)]
+        from ..services import request_fields as rf
+        fields = rf.missing(deal.get("required_calc") or rf.DEFAULT["calc"], p)
         tech = [r.get("name_ru") or r.get("code") or "?" for r in (p.get("tech_param_rows") or [])
                 if r.get("required") and not r.get("local_ru") and not (r.get("value_ru") or r.get("value_zh"))]
         if fields or tech:

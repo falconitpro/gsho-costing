@@ -9,9 +9,12 @@ from sqlalchemy.orm import Session
 
 from ..models import RateSetting
 
+from .request_fields import FIELDS as _REQUEST_FIELDS   # обязательные поля заявки (D-069)
+
 DEFAULTS: dict[str, Any] = {
     "margin_threshold_pct": 3.0,
     "margin_threshold_scale": [],
+    "request_required_fields": {"create": ["machine_type", "qty"], "calc": ["factory", "model", "qty", "unit_price", "currency"]},   # D-069
     "file_scan_bypass": None,          # ручной обход антивируса (D-068): {until, reason, by, since}; задаётся только экраном безопасности      # порог маржи по стоимости сделки (D-067): [{up_to_rub, pct}], пусто — «Порог маржи» для всех
     "scenario_dk": {"pessimistic": 5.0, "optimistic": -3.0},
     "scenario_dt": {"pessimistic": 30, "optimistic": -10},
@@ -180,6 +183,11 @@ META: dict[str, dict] = {
     # Маржа и визы
     "margin_threshold_pct": {"group": "Маржа и визы", "title": "Порог маржи", "unit": "%", "type": "number",
                              "help": "Если маржа сделки ниже порога, нужна виза финансового директора."},
+    "request_required_fields": {"group": "Заявка", "title": "Обязательные поля позиции", "type": "required_fields",
+                                "help": "«При создании» — без этих полей позицию нельзя сохранить (при ручном вводе известны только требования клиента). "
+                                        "«Перед расчётом» — без них заявку нельзя отправить на расчёт (обычно данные из ответа завода). "
+                                        "Обязательное при создании обязательно и перед расчётом. Обязательные технические характеристики — в «Каталог → Шаблоны технических характеристик».",
+                                "options": [{"value": k, "label": t} for k, (t, _c) in _REQUEST_FIELDS.items()]},
     "margin_threshold_scale": {"group": "Маржа и визы", "title": "Порог маржи по стоимости сделки", "type": "table",
                                "help": "Разный порог для сделок разной стоимости (цена без НДС, ₽): первая подходящая строка «до»; последняя строка с пустым «до» — «свыше». Пусто — для всех сделок действует «Порог маржи».",
                                "columns": [{"key": "up_to_rub", "label": "Цена сделки до, ₽ (без НДС)", "type": "number", "nullable": True}, {"key": "pct", "label": "Порог маржи, %", "type": "number"}]},
@@ -326,7 +334,7 @@ META: dict[str, dict] = {
     "kp_brand_default": {"group": "Интеграции и КП", "title": "Подача КП по умолчанию", "type": "select",
                          "options": [{"value": "factory", "label": "под маркой завода"}, {"value": "company", "label": "под брендом компании"}]},
 }
-GROUP_ORDER = ["Маржа и визы", "Комиссии", "Условия оплаты по умолчанию", "Стоимость денег и банк", "Сценарии и прогноз курса", "НДС",
+GROUP_ORDER = ["Заявка", "Маржа и визы", "Комиссии", "Условия оплаты по умолчанию", "Стоимость денег и банк", "Сценарии и прогноз курса", "НДС",
                "Накладные и резервы", "Сервис", "Таможня и утилизационный сбор", "Контроль отклонений", "Сроки и календарь", "Интеграции и КП"]
 
 

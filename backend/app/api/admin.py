@@ -69,6 +69,9 @@ def set_setting(key: str, body: SettingIn, db: Session = Depends(get_db), user: 
         raise HTTPException(403, "Этот параметр меняет " + ("КД или ЗГД" if key in CD_KEYS else "ФД, ЗГД или администратор" if key in FD_KEYS else "ЗГД или администратор"))
     if key == "fx_expert_points":
         body.value = settings_service.expert_points(body.value)
+    if key == "request_required_fields":   # D-069: только известные поля; обязательное при создании — и перед расчётом
+        from ..services import request_fields as rf
+        body.value = rf.normalize(body.value)
     if key == "margin_threshold_scale":   # D-067: ступени по цене сделки, «свыше» (пустое «до») — последней
         try:
             rows = [{"up_to_rub": None if r.get("up_to_rub") in (None, "") else float(r["up_to_rub"]), "pct": float(r["pct"])}

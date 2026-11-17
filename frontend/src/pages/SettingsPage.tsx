@@ -49,6 +49,11 @@ function summary(m: Meta, v: unknown): string {
         return c.type === "select" ? c.options?.find((o) => o.value === x)?.label || String(x) : c.key === "share_pct" ? `${x} %` : c.key === "offset_days" ? `+${x} дн.` : String(x);
       }).filter(Boolean).join(" ")).join("; ");
     }
+    case "required_fields": {
+      const r = (v || {}) as { create?: string[]; calc?: string[] };
+      const t = (keys?: string[]) => (keys || []).map((k) => m.options?.find((o) => o.value === k)?.label || k).join(", ") || "—";
+      return `при создании: ${t(r.create)}; перед расчётом: ${t(r.calc)}`;
+    }
     case "dates": return (v as string[]).length ? (v as string[]).join(", ") : "нет";
     case "dict_table": return Object.entries(v as Record<string, Record<string, unknown>>).map(([k, row]) =>
       `${k === "default" ? "остальные регионы" : k}: ${(m.columns || []).map((c) => `${c.label.split(",")[0].toLowerCase()} ${num(row?.[c.key])}`).join(", ")}`).join("; ") || "—";
@@ -86,6 +91,22 @@ function Editor({ m, value, onChange }: { m: Meta; value: unknown; onChange: (v:
           <td><Field col={{ key: k, label: k }} value={x} onChange={(nv) => put(entries.map((en, j) => (j === i ? [en[0], nv] : en)))} /></td>
           <td><button className="btn ghost" onClick={() => put(entries.filter((_, j) => j !== i))}>×</button></td></tr>)}</tbody></table>
         <button className="btn add" onClick={() => put([...entries, [`новый_${entries.length + 1}`, 0]])}>Строка</button></div>;
+    }
+    case "required_fields": {
+      const r = (value || {}) as { create?: string[]; calc?: string[] };
+      const has = (st: "create" | "calc", k: string) => (r[st] || []).includes(k);
+      const toggle = (st: "create" | "calc", k: string, on: boolean) => {
+        const next = { create: [...(r.create || [])], calc: [...(r.calc || [])] };
+        next[st] = on ? [...next[st].filter((x) => x !== k), k] : next[st].filter((x) => x !== k);
+        if (st === "create" && on && !next.calc.includes(k)) next.calc.push(k);          // обязательное при создании — и перед расчётом
+        if (st === "calc" && !on) next.create = next.create.filter((x) => x !== k);
+        onChange(next);
+      };
+      return <table style={{ maxWidth: 560 }}><thead><tr><th>Поле позиции</th><th style={{ textAlign: "center" }}>При создании</th><th style={{ textAlign: "center" }}>Перед расчётом</th></tr></thead><tbody>
+        {(m.options || []).map((o) => <tr key={o.value}><td>{o.label}</td>
+          <td style={{ textAlign: "center" }}><input type="checkbox" checked={has("create", o.value)} onChange={(e) => toggle("create", o.value, e.target.checked)} /></td>
+          <td style={{ textAlign: "center" }}><input type="checkbox" checked={has("calc", o.value)} onChange={(e) => toggle("calc", o.value, e.target.checked)} /></td></tr>)}
+      </tbody></table>;
     }
     case "table": {
       const rows = ((value || []) as Record<string, unknown>[]);

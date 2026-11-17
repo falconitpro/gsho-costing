@@ -61,18 +61,20 @@ class DealUpdate(BaseModel):
 
 
 class PositionIn(BaseModel):
-    factory_id: str
+    # D-069: при ручном вводе до ответа завода известны только требования клиента — завод, модель и цена могут быть пустыми;
+    # что обязательно при создании и перед расчётом — «Настройки → Заявка»
+    factory_id: Optional[str] = None
     trademark: str = ""                                    # торговая марка; пусто — по сопоставлению «завод → марки»
-    model: str
+    model: str = ""
     machine_type: str = ""
     qty: int = 1
-    unit_price: float
+    unit_price: Optional[float] = None                    # пусто или 0 — цена ещё неизвестна
     currency: str = "CNY"
     options: list[dict] = Field(default_factory=list)
     options_price: float = 0.0
     basis: str = "FCA"
     delivery_point: str = ""
-    production_days: int = 90
+    production_days: Optional[int] = None                 # пусто — срок узнаем из ответа завода
     delivery_days: int = 10
     production_term: dict = Field(default_factory=dict)    # задача 3: {value, unit, fixed_date, start_event}
     delivery_term: dict = Field(default_factory=dict)      # задача 3: {unit, start_event}
@@ -287,7 +289,10 @@ def _now_block(db: Session, deal: Deal, user: CurrentUser) -> dict:
 
 
 def _deal_dict(deal: Deal) -> dict:
-    return {"client_id": deal.client_id,
+    from sqlalchemy.orm import object_session
+    from ..services import request_fields as rf
+    db = object_session(deal)
+    return {"client_id": deal.client_id, "required_calc": rf.get(db)["calc"] if db is not None else rf.DEFAULT["calc"],
             "positions": [{**serialize(p), "factory": p.factory_id, "tech_param_rows": [serialize(r) for r in (p.tech_param_rows or [])],
                            "local_options": [serialize(o) for o in (p.local_option_rows or [])]} for p in deal.positions],
             "client_payments": deal.client_payments, "variants": [serialize(v) for v in deal.variants], "has_alternatives": deal.has_alternatives,
@@ -367,12 +372,26 @@ def update_deal(deal_id: str, body: DealUpdate, db: Session = Depends(get_db), u
 def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
     _editable_by_manager(deal, user)
-    fac = db.get(Factory, body.factory_id)
-    if fac is None:
-        raise HTTPException(400, "Завод не найден")
-    from ..services.suppliers import require_approved
-    require_approved(fac, "выбрать его в сделке")
+    if body.factory_id:
+        fac = db.get(Factory, body.factory_id)
+        if fac is None:
+            raise HTTPException(400, "Завод не найден")
+        from ..services.suppliers import require_approved
+        require_approved(fac, "выбрать его в сделке")
+    from ..services import request_fields as rf
     data = body.model_dump()
+    data["unit_price"] = data.get("unit_price") or 0.0
+    if body.execution_id:   # из каталога: тип техники, модель и завод — из карточки модели (если не введены)
+        from ..models import EquipmentExecution
+        ex = db.get(EquipmentExecution, body.execution_id)
+        em = db.get(EquipmentModel, ex.model_id) if ex else None
+        if em is not None:
+            data["machine_type"] = data.get("machine_type") or em.machine_type or ""
+            data["model"] = data.get("model") or em.model
+            data["factory_id"] = data.get("factory_id") or em.factory_id
+    miss = rf.missing(rf.get(db)["create"], {**data, "production_term": data.get("production_term")})
+    if miss:
+        raise HTTPException(422, {"message": "Заполните обязательные поля: " + ", ".join(miss), "missing": miss})
     comment = data.pop("price_comment")
     form_rows = data.pop("form_rows") or []
     # задача 1: график оплаты заводу задаёт КД; введённое менеджером — справка «условия завода»
@@ -399,13 +418,14 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
     data.pop("production_days", None)
     pos = Position(deal_id=deal.id, **data)
     pos.tech_params = {**pos.tech_params, "_source_file": "каталог" if body.execution_id else "ручной ввод"}
-    pos.price_reference = _price_ref(db, pos, comment)
+    pos.price_reference = _price_ref(db, pos, comment) if pos.factory_id and pos.unit_price else {}
     if pos.price_reference.get("needs_comment") and not comment:
         raise HTTPException(422, {"message": "Отклонение цены от истории выше порога — нужен комментарий", "price_reference": pos.price_reference})
     db.add(pos)
     db.flush()
     pterm.set_term(db, pos, raw_term, user.id, term_src)
-    _record_price(db, pos, deal)
+    if pos.factory_id and pos.unit_price:   # без завода и цены — это ещё запрос клиента, в историю цен не пишем
+        _record_price(db, pos, deal)
     from ..services.tech_params_service import init_position_rows
     init_position_rows(db, pos, user.id)   # задача 4/7: перечень технических характеристик из исполнения каталога или шаблона по типу
     from_catalog = {}
@@ -457,9 +477,18 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
             raise HTTPException(400, "Завод не найден")
         require_approved(fac, "выбрать его в сделке")
     before = serialize(pos)
+    if "unit_price" in body and body["unit_price"] is None:
+        body["unit_price"] = 0.0          # цена ещё неизвестна (D-069)
+    if "factory_id" in body and not body["factory_id"]:
+        body["factory_id"] = None
     for k, v in body.items():
-        if k in allowed:
+        if k in allowed and k not in ("production_term", "production_days"):
             setattr(pos, k, v)
+    from ..services import request_fields as rf
+    miss = rf.missing(rf.get(db)["create"], {**serialize(pos), "production_term": body.get("production_term", pos.production_term)})
+    if miss:
+        db.rollback()
+        raise HTTPException(422, {"message": "Заполните обязательные поля: " + ", ".join(miss), "missing": miss})
     if "trademark" in body or "factory_id" in body:   # смена завода — марка по сопоставлению, если не указана явно
         from ..services.catalog_service import resolve_trademark
         pos.trademark = resolve_trademark(db, pos.factory_id, pos.model, body.get("trademark") or "")
@@ -500,7 +529,7 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
         cat = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == pos.factory_id, EquipmentModel.model == pos.model))
         if cat is not None:
             sync_model_from_position(db, cat, pos, user.id)
-    if "unit_price" in body:
+    if "unit_price" in body and pos.factory_id and pos.unit_price:
         pos.price_reference = _price_ref(db, pos, body.get("price_comment", ""))
         _record_price(db, pos, deal)
     if {"unit_price", "currency", "basis", "production_term", "form_rows"} & set(body):   # обновить ответ завода позиции
@@ -568,6 +597,9 @@ def rfq_template_schema(db: Session = Depends(get_db), user: CurrentUser = Depen
     lc = l_codes(db)
     if lc is not None:   # поля для логиста — по настройке «Поля для логиста»
         out["fields"] = [{**f, "is_l": f["code"] in lc} for f in out["fields"]]
+    from ..services import request_fields as rf   # обязательность — по «Настройки → Заявка» (D-069)
+    out["required"], out["required_calc"] = sorted(rf.codes(db, "create")), sorted(rf.codes(db, "calc"))
+    out["required_fields"] = rf.public(db)
     return out
 
 
@@ -592,7 +624,8 @@ async def rfq_preview(deal_id: str, file: UploadFile = File(...), db: Session = 
         path = tmp.name
     try:
         from ..services.tech_params_service import l_codes
-        parsed = parse_rfq(path).apply_l_codes(l_codes(db))
+        from ..services import request_fields as rf
+        parsed = parse_rfq(path, required=rf.codes(db, "create")).apply_l_codes(l_codes(db))
     finally:
         os.unlink(path)
     return parsed.to_dict()
@@ -609,7 +642,8 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     from ..services.tech_params_service import l_codes
-    parsed = parse_rfq(path).apply_l_codes(l_codes(db))   # поля для логиста — по настройке
+    from ..services import request_fields as rf
+    parsed = parse_rfq(path, required=rf.codes(db, "create")).apply_l_codes(l_codes(db))   # поля для логиста — по настройке
     attempt = (db.scalar(select(RfqImport.attempt).where(RfqImport.deal_id == deal.id).order_by(RfqImport.attempt.desc())) or 0) + 1
     imp = RfqImport(deal_id=deal.id, file_path=path, file_hash=sha256_file(path), template_version=parsed.template_version,
                     attempt=attempt, parsed=parsed.to_dict(), errors=[e.__dict__ for e in parsed.errors], imported_by=user.id)
@@ -619,26 +653,26 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
         db.commit()
         raise HTTPException(422, {"message": "Ошибки импорта — исправьте файл и загрузите повторно", "errors": imp.errors,
                                   "missing_required": parsed.missing_required})
-    # завод
-    fname = parsed.header.get("factory_name")
-    factory = db.scalar(select(Factory).where(Factory.name == fname))
+    # завод (в запросе клиента его может не быть — выберем при запросе заводу, D-069)
+    fname = (parsed.header.get("factory_name") or "").strip()
+    factory = db.scalar(select(Factory).where(Factory.name == fname)) if fname else None
     from ..services.suppliers import is_approved, new_factory_status
-    if factory is None:
+    if factory is None and fname:
         factory = Factory(name=fname, address=parsed.header.get("factory_address") or "", supplies=["gsho"], **new_factory_status(user))
         db.add(factory)
         db.flush()
-    if not is_approved(factory):
+    if factory is not None and not is_approved(factory):
         imp.factory_id = factory.id
         imp.errors = [*(imp.errors or []), {"code": "0.7", "message": f"Завод «{fname}» не утверждён КД или ЗГД", "severity": "error"}]
         db.commit()
         raise HTTPException(409, f"Завод «{fname}» {'заведён и ' if factory.approval_status == 'pending' else ''}ждёт утверждения КД или ЗГД "
                                  "(раздел «Поставщики») — загрузите RFQ повторно после утверждения")
-    imp.factory_id = factory.id
+    imp.factory_id = factory.id if factory else None
     from ..services.catalog_service import resolve_trademark
     pos_data = parsed.position
     pos = Position(
-        deal_id=deal.id, factory_id=factory.id, machine_type=pos_data.get("machine_type") or "", model=pos_data["model"],
-        qty=int(pos_data.get("qty") or 1), unit_price=float(pos_data["unit_price"]), currency=pos_data.get("currency") or "CNY",
+        deal_id=deal.id, factory_id=factory.id if factory else None, machine_type=pos_data.get("machine_type") or "", model=str(pos_data.get("model") or ""),
+        qty=int(pos_data.get("qty") or 1), unit_price=float(pos_data.get("unit_price") or 0), currency=pos_data.get("currency") or "CNY",
         options=parsed.options, options_price=pos_data.get("options_price") or 0.0, basis=pos_data.get("basis") or "FCA",
         delivery_point=pos_data.get("delivery_point") or "", production_days=int(pos_data.get("production_days") or 90),
         delivery_days=int(pos_data.get("delivery_days") or 10), warranty_months=pos_data.get("warranty_months"),
@@ -647,19 +681,21 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
                      "sections": parsed.sections, "filled": parsed.filled_count, "total": len(parsed.fields),
                      "fields": {c: f.as_dict() for c, f in parsed.fields.items()}}},
         logistics_params=parsed.logistics_params, rfq_import_id=imp.id,
-        trademark=resolve_trademark(db, factory.id, pos_data["model"], str(pos_data.get("trademark") or "")),
+        trademark=resolve_trademark(db, factory.id if factory else None, str(pos_data.get("model") or ""), str(pos_data.get("trademark") or "")),
         service_calc={"spare_parts": parsed.spare_parts, "zip_target_hours": parsed.zip_target_hours, "zip_currency": parsed.zip_currency},
     )
-    pos.price_reference = _price_ref(db, pos, price_comment)
+    pos.price_reference = _price_ref(db, pos, price_comment) if factory and pos.unit_price else {}
     if pos.price_reference.get("needs_comment") and not price_comment:
         db.commit()
         raise HTTPException(422, {"message": "Отклонение цены завода от истории выше порога — укажите комментарий",
                                   "price_reference": pos.price_reference, "preview": parsed.to_dict()})
-    pos.production_term = {"value": pos.production_days, "unit": "calendar_days", "start_event": "factory_contract", "source": "rfq",
-                           "set_by": user.id, "set_at": date.today().isoformat(), "comment": "", "fixed": False}
+    if pos_data.get("production_days"):   # срока в запросе клиента может не быть
+        pos.production_term = {"value": pos.production_days, "unit": "calendar_days", "start_event": "factory_contract", "source": "rfq",
+                               "set_by": user.id, "set_at": date.today().isoformat(), "comment": "", "fixed": False}
     db.add(pos)
     db.flush()
-    _record_price(db, pos, deal)
+    if factory and pos.unit_price:
+        _record_price(db, pos, deal)
     from ..services.tech_params_service import rows_from_rfq
     rows_from_rfq(db, pos, parsed, user.id)   # задача 4: таблица технических характеристик из ответа завода в шаблоне RFQ
     db.refresh(pos)
@@ -678,12 +714,12 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     if deal.service_flag and not deal.target_hours and parsed.zip_target_hours:
         deal.target_hours = parsed.zip_target_hours
     # каталог оборудования: новая модель или различия с каталогом
-    cat = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == factory.id, EquipmentModel.model == pos.model))
+    cat = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == factory.id, EquipmentModel.model == pos.model)) if factory and pos.model else None
     catalog_diff = {}
-    if cat is None:
+    if cat is None and factory and pos.model:
         db.add(EquipmentModel(factory_id=factory.id, machine_type=pos.machine_type, model=pos.model, trademark=pos.trademark, tech_params=parsed.tech_params,
                               logistics_params=parsed.logistics_params))
-    else:
+    elif cat is not None:
         for code, f in {**parsed.tech_params, **parsed.logistics_params}.items():
             old = (cat.tech_params.get(code) or cat.logistics_params.get(code) or {}).get("value")
             if old not in (None, f.get("value")):
@@ -691,7 +727,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     # файл в хранилище
     try:
         ensure_folders(db, deal)
-        stored = adapters.storage().upload(path, deal.storage_folder, "01_rfq", f"RFQ_{factory.name[:30]}_v{attempt}.xlsx")
+        stored = adapters.storage().upload(path, deal.storage_folder, "01_rfq", f"RFQ_{(factory.name if factory else 'запрос')[:30]}_v{attempt}.xlsx")
         db.add(Attachment(deal_id=deal.id, folder="01_rfq", entity="position", entity_id=pos.id, file_name=file.filename or "rfq.xlsx",
                           storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=user.id))
         imp.file_path = stored.path

@@ -11,5 +11,5 @@ def test_check_items_full_list():
     items = manager_check_items(deal)
     assert [x["group"] for x in items] == ["Сделка", "Позиция 1 · Самосвал M1"]
     assert items[0]["fields"] == ["Целевая наработка (активен флаг сервиса)"]
-    assert items[1]["fields"] == ["Цена"] and len(items[1]["tech"]) == 8 and items[1]["position_id"] == "p1"
+    assert items[1]["fields"] == ["Цена за единицу"] and len(items[1]["tech"]) == 8 and items[1]["position_id"] == "p1"
     assert "…" in " ".join(manager_checks(deal))          # строковые проверки по-прежнему обрезаны, перечень — нет

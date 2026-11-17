@@ -163,7 +163,7 @@ def propose(db: Session, deal: Deal, position_ids: list[str], names: dict[str, s
     """Менеджер отметил позиции → исполнения «на проверке» и задача КД (видна и ЗГД) «Подтвердить занесение в каталог»."""
     created: list[EquipmentExecution] = []
     for p in deal.positions:
-        if p.id not in position_ids:
+        if p.id not in position_ids or not p.factory_id or not p.model:   # без завода и модели в каталог заносить нечего (D-069)
             continue
         model = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == p.factory_id, EquipmentModel.model == p.model))
         if model is None:
