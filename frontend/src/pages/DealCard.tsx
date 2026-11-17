@@ -132,7 +132,8 @@ export default function DealCard({ me }: { me: Me }) {
   }
   const posTerm = (p: Position) => {
     const t = p.production_term || {};
-    const prod = t.unit === "date" ? `до ${fmtDate(t.fixed_date)}` : `${t.value ?? p.production_days} ${TERM_UNITS[t.unit || "calendar_days"]}`;
+    if (t.unit !== "date" && !t.value) return "из ответа завода";
+    const prod = t.unit === "date" ? `до ${fmtDate(t.fixed_date)}` : `${t.value} ${TERM_UNITS[t.unit || "calendar_days"]}`;
     return `${prod} ${PRODUCTION_START[t.start_event || "factory_contract"]}${t.fixed ? " · зафиксирован КД / ЗГД" : ""}`;
   };
 
@@ -282,9 +283,9 @@ export default function DealCard({ me }: { me: Me }) {
               <tbody>{(deal.positions || []).map((p) => {
                 const pr = (p.price_reference || {}) as { last_price?: number; deviation_pct?: number; comment?: string };
                 const dt = p.delivery_term || {};
-                return (<tr key={p.id} style={multi && shownPos?.id === p.id ? { background: "var(--accent-soft)" } : undefined}><td>{factories[p.factory_id] || p.factory_id.slice(0, 8)}</td><td>{p.machine_type}</td><td>{multi ? <a href={"#pos-" + p.id} title="открыть технические характеристики позиции" onClick={(e) => { e.preventDefault(); openPos(p.id); }}
-                    style={{ fontWeight: shownPos?.id === p.id ? 700 : 400 }}><b>{designation(p)}</b></a> : <b>{designation(p)}</b>}{p.execution_id && <span className="badge" title="из каталога"> каталог</span>}</td><td className="num">{p.qty}</td>
-                  <td className="num">{fmtRub(p.unit_price)}</td><td>{p.currency}</td><td className="num">{fmtRub(p.options_price)}</td><td>{p.basis}</td><td>{posTerm(p)}</td>
+                return (<tr key={p.id} style={multi && shownPos?.id === p.id ? { background: "var(--accent-soft)" } : undefined}><td>{p.factory_id ? factories[p.factory_id] || p.factory_id.slice(0, 8) : <span className="muted">не выбран</span>}</td><td>{p.machine_type}</td><td>{multi ? <a href={"#pos-" + p.id} title="открыть технические характеристики позиции" onClick={(e) => { e.preventDefault(); openPos(p.id); }}
+                    style={{ fontWeight: shownPos?.id === p.id ? 700 : 400 }}><b>{designation(p) || "модель — из ответа завода"}</b></a> : designation(p) ? <b>{designation(p)}</b> : <span className="muted">из ответа завода</span>}{p.execution_id && <span className="badge" title="из каталога"> каталог</span>}</td><td className="num">{p.qty}</td>
+                  <td className="num">{p.unit_price ? fmtRub(p.unit_price) : <span className="muted">—</span>}</td><td>{p.currency}</td><td className="num">{fmtRub(p.options_price)}</td><td>{p.basis}</td><td>{posTerm(p)}</td>
                   <td className="muted">{TERM_UNITS[dt.unit || "calendar_days"]} {DELIVERY_START[dt.start_event || "client_contract"]} (+10 %, до недели)</td>
                   <td>{pr.last_price ? <>посл. {fmtRub(pr.last_price)} ({pr.deviation_pct} %) {pr.comment && <span className="muted">— {pr.comment}</span>}</> : <span className="muted">нет истории</span>}</td>
                   <td>{p.rfq_import_id ? <span className="badge accent">RFQ</span> : p.offer_id ? <span className="badge">ответ завода</span> : <span className="badge">вручную</span>}</td>

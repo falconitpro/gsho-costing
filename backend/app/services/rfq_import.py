@@ -240,7 +240,8 @@ def _canonical_code(code: str, name: str, enabled: bool) -> str:
     return code
 
 
-def parse_rfq(path: str, by_name: bool = True) -> RfqParsed:
+def parse_rfq(path: str, by_name: bool = True, required: Optional[set[str]] = None) -> RfqParsed:
+    req = REQUIRED_CODES if required is None else set(required)   # обязательные коды — по «Настройки → Заявка» (D-069)
     wb = load_workbook(path, data_only=True)
     out = RfqParsed()
     main = next((ws for ws in wb.worksheets if "тех" in ws.title.lower() or "технич" in ws.title.lower() or "кп" in ws.title.lower()), wb.worksheets[0])
@@ -300,7 +301,7 @@ def parse_rfq(path: str, by_name: bool = True) -> RfqParsed:
             f.value = _value(f.requirement, None, code, name_ru or code, out)
             if f.value is not None:
                 out.errors.append(ImportError_(code, f"Поле {code} «{name_ru}» не заполнено заводом — взято из требований заказчика: «{f.requirement}».", "info"))
-        if f.value is None and code in REQUIRED_CODES:
+        if f.value is None and code in req:
             out.errors.append(ImportError_(code, f"Обязательное поле {code} «{name_ru}» не заполнено заводом."))
             out.missing_required.append(code)
         out.fields[code] = f
@@ -310,7 +311,7 @@ def parse_rfq(path: str, by_name: bool = True) -> RfqParsed:
         l_codes = _canonical()[1]
         for code, f in out.fields.items():
             f.is_l = code in l_codes
-    for code in REQUIRED_CODES - set(out.fields):
+    for code in req - set(out.fields):
         out.errors.append(ImportError_(code, f"В шаблоне нет обязательного поля {code}."))
         out.missing_required.append(code)
     out.template_version = "v2" if "14.21" in out.fields and "13.9" in out.fields else ("v1" if "14.21" in out.fields else "unknown")

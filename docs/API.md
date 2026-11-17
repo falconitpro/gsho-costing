@@ -72,6 +72,7 @@
 | POST / PATCH / DELETE | `/deals/{id}/competitors[/{oid}]` | КД, ЗГД | Цена конкурента: `competitor` (необязательно), `on`, `equipment`, `qty`, `amount`, `currency`, `vat_included`, `vat_pct`, `variant_id`, `source`, `comment`; удаление мягкое |
 | GET | `/deals/{id}/competitors/{oid}/history` | КД, ЗГД | История правок записи |
 | GET | `/competitors?q=`, `/competitors/{cid}/offers` | КД, ЗГД | Справочник конкурентов; история предложений конкурента по всем сделкам с нашей ценой |
+| POST / PATCH | `/deals/{id}/positions[/{pid}]` | менеджер | Позиция: `factory_id`, `model`, `unit_price` могут быть пустыми до ответа завода; обязательное при создании — по настройке `request_required_fields` (422 со списком `missing`) |
 | PUT | `/deals/{id}/positions/{pid}/production-term` | КД, ЗГД | Срок производства: `value`, `unit` (`calendar_days`/`working_days`/`weeks`/`months`/`date`), `fixed_date`, `start_event`, обязательный `comment`; фиксирует срок (автоматические источники и менеджер не перезаписывают); после виз — визы сбрасываются |
 | GET | `/deals/{id}/positions/{pid}/production-term/history` | все с доступом к сделке | Текущий срок (откуда, кем, когда) и история изменений |
 | PUT | `/deals/{id}/logistics/positions/{pid}` | логист | Статьи позиции, код ТН ВЭД (ставки из справочника; ручная ставка — с комментарием), утильсбор, сертификация |
