@@ -16,7 +16,7 @@ type AlertCard = Alert & { events: Ev[]; can_act: boolean };
 const SEV: Record<string, string> = { low: "", medium: "warn", high: "bad", critical: "bad" };
 const STATUS: Record<string, [string, string]> = { new: ["новое", "bad"], acknowledged: ["в работе", "warn"], resolved: ["закрыто", "ok"] };
 const RESULT: Record<string, [string, string]> = { success: ["успех", "ok"], denied: ["отказ", "bad"], error: ["ошибка", "warn"] };
-const ACTIONS: Record<string, string> = {
+const ACTIONS: Record<string, string> = { bypass_on: "проверка файлов отключена вручную", bypass_off: "проверка файлов включена", scan_bypassed: "файл принят без проверки (обход)",
   login: "вход", logout: "выход", step_up: "подтверждение действия", password_ok_mfa_pending: "пароль верный, ждём код", download: "скачивание", view: "просмотр",
   export: "выгрузка", revoke: "завершена сессия", revoke_others: "завершены другие сессии", admin_revoke: "администратор завершил сессию", admin_revoke_all: "администратор завершил все сессии",
   setup: "настройка кода", setup_started: "начата настройка кода", enabled: "код включён", disabled: "код выключен", recovery_regenerated: "новые коды восстановления",
@@ -188,7 +188,8 @@ function EventsTab({ user, clearUser }: { user: { id: string; name: string } | n
 }
 
 type Scanner = { mode: string; available: boolean | null; engine: string; signatures: number | null; signatures_at: string | null; age_hours: number | null;
-  stale: boolean; error: string; attachments: Record<string, number>;
+  stale: boolean; error: string; attachments: Record<string, number>; bypass_max_hours?: number;
+  bypass?: { active: boolean; until: string; since?: string; reason: string; by_name?: string } | null;
   recent: { id: string; at: string; source: string; file_name: string; status: string; detected_name: string; error: string; size: number }[] };
 const SCAN: Record<string, [string, string]> = { clean: ["чистый", "ok"], infected: ["угроза", "bad"], error: ["не проверен", "warn"], pending: ["проверяется", "info"],
   legacy_unscanned: ["не проверялся", ""] };
@@ -196,17 +197,45 @@ const SCAN: Record<string, [string, string]> = { clean: ["чистый", "ok"], 
 function ScannerTab() {
   const [d, setD] = useState<Scanner | null>(null);
   const [err, setErr] = useState("");
-  useEffect(() => { api.get<Scanner>("/api/security/scanner").then(setD).catch((x) => setErr(errText(x))); }, []);
+  const [bp, setBp] = useState({ hours: "2", reason: "" });
+  const [bpErr, setBpErr] = useState("");
+  const loadScanner = () => api.get<Scanner>("/api/security/scanner").then(setD).catch((x) => setErr(errText(x)));
+  useEffect(() => { loadScanner(); }, []);
   if (err) return <div className="alert error" role="alert">{err}</div>;
   if (!d) return <span className="muted">Загрузка…</span>;
+  const bpOn = async () => {
+    try { await api.post("/api/security/scanner/bypass", { hours: Number(bp.hours), reason: bp.reason }); setBpErr(""); setBp({ hours: "2", reason: "" }); loadScanner(); }
+    catch (x) { setBpErr(errText(x)); }
+  };
+  const bpOff = async () => { try { await api.del("/api/security/scanner/bypass"); setBpErr(""); loadScanner(); } catch (x) { setBpErr(errText(x)); } };
+  const bypassBlock = d.mode === "clamav" && (
+    <div className="card" style={{ borderLeft: `4px solid ${d.bypass?.active ? "var(--bad)" : "var(--line)"}`, margin: "8px 0 12px" }}>
+      {d.bypass?.active ? (<>
+        <b style={{ color: "var(--bad)" }}>Файлы временно принимаются без проверки</b> — до {dt(d.bypass.until)}; включил {d.bypass.by_name || "—"}; причина: {d.bypass.reason}
+        <div className="muted" style={{ fontSize: 12 }}>Действует, только пока антивирус не отвечает. Принятые файлы помечаются «не проверялся» и проверяются автоматически, когда антивирус заработает. Заражённые файлы не принимаются, если антивирус ответил.</div>
+        <button className="btn" style={{ marginTop: 6 }} onClick={bpOff}>Включить проверку обратно</button>
+      </>) : (<>
+        <b>Временно принимать файлы без проверки</b> <span className="muted">— если антивирус сломался; ЗГД или администратор, с подтверждением</span>
+        <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+          <label className="muted">на <select value={bp.hours} onChange={(e) => setBp({ ...bp, hours: e.target.value })}>
+            {["1", "2", "4", "8", String(d.bypass_max_hours || 24)].map((h) => <option key={h} value={h}>{h} ч</option>)}</select></label>
+          <input value={bp.reason} placeholder="причина (обязательно)" style={{ minWidth: 280 }} onChange={(e) => setBp({ ...bp, reason: e.target.value })} />
+          <button className="btn secondary" disabled={!bp.reason.trim()} onClick={bpOn}>Отключить проверку</button>
+        </div>
+        {d.bypass && !d.bypass.active && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Последний обход закончился {dt(d.bypass.until)}.</div>}
+      </>)}
+      {bpErr && <div className="alert error">{bpErr}</div>}
+    </div>);
   const total = Object.values(d.attachments).reduce((a, b) => a + b, 0);
   return (
     <>
       {d.mode !== "clamav" ? <div className="alert info">Проверка загрузок антивирусом выключена (FILE_SCAN=off): новые файлы принимаются без проверки и помечаются «не проверялся».
         Включение — по инструкции <code>deploy/clamav/install.md</code>.</div>
-        : d.available === false ? <div className="alert error" role="alert">Антивирус не отвечает ({d.error}) — новые файлы не принимаются, пока он не заработает.</div>
+        : d.available === false ? <div className="alert error" role="alert">Антивирус не отвечает ({d.error}) — {d.bypass?.active ? "файлы принимаются без проверки (обход включён)" : "новые файлы не принимаются, пока он не заработает"}.
+          Сразу после обновления системы это нормально 1–2 минуты — антивирус загружает базы.</div>
         : <div className={`alert ${d.stale ? "warn" : "ok"}`}>Антивирус работает: ClamAV {d.engine}, базы {d.signatures}{d.signatures_at ? ` от ${dt(d.signatures_at)}` : ""}
           {d.age_hours != null && ` (${Math.round(d.age_hours)} ч назад)`}{d.stale && " — базы устарели, проверьте обновление"}.</div>}
+      {bypassBlock}
       <p style={{ marginBottom: 6 }}>Файлы сделок: всего {total}{Object.entries(d.attachments).map(([k, n]) => <span key={k}> · <span className={`badge ${(SCAN[k] || [k, ""])[1]}`}>{(SCAN[k] || [k])[0]}</span> {n}</span>)}</p>
       <h4 style={{ margin: "12px 0 6px" }}>Последние проверки</h4>
       {d.recent.length === 0 ? <p className="muted">Проверок ещё не было.</p> : <div className="backup-table"><table className="aud-table">

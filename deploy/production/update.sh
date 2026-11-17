@@ -61,5 +61,19 @@ fi
 
 echo "== новая версия"
 BACKUP_REQUIRED=false bash deploy/deploy-remote.sh    # копия уже сделана выше
+echo "== антивирус"   # после пересборки clamd 1–2 мин загружает базы; пока он не готов, загрузки файлов получают 503 (D-068)
+CID="$("${DC[@]}" --profile scanner ps -q clamav 2>/dev/null || true)"
+if [ -n "$CID" ]; then
+  for i in $(seq 1 "${GSHO_SCANNER_WAIT:-60}"); do
+    H="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CID" 2>/dev/null || echo unknown)"
+    if "${DC[@]}" exec -T backend python -c "from app.core.config import get_settings as g; from app.services.file_scanner import version as v; s=g(); v(s.clamd_host, s.clamd_port, 5)" >/dev/null 2>&1; then
+      echo "  антивирус отвечает (через ~$((i * 5)) с; состояние контейнера: $H)"; break
+    fi
+    [ "$i" = "${GSHO_SCANNER_WAIT:-60}" ] && echo "  ВНИМАНИЕ: антивирус не ответил за $((i * 5)) с (состояние: $H) — файлы не принимаются; см. deploy/clamav/install.md «Антивирус не отвечает»"
+    sleep 5
+  done
+else
+  echo "  контейнер антивируса не найден"
+fi
 echo "== проверка"
 "${DC[@]}" exec -T backend python -m scripts.prod_init check

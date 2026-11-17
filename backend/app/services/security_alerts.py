@@ -54,6 +54,7 @@ RULES = {r.key: r for r in (
     Rule("file_infected", "Антивирус нашёл угрозу в файле", "critical"),
     Rule("scanner_unavailable", "Проверка файлов недоступна", "high", subject="subject"),
     Rule("scanner_stale", "Антивирусные базы устарели", "high", subject="subject"),
+    Rule("scanner_bypass", "Проверка файлов антивирусом отключена вручную", "critical", subject="subject"),
 )}
 
 
@@ -112,6 +113,9 @@ def match(db: Session, ev: SecurityEvent) -> list[tuple[str, str, dict, str]]:
             hits.append(("scanner_stale", "high", {"hours": (ev.meta or {}).get("hours")}, f"Антивирусные базы не обновлялись {(ev.meta or {}).get('hours')} ч"))
         elif t == "scanner" and a == "down":
             hits.append(("scanner_unavailable", "high", {"error": (ev.meta or {}).get("error")}, "Антивирус не отвечает — новые файлы не принимаются"))
+        elif t == "scanner" and a == "bypass_on":
+            hits.append(("scanner_bypass", "critical", {"hours": (ev.meta or {}).get("hours")},
+                         f"Файлы временно принимаются без проверки антивирусом ({(ev.meta or {}).get('hours')} ч)"))
         elif t == "access" and a == "review_overdue":
             hits.append(("access_review_overdue", "medium", {"pending": (ev.meta or {}).get("pending")}, f"Пересмотр прав просрочен, не решено сотрудников — {(ev.meta or {}).get('pending')}"))
         elif t == "password" and a == "admin_temporary":

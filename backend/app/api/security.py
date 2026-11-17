@@ -411,6 +411,39 @@ def alert_resolve(aid: str, body: AlertActionIn, request: Request, db: Session =
 
 # ------------------------------------------------------------------ проверка файлов (04 §8)
 
+class BypassIn(BaseModel):
+    hours: float = 2
+    reason: str
+
+
+@router.post("/scanner/bypass")
+def scanner_bypass_on(body: BypassIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Временно принимать файлы без проверки, пока антивирус не отвечает (D-068): ЗГД или администратор, причина, до 24 ч, с подтверждением."""
+    from ..core.auth import require_step_up
+    from ..services import scanner_status
+    if not user.has(Role.GD, Role.ADMIN):
+        raise HTTPException(403, "Отключить проверку файлов может ЗГД или администратор")
+    require_step_up(user)
+    if not body.reason.strip():
+        raise HTTPException(422, "Укажите причину")
+    if not (0 < body.hours <= scanner_status.BYPASS_MAX_HOURS):
+        raise HTTPException(422, f"Срок — от 1 минуты до {scanner_status.BYPASS_MAX_HOURS} ч")
+    val = scanner_status.set_bypass(db, user.id, body.hours, body.reason.strip()[:500])
+    audit(db, user.id, None, "setting", "file_scan_bypass", "update", None, val, body.reason.strip()[:500])
+    db.commit()
+    return val
+
+
+@router.delete("/scanner/bypass", status_code=204)
+def scanner_bypass_off(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from ..services import scanner_status
+    if not user.has(Role.GD, Role.ADMIN):
+        raise HTTPException(403, "Включить проверку обратно может ЗГД или администратор")
+    scanner_status.clear_bypass(db, user.id, "включено вручную")
+    audit(db, user.id, None, "setting", "file_scan_bypass", "update", None, None, "проверка включена")
+    db.commit()
+
+
 @router.get("/scanner")
 def scanner(db: Session = Depends(get_db), user: CurrentUser = Depends(_audit_reader)):
     """Антивирус: режим, доступность, свежесть баз; статусы файлов и последние проверки (без путей хранения)."""

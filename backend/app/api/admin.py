@@ -63,6 +63,8 @@ class SettingIn(BaseModel):
 def set_setting(key: str, body: SettingIn, db: Session = Depends(get_db), user: CurrentUser = Depends(SETTINGS_READ)):
     if key not in settings_service.DEFAULTS:
         raise HTTPException(404, "Неизвестный ключ")
+    if key in settings_service.INTERNAL_KEYS:
+        raise HTTPException(403, "Этот параметр меняется только своим действием (Журнал и предупреждения → Проверка файлов)")
     if not _can_set(user, key):
         raise HTTPException(403, "Этот параметр меняет " + ("КД или ЗГД" if key in CD_KEYS else "ФД, ЗГД или администратор" if key in FD_KEYS else "ЗГД или администратор"))
     if key == "fx_expert_points":

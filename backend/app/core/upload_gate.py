@@ -101,6 +101,22 @@ def _scan_one(f: UploadFile, sha: str, size: int, route: str, actor, request: Re
         return res.status, row.id, res.signature or res.error_code
 
 
+def _bypass_accept(f: UploadFile, sha: str, size: int, route: str, actor, request: Request, info: str) -> bool:
+    """Антивирус не ответил: если ЗГД / администратор включил обход — файл принимается без проверки, событие в журнал."""
+    from ..db import SessionLocal
+    from ..services import scanner_status
+    from ..services import security_events as sev
+    with SessionLocal() as db:
+        if not scanner_status.bypass_active(db):
+            return False
+        sev.record(db, "file", "scan_bypassed", result="success", actor_id=actor.id if actor else None, subject_id=None, request=request,
+                   session_id=actor.sid if actor else None, entity_type="upload", entity_id=sha[:16], byte_size=size,
+                   fmt=os.path.splitext(_safe_name(f.filename or ""))[1].lower().lstrip(".")[:16], meta={"route": route, "error": info})
+        db.commit()
+    log.warning("file accepted without scan (bypass): %s %s", route, info)
+    return True
+
+
 async def _gate(request: Request, path: str) -> Optional[Response]:
     from ..services import file_scanner
     from .config import get_settings
@@ -128,6 +144,9 @@ async def _gate(request: Request, path: str) -> Optional[Response]:
             if status == "infected":
                 return _reject(422, "file_infected", f"Файл «{_safe_name(f.filename or '')}» не принят: антивирус нашёл угрозу ({info}). "
                                                       "Не открывайте исходный файл и сообщите администратору.")
+            if status != "clean" and await anyio.to_thread.run_sync(_bypass_accept, f, sha, size, path, actor, request, info):
+                state[sha] = None      # принят без проверки (обход D-068): «не проверялся», перепроверка — когда антивирус заработает
+                continue
             if status != "clean":
                 log.error("file scan unavailable: %s %s", path, info)
                 return _reject(503, "scan_unavailable", "Проверка файлов антивирусом временно недоступна — файл не принят. Повторите через несколько минут.")

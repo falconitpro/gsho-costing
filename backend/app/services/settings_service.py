@@ -11,7 +11,8 @@ from ..models import RateSetting
 
 DEFAULTS: dict[str, Any] = {
     "margin_threshold_pct": 3.0,
-    "margin_threshold_scale": [],      # порог маржи по стоимости сделки (D-067): [{up_to_rub, pct}], пусто — «Порог маржи» для всех
+    "margin_threshold_scale": [],
+    "file_scan_bypass": None,          # ручной обход антивируса (D-068): {until, reason, by, since}; задаётся только экраном безопасности      # порог маржи по стоимости сделки (D-067): [{up_to_rub, pct}], пусто — «Порог маржи» для всех
     "scenario_dk": {"pessimistic": 5.0, "optimistic": -3.0},
     "scenario_dt": {"pessimistic": 30, "optimistic": -10},
     "use_historical_volatility": True,
@@ -329,7 +330,11 @@ GROUP_ORDER = ["Маржа и визы", "Комиссии", "Условия о�
                "Накладные и резервы", "Сервис", "Таможня и утилизационный сбор", "Контроль отклонений", "Сроки и календарь", "Интеграции и КП"]
 
 
+# служебные ключи: не показываются на экране «Настройки» и не меняются через него (только своим действием с подтверждением)
+INTERNAL_KEYS = {"file_scan_bypass"}
+
+
 def meta() -> dict:
     """Описание всех ключей для экрана настроек; ключи без описания — в группу «Прочее» (тип json)."""
-    items = {k: {"key": k, **META.get(k, {"group": "Прочее", "title": k, "type": "json"})} for k in DEFAULTS}
+    items = {k: {"key": k, **META.get(k, {"group": "Прочее", "title": k, "type": "json"})} for k in DEFAULTS if k not in INTERNAL_KEYS}
     return {"groups": GROUP_ORDER + ["Прочее"], "items": items}
