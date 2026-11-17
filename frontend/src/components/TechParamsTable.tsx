@@ -5,6 +5,7 @@ import { lbl, IMAGE_KIND, IMAGE_SOURCE } from "../labels";
 import { api, ApiError, designation, ru } from "../api";
 import { UndoButton, useUndoHistory } from "../undo";
 import type { Position, TechParamRow } from "../types";
+import { addBlock, insertAfter, moveRow, renumber } from "../rowOps";
 
 type Preview = { sheets: { name: string; rows: unknown[][]; total_rows: number; mapping: { header_row: number; first_row: number; columns: Record<string, number>; source?: string } }[];
   columns: { key: string; title: string }[] };
@@ -63,7 +64,15 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
 
   const upd = (i: number, patch: Partial<TechParamRow>) => { setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r))); setDirty(true); };
   const addRow = () => { setRows((rs) => [...rs, { no: (rs[rs.length - 1]?.no || 0) + 1, code: "", name_ru: "", name_zh: "", unit: "", customer_requirement_ru: "", value_ru: "", value_zh: "", comment_ru: "", required: false, local_ru: false, section: rs[rs.length - 1]?.section || "Дополнительные параметры" }]); setDirty(true); };
-  const delRow = (i: number) => { setRows((rs) => rs.filter((_, j) => j !== i)); setDirty(true); };
+  const delRow = (i: number) => { setRows((rs) => renumber(rs.filter((_, j) => j !== i))); setDirty(true); };
+  // D-070: порядок строк и вставка в любое место; номера — по порядку на экране
+  const blank = (): TechParamRow => ({ no: 0, code: "", name_ru: "", name_zh: "", unit: "", customer_requirement_ru: "", value_ru: "", value_zh: "", comment_ru: "", required: false, local_ru: false, section: "" });
+  const [focusNo, setFocusNo] = useState<number | null>(null);
+  const insRow = (i: number) => { setRows((rs) => renumber(insertAfter(rs, i, blank()))); setShowFree((f) => ({ ...f, [rows[i]?.section || "Дополнительные параметры"]: true })); setFocusNo(i + 2); setDirty(true); };
+  const mvRow = (i: number, d: -1 | 1) => { setRows((rs) => renumber(moveRow(rs, i, d))); setDirty(true); };
+  const newBlock = () => { const n = prompt("Название нового блока (например, «Навесное оборудование»):"); if (!n?.trim()) return;
+    setRows((rs) => renumber(addBlock(rs, n.trim(), blank()))); setShowFree((f) => ({ ...f, [n.trim()]: true })); setFocusNo(rows.length + 1); setDirty(true); };
+  useEffect(() => { if (focusNo != null) { (document.querySelector(`[data-tp-no="${focusNo}"]`) as HTMLInputElement | null)?.focus(); setFocusNo(null); } }, [focusNo, rows]);
   async function save(auto = false) {
     if (saving) return;
     setSaving(true);
@@ -140,7 +149,8 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
             <button className="btn ghost" onClick={() => { setWizard("factory_answer"); setPreview(null); setOfferId(""); }}>Импорт ответа завода</button>
             <a className="btn ghost" href={`/api/deals/${dealId}/positions/${position.id}/rfq/file`} title="шаблон RFQ с требованиями заказчика из таблицы; строки «в РФ» помечены">RFQ с требованиями</a>
             <UndoButton h={history} />
-            <button className="btn add" onClick={addRow}>Строка</button>
+            <button className="btn add" onClick={addRow}>Строка в конец</button>
+            <button className="btn add" onClick={newBlock} title="новый блок параметров в конец таблицы">Блок</button>
             <button className="btn" onClick={() => save()} disabled={!dirty || saving}>Сохранить</button>
             <span className="muted" style={{ fontSize: 11 }}>{dirty ? "есть несохранённые правки — сохранятся автоматически" : autoAt ? `автосохранение ${autoAt}` : ""}</span>
           </div>
@@ -193,7 +203,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
       </div>
       <div style={{ overflowX: "auto" }}>
         <table>
-          <thead><tr>{COLS.map((c) => <th key={c.key} style={{ width: c.w }}>{c.title}</th>)}<th title="обязательный параметр">Обяз.</th><th title="реализуется в России — не идёт заводу">В РФ</th>{canEdit && <th />}</tr></thead>
+          <thead><tr>{COLS.map((c) => <th key={c.key} style={{ width: c.w }}>{c.title}</th>)}<th title="обязательный параметр">Обяз.</th><th title="реализуется в России — не идёт заводу">В РФ</th>{canEdit && <th style={{ width: 124 }} />}</tr></thead>
           <tbody>
             <tr style={{ background: "#fff3f3" }} title="торговая марка — по выбранному заводу (вверху листа)">
               <td style={{ padding: 3 }}>—</td><td style={{ padding: 3, fontWeight: 600 }}>Марка (торговая марка)</td><td />
@@ -210,7 +220,9 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
               <tr key={"s" + i} style={{ background: "#f1f1f1", cursor: "pointer" }} onClick={() => setClosed({ ...closed, [sec]: !closed[sec] })}>
                 <td colSpan={COLS.length + 2 + (canEdit ? 1 : 0)} style={{ fontWeight: 700, padding: "6px 8px" }}>
                   {closed[sec] ? "▸" : "▾"} {ru(sec)} <span className="muted" style={{ fontWeight: 400 }}>· заполнено {inSec.filter((x) => x.value_ru || x.value_zh).length} из {inSec.length}
-                    {inSec.some((x) => x.req_status === "mismatch") && ` · не соответствует требованию: ${inSec.filter((x) => x.req_status === "mismatch").length}`}</span></td></tr>);
+                    {inSec.some((x) => x.req_status === "mismatch") && ` · не соответствует требованию: ${inSec.filter((x) => x.req_status === "mismatch").length}`}</span>
+                  {canEdit && <span className="te-acts" style={{ float: "right", width: "auto" }} onClick={(e) => e.stopPropagation()}>
+                    <button title="добавить строку в конец блока" onClick={() => insRow(rows.lastIndexOf(inSec[inSec.length - 1]))}>+ строка</button></span>}</td></tr>);
             if (closed[sec]) return <Fragment key={r.id || i}>{header}</Fragment>;
             const freeInSec = inSec.filter(freeRow).length;
             const freeToggle = head && freeInSec > 0 && (
@@ -236,6 +248,8 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
                         {countries.map((x) => <option key={x}>{x}</option>)}
                       </select>)
                     : canEdit ? <input style={{ width: "100%", padding: 4, ...vStyle(c.key) }} value={String(r[c.key] ?? "")} type={c.key === "no" ? "number" : "text"}
+                      data-tp-no={c.key === "name_ru" ? r.no : undefined}
+                      onKeyDown={c.key === "name_ru" ? (e) => { if (e.altKey && e.key === "ArrowUp") { e.preventDefault(); mvRow(i, -1); setFocusNo(Math.max(1, r.no - 1)); } else if (e.altKey && e.key === "ArrowDown") { e.preventDefault(); mvRow(i, 1); setFocusNo(r.no + 1); } } : undefined}
                       placeholder={c.key === "name_ru" && freeRow(r) ? "свободная строка: параметр" : undefined}
                       onChange={(e) => upd(i, { [c.key]: c.key === "no" ? Number(e.target.value) : e.target.value } as Partial<TechParamRow>)}
                       title={c.key === "name_ru" && r.name_zh ? r.name_zh : c.key === "value_ru" ? [vTitle, r.value_zh ? `CN: ${r.value_zh}` : ""].filter(Boolean).join(" · ") || undefined : undefined} />
@@ -246,7 +260,12 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
                 ))}
                 <td style={{ textAlign: "center" }}><input type="checkbox" checked={!!r.required} disabled={!canEdit} onChange={(e) => upd(i, { required: e.target.checked })} /></td>
                 <td style={{ textAlign: "center" }}><input type="checkbox" checked={!!r.local_ru} disabled={!canEdit} onChange={(e) => upd(i, { local_ru: e.target.checked })} /></td>
-                {canEdit && <td>{canDelete && <button className="btn ghost" style={{ padding: "2px 6px" }} title="удалить строку (КД, ЗГД, администратор)" onClick={() => delRow(i)}>×</button>}</td>}
+                {canEdit && <td><span className="te-acts">
+                  <button title="выше (Alt+↑ в поле «Параметр»)" disabled={i === 0} onClick={() => mvRow(i, -1)}>↑</button>
+                  <button title="ниже (Alt+↓)" disabled={i === rows.length - 1} onClick={() => mvRow(i, 1)}>↓</button>
+                  <button title="вставить пустую строку ниже" onClick={() => insRow(i)}>+</button>
+                  {(canDelete || !r.id) && <button className="te-del" title={r.id ? "удалить строку (КД, ЗГД, администратор)" : "убрать новую строку"} onClick={() => delRow(i)}>×</button>}
+                </span></td>}
               </tr></Fragment>);
           })}</tbody>
         </table>

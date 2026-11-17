@@ -87,6 +87,8 @@ class PositionIn(BaseModel):
     execution_id: Optional[str] = None                     # задача 7: исполнение из каталога
     price_comment: str = ""
     form_rows: list[dict] = Field(default_factory=list)    # ручной ввод таблицей: [{code, value, requirement, comment}] → строки таблицы
+    custom_rows: list[dict] = Field(default_factory=list)  # свои строки формы (D-070): [{id?, name, unit, requirement, value, comment, section_no}]
+    row_order: list[str] = Field(default_factory=list)     # порядок строк формы: «c:<код>» / «x:<номер своей строки>»
 
 
 def _production_days(term: dict, fallback: int) -> int:
@@ -394,6 +396,7 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
         raise HTTPException(422, {"message": "Заполните обязательные поля: " + ", ".join(miss), "missing": miss})
     comment = data.pop("price_comment")
     form_rows = data.pop("form_rows") or []
+    custom_rows, row_order = data.pop("custom_rows") or [], data.pop("row_order") or []
     # задача 1: график оплаты заводу задаёт КД; введённое менеджером — справка «условия завода»
     data["factory_payments_offer"] = data.pop("factory_payments") or []
     if user.can("payment_terms", 2):
@@ -436,6 +439,10 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
         from ..services.tech_params_service import apply_form_rows, sync_position
         apply_form_rows(pos, form_rows, user.id, skip_empty=True)   # пустые поля формы не затирают данные исполнения из каталога
         sync_position(db, pos)
+    if custom_rows or row_order:   # свои строки и порядок строк формы (D-070)
+        from ..services.tech_params_service import apply_custom_rows, init_position_rows as _init
+        _init(db, pos, user.id)
+        apply_custom_rows(db, pos, custom_rows, row_order, user.id)
     ensure_default_variant(db, deal)
     audit(db, user.id, deal.id, "position", pos.id, "create", after={**data, "from_catalog": from_catalog} if from_catalog else data)
     db.commit()
@@ -469,7 +476,7 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
     pos = db.get(Position, pos_id)
     if pos is None or pos.deal_id != deal.id:
         raise HTTPException(404)
-    allowed = set(PositionIn.model_fields) - {"price_comment", "tech_params", "logistics_params", "factory_payments", "form_rows"}
+    allowed = set(PositionIn.model_fields) - {"price_comment", "tech_params", "logistics_params", "factory_payments", "form_rows", "custom_rows", "row_order"}
     if body.get("factory_id") and body["factory_id"] != pos.factory_id:
         from ..services.suppliers import require_approved
         fac = db.get(Factory, body["factory_id"])
@@ -524,6 +531,10 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
         init_position_rows(db, pos, user.id)
         apply_form_rows(pos, body["form_rows"], user.id, skip_empty=body.get("execution_id") != before.get("execution_id"))
         sync_position(db, pos)
+    if body.get("custom_rows") or body.get("row_order"):   # свои строки и порядок строк формы (D-070)
+        from ..services.tech_params_service import apply_custom_rows, init_position_rows as _init
+        _init(db, pos, user.id)
+        apply_custom_rows(db, pos, body.get("custom_rows") or [], body.get("row_order") or [], user.id)
     if {"machine_type", "trademark"} & set(body) or "form_rows" in body:   # исправленные тип / марка — в модель каталога, созданную импортом
         from ..services.catalog_service import sync_model_from_position
         cat = db.scalar(select(EquipmentModel).where(EquipmentModel.factory_id == pos.factory_id, EquipmentModel.model == pos.model))

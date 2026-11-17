@@ -137,6 +137,12 @@ def section_label(code: str, title: str = "") -> str:
     return f"{major}. {title}" if title else f"{major}. {ru_only(_general_sections().get(major, '')) or 'Раздел ' + major}"
 
 
+def block_name(code: str, section: str = "") -> str:
+    """Блок строки шаблона: заданное название (без китайской части) или раздел RFQ по коду (D-070)."""
+    name = ru_only(section or "").strip(" /")
+    return name or section_label(code or "")
+
+
 @lru_cache(maxsize=1)
 def _general_sections() -> dict[str, str]:
     """Номер раздела → название раздела по встроенному шаблону RFQ."""
@@ -198,7 +204,7 @@ def init_position_rows(db: Session, pos: Position, user_id: Optional[str], repla
         known = {"1.1": pos.machine_type or "", "1.2": pos.model or ""}
         for t in template_for(db, pos.machine_type):
             rows.append(PositionTechParam(position_id=pos.id, no=t.no, code=t.code, name_ru=t.name_ru, name_zh=t.name_zh, unit=t.unit,
-                                          value_ru=known.get(t.code, ""), required=t.required, section=section_label(t.code, t.section),
+                                          value_ru=known.get(t.code, ""), required=t.required, section=block_name(t.code, t.section),
                                           source="manual", filled_by=user_id))
     db.add_all(rows)
     db.flush()
@@ -241,7 +247,7 @@ def rfq_rows(db: Session, parsed, machine_type: str = "") -> list[dict]:
         if t.code and t.code not in out and 1 <= int(t.code.split(".")[0] or 0) <= 11:
             out[t.code] = {"code": t.code, "name_ru": t.name_ru, "name_zh": t.name_zh, "unit": t.unit, "customer_requirement_ru": "",
                            "customer_requirement_zh": "", "value_ru": "", "value_zh": "", "comment_ru": "", "required": t.required,
-                           "section": section_label(t.code, t.section), "source": "template"}
+                           "section": block_name(t.code, t.section), "source": "template"}
     rows = sorted(out.values(), key=lambda r: [int(x) for x in r["code"].split(".")])
     for i, r in enumerate(rows, 1):
         r["no"] = i
@@ -705,3 +711,58 @@ def fingerprint(rows: list[dict]) -> str:
     import hashlib
     key = "|".join(f"{_norm(r.get('name_ru'))}={_norm(r.get('value_ru'))}" for r in sorted(rows, key=lambda r: (r.get("no") or 0, r.get("name_ru") or "")) if r.get("value_ru"))
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
+
+
+def apply_custom_rows(db: Session, pos: Position, custom_rows: list[dict], order: list[str], user_id: Optional[str]) -> int:
+    """Ручной ввод в форме позиции (D-070): свои строки (без кода RFQ) и порядок строк.
+
+    custom_rows: [{id?, name, unit, requirement, value, comment, section_no}] — новые строки создаются, существующие
+    (по id) обновляются; order: токены в порядке экрана — «c:<код>» (поле опросника) или «x:<номер в custom_rows>».
+    Строки таблицы, которых нет в форме (поля шаблона типа машины и т. п.), остаются за своей предыдущей соседкой."""
+    rows = list(pos.tech_param_rows or [])
+    by_id = {r.id: r for r in rows}
+    created: list[PositionTechParam] = []
+    for i, c in enumerate(custom_rows or []):
+        name = str(c.get("name") or "").strip()[:512]
+        data = {"name_ru": name, "unit": str(c.get("unit") or "").strip()[:64], "customer_requirement_ru": str(c.get("requirement") or "").strip(),
+                "value_ru": str(c.get("value") or "").strip(), "comment_ru": str(c.get("comment") or "").strip()}
+        try:
+            sec_no = int(c.get("section_no"))
+        except (TypeError, ValueError):
+            sec_no = 99
+        section = str(c.get("section") or "").strip()[:255] or (section_label(f"{sec_no}.1") if 0 <= sec_no < 99 else "Дополнительные параметры")
+        r = by_id.get(c.get("id") or "")
+        if r is None:
+            if not any(data.values()):
+                created.append(None)   # type: ignore[arg-type]   # пустая новая строка — не сохраняется, но держит место в порядке
+                continue
+            r = PositionTechParam(position_id=pos.id, no=0, code="", section=section, source="manual", filled_by=user_id, **data)
+            db.add(r)
+            rows.append(r)
+        else:
+            for k, v in data.items():
+                setattr(r, k, v)
+            r.section, r.filled_by = section, user_id
+        created.append(r)
+    if order:
+        by_code = {r.code: r for r in rows if r.code}
+        seq: list[PositionTechParam] = []
+        for t in order:
+            kind, _, val = str(t).partition(":")
+            r = by_code.get(val) if kind == "c" else (created[int(val)] if kind == "x" and val.isdigit() and int(val) < len(created) else None)
+            if r is not None and r not in seq:
+                seq.append(r)
+        original = sorted([r for r in rows if r.id], key=lambda r: r.no or 0)
+        result = list(seq)
+        for idx, r in enumerate(original):
+            if r in result:
+                continue
+            prev = original[idx - 1] if idx > 0 else None
+            result.insert(result.index(prev) + 1 if prev in result else 0, r)
+        for r in rows:
+            if r not in result:
+                result.append(r)
+        for n, r in enumerate(result, 1):
+            r.no = n
+    db.flush()
+    return len([c for c in created if c is not None])
