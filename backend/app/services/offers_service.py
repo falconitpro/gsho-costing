@@ -62,9 +62,14 @@ def duplicate_deal(db: Session, deal: Deal, user_id: str, offer_id: Optional[str
         np_.logistics = {**(p.logistics or {}), "copied_from": deal.number, "verify": True} if copy_calcs and p.logistics else {}
         np_.service_calc = {**(p.service_calc or {}), "copied_from": deal.number, "verify": True} if copy_calcs and p.service_calc else {}
         np_.factory_payments = []   # график заводу задаёт КД заново
+        if np_.production_term:     # срок переносится значением; фиксацию КД / ЗГД новая сделка проходит заново
+            np_.production_term = {**(np_.production_term or {}), "source": "copy", "comment": f"из сделки {deal.number}", "fixed": False}
         if offer:
             np_.factory_id, np_.model, np_.unit_price, np_.currency, np_.basis = offer.factory_id, offer.model or p.model, offer.unit_price or p.unit_price, offer.currency, offer.basis
-            np_.production_term = offer.production_term or p.production_term
+            from .production_term import normalize
+            if normalize(offer.production_term) and not (p.production_term or {}).get("fixed"):
+                np_.production_term = {**normalize(offer.production_term), "source": "offer", "set_by": user_id, "set_at": date.today().isoformat(),
+                                       "comment": "ответ завода при копировании", "fixed": False}
             if offer.factory_id != p.factory_id:
                 from .catalog_service import resolve_trademark
                 np_.trademark = resolve_trademark(db, offer.factory_id, np_.model)
@@ -203,8 +208,8 @@ def select_offers(db: Session, deal: Deal, offer_ids: list[str], user_id: str, c
         pos.factory_id, pos.model = first.factory_id, first.model or pos.model
         if first.unit_price:
             pos.unit_price, pos.currency, pos.basis = first.unit_price, first.currency, first.basis
-        if first.production_term:
-            pos.production_term = first.production_term
+        from .production_term import set_term
+        set_term(db, pos, first.production_term, user_id, "offer", f"выбран ответ завода {first.model or ''}".strip())
         pos.factory_payments_offer, pos.offer_id = first.factory_payments or [], first.id
         for r in pos.tech_param_rows or []:
             v = next((x for x in (first.params or []) if _norm(x.get("name_ru")) == _norm(r.name_ru) or (x.get("no") == r.no and not r.name_ru)), None)
@@ -283,7 +288,8 @@ def offer_from_position(db: Session, deal: Deal, pos: Position, user_id: Optiona
     if pos.unit_price:
         o.unit_price, o.currency = pos.unit_price, pos.currency or o.currency
     o.basis = pos.basis or o.basis
-    o.production_term = pos.production_term or ({"value": pos.production_days, "unit": "calendar_days"} if pos.production_days else o.production_term)
+    from .production_term import normalize
+    o.production_term = normalize(pos.production_term) or ({"value": pos.production_days, "unit": "calendar_days"} if pos.production_days else o.production_term)
     o.factory_payments = pos.factory_payments_offer or o.factory_payments or []
     o.params = [{"no": r.no, "code": r.code, "name_ru": r.name_ru, "name_zh": r.name_zh, "unit": r.unit,
                  "customer_requirement_ru": r.customer_requirement_ru, "value_ru": r.value_ru, "value_zh": r.value_zh,

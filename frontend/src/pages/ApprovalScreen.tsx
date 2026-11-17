@@ -4,6 +4,7 @@ import { api, fmtDate, fmtPct, fmtRub, designation } from "../api";
 import { COST_ITEMS, EVENT_TITLES, can, type CalcResponse, type Deal, type Me, type ScenarioResult } from "../types";
 import CashflowChart from "../components/CashflowChart";
 import PaymentTermsEditor from "../components/PaymentTermsEditor";
+import ProductionTermBlock from "../components/ProductionTermBlock";
 
 const SCEN = [["pessimistic", "Пессимистичный"], ["base", "Базовый"], ["optimistic", "Оптимистичный"]] as const;
 
@@ -188,6 +189,10 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                 <tr><td /><td>Банковская гарантия на аванс, RUB</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(scen[k]?.guarantee_cost_rub)}</td>)}</tr>
               </tbody>
             </table>
+            {calc.production && Object.keys(calc.production).length > 0 && (
+              <ProductionTermBlock dealId={deal.id} production={calc.production} canEdit={!!calc.can_edit_production}
+                events={Object.fromEntries(terms.map((t) => [t.position_id, t.events]))} onSaved={() => { reload(); load(); }} />
+            )}
             {terms.length > 0 && (
               <div style={{ marginTop: 10 }}>
                 <b>Срок поставки клиенту по позициям</b> <span className="muted">(расчёт × 1,1 → округление до целой недели; в КП)</span>

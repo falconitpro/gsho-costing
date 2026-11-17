@@ -699,7 +699,8 @@ def create_deal_from_catalog(exec_id: str, body: DealFromCatalogIn, db: Session 
     term = (h.production_term if h and h.production_term else {}) or {}
     pos = Position(deal_id=deal.id, factory_id=model.factory_id, model=model.model, machine_type=model.machine_type or "", trademark=model.trademark or "",
                    qty=max(body.qty, 1), unit_price=h.unit_price if h else 0.0, currency=h.currency if h else "CNY", basis=(h.basis if h and h.basis else "FCA"),
-                   production_term=term, production_days=_production_days(term, 90) if term else 90, execution_id=ex.id,
+                   production_term=({**term, "source": "catalog", "set_by": user.id, "set_at": _date.today().isoformat(), "comment": "", "fixed": False} if term else {}),
+                   production_days=_production_days(term, 90) if term else 90, execution_id=ex.id,
                    factory_payments_offer=(h.factory_payments if h else []) or [], tech_params={"_source_file": "каталог"},
                    logistics_params=dict(model.logistics_params or {}))
     pos.price_reference = {"last_price": h.unit_price if h else None, "on": h.on.isoformat() if h else None, "currency": h.currency if h else None,

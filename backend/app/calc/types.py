@@ -93,7 +93,7 @@ class ProductionTerm(BaseModel):
     """Срок производства (задача 3): значение + единица + точка отсчёта, либо конкретная дата."""
 
     value: Optional[float] = None
-    unit: Literal["calendar_days", "working_days", "weeks", "date"] = "calendar_days"
+    unit: Literal["calendar_days", "working_days", "weeks", "months", "date"] = "calendar_days"
     fixed_date: Optional[date] = None
     start_event: Literal["factory_contract", "factory_prepayment"] = "factory_contract"
 

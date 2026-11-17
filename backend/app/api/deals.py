@@ -379,7 +379,10 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
     data["factory_payments_offer"] = data.pop("factory_payments") or []
     if user.can("payment_terms", 2):
         data["factory_payments"] = data["factory_payments_offer"]
-    data["production_days"] = _production_days(data.get("production_term") or {}, data.get("production_days") or 90)
+    from ..services import production_term as pterm
+    if not pterm.normalize(data.get("production_term")) and data.get("production_days"):
+        data["production_term"] = {"value": data["production_days"], "unit": "calendar_days"}
+    term_src = "manager"
     from ..services.catalog_service import resolve_trademark
     data["trademark"] = resolve_trademark(db, body.factory_id, body.model, body.trademark)
     if body.execution_id and not body.unit_price:   # из каталога без цены — последняя цена и срок завода по модели
@@ -387,12 +390,13 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
                        .order_by(FactoryPriceHistory.on.desc())).first()
         if h is not None:
             data["unit_price"], data["currency"] = h.unit_price, h.currency
-            if h.production_term and h.production_term.get("value") and not data.get("production_term"):
-                data["production_term"] = h.production_term
-                data["production_days"] = _production_days(h.production_term, data.get("production_days") or 90)
+            if pterm.normalize(h.production_term) and not body.production_term:
+                data["production_term"], term_src = h.production_term, "catalog"
             if h.factory_payments and not data["factory_payments_offer"]:
                 data["factory_payments_offer"] = h.factory_payments
             comment = comment or f"цена из каталога (последнее предложение завода от {h.on:%d.%m.%Y})"
+    raw_term = data.pop("production_term", None)
+    data.pop("production_days", None)
     pos = Position(deal_id=deal.id, **data)
     pos.tech_params = {**pos.tech_params, "_source_file": "каталог" if body.execution_id else "ручной ввод"}
     pos.price_reference = _price_ref(db, pos, comment)
@@ -400,6 +404,7 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
         raise HTTPException(422, {"message": "Отклонение цены от истории выше порога — нужен комментарий", "price_reference": pos.price_reference})
     db.add(pos)
     db.flush()
+    pterm.set_term(db, pos, raw_term, user.id, term_src)
     _record_price(db, pos, deal)
     from ..services.tech_params_service import init_position_rows
     init_position_rows(db, pos, user.id)   # задача 4/7: перечень технических характеристик из исполнения каталога или шаблона по типу
@@ -417,6 +422,11 @@ def add_position(deal_id: str, body: PositionIn, db: Session = Depends(get_db), 
     return {**serialize(pos), "from_catalog": from_catalog}
 
 
+def _pterm_norm(t: dict | None) -> dict:
+    from ..services.production_term import normalize
+    return normalize(t)
+
+
 def _price_ref(db: Session, pos: Position, comment: str) -> dict:
     hist = [{"unit_price": h.unit_price, "currency": h.currency, "on": h.on}
             for h in db.scalars(select(FactoryPriceHistory).where(FactoryPriceHistory.factory_id == pos.factory_id,
@@ -428,7 +438,7 @@ def _price_ref(db: Session, pos: Position, comment: str) -> dict:
 
 def _record_price(db: Session, pos: Position, deal: Deal, source: str = "rfq") -> None:
     db.add(FactoryPriceHistory(factory_id=pos.factory_id, model=pos.model, execution_id=pos.execution_id, unit_price=pos.unit_price,
-                               currency=pos.currency, basis=pos.basis, production_term=pos.production_term or {"value": pos.production_days, "unit": "calendar_days"},
+                               currency=pos.currency, basis=pos.basis, production_term=_pterm_norm(pos.production_term) or {"value": pos.production_days, "unit": "calendar_days"},
                                factory_payments=pos.factory_payments_offer or pos.factory_payments or [], on=date.today(), deal_id=deal.id, source=source))
 
 
@@ -457,8 +467,18 @@ def update_position(deal_id: str, pos_id: str, body: dict, db: Session = Depends
         pos.factory_payments_offer = body["factory_payments"] or []
         if user.can("payment_terms", 2):
             pos.factory_payments = pos.factory_payments_offer
-    if "production_term" in body:
-        pos.production_days = _production_days(pos.production_term or {}, body.get("production_days") or pos.production_days or 90)
+    if "production_term" in body or "production_days" in body:
+        from ..services import production_term as pterm
+        raw = body.get("production_term") if pterm.normalize(body.get("production_term")) else (
+            {"value": body["production_days"], "unit": "calendar_days"} if body.get("production_days") else None)
+        pos.production_term, pos.production_days = before.get("production_term"), before.get("production_days")   # записывает только set_term
+        if raw:
+            try:
+                pterm.set_term(db, pos, raw, user.id, "cd" if user.has(Role.CD) else "gd" if user.has(Role.GD) else "manager",
+                               "в карточке позиции" if user.has(Role.CD, Role.GD) else "")
+            except pterm.FixedTermError as e:
+                db.rollback()
+                raise HTTPException(409, str(e))
     for key in ("tech_params", "logistics_params"):
         if isinstance(body.get(key), dict):
             setattr(pos, key, {**(getattr(pos, key) or {}), **body[key]})
@@ -635,7 +655,8 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
         db.commit()
         raise HTTPException(422, {"message": "Отклонение цены завода от истории выше порога — укажите комментарий",
                                   "price_reference": pos.price_reference, "preview": parsed.to_dict()})
-    pos.production_term = {"value": pos.production_days, "unit": "calendar_days", "start_event": "factory_contract"}
+    pos.production_term = {"value": pos.production_days, "unit": "calendar_days", "start_event": "factory_contract", "source": "rfq",
+                           "set_by": user.id, "set_at": date.today().isoformat(), "comment": "", "fixed": False}
     db.add(pos)
     db.flush()
     _record_price(db, pos, deal)

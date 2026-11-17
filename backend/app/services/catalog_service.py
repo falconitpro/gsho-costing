@@ -382,7 +382,7 @@ def _term_days(term: dict) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     unit = (term or {}).get("unit") or "calendar_days"
-    return v * 7 if unit == "weeks" else v * 1.4 if unit == "working_days" else v if unit == "calendar_days" else None
+    return v * 7 if unit == "weeks" else v * 1.4 if unit == "working_days" else v * 30.44 if unit == "months" else v if unit == "calendar_days" else None
 
 
 def _stats(vals: list[float]) -> dict:
@@ -563,9 +563,8 @@ def apply_execution_to_position(db: Session, deal, pos, user_id: Optional[str]) 
             pos.unit_price, pos.currency = h.unit_price, h.currency
             if h.basis:
                 pos.basis = h.basis
-            if h.production_term and h.production_term.get("value"):
-                pos.production_term = h.production_term
-                pos.production_days = int(h.production_term.get("value") or pos.production_days or 90) * (7 if h.production_term.get("unit") == "weeks" else 1)
+            from .production_term import set_term
+            set_term(db, pos, h.production_term, user_id, "catalog", f"последнее предложение завода от {h.on:%d.%m.%Y}")
             if h.factory_payments and not pos.factory_payments_offer:
                 pos.factory_payments_offer = h.factory_payments
             done["price"] = f"{h.unit_price:g} {h.currency} от {h.on:%d.%m.%Y}"
