@@ -7,6 +7,7 @@ export type TplRow = { id?: string; no: number; code: string; name_ru: string; n
 type Parsed = { rows: TplRow[]; blocks: number; warnings: string[]; sheet: string };
 type Type = { id: string; name: string; status?: string };
 
+const HEADER = "__header__";
 let seq = 0;
 const key = () => `n${++seq}`;
 const withKeys = (rows: TplRow[]) => rows.map((r) => ({ ...r, _k: r._k || r.id || key() }));
@@ -15,7 +16,7 @@ const empty = (section = ""): TplRow => ({ no: 0, code: "", name_ru: "", name_zh
 /** Редактор шаблона технических характеристик (D-070): блоки, порядок строк, вставка в любое место, Excel туда и обратно.
  *  Клавиши в поле «Параметр»: Enter — новая строка ниже, Alt+↑ / Alt+↓ — переместить строку. */
 export default function TemplateEditor({ editor, types, onTypesChanged }: { editor: boolean; types: Type[]; onTypesChanged: () => void }) {
-  const [typeId, setTypeId] = useState("");
+  const [typeId, setTypeId] = useState(() => (new URLSearchParams(window.location.search).get("tpl") === "header" ? HEADER : ""));
   const [rows, setRows] = useState<TplRow[]>([]);
   const [saved, setSaved] = useState("[]");
   const [inherited, setInherited] = useState(false);
@@ -29,8 +30,10 @@ export default function TemplateEditor({ editor, types, onTypesChanged }: { edit
   const history = useUndoHistory(rows, setRows, typeId);
   const dirty = JSON.stringify(rows.map(({ _k, ...r }) => r)) !== saved;
 
-  const load = (id = typeId) => api.get<{ rows: TplRow[]; inherited: boolean }>(`/api/refs/tech-param-templates?machine_type_id=${id}`).then((r) => {
-    const rs = withKeys(r.rows); setRows(rs); setSaved(JSON.stringify(rs.map(({ _k, ...x }) => x))); setInherited(r.inherited); history.accept(); setPending(null);
+  const isHeader = typeId === HEADER;   // D-071: шапка заявки — общая для всех сделок, над шаблоном типа
+  const load = (id = typeId) => api.get<{ rows: TplRow[]; inherited?: boolean }>(id === HEADER ? "/api/refs/request-header" : `/api/refs/tech-param-templates?machine_type_id=${id}`).then((r) => {
+    const rs = withKeys(r.rows.map((x) => ({ ...x, code: x.code || "", name_zh: x.name_zh || "", unit: x.unit || "", section: x.section || "" })));
+    setRows(rs); setSaved(JSON.stringify(rs.map(({ _k, ...x }) => x))); setInherited(!!r.inherited); history.accept(); setPending(null);
   }).catch((e) => setMsg({ ok: false, text: e.message }));
   useEffect(() => { load(typeId); }, [typeId]);
   useEffect(() => { if (focusKey) { inputs.current[focusKey]?.focus(); setFocusKey(null); } }, [focusKey, rows]);
@@ -53,8 +56,8 @@ export default function TemplateEditor({ editor, types, onTypesChanged }: { edit
     const named = rows.filter((r) => r.name_ru.trim());
     if (named.length !== rows.length && !window.confirm(`Пустых строк: ${rows.length - named.length} — они не сохранятся. Продолжить?`)) return;
     try {
-      await api.put(`/api/refs/tech-param-templates?machine_type_id=${typeId}`, renumber(named).map(({ _k, ...r }) => r));
-      setMsg({ ok: true, text: inherited ? "Сохранён отдельный шаблон для этого типа машины" : "Шаблон сохранён" }); load();
+      await api.put(isHeader ? "/api/refs/request-header" : `/api/refs/tech-param-templates?machine_type_id=${typeId}`, renumber(named).map(({ _k, ...r }) => r));
+      setMsg({ ok: true, text: isHeader ? "Шапка заявки сохранена — новые и открытые заново заявки показывают её" : inherited ? "Сохранён отдельный шаблон для этого типа машины" : "Шаблон сохранён" }); load();
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
   }
   async function upload(f: File) {
@@ -79,27 +82,30 @@ export default function TemplateEditor({ editor, types, onTypesChanged }: { edit
 
   const blocks: number[] = rows.map((_, i) => i).filter((i) => i === 0 || blockOf(rows[i - 1]) !== blockOf(rows[i]));
   const allClosed = blocks.length > 0 && blocks.every((i) => closed[blockOf(rows[i])]);
-  const curName = typeId ? types.find((t) => t.id === typeId)?.name : "Общий шаблон";
+  const curName = isHeader ? "Шапка заявки" : typeId ? types.find((t) => t.id === typeId)?.name : "Общий шаблон";
 
   return (
     <div className="card te">
       <div className="te-bar">
         <label className="te-type">Тип машины
           <select value={typeId} onChange={(e) => pickType(e.target.value)}>
-            <option value="">Общий шаблон (для всех типов)</option>
+            <option value={HEADER}>Шапка заявки (для всех сделок)</option>
+            <option value="">Общий (типовой) шаблон техники</option>
             {types.map((t) => <option key={t.id} value={t.id}>{t.name}{t.status === "pending" ? " (на подтверждение)" : ""}</option>)}
           </select></label>
         {editor && <button className="btn ghost" onClick={() => { const n = prompt("Новый тип машины:"); if (n) api.post("/api/refs/machine-types", { name: n }).then(onTypesChanged); }}>+ тип машины</button>}
         <span className="te-spacer" />
-        <a className="btn ghost" href={`/api/refs/tech-param-templates/file?machine_type_id=${typeId}`}>⬇ Скачать в Excel</a>
+        <a className="btn ghost" href={isHeader ? "/api/refs/tech-param-templates/file?kind=header" : `/api/refs/tech-param-templates/file?machine_type_id=${typeId}`}>⬇ Скачать в Excel</a>
         {editor && <><button className="btn ghost" onClick={() => fileRef.current?.click()}>⬆ Загрузить из Excel</button>
           <input ref={fileRef} type="file" accept=".xlsx,.xlsm" hidden onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
-          <select className="te-copy" value="-" onChange={(e) => copyFrom(e.target.value)} title="взять строки другого шаблона за основу">
+          {!isHeader && <select className="te-copy" value="-" onChange={(e) => copyFrom(e.target.value)} title="взять строки другого шаблона за основу">
             <option value="-">Скопировать из…</option><option value="general">общего шаблона</option>
-            {types.filter((t) => t.id !== typeId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></>}
+            {types.filter((t) => t.id !== typeId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>}</>}
       </div>
 
-      <p className="muted te-help">{inherited
+      <p className="muted te-help">{isHeader
+        ? <>Шапка заявки — поля, общие для всех сделок (сведения о запросе, коммерческие условия, сроки…). В форме позиции она стоит над таблицей характеристик выбранного типа техники. Тип техники, количество и пункт поставки в шапке есть всегда.</>
+        : inherited
         ? <>У типа «{curName}» своего шаблона нет — показан общий. После «Сохранить шаблон» у типа появится свой, общий не изменится.</>
         : <>Шаблон «{curName}»: перечень параметров по блокам и их обязательность (правят КД и ЗГД). Новые позиции получают эти строки; менеджер может изменить обязательность в своей сделке.</>}
         {editor && <> В поле «Параметр»: <kbd>Enter</kbd> — новая строка ниже, <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> — переместить. Excel: колонки «Блок, Код, Параметр, 参数 (CN), Ед., Обязательный» или свой файл — колонки и блоки распознаются по заголовкам.</>}</p>

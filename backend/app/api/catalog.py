@@ -5,14 +5,14 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser, get_current_user
 from ..core.files import file_response
 from ..core.roles import Role
 from ..db import get_db
-from ..models import EquipmentExecution, EquipmentModel, Factory, FactoryPriceHistory, Glossary, MachineType, TechParamTemplate
+from ..models import Position, EquipmentExecution, EquipmentModel, Factory, FactoryPriceHistory, Glossary, MachineType, TechParamTemplate
 from ..services import catalog_service as cs, tech_params_service as tps
 from ..services.deal_service import audit
 from .common import get_deal_or_404, serialize
@@ -490,20 +490,90 @@ def create_machine_type(body: MachineTypeIn, db: Session = Depends(get_db), user
     """Тип заводится по ходу работы: КД/ЗГД — сразу подтверждённый, менеджер — на подтверждение."""
     if db.scalar(select(MachineType).where(MachineType.name == body.name)):
         raise HTTPException(409, "Такой тип уже есть")
-    t = MachineType(name=body.name, name_zh=body.name_zh, status="approved" if user.can("catalog", 2) else "pending", proposed_by=user.id)
+    name = " ".join(body.name.split())
+    if not name:
+        raise HTTPException(422, "Укажите название типа")
+    if db.scalar(select(MachineType).where(func.lower(MachineType.name) == name.lower())):
+        raise HTTPException(409, "Такой тип уже есть")
+    t = MachineType(name=name, name_zh=body.name_zh, status="approved" if user.can("catalog", 2) else "pending", proposed_by=user.id)
     db.add(t)
+    db.flush()
+    if t.status == "pending":   # D-071: новый тип утверждают КД или ЗГД — уведомление; до утверждения позиция заполняется по типовому шаблону
+        from ..services.deal_service import notify
+        from ..services.legal_contracts import role_users
+        for u in role_users(db, "cd", "gd"):
+            notify(db, None, u.id, "machine_type", None, f"Новый тип техники «{name}» на утверждение ({user.display_name}): Каталог → На подтверждение")
     db.commit()
     return serialize(t)
 
 
 @router.post("/refs/machine-types/{type_id}/approve")
-def approve_machine_type(type_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_editor)):
+def approve_machine_type(type_id: str, body: Optional[MachineTypeIn] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_editor)):
+    """Утвердить тип (КД / ЗГД), при необходимости исправив название; позиции с прежним названием получают новое (D-071)."""
     t = db.get(MachineType, type_id)
     if t is None:
         raise HTTPException(404)
+    new = (body.name.strip() if body and body.name else "") or t.name
+    if new != t.name:
+        if db.scalar(select(MachineType).where(MachineType.name == new, MachineType.id != t.id)):
+            raise HTTPException(409, "Такой тип уже есть — отклоните этот с заменой на существующий")
+        _rename_positions(db, t.name, new)
+        t.name = new
+    if body and body.name_zh:
+        t.name_zh = body.name_zh
     t.status = "approved"
+    audit(db, user.id, None, "machine_type", t.id, "approve", after=serialize(t))
     db.commit()
     return serialize(t)
+
+
+class MachineTypeReject(BaseModel):
+    replace_with: Optional[str] = None     # id существующего типа: позиции с отклонённым типом получают его
+
+
+@router.post("/refs/machine-types/{type_id}/reject")
+def reject_machine_type(type_id: str, body: MachineTypeReject, db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_editor)):
+    t = db.get(MachineType, type_id)
+    if t is None:
+        raise HTTPException(404)
+    if t.status != "pending":
+        raise HTTPException(409, "Отклонить можно только тип на утверждении")
+    target = db.get(MachineType, body.replace_with) if body.replace_with else None
+    used = db.scalar(select(func.count()).select_from(Position).where(Position.machine_type == t.name)) or 0
+    if used and target is None:
+        raise HTTPException(422, f"Тип используется в позициях ({used}) — выберите, на какой тип их перевести")
+    if target is not None:
+        _rename_positions(db, t.name, target.name)
+    db.execute(TechParamTemplate.__table__.delete().where(TechParamTemplate.machine_type_id == t.id))
+    audit(db, user.id, None, "machine_type", t.id, "reject", before=serialize(t), after={"replace_with": target.name if target else None})
+    db.delete(t)
+    db.commit()
+    return {"ok": True, "replaced": used}
+
+
+def _rename_positions(db: Session, old: str, new: str) -> None:
+    for p in db.scalars(select(Position).where(Position.machine_type == old)).all():
+        p.machine_type = new
+
+
+# ------------------------------------------------------------------ шапка заявки (D-071): общая для всех сделок, правят КД и ЗГД
+
+@router.get("/refs/request-header")
+def request_header(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from ..services import request_header as rh
+    return {"rows": rh.rows(db)}
+
+
+@router.put("/refs/request-header")
+def save_request_header(rows: list[dict], db: Session = Depends(get_db), user: CurrentUser = Depends(_catalog_editor)):
+    from ..services import request_header as rh
+    from ..services import settings_service
+    val = rh.normalize(rows)
+    if not val:
+        raise HTTPException(422, "В шапке нет ни одного поля")
+    settings_service.set_value(db, "request_header_rows", val, user.id, "шапка заявки")
+    db.commit()
+    return {"rows": len(val)}
 
 
 # ------------------------------------------------------------------ шаблоны технических характеристик (обязательность задают КД/ЗГД)
@@ -541,14 +611,18 @@ def templates(machine_type_id: str = "", db: Session = Depends(get_db), user: Cu
 
 
 @router.get("/refs/tech-param-templates/file")
-def template_file(machine_type_id: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Шаблон в Excel — поправить в таблице и загрузить обратно (D-070)."""
+def template_file(machine_type_id: str = "", kind: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Шаблон в Excel — поправить в таблице и загрузить обратно (D-070); kind=header — шапка заявки (D-071)."""
     import os
     import tempfile
     from ..services import template_excel
-    rows, _ = _tpl_rows(db, machine_type_id)
-    mt = db.get(MachineType, machine_type_id) if machine_type_id else None
-    name = f"Шаблон ТХ — {mt.name if mt else 'общий'}.xlsx"
+    if kind == "header":
+        from ..services import request_header as rh
+        rows, mt, name = rh.rows(db), None, "Шапка заявки.xlsx"
+    else:
+        rows, _ = _tpl_rows(db, machine_type_id)
+        mt = db.get(MachineType, machine_type_id) if machine_type_id else None
+        name = f"Шаблон ТХ — {mt.name if mt else 'общий'}.xlsx"
     path = os.path.join(tempfile.mkdtemp(), "template.xlsx")
     template_excel.export(rows, path, name[:-5])
     return file_response(path, name, inline=False)

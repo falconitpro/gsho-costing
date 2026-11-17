@@ -121,6 +121,15 @@ export default function DealsList({ me }: { me: Me }) {
   const [partsMeta, setPartsMeta] = useState<{ channels: Record<string, string>; line_status: Record<string, string>; close_kinds: Record<string, string>; can_create: boolean } | null>(null);
   useEffect(() => { if (partsCreator) api.get<typeof partsMeta>("/api/parts/requests/meta").then(setPartsMeta).catch(() => setPartsMeta(null)); }, [partsCreator]);
   const [form, setForm] = useState({ client_id: "", contact: "", kp_due: "", priority: "normal", service_flag: false, target_hours: "" });
+  // D-071: тип техники при заведении сделки — после создания сразу открывается заявка по шаблону этого типа
+  const [mtypes, setMtypes] = useState<{ id: string; name: string; status?: string }[]>([]);
+  const [eq, setEq] = useState({ type: "", qty: "1", adding: false, newName: "" });
+  const addMType = async () => {
+    const n = eq.newName.trim(); if (!n) return;
+    try { const t = await api.post<{ id: string; name: string; status?: string }>("/api/refs/machine-types", { name: n }); setMtypes([...mtypes, t]); setEq({ ...eq, type: t.name, adding: false, newName: "" });
+      if (t.status === "pending") alert(`Тип «${t.name}» отправлен на утверждение КД / ЗГД. До утверждения заявка заполняется по типовому шаблону.`); }
+    catch (e) { setErr((e as Error).message); }
+  };
   const [err, setErr] = useState("");
   const nav = useNavigate();
   const isManager = me.roles.some((r) => ["manager", "cd", "gd"].includes(r.code));
@@ -196,7 +205,7 @@ export default function DealsList({ me }: { me: Me }) {
   const clientCell = (d: Row) => (<td style={{ minWidth: 160 }}><b>{d.client_name}</b>{d.site && <div className="muted" style={{ fontSize: 12 }}>{d.site}</div>}</td>);
   const eqCell = (d: Row) => d.kind === "parts" ? (<td style={{ minWidth: 180, fontSize: 13 }}>{d.equipment || <span className="muted">машина не указана</span>}{d.urgent && <div><span className="badge bad" style={{ fontSize: 10 }}>машина стоит</span></div>}</td>) : (<td style={{ minWidth: 180, fontSize: 13 }}>{d.equipment_lines?.length ? <>{d.equipment_lines.map((l, i) => <div key={i} style={{ whiteSpace: "nowrap" }}>{l.name || <span className="muted">без наименования</span>}</div>)}{d.equipment_more ? <div className="muted" style={{ fontSize: 11 }}>… ещё {d.equipment_more}</div> : null}</> : <span className="muted">позиций нет</span>}</td>);
   const qtyCell = (d: Row) => d.kind === "parts" ? (<td className="num" style={{ fontSize: 13, whiteSpace: "nowrap" }}>{d.lines}<div className="muted" style={{ fontSize: 11 }}>поз.</div></td>) : (<td className="num" style={{ fontSize: 13, whiteSpace: "nowrap" }}>{d.equipment_lines?.length ? <>{d.equipment_lines.map((l, i) => <div key={i}>{l.qty}</div>)}{(d.equipment_lines.length > 1 || d.equipment_more) ? <div style={{ borderTop: "1px solid var(--line)", fontWeight: 600 }}>{d.machines ?? 0}</div> : null}</> : <span className="muted">—</span>}</td>);
-  useEffect(() => { api.get<typeof clients>("/api/refs/clients").then(setClients); }, []);
+  useEffect(() => { api.get<typeof clients>("/api/refs/clients").then(setClients); api.get<typeof mtypes>("/api/refs/machine-types").then(setMtypes).catch(() => setMtypes([])); }, []);
 
   const [docs, setDocs] = useState<{ file: File; category: string }[]>([]);   // файлы от клиента — хранятся в сделке
   async function create() {
@@ -204,7 +213,7 @@ export default function DealsList({ me }: { me: Me }) {
       const d = await api.post<Deal & { warning?: string }>("/api/deals", { ...form, manager_id: managerId || undefined, kp_due: form.kp_due || null, target_hours: form.target_hours ? Number(form.target_hours) : null });
       if (d.warning) alert(d.warning);
       for (const x of docs) await api.upload(`/api/deals/${d.id}/documents`, x.file, { category: x.category, comment: "загружено при заведении сделки" });
-      nav(`/deals/${d.id}`);
+      nav(eq.type && newKind === "gsho" ? `/deals/${d.id}?tab=positions&newpos=1&type=${encodeURIComponent(eq.type)}&qty=${Number(eq.qty) || 1}` : `/deals/${d.id}`);
     } catch (e) { setErr((e as Error).message); }
   }
 
@@ -257,6 +266,18 @@ export default function DealsList({ me }: { me: Me }) {
                 </select></label>)}
             <label className="f">Контактное лицо<input value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} /></label>
             <label className="f">Срок КП<input type="date" value={form.kp_due} onChange={(e) => setForm({ ...form, kp_due: e.target.value })} /></label>
+            <label className="f">Тип техники
+              {!eq.adding ? (
+                <select value={eq.type} onChange={(e) => e.target.value === "__new" ? setEq({ ...eq, adding: true }) : setEq({ ...eq, type: e.target.value })}>
+                  <option value="">— выберите (откроется заявка по шаблону типа) —</option>
+                  {mtypes.map((t) => <option key={t.id} value={t.name}>{t.name}{t.status === "pending" ? " — на утверждении" : ""}</option>)}
+                  <option value="__new">+ Добавить новый тип…</option>
+                </select>) : (
+                <div className="row" style={{ gap: 4 }}><input autoFocus value={eq.newName} placeholder="название нового типа" style={{ flex: 1, minWidth: 0 }}
+                  onChange={(e) => setEq({ ...eq, newName: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addMType(); } }} />
+                  <button className="btn" disabled={!eq.newName.trim()} onClick={addMType}>Добавить</button><button className="btn ghost" onClick={() => setEq({ ...eq, adding: false })}>×</button></div>)}
+            </label>
+            <label className="f">Количество, шт.<input type="number" min="1" value={eq.qty} onChange={(e) => setEq({ ...eq, qty: e.target.value })} /></label>
             <label className="f">Приоритет
               <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
                 <option value="low">низкий</option><option value="normal">обычный</option><option value="high">высокий</option>

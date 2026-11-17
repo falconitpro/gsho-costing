@@ -732,8 +732,12 @@ def apply_custom_rows(db: Session, pos: Position, custom_rows: list[dict], order
             sec_no = 99
         section = str(c.get("section") or "").strip()[:255] or (section_label(f"{sec_no}.1") if 0 <= sec_no < 99 else "Дополнительные параметры")
         r = by_id.get(c.get("id") or "")
+        if r is None and name:   # строка шаблона (без кода) уже есть в таблице позиции — та же строка, не дубль (D-071)
+            r = next((x for x in rows if not x.code and x not in created and (x.name_ru or "").strip().lower() == name.lower()
+                      and (x.section or "").strip() == section), None)
         if r is None:
-            if not any(data.values()):
+            # пустая новая строка или пустое поле шапки (skip_empty) — не сохраняется, но держит место в порядке
+            if not any(data.values()) or (c.get("skip_empty") and not any(data[k] for k in ("customer_requirement_ru", "value_ru", "comment_ru"))):
                 created.append(None)   # type: ignore[arg-type]   # пустая новая строка — не сохраняется, но держит место в порядке
                 continue
             r = PositionTechParam(position_id=pos.id, no=0, code="", section=section, source="manual", filled_by=user_id, **data)

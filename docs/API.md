@@ -73,6 +73,8 @@
 | GET | `/deals/{id}/competitors/{oid}/history` | КД, ЗГД | История правок записи |
 | GET | `/competitors?q=`, `/competitors/{cid}/offers` | КД, ЗГД | Справочник конкурентов; история предложений конкурента по всем сделкам с нашей ценой |
 | POST / PATCH | `/deals/{id}/positions[/{pid}]` | менеджер | Позиция: `factory_id`, `model`, `unit_price` могут быть пустыми до ответа завода; обязательное при создании — по настройке `request_required_fields` (422 со списком `missing`) |
+| GET / PUT | `/refs/request-header` | все / КД, ЗГД | Шапка заявки — общий для всех сделок перечень полей над таблицей характеристик |
+| POST | `/refs/machine-types/{id}/approve`, `/reject` | КД, ЗГД | Утвердить новый тип (можно исправить название) / отклонить с `replace_with` — позиции переводятся на другой тип |
 | GET | `/refs/tech-param-templates/file?machine_type_id=` | все | Шаблон технических характеристик в Excel (Блок, Код, Параметр, 参数 (CN), Ед., Обязательный) |
 | POST | `/refs/tech-param-templates/parse` | КД, ЗГД | Разбор файла Excel в строки шаблона без сохранения: `rows`, `blocks`, `warnings` |
 | PUT | `/deals/{id}/positions/{pid}/production-term` | КД, ЗГД | Срок производства: `value`, `unit` (`calendar_days`/`working_days`/`weeks`/`months`/`date`), `fixed_date`, `start_event`, обязательный `comment`; фиксирует срок (автоматические источники и менеджер не перезаписывают); после виз — визы сбрасываются |
