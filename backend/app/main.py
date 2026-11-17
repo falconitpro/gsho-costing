@@ -18,6 +18,25 @@ log = logging.getLogger("gsho")
 settings = get_settings()
 
 
+SCANNER_START_GRACE_S = 600   # после старта антивирус 1–2 мин загружает базы; раньше проверять — ложная тревога (D-068)
+
+
+async def _scanner_check(delay: float) -> None:
+    """Доступность и свежесть баз антивируса (docs/operations/04 §8.2); сетевой опрос и перепроверка файлов — в отдельном потоке."""
+    if delay:
+        await asyncio.sleep(delay)
+
+    def run() -> None:
+        from .db import SessionLocal
+        from .services import scanner_status
+        with SessionLocal() as db:
+            scanner_status.hourly(db, settings)
+    try:
+        await asyncio.to_thread(run)
+    except Exception as e:   # pragma: no cover
+        log.warning("scanner check failed: %s", e)
+
+
 async def _daily_jobs() -> None:
     """Фоновые задания: курс ЦБ ежедневно, проверка просрочек раз в час.
 
@@ -27,6 +46,7 @@ async def _daily_jobs() -> None:
     from . import adapters
     from .db import SessionLocal
     from .models import FxRate, IntegrationLog
+    _first_done = False
     while True:
         try:
             with SessionLocal() as db:
@@ -117,12 +137,8 @@ async def _daily_jobs() -> None:
                 _ai.purge(db, settings)
         except Exception as e:   # pragma: no cover
             log.warning("assistant purge failed: %s", e)
-        try:   # антивирус: доступность и свежесть баз (docs/operations/04 §8.2)
-            from .services import scanner_status
-            with SessionLocal() as db:
-                scanner_status.hourly(db, settings)
-        except Exception as e:   # pragma: no cover
-            log.warning("scanner check failed: %s", e)
+        asyncio.create_task(_scanner_check(0 if _first_done else SCANNER_START_GRACE_S))   # D-068: после старта — через 10 мин
+        _first_done = True
         try:   # резервные копии: перенос статуса с хоста, «нет копии дольше 26 ч», уведомления в системе (docs/operations/03 §5)
             from .services.backup_status import refresh as refresh_backups
             with SessionLocal() as db:

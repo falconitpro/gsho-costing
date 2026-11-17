@@ -389,3 +389,55 @@ def test_load_smoke_script_passes_and_fails_when_scanner_down(capsys):
         assert load_smoke.main(["--files", "1"]) == 2
     finally:
         s.clamd_host, s.clamd_port = old
+
+
+# ------------------------------------------------------------------ D-068: обход вручную, автозакрытие тревоги, перепроверка
+
+def _step_up(c, email):
+    from scripts.seed import DEV_PASSWORD, TEST_LOGIN, TEST_PASSWORD
+    r = c.post("/api/auth/step-up", headers=H(email), json={"password": TEST_PASSWORD if email == TEST_LOGIN else DEV_PASSWORD})
+    assert r.status_code == 200, r.text
+
+
+def test_scanner_bypass_and_alert_auto_resolve(c, scan_on, monkeypatch, tmp_path):
+    s = get_settings()
+    monkeypatch.setattr(s, "quarantine_dir", str(tmp_path / "q"))
+    d = new_deal(c)
+    s.clamd_port = 1                                                        # антивирус «лежит»
+    with SessionLocal() as db:
+        scanner_status.hourly(db, s)
+        assert db.scalar(select(SecurityAlert).where(SecurityAlert.rule_key == "scanner_unavailable", SecurityAlert.status != "resolved")) is not None
+    assert upload(c, d, "без-обхода.pdf", b"%PDF a").status_code == 503
+    # обход: только ЗГД / администратор, причина, подтверждение
+    assert c.post("/api/security/scanner/bypass", headers=H(MGR), json={"hours": 2, "reason": "x"}).status_code == 403
+    assert c.post("/api/security/scanner/bypass", headers=H(ADM), json={"hours": 2, "reason": ""}).status_code in (403, 422)
+    _step_up(c, ADM)
+    assert c.post("/api/security/scanner/bypass", headers=H(ADM), json={"hours": 30, "reason": "сломался"}).status_code == 422
+    assert c.post("/api/security/scanner/bypass", headers=H(ADM), json={"hours": 2, "reason": "clamd упал, чиним"}).status_code == 200
+    with SessionLocal() as db:
+        assert db.scalar(select(SecurityAlert).where(SecurityAlert.rule_key == "scanner_bypass", SecurityAlert.status != "resolved")) is not None
+    st = c.get("/api/security/scanner", headers=H(ADM)).json()
+    assert st["bypass"]["active"] and st["bypass"]["reason"] == "clamd упал, чиним"
+    # антивирус не отвечает → файл принят без проверки
+    assert upload(c, d, "в-обходе.pdf", b"%PDF bypass").status_code == 201
+    assert [a.scan_status for a in att_by_name(d, "в-обходе.pdf")] == ["legacy_unscanned"]
+    # антивирус отвечает → заражённый не принимается даже при обходе
+    s.clamd_port = scan_on.port
+    assert upload(c, d, "eicar.txt", EICAR).status_code == 422
+    # ежечасная проверка: тревога закрыта, принятый без проверки файл проверен
+    with SessionLocal() as db:
+        res = scanner_status.hourly(db, s)
+        assert res["available"] and res["rescan"]["checked"] >= 1
+        assert db.scalar(select(SecurityAlert).where(SecurityAlert.rule_key == "scanner_unavailable", SecurityAlert.status != "resolved")) is None
+    assert [a.scan_status for a in att_by_name(d, "в-обходе.pdf")] == ["clean"]
+    # выключение
+    assert c.delete("/api/security/scanner/bypass", headers=H(ADM)).status_code == 204
+    assert not (c.get("/api/security/scanner", headers=H(ADM)).json()["bypass"] or {}).get("active")
+    s.clamd_port = 1
+    assert upload(c, d, "после.pdf", b"%PDF after").status_code == 503
+    s.clamd_port = scan_on.port
+
+
+def test_bypass_not_settable_via_settings(c):
+    assert c.put("/api/admin/settings/file_scan_bypass", headers=H(ADM), json={"value": {"until": "2099-01-01T00:00:00+00:00"}}).status_code == 403
+    assert "file_scan_bypass" not in c.get("/api/admin/settings/meta", headers=H(ADM)).json()["items"]
