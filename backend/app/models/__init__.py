@@ -677,6 +677,9 @@ class Variant(TimestampMixin, Base):
     price_currency: Mapped[Optional[str]] = mapped_column(String(3))       # валюта цены клиенту (по умолчанию — валюта предложения завода)
     price_amount: Mapped[Optional[float]] = mapped_column(Float)           # цена в этой валюте без НДС
     price_fx_rate: Mapped[Optional[float]] = mapped_column(Float)          # курс ЦБ (RUB за единицу) на момент назначения цены
+    price_vat_included: Mapped[bool] = mapped_column(Boolean, default=False)   # КД ввёл цену с НДС (D-066); price_amount / price_rub — всегда без НДС
+    price_vat_pct: Mapped[Optional[float]] = mapped_column(Float)              # ставка НДС на момент ввода
+    price_input_amount: Mapped[Optional[float]] = mapped_column(Float)         # сумма, как её ввёл КД (с НДС или без)
     service_in_kp: Mapped[bool] = mapped_column(Boolean, default=False)
     client_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     client_payments_alt: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # сравнение двух условий оплаты
@@ -2211,6 +2214,40 @@ class AcceptanceUnit(TimestampMixin, Base):
     is_final: Mapped[bool] = mapped_column(Boolean, default=True)                    # приёмка окончательная (на заводе — всегда; онлайн — по отметке)
     round_no: Mapped[int] = mapped_column(Integer, default=1)                        # номер текущей приёмки машины
     rounds: Mapped[list[dict]] = mapped_column(JSONType, default=list)               # история предыдущих приёмок (полные снимки)
+
+
+# ------------------------------------------------------------------ цены конкурентов (D-066): видят только КД и ЗГД
+class Competitor(TimestampMixin, Base):
+    """Конкурент — справочник, пополняется вводом названия в предложении конкурента."""
+    __tablename__ = "competitors"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    name_key: Mapped[str] = mapped_column(String(255), unique=True)          # нормализованное название (регистр, пробелы, кавычки)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+
+class CompetitorOffer(TimestampMixin, Base):
+    """Цена конкурента по сделке: дата сведений, сумма как введена (с НДС или без), валюта, курс ЦБ на дату; правки — в журнале действий."""
+    __tablename__ = "competitor_offers"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    variant_id: Mapped[Optional[str]] = mapped_column(String(36))            # с каким нашим предложением сравнивается
+    competitor_id: Mapped[Optional[str]] = mapped_column(ForeignKey("competitors.id"), index=True)   # пусто — название неизвестно
+    on: Mapped[date] = mapped_column(Date)
+    equipment: Mapped[str] = mapped_column(String(500), default="")          # что предлагает конкурент (марка, модель, комплектация)
+    qty: Mapped[float] = mapped_column(Float, default=1)
+    amount: Mapped[float] = mapped_column(Float)                             # как введено
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    vat_included: Mapped[bool] = mapped_column(Boolean, default=False)
+    vat_pct: Mapped[float] = mapped_column(Float, default=22.0)
+    fx_rate: Mapped[float] = mapped_column(Float, default=1.0)               # RUB за единицу валюты на дату сведений
+    fx_on: Mapped[Optional[date]] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(255), default="")             # откуда сведения (тендер, клиент, рынок…)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    deleted_by: Mapped[Optional[str]] = mapped_column(String(36))
 
 
 # ------------------------------------------------------------------ раздел «Финансы» (вариант Б): docs/finance/

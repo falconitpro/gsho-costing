@@ -5,6 +5,7 @@ import { COST_ITEMS, EVENT_TITLES, can, type CalcResponse, type Deal, type Me, t
 import CashflowChart from "../components/CashflowChart";
 import PaymentTermsEditor from "../components/PaymentTermsEditor";
 import ProductionTermBlock from "../components/ProductionTermBlock";
+import CompetitorsTab from "../components/CompetitorsTab";
 
 const SCEN = [["pessimistic", "Пессимистичный"], ["base", "Базовый"], ["optimistic", "Оптимистичный"]] as const;
 
@@ -16,9 +17,10 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   const [mode, setMode] = useState<"amount" | "markup" | "margin">("amount");
   const [value, setValue] = useState("");
   const [cur, setCur] = useState("");   // валюта цены клиенту; пусто — ранее выбранная или валюта предложения завода
+  const [withVat, setWithVat] = useState(false);   // сумма вводится с НДС (D-066)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [tab, setTab] = useState<"cost" | "terms" | "cashflow" | "fx" | "history" | "kp">("cost");
+  const [tab, setTab] = useState<"cost" | "terms" | "cashflow" | "fx" | "history" | "kp" | "competitors">("cost");
   const [rework, setRework] = useState({ block: "logistics", reason: "" });
   const [visaComment, setVisaComment] = useState("");
   const [insistComment, setInsistComment] = useState("");
@@ -54,7 +56,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
     if (!value) return;
     setBusy(true);
     try {
-      await api.post(`/api/deals/${deal.id}/price`, { variant_id: vid, mode, value: Number(value), currency: priceCur });
+      await api.post(`/api/deals/${deal.id}/price`, { variant_id: vid, mode, value: Number(value), currency: priceCur, vat_included: mode === "amount" && withVat });
       await load(); reload(); setCur(""); setErr("");
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
@@ -84,6 +86,8 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
     v.price_currency && v.price_currency !== "RUB" && v.price_amount != null ? `${fmtRub(v.price_amount)} ${v.price_currency}` : "";
   const canPrice = isCD && ["calc_ready", "cd_approval", "rework", "fd_visa", "gd_visa", "approved"].includes(deal.status);
   const cdChecks = calc.cd_checks || [];
+  const vatPct = calc.sales_vat_pct ?? 22;
+  const cc = calc.contract_currency;
   const terms = calc.terms?.[vid] || [];
 
   return (
@@ -124,14 +128,23 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
               <div className={"margin-ind " + indicator.cls}>{fmtPct(base?.margin_pct)}</div>
               <div className="muted">маржа от выручки (базовый) · {indicator.text}</div>
               {base?.price_rub != null && <div style={{ fontSize: 13 }}>Цена клиенту без НДС: <b>{inCur(variant) || `${fmtRub(base.price_rub)} RUB`}</b>
-                {inCur(variant) && <span className="muted"> · по курсу {variant.price_fx_rate?.toFixed(4)} ≈ {fmtRub(base.price_rub)} RUB · КП — в {variant.price_currency}</span>}</div>}
+                {inCur(variant) && <span className="muted"> · по курсу {variant.price_fx_rate?.toFixed(4)} ≈ {fmtRub(base.price_rub)} RUB · КП — в {variant.price_currency}</span>}
+                <div>с НДС {vatPct} %: <b>{fmtRub((variant.price_amount ?? base.price_rub) * (1 + vatPct / 100))} {variant.price_currency || "RUB"}</b>
+                  {(variant.price_currency || "RUB") !== "RUB" && <span className="muted"> ≈ {fmtRub(base.price_rub * (1 + vatPct / 100))} RUB</span>}
+                  {variant.price_vat_included && variant.price_input_amount != null && <span className="muted"> · введено с НДС: {fmtRub(variant.price_input_amount)} {variant.price_currency}</span>}</div>
+                {cc && cc.code !== (variant.price_currency || "RUB") && cc.rate && <div className="muted">в валюте контракта ({cc.code}, {cc.source}): {fmtRub(base.price_rub / cc.rate)} без НДС · {fmtRub(base.price_rub * (1 + vatPct / 100) / cc.rate)} с НДС</div>}
+                {mode === "amount" && value && Number(value) > 0 && <div className="muted">вводимая сумма: без НДС {fmtRub(withVat ? Number(value) / (1 + vatPct / 100) : Number(value))} · с НДС {fmtRub(withVat ? Number(value) : Number(value) * (1 + vatPct / 100))} {priceCur}
+                  {priceCur !== "RUB" && calc.input.fx.rates[priceCur] ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * calc.input.fx.rates[priceCur])} RUB без НДС` : ""}
+                  {cc && cc.code !== priceCur && cc.rate && (priceCur === "RUB" || calc.input.fx.rates[priceCur]) ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * (priceCur === "RUB" ? 1 : calc.input.fx.rates[priceCur]) / cc.rate)} ${cc.code} без НДС` : ""}</div>}</div>}
               <div className="muted">наценка {fmtPct(base?.markup_pct)} · прибыль {fmtRub(base?.profit_rub)} RUB · разрыв {fmtRub(base?.cash_gap.amount_rub)} RUB ({base?.cash_gap.days} дн)</div>
             </div>
             {canPrice && (
               <div className="row">
                 <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-                  <option value="amount">сумма без НДС</option><option value="markup">наценка, %</option><option value="margin">целевая маржа, %</option>
+                  <option value="amount">сумма</option><option value="markup">наценка, %</option><option value="margin">целевая маржа, %</option>
                 </select>
+                {mode === "amount" && <select value={withVat ? "gross" : "net"} onChange={(e) => setWithVat(e.target.value === "gross")} title={`НДС ${vatPct} %`}>
+                  <option value="net">без НДС</option><option value="gross">с НДС {vatPct} %</option></select>}
                 <input type="number" value={value} onChange={(e) => setValue(e.target.value)}
                   placeholder={mode === "amount" ? String((priceCur === variant.price_currency ? variant.price_amount : null) ?? (priceCur === "RUB" ? base?.price_rub ?? "" : "")) : ""} style={{ width: 160 }} />
                 <label className="muted" style={{ fontSize: 12 }} title={`по умолчанию — валюта предложения завода (${offerCur}); пересчёт в RUB по курсу ЦБ на дату расчёта`}>
@@ -167,6 +180,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
           {can(me, "kp_images_select", 2) && <button className={tab === "kp" ? "active" : ""} onClick={() => setTab("kp")}>Подача КП</button>}
           <button className={tab === "fx" ? "active" : ""} onClick={() => setTab("fx")}>Курсы и прогноз</button>
           <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>Комментарии и история</button>
+          {isCD && <button className={tab === "competitors" ? "active" : ""} onClick={() => setTab("competitors")}>Конкуренты</button>}
         </div>
 
         {tab === "cost" && (
@@ -256,6 +270,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
               </table>
             </div>);
         })()}
+        {tab === "competitors" && isCD && <CompetitorsTab dealId={deal.id} variants={deal.variants || []} />}
         {tab === "history" && (
           <div className="grid cols-2">
             <div className="card"><h2 style={{ marginTop: 0 }}>Комментарии логиста и менеджера</h2>

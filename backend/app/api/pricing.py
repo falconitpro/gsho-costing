@@ -93,6 +93,8 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
         "factory_price_history": [serialize(h) for h in price_hist], "client_kp_history": client_kp_history,
         "warnings": res.warnings + warn_lower, "comments": comments, "cd_checks": checks, "terms": terms, "production": production,
         "can_edit_production": user.has(Role.CD, Role.GD),
+        "sales_vat_pct": float(settings_service.get(db, "sales_vat_pct") or 22.0),
+        "contract_currency": _contract_ccy(db, deal, inp),
         "status": deal.status.value, "scenario_override": deal.scenario_override, "kp_brand": deal.kp_brand, "kp_images_mode": deal.kp_images_mode,
         "payment_terms": {"client_payments": deal.client_payments, "client_payment_wishes": deal.client_payment_wishes, "bank_guarantee": deal.bank_guarantee,
                           "default_client": settings_service.get(db, "default_client_payment_scheme"),
@@ -216,6 +218,7 @@ class PriceIn(BaseModel):
     mode: str = "amount"            # amount | markup | margin
     value: float
     currency: Optional[str] = None  # валюта цены клиенту; по умолчанию — валюта предложения завода (или ранее выбранная)
+    vat_included: bool = False      # сумма введена с НДС (только mode=amount): в расчёт идёт сумма без НДС (D-066)
     service_in_kp: Optional[bool] = None
     client_payments: Optional[list[dict]] = None
     overhead_pct_override: Optional[float] = None
@@ -243,8 +246,10 @@ def set_price(deal_id: str, body: PriceIn, db: Session = Depends(get_db), user: 
     rate = 1.0 if cur == "RUB" else (inp.fx.rates or {}).get(cur)
     if not rate:
         raise HTTPException(422, f"Нет курса ЦБ для валюты {cur} на дату расчёта")
+    vat_pct = float(settings_service.get(db, "sales_vat_pct") or 22.0)
+    vat_in = body.mode == "amount" and body.vat_included
     if body.mode == "amount":
-        price = body.value * rate
+        price = (body.value / (1 + vat_pct / 100.0) if vat_in else body.value) * rate
     elif body.mode == "markup":
         price = solve_price(inp, v.id, target_markup_pct=body.value)
     elif body.mode == "margin":
@@ -253,16 +258,26 @@ def set_price(deal_id: str, body: PriceIn, db: Session = Depends(get_db), user: 
         raise HTTPException(422, "Способ задания цены: сумма, наценка или маржа")
     v.price_rub, v.price_mode = round(price, 2), body.mode
     v.price_currency, v.price_fx_rate = cur, rate
-    v.price_amount = round(body.value, 2) if body.mode == "amount" else round(price / rate, 2)
+    v.price_amount = round(price / rate, 2)
+    v.price_vat_included, v.price_vat_pct = vat_in, vat_pct
+    v.price_input_amount = round(body.value, 2) if body.mode == "amount" else None
     reset = price_changed_after_visa(DealState(status=deal.status, service_flag=deal.service_flag))
     if reset and before.get("price_rub") != v.price_rub:
         for a in db.scalars(select(Approval).where(Approval.deal_id == deal.id, Approval.reset_at.is_(None))).all():
             a.reset_at = datetime.now(timezone.utc)
         apply_transition(db, deal, reset, user.id)
-    audit(db, user.id, deal.id, "variant", v.id, "price", {"price_rub": before.get("price_rub")}, {"price_rub": v.price_rub, "mode": body.mode, "currency": cur, "amount": v.price_amount, "rate": rate})
+    audit(db, user.id, deal.id, "variant", v.id, "price", {"price_rub": before.get("price_rub")}, {"price_rub": v.price_rub, "mode": body.mode, "currency": cur, "amount": v.price_amount, "rate": rate,
+                                                                                        "vat_included": vat_in, "vat_pct": vat_pct, "entered": v.price_input_amount})
     db.commit()
     inp, res = run_calc(db, deal)
     return {"variant": serialize(v), "result": res.variants[v.id], "approval_flags": approval_flags(res), "warnings": res.warnings}
+
+
+def _contract_ccy(db: Session, deal: Deal, inp) -> dict:
+    """Валюта контракта с клиентом и её курс на дату расчёта — справочный пересчёт цены предложения."""
+    from .competitors import contract_currency
+    ccy, src = contract_currency(db, deal)
+    return {"code": ccy, "source": src, "rate": 1.0 if ccy == "RUB" else (inp.fx.rates or {}).get(ccy)}
 
 
 def offer_currency(deal: Deal, v: Optional[Variant] = None) -> str:

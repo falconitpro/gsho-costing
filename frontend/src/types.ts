@@ -77,6 +77,7 @@ export interface Variant {
   id: string; name: string; position_ids: string[]; price_rub?: number | null; service_in_kp: boolean; client_payments: PaymentLine[];
   overhead_pct_override?: number | null; is_default?: boolean; in_kp?: boolean;
   price_currency?: string | null; price_amount?: number | null; price_fx_rate?: number | null;
+  price_vat_included?: boolean; price_vat_pct?: number | null; price_input_amount?: number | null;   // цена введена с НДС / без (D-066)
 }
 export interface PaymentLine { no: number; share_pct?: number; amount?: number; event: string; offset_days: number; offset_kind?: string; via?: string; guarantee?: string; guarantee_pct?: number; guarantee_months?: number }
 export interface Batch { id: string; name: string; route: string; transport_units: number; transit_days: number; customs_days: number; rf_delivery_days?: number; border_planned?: string | null; border_actual?: string | null; allocation: string; items: Record<string, unknown> }
@@ -113,6 +114,7 @@ export interface CalcResponse {
   fd_declined?: { comment: string; at: string | null; user: string } | null;
   input: { base_currency: string; calc_date?: string; fx: { as_of: string; rates: Record<string, number>; source: string; note?: string }; thresholds: { margin_threshold_pct: number } };
   result: { variants: Record<string, Record<string, ScenarioResult>>; fx_components: FxComponent[]; approval: { financial: boolean; general: boolean; reasons: string[] }; warnings: string[] };
+  sales_vat_pct?: number; contract_currency?: { code: string; source: string; rate: number | null };
   production?: Record<string, import("./components/ProductionTermBlock").ProductionInfo>; can_edit_production?: boolean;
   approval_flags: Record<string, boolean>; threshold_pct: number; warnings: string[]; comments: { from: string; item: string; ref: string; comment: string }[];
   factory_price_history?: { model: string; unit_price: number; currency: string; on: string }[];
