@@ -118,6 +118,9 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; colo
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; overflow-x: auto; }
 .tabs button { background: none; border: 0; padding: 8px 12px; cursor: pointer; font-family: inherit; font-size: 14px; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tabs button.active { border-color: var(--accent); font-weight: 700; }
+/* экран «Расчёт и утверждение»: вкладки в две строки, чтобы все помещались без прокрутки */
+.tabs.tabs-compact { flex-wrap: wrap; overflow-x: visible; align-items: flex-end; }
+.tabs.tabs-compact button { white-space: normal; padding: 6px 10px; font-size: 13px; line-height: 1.2; text-align: center; }
 .alert { padding: 10px 12px; border-radius: 6px; margin: 8px 0; }
 .alert.error { background: var(--bad-bg); color: var(--bad); border-left: 4px solid var(--bad); }
 .alert.warn { background: var(--warn-bg); color: #5c3d00; border-left: 4px solid var(--warn); }
