@@ -33,6 +33,7 @@ DEFAULTS: dict[str, Any] = {
     "util_coefficients": [],           # коэффициенты по виду техники и коду ТН ВЭД: [{hs_prefix, machine_type, coefficient, comment}]
     "guarantee_rate_pct": 3.0,
     "vat_offset_days": 90,
+    "sales_vat_pct": 22.0,             # НДС с продажи: цена предложения с НДС ↔ без НДС, цены конкурентов (D-066)
     "import_vat_in_cost": False,
     "overhead_scale": [{"up_to_rub": 50_000_000, "pct": 5.0}, {"up_to_rub": 200_000_000, "pct": 4.0}, {"up_to_rub": None, "pct": 3.0}],
     "overhead_actual_pct_last_year": None,
@@ -242,6 +243,8 @@ META: dict[str, dict] = {
                                            "options": [{"value": "one_time_pct", "label": "разовый % от аванса"}, {"value": "annual_pct", "label": "% годовых до поставки"}, {"value": "fixed", "label": "фиксированная сумма, ₽"}]},
                                           {"key": "value", "label": "Значение"}]},
     # НДС
+    "sales_vat_pct": {"group": "НДС", "title": "НДС с продажи", "unit": "%", "type": "number",
+                      "help": "Пересчёт цены предложения и цен конкурентов «с НДС ↔ без НДС»."},
     "vat_offset_days": {"group": "НДС", "title": "Срок возмещения ввозного НДС", "unit": "дн.", "type": "number"},
     "import_vat_in_cost": {"group": "НДС", "title": "Ввозной НДС — расход (не возмещается)", "type": "bool",
                            "help": "Выключено: НДС возмещается и влияет только на кассовый разрыв."},

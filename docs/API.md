@@ -68,6 +68,10 @@
 | POST | `/deals/{id}/logistics/batches` | логист | Создать партию: маршрут, транспортные единицы, сроки, общие статьи, распределение (`cost/weight/volume`), позиции; сверка с историей — 422, если нужен комментарий |
 | PATCH | `/deals/{id}/logistics/batches/{bid}` | логист | Изменить партию и состав |
 | DELETE | `/deals/{id}/logistics/batches/{bid}` | логист | Удалить лишнюю партию: её позиции становятся нераспределёнными, строки платежей выводятся из итогов |
+| GET | `/deals/{id}/competitors` | КД, ЗГД | Цены конкурентов по сделке (хронология, с удалёнными): без НДС / с НДС, RUB и валюта контракта по курсу ЦБ на дату сведений, отклонение нашего предложения; наши цены; валюта контракта |
+| POST / PATCH / DELETE | `/deals/{id}/competitors[/{oid}]` | КД, ЗГД | Цена конкурента: `competitor` (необязательно), `on`, `equipment`, `qty`, `amount`, `currency`, `vat_included`, `vat_pct`, `variant_id`, `source`, `comment`; удаление мягкое |
+| GET | `/deals/{id}/competitors/{oid}/history` | КД, ЗГД | История правок записи |
+| GET | `/competitors?q=`, `/competitors/{cid}/offers` | КД, ЗГД | Справочник конкурентов; история предложений конкурента по всем сделкам с нашей ценой |
 | PUT | `/deals/{id}/positions/{pid}/production-term` | КД, ЗГД | Срок производства: `value`, `unit` (`calendar_days`/`working_days`/`weeks`/`months`/`date`), `fixed_date`, `start_event`, обязательный `comment`; фиксирует срок (автоматические источники и менеджер не перезаписывают); после виз — визы сбрасываются |
 | GET | `/deals/{id}/positions/{pid}/production-term/history` | все с доступом к сделке | Текущий срок (откуда, кем, когда) и история изменений |
 | PUT | `/deals/{id}/logistics/positions/{pid}` | логист | Статьи позиции, код ТН ВЭД (ставки из справочника; ручная ставка — с комментарием), утильсбор, сертификация |
