@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
-import { STATUS_TITLES, type Deal, type Me } from "../types";
+import { STATUS_TITLES, type Batch, type Deal, type Me } from "../types";
 import TechParamsView from "../components/TechParamsView";
 import SpecTable from "../components/SpecTable";
 import { UndoButton, useUndoHistory } from "../undo";
@@ -17,11 +17,34 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const [hs, setHs] = useState<{ code: string; description: string; duty_pct: number; vat_pct: number; certification: string[] }[]>([]);
   const batches = deal.batches || [];
   const positions = deal.positions || [];
-  const [batch, setBatch] = useState({ name: `Партия ${batches.length + 1}`, route: "завод → Маньчжурия → Забайкальск → пункт поставки", transport_units: 1, transit_days: 14, customs_days: 5, rf_delivery_days: 5, border_planned: "", allocation: "cost",
+  const emptyBatch = () => ({ name: `Партия ${batches.length + 1}`, route: "завод → Маньчжурия → Забайкальск → пункт поставки", transport_units: 1, transit_days: 14, customs_days: 5, rf_delivery_days: 5, border_planned: "", allocation: "cost",
     intl_freight: 0, intl_currency: "CNY", insurance_pct: 0.3, broker_rub: 0, rf_delivery_rub: 0, comment_freight: "", comment_broker: "", comment_rf: "", d2d: true, d2d_amount: 0, d2d_currency: "CNY" });
+  // правка сохранённой партии: значения — в ту же форму, сохранение обновляет партию
+  const batchForm = (b: Batch) => {
+    const it = (b.items || {}) as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; const d = it.door_to_door as Money | null | undefined;
+    const cm = (it.comments || {}) as Record<string, string>;
+    return { name: b.name, route: b.route, transport_units: b.transport_units, transit_days: b.transit_days, customs_days: b.customs_days, rf_delivery_days: b.rf_delivery_days ?? 5,
+      border_planned: b.border_planned || "", allocation: b.allocation || "cost", intl_freight: fr?.amount || 0, intl_currency: fr?.currency || "CNY",
+      insurance_pct: (it.insurance_pct as number | null) ?? 0, broker_rub: Number(it.broker_rub || 0), rf_delivery_rub: Number(it.rf_delivery_rub || 0),
+      comment_freight: cm.intl_freight || cm.door_to_door || "", comment_broker: cm.broker_rub || "", comment_rf: cm.rf_delivery_rub || "",
+      d2d: !!d?.amount || !(fr?.amount || it.rf_delivery_rub), d2d_amount: d?.amount || 0, d2d_currency: d?.currency || "CNY" };
+  };
+  const [editId, setEditId] = useState<string | null>(null);
+  const [batch, setBatch] = useState(emptyBatch);
+  const [batchSaved, setBatchSaved] = useState(() => JSON.stringify(emptyBatch()));
+  const freePositions = () => positions.filter((p) => !p.batch_id).map((p) => p.id);
+  const [posSel, setPosSel] = useState<string[]>(() => (batches.length ? freePositions() : positions.map((p) => p.id)));
   const [borderPct, setBorderPct] = useState(10);   // единая стоимость доставки: доля до границы РФ (настройка КД / ЗГД)
   useEffect(() => { api.get<{ door_to_door_border_pct: number }>(`/api/deals/${deal.id}/logistics/defaults`).then((r) => setBorderPct(r.door_to_door_border_pct)).catch(() => undefined); }, [deal.id]);
   const [bc, setBc] = useState<Record<string, string>>({});   // комментарии к остальным полям партии
+  const startEdit = (b: Batch) => {
+    const f = batchForm(b); setEditId(b.id); setBatch(f); setBatchSaved(JSON.stringify(f));
+    setBc(Object.fromEntries(Object.entries(((b.items || {}) as { comments?: Record<string, string> }).comments || {}).filter(([k]) => !["intl_freight", "door_to_door", "broker_rub", "rf_delivery_rub"].includes(k))));
+    setPosSel(positions.filter((p) => p.batch_id === b.id).map((p) => p.id));
+  };
+  const resetBatchForm = () => { const f = emptyBatch(); setEditId(null); setBatch(f); setBatchSaved(JSON.stringify(f)); setBc({}); setPosSel(freePositions()); };
+  const batchCost = batch.d2d ? batch.d2d_amount : batch.intl_freight + batch.rf_delivery_rub + batch.broker_rub;
+  const batchDirty = JSON.stringify(batch) !== batchSaved;
   const bcc = (k: string) => <input value={bc[k] || ""} placeholder="комментарий" onChange={(e) => setBc({ ...bc, [k]: e.target.value })} />;
   const [forms, setForms] = useState<Record<string, PosForm>>(() => Object.fromEntries(positions.map((p) => {
     const l = (p.logistics || {}) as Partial<PosForm>;
@@ -44,27 +67,46 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const history = useUndoHistory({ forms, batch, bc }, (st) => { setForms(st.forms); setBatch(st.batch); setBc(st.bc); }, deal.id);
   const onErr = (e: unknown) => { const d = (e as ApiError).detail as { message?: string; check?: { history_avg: number; deviation_pct: number } }; setErr((d?.message || (e as Error).message) + (d?.check ? ` (среднее по истории ${fmtRub(d.check.history_avg)}, отклонение ${d.check.deviation_pct} %)` : "")); };
 
-  async function createBatch() {
+  async function saveBatch(silent = false): Promise<boolean> {
+    if (!posSel.length && !silent && !window.confirm("В партии нет позиций — её расходы не попадут в себестоимость. Сохранить всё равно?")) return false;
     try {
-      await api.post(`/api/deals/${deal.id}/logistics/batches`, { name: batch.name, route: batch.route, transport_units: batch.transport_units, transit_days: batch.transit_days, customs_days: batch.customs_days,
+      const body = { name: batch.name, route: batch.route, transport_units: batch.transport_units, transit_days: batch.transit_days, customs_days: batch.customs_days,
         rf_delivery_days: batch.rf_delivery_days, border_planned: batch.border_planned || null, allocation: batch.allocation,
         items: { intl_freight: { amount: batch.d2d ? 0 : batch.intl_freight, currency: batch.intl_currency }, insurance_pct: batch.insurance_pct, broker_rub: batch.broker_rub,
           rf_delivery_rub: batch.d2d ? 0 : batch.rf_delivery_rub, door_to_door: batch.d2d ? { amount: batch.d2d_amount, currency: batch.d2d_currency } : null,
-          comments: { ...bc, intl_freight: batch.comment_freight, broker_rub: batch.comment_broker, rf_delivery_rub: batch.comment_rf } },
-        position_ids: positions.filter((p) => !p.batch_id).map((p) => p.id) });
-      setErr(""); reload();
-    } catch (e) { onErr(e); }
+          comments: { ...bc, intl_freight: batch.comment_freight, door_to_door: batch.comment_freight, broker_rub: batch.comment_broker, rf_delivery_rub: batch.comment_rf } },
+        position_ids: posSel };
+      if (editId) await api.patch(`/api/deals/${deal.id}/logistics/batches/${editId}`, body);
+      else await api.post(`/api/deals/${deal.id}/logistics/batches`, body);
+      setBatchSaved(JSON.stringify(batch)); setErr("");
+      if (!silent) { setEditId(null); reload(); }
+      return true;
+    } catch (e) { onErr(e); return false; }
   }
-  async function savePos(pid: string) {
+  async function deleteBatch(b: Batch) {
+    if (!window.confirm(`Удалить партию «${b.name}»? Её позиции станут нераспределёнными.`)) return;
+    try { await api.del(`/api/deals/${deal.id}/logistics/batches/${b.id}`); if (editId === b.id) resetBatchForm(); setErr(""); reload(); } catch (e) { onErr(e); }
+  }
+  async function savePos(pid: string, silent = false): Promise<boolean> {
     const f = forms[pid];
     try {
       await api.put(`/api/deals/${deal.id}/logistics/positions/${pid}`, { ...f, duty_pct: f.duty_pct === "" ? null : Number(f.duty_pct), vat_pct: f.vat_pct === "" ? null : Number(f.vat_pct), volume_m3: f.volume_m3 === "" ? null : Number(f.volume_m3),
         util_applies: utilOn(pid), util_base_rate_rub: utilBase(pid), util_coefficient: utilCoef(pid), util_fee_rub: utilOn(pid) ? utilSum(pid) : 0 });
-      setErr(""); reload();
-    } catch (e) { onErr(e); }
+      setDirtyPos((d) => d.filter((x) => x !== pid)); setErr("");
+      if (!silent) reload();
+      return true;
+    } catch (e) { onErr(e); return false; }
   }
-  async function complete() {
-    try { await api.post(`/api/deals/${deal.id}/logistics/complete`); setErr(""); reload(); } catch (e) { onErr(e); }
+  // «Отправить далее»: сначала сохраняем то, что введено, но не сохранено (партия и позиции), иначе в расчёт уйдут нули
+  async function complete(noDeliveryCost = false) {
+    if (batchDirty && batchCost > 0 && !(await saveBatch(true))) return;
+    for (const pid of dirtyPos) if (!(await savePos(pid, true))) return;
+    try { await api.post(`/api/deals/${deal.id}/logistics/complete`, { no_delivery_cost: noDeliveryCost }); setErr(""); reload(); }
+    catch (e) {
+      const d = (e as ApiError).detail as { message?: string; confirm?: string } | undefined;
+      if (d?.confirm === "no_delivery_cost" && window.confirm(`${d.message}\n\nОтправить на расчёт без стоимости доставки?`)) return complete(true);
+      onErr(e); reload();
+    }
   }
   // утилизационный сбор: начисляется (по справочнику ТН ВЭД, можно изменить) → базовая ставка × коэффициент
   const utilOn = (pid: string) => forms[pid].util_applies ?? (uref[pid]?.applies_by_hs ?? (forms[pid].util_fee_rub > 0));
@@ -81,32 +123,35 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const [hsInfo, setHsInfo] = useState<Record<string, { code: string; source: string | null; description: string; note?: string; error?: string; links?: { title: string; url: string }[]; duty_pct?: number; vat_pct?: number }>>({});
   const lookupHs = (pid: string, code: string) => api.get<(typeof hsInfo)[string]>(`/api/refs/hs/lookup?code=${encodeURIComponent(code)}`).then((r) => {
     setHsInfo((h) => ({ ...h, [pid]: r }));
+    if (r.description) setDirtyPos((d) => (d.includes(pid) ? d : [...d, pid]));
     if (r.description) setForms((fs) => ({ ...fs, [pid]: { ...fs[pid], hs_code: r.code, hs_description: fs[pid].hs_description || r.description,
       ...(r.source === "reference" ? { duty_pct: String(r.duty_pct), vat_pct: String(r.vat_pct) } : {}) } }));
     loadUref(pid, r.code);
   }).catch(() => undefined);
-  const upd = (pid: string, patch: Partial<PosForm>) => setForms({ ...forms, [pid]: { ...forms[pid], ...patch } });
+  const [dirtyPos, setDirtyPos] = useState<string[]>([]);   // позиции с несохранёнными изменениями
+  const upd = (pid: string, patch: Partial<PosForm>) => { setForms({ ...forms, [pid]: { ...forms[pid], ...patch } }); setDirtyPos((d) => (d.includes(pid) ? d : [...d, pid])); };
 
   return (
     <>
       {err && <div className="alert error">{err}</div>}
       <div className="card row" style={{ justifyContent: "space-between" }}>
         <span>Статус: <span className="badge accent">{STATUS_TITLES[deal.status] || deal.status}</span> · логистика: {deal.logistics_done ? <span className="badge ok">рассчитана, передана далее</span> : <span className="badge warn">в работе</span>}</span>
-        {canEdit && !deal.logistics_done && <button className="btn" onClick={complete}>Отправить далее на расчёт</button>}
+        {canEdit && !deal.logistics_done && <button className="btn" onClick={() => complete()}>Отправить далее на расчёт</button>}
       </div>
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Доставка</h2>
-        <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление / по РФ, дн</th><th>CMR план / факт</th><th>Доставка до границы РФ</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Позиции</th></tr></thead>
+        <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление / по РФ, дн</th><th>CMR план / факт</th><th>Доставка до границы РФ</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Позиции</th>{canEdit && <th />}</tr></thead>
           <tbody>{batches.map((b) => { const it = b.items as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; const d2d = it.door_to_door as Money | null | undefined; return (
             <tr key={b.id}><td>{b.name}</td><td>{b.route}</td><td className="num">{b.transport_units}</td><td className="num">{b.transit_days} / {b.customs_days} / {b.rf_delivery_days ?? 5}</td><td>{fmtDate(b.border_planned)} / {b.border_actual ? <b>{fmtDate(b.border_actual)}</b> : "—"}</td>
               {d2d?.amount ? <td colSpan={1} title="единая стоимость завод → клиент">{fmtRub(d2d.amount * borderPct / 100)} {d2d.currency} <span className="muted">({borderPct} % от {fmtRub(d2d.amount)})</span></td>
                 : <td>{fr ? `${fmtRub(fr.amount)} ${fr.currency}` : "—"}</td>}
               <td>{it.insurance_pct != null ? `${it.insurance_pct} %` : "—"}</td><td className="num">{fmtRub(it.broker_rub as number)}</td>
               <td className="num">{d2d?.amount ? <>{fmtRub(d2d.amount * (100 - borderPct) / 100)} {d2d.currency} <span className="muted">({100 - borderPct} %)</span></> : fmtRub(it.rf_delivery_rub as number)}</td>
-              <td>{positions.filter((p) => p.batch_id === b.id).map((p) => designation(p)).join(", ")}</td></tr>); })}</tbody></table>
+              <td>{positions.filter((p) => p.batch_id === b.id).map((p) => designation(p)).join(", ") || <span className="badge warn">нет позиций — расходы не учитываются</span>}</td>
+              {canEdit && <td><button className="btn ghost" onClick={() => startEdit(b)}>изменить</button> <button className="btn ghost" onClick={() => deleteBatch(b)}>удалить</button></td>}</tr>); })}</tbody></table>
         {canEdit && (
           <>
-            <h3 style={{ marginBottom: 4 }}>Новая партия</h3>
+            <h3 style={{ marginBottom: 4 }}>{editId ? `Изменение партии «${batches.find((b) => b.id === editId)?.name || batch.name}»` : "Новая партия"}</h3>
             <SpecTable refTitle="Примечание" sections={[
               { title: "Маршрут и сроки", rows: [
                 { key: "name", name: "Название партии", filled: !!batch.name, required: true, value: <input value={batch.name} onChange={(e) => setBatch({ ...batch, name: e.target.value })} />, comment: bcc("name") },
@@ -141,7 +186,13 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
                 ]),
               ] },
             ]} />
-            <div className="row" style={{ marginTop: 8 }}><button className="btn secondary" onClick={createBatch}>Создать партию (нераспределённые позиции)</button><UndoButton h={history} /></div>
+            <div style={{ marginTop: 8 }}><b>Позиции в партии</b> <span className="muted">(позиция из другой партии перейдёт в эту)</span>
+              <div className="row" style={{ flexWrap: "wrap", gap: 12 }}>{positions.map((p) => (
+                <label key={p.id}><input type="checkbox" checked={posSel.includes(p.id)} onChange={(e) => setPosSel(e.target.checked ? [...posSel, p.id] : posSel.filter((x) => x !== p.id))} />{" "}
+                  {designation(p)}{p.batch_id && p.batch_id !== editId ? <span className="muted"> ({batches.find((b) => b.id === p.batch_id)?.name})</span> : null}</label>))}</div></div>
+            <div className="row" style={{ marginTop: 8 }}><button className="btn secondary" onClick={() => saveBatch()}>{editId ? "Сохранить партию" : "Создать партию"}</button>
+              {editId && <button className="btn ghost" onClick={resetBatchForm}>Отменить правку</button>}<UndoButton h={history} />
+              {batchDirty && batchCost > 0 && <span className="badge warn">не сохранено — сохранится при «Отправить далее»</span>}</div>
           </>
         )}
       </div>
@@ -220,7 +271,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
           </div>
         );
       })}
-      {canEdit && <div className="row"><button className="btn" onClick={complete}>Отправить далее на расчёт</button><span className="muted">все позиции без партии войдут в первую партию</span></div>}
+      {canEdit && <div className="row"><button className="btn" onClick={() => complete()}>Отправить далее на расчёт</button><span className="muted">несохранённые данные партии и позиций сохранятся; позиции без партии войдут в первую партию</span></div>}
     </>
   );
 }
