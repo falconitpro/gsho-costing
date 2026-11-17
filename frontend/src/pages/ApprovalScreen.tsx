@@ -173,13 +173,13 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
           {err && <div className="alert error">{err}</div>}
         </div>
 
-        <div className="tabs">
-          <button className={tab === "cost" ? "active" : ""} onClick={() => setTab("cost")}>Себестоимость 15 × 3</button>
-          {canTerms && calc.payment_terms && <button className={tab === "terms" ? "active" : ""} onClick={() => setTab("terms")}>Условия оплаты и сроки</button>}
-          <button className={tab === "cashflow" ? "active" : ""} onClick={() => setTab("cashflow")}>Денежный поток</button>
-          {can(me, "kp_images_select", 2) && <button className={tab === "kp" ? "active" : ""} onClick={() => setTab("kp")}>Подача КП</button>}
-          <button className={tab === "fx" ? "active" : ""} onClick={() => setTab("fx")}>Курсы и прогноз</button>
-          <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>Комментарии и история</button>
+        <div className="tabs tabs-compact">
+          <button className={tab === "cost" ? "active" : ""} onClick={() => setTab("cost")}>Себестоимость</button>
+          {canTerms && calc.payment_terms && <button className={tab === "terms" ? "active" : ""} onClick={() => setTab("terms")}>Условия оплаты<br />и сроки</button>}
+          <button className={tab === "cashflow" ? "active" : ""} onClick={() => setTab("cashflow")}>Денежный<br />поток</button>
+          {can(me, "kp_images_select", 2) && <button className={tab === "kp" ? "active" : ""} onClick={() => setTab("kp")}>Подача<br />КП</button>}
+          <button className={tab === "fx" ? "active" : ""} onClick={() => setTab("fx")}>Курсы<br />и прогноз</button>
+          <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>Комментарии<br />и история</button>
           {isCD && <button className={tab === "competitors" ? "active" : ""} onClick={() => setTab("competitors")}>Конкуренты</button>}
         </div>
 
