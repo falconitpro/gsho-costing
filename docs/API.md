@@ -190,3 +190,9 @@
 - `POST .../logistics/quotes/choose/decision` — ЗГД: `{approve, comment}`; отказ без причины — 422.
 - `PUT /api/deals/{id}/negotiation/steps/{sid}/review` — «на рассмотрении клиента»: `{remind_on, assignee: manager|me, note}` → задача-напоминание (D-076).
 - `POST /api/deals/{id}/negotiation/steps/{sid}/review/close` — `{client_answer}`; не на рассмотрении — 409.
+
+## Файлы: просмотр и скачивание (D-077)
+
+- `GET /api/files/{path}?view=1` — просмотр: изображения / видео inline; PDF и Word / Excel — `&info=1` → `{pages}`, `&page=N` → страница PNG. Неподдерживаемый тип — 415.
+- `GET /api/files/{path}` — скачивание: группа `file_download` или одобренный запрос (24 ч), иначе 403 `{code: "download_restricted"}`.
+- `POST /api/files-download-requests` — `{path, reason}` → 201 `{id, status}`; `GET /api/files-download-requests?status=pending` (ЗГД — все, остальные — свои); `POST /api/files-download-requests/{id}` — ЗГД: `{approve, comment}`.

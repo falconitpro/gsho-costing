@@ -1,3 +1,4 @@
+import DownloadRequests from "../components/DownloadRequests";
 import BriefingBlock, { type Briefing } from "../components/BriefingBlock";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -230,6 +231,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
           {d.quick[0] && <button className="btn add" onClick={() => nav(d.quick[0].url)}>{d.quick[0].title}</button>}
         </div>
       </header>
+      {me.roles.some((r) => r.code === "gd") && <DownloadRequests />}
       {visible.includes("kpis") && (
         <section className="wp-kpis">{d.kpis.map((k) => (
           <button key={k.title} type="button" className={`wp-kpi ${k.url ? "link" : ""}`} title={k.url ? "открыть" : undefined}

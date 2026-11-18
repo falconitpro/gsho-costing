@@ -184,11 +184,10 @@ def overdue_report(date_from: Optional[date] = None, date_to: Optional[date] = N
 BLOCKED_SCAN = {"infected", "error", "pending"}   # 04 §8: заражённые и непроверенные новые файлы не выдаются (D-049)
 
 
-@router.get("/files/{path:path}")
-def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    s = get_settings()
-    if s.storage_provider not in ("local", "s3"):
-        raise HTTPException(404, "Файлы выдаются ссылками хранилища")
+PREVIEW_OFFICE = {".docx", ".doc", ".xlsx", ".xls", ".pptx", ".odt", ".ods", ".rtf"}
+
+
+def _file_access(db: Session, path: str, user: CurrentUser):
     att = db.scalar(select(Attachment).where(Attachment.storage_path == path))
     ver = None if att else db.scalar(select(DealVersion).where((DealVersion.excel_path == path) | (DealVersion.excel_manager_path == path) | (DealVersion.kp_path == path)))
     if att is None and ver is None:
@@ -203,18 +202,48 @@ def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depen
         raise HTTPException(403, "Папка «04 Расчёт себестоимости» недоступна для роли")
     if att is not None and att.scan_status in BLOCKED_SCAN:
         raise HTTPException(410, "Файл заблокирован проверкой безопасности — обратитесь к администратору")
+    return att, ver, deal
+
+
+def can_download(db: Session, user: CurrentUser, path: str) -> bool:
+    """Скачивание (D-077): право группы «Скачивание файлов сделок» или одобренный запрос (действует 24 часа)."""
+    if user.can("file_download"):
+        return True
+    from ..models import FileDownloadRequest
+    now = datetime.now(timezone.utc)
+    return db.scalar(select(FileDownloadRequest.id).where(FileDownloadRequest.user_id == user.id, FileDownloadRequest.storage_path == path,
+                                                          FileDownloadRequest.status == "approved", FileDownloadRequest.expires_at > now).limit(1)) is not None
+
+
+@router.get("/files/{path:path}")
+def get_file(path: str, view: bool = False, page: int = 0, info: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Файл сделки. view=1 — просмотр в системе (изображения, PDF, видео; Word / Excel — как PDF) всем, кто видит сделку;
+    без view — скачивание: только с правом «Скачивание файлов сделок» или по одобренному запросу (D-077)."""
+    s = get_settings()
+    if s.storage_provider not in ("local", "s3"):
+        raise HTTPException(404, "Файлы выдаются ссылками хранилища")
+    att, ver, deal = _file_access(db, path, user)
+    name = att.file_name if att else os.path.basename(path)
+    ext = os.path.splitext(name or path)[1].lower()
+    from ..core.files import INLINE_TYPES
+    if view and ext not in INLINE_TYPES and ext not in PREVIEW_OFFICE:
+        raise HTTPException(415, "Просмотр этого типа файла в системе недоступен — запросите скачивание")
+    if not view and not can_download(db, user, path):
+        raise HTTPException(403, {"code": "download_restricted", "message": "Скачивание файлов закрыто для вашей роли — откройте просмотр или запросите скачивание"})
     # журнал скачиваний (core/download_audit.py): объект и сделка — без пути хранения и имени файла
-    note(entity_type="attachment" if att else "deal_version", entity_id=att.id if att else ver.id, deal_id=deal.id)
+    note(entity_type="attachment" if att else "deal_version", entity_id=att.id if att else ver.id, deal_id=deal.id, inline=True if view else None)
+    if view and (ext in PREVIEW_OFFICE or ext == ".pdf"):
+        # PDF и Word / Excel — постранично картинками (встраивать файлы во фреймы политика безопасности не даёт)
+        return _pdf_pages(path, name, ext, s, page, info)
     if s.storage_provider == "s3":
         # права проверены выше — только теперь короткая ссылка (5 минут); в ответе и журнале её нет, кроме Location
         from fastapi.responses import RedirectResponse
         from .. import adapters
-        name = att.file_name if att else os.path.basename(path)
         note(presigned=True)
-        url = adapters.storage(s).presigned(path, name, inline=False)
+        url = adapters.storage(s).presigned(path, name, inline=view and ext in INLINE_TYPES)
         return RedirectResponse(url, status_code=307, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
     full = os.path.join(s.storage_local_root, path)
-    if ver is not None and path in (ver.excel_path, ver.excel_manager_path):
+    if not view and ver is not None and path in (ver.excel_path, ver.excel_manager_path):
         # Excel версии собирается заново по сохранённому расчёту (цифры те же) — в текущем формате подписей
         from ..services.deal_service import rebuild_version_excel
         try:
@@ -225,7 +254,139 @@ def get_file(path: str, db: Session = Depends(get_db), user: CurrentUser = Depen
             pass
     if not os.path.isfile(full):
         raise HTTPException(404)
-    return file_response(full, os.path.basename(full), inline=False)
+    return file_response(full, name or os.path.basename(full), inline=view)
+
+
+def _local_copy(path: str, name: str, s) -> str:
+    import shutil
+    import tempfile
+    from .. import adapters
+    local = os.path.join(tempfile.mkdtemp(), name or os.path.basename(path))
+    if s.storage_provider == "s3":
+        adapters.storage(s).download(path, local)
+    else:
+        src = os.path.join(s.storage_local_root, path)
+        if not os.path.isfile(src):
+            raise HTTPException(404)
+        shutil.copy(src, local)
+    return local
+
+
+def _pdf_pages(path: str, name: str, ext: str, s, page: int, info: bool):
+    """Просмотр PDF / Word / Excel: число страниц (info=1) или страница картинкой PNG; результат кешируется во временной папке."""
+    import hashlib
+    import tempfile
+    import pymupdf
+    from fastapi.responses import JSONResponse
+    key = hashlib.sha256(path.encode()).hexdigest()[:24]
+    root = os.path.join(tempfile.gettempdir(), "gsho-preview", key)
+    pdf = os.path.join(root, "doc.pdf")
+    if not os.path.isfile(pdf):
+        local = _local_copy(path, name, s)
+        if ext != ".pdf":
+            from .pricing import _to_pdf
+            try:
+                local = _to_pdf(local)
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(415, "Не удалось подготовить просмотр — запросите скачивание")
+        os.makedirs(root, exist_ok=True)
+        os.replace(local, pdf)
+    try:
+        doc = pymupdf.open(pdf)
+    except Exception:
+        raise HTTPException(415, "Файл не открывается для просмотра")
+    n = doc.page_count
+    if info:
+        doc.close()
+        return JSONResponse({"pages": n}, headers={"Cache-Control": "no-store"})
+    p = min(max(page, 1), max(n, 1))
+    png = os.path.join(root, f"p{p}.png")
+    if not os.path.isfile(png):
+        pg = doc.load_page(p - 1)
+        zoom = min(2.0, 1600 / max(pg.rect.width, 1))
+        pg.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom)).save(png)
+    doc.close()
+    return file_response(png, f"{os.path.splitext(name or 'file')[0]}_стр{p}.png", inline=True)
+
+
+class DownloadRequestIn(BaseModel):
+    path: str
+    reason: str = ""
+
+
+@router.post("/files-download-requests", status_code=201)
+def request_download(body: DownloadRequestIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Запрос на скачивание файла, когда скачивание закрыто для роли: решает ЗГД (или тот, у кого «Уровни доступа»)."""
+    from ..models import FileDownloadRequest, User
+    from ..services.deal_service import notify
+    att, ver, deal = _file_access(db, body.path, user)
+    if can_download(db, user, body.path):
+        return {"status": "approved", "already": True}
+    open_ = db.scalar(select(FileDownloadRequest).where(FileDownloadRequest.user_id == user.id, FileDownloadRequest.storage_path == body.path,
+                                                       FileDownloadRequest.status == "pending"))
+    if open_ is not None:
+        return {"id": open_.id, "status": "pending"}
+    name = att.file_name if att else os.path.basename(body.path)
+    r = FileDownloadRequest(user_id=user.id, deal_id=deal.id, storage_path=body.path, file_name=name, reason=body.reason.strip()[:500])
+    db.add(r)
+    db.flush()
+    for u in db.scalars(select(User).where(User.is_active.is_(True))).all():
+        roles = set(u.roles or [])
+        if "gd" in roles:
+            notify(db, deal, u.id, "file_download_request", None, f"{user.display_name or user.email} просит скачать файл «{name}» (сделка {deal.number})"
+                   + (f": {r.reason}" if r.reason else ""))
+    db.commit()
+    return {"id": r.id, "status": "pending"}
+
+
+@router.get("/files-download-requests")
+def list_download_requests(status: str = "pending", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from ..models import FileDownloadRequest, User
+    q = select(FileDownloadRequest).order_by(FileDownloadRequest.requested_at.desc()).limit(200)
+    if not (user.has(Role.GD) or user.can("access_admin", 2)):
+        q = q.where(FileDownloadRequest.user_id == user.id)
+    if status:
+        q = q.where(FileDownloadRequest.status == status)
+    names = {u.id: u.display_name or u.email for u in db.scalars(select(User)).all()}
+    deals = {}
+    out = []
+    for r in db.scalars(q).all():
+        d = deals.get(r.deal_id) or db.get(Deal, r.deal_id)
+        deals[r.deal_id] = d
+        out.append({"id": r.id, "user": names.get(r.user_id, ""), "deal_id": r.deal_id, "deal_number": d.number if d else "", "file_name": r.file_name,
+                    "path": r.storage_path, "reason": r.reason, "status": r.status, "requested_at": r.requested_at.isoformat() if r.requested_at else None,
+                    "decided_by": names.get(r.decided_by or "", ""), "expires_at": r.expires_at.isoformat() if r.expires_at else None})
+    return out
+
+
+class DownloadDecisionIn(BaseModel):
+    approve: bool
+    comment: str = ""
+
+
+@router.post("/files-download-requests/{rid}")
+def decide_download(rid: str, body: DownloadDecisionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from datetime import timedelta
+    from ..models import FileDownloadRequest
+    from ..services.deal_service import notify
+    if not (user.has(Role.GD) or user.can("access_admin", 2)):
+        raise HTTPException(403, "Запросы на скачивание решает ЗГД")
+    r = db.get(FileDownloadRequest, rid)
+    if r is None:
+        raise HTTPException(404)
+    if r.status != "pending":
+        raise HTTPException(409, "Запрос уже рассмотрен")
+    now = datetime.now(timezone.utc)
+    r.status, r.decided_by, r.decided_at, r.comment = ("approved" if body.approve else "declined"), user.id, now, body.comment.strip()[:500]
+    r.expires_at = now + timedelta(hours=24) if body.approve else None
+    audit(db, user.id, r.deal_id, "attachment", r.id, "download_" + r.status, comment=r.comment or None)
+    deal = db.get(Deal, r.deal_id)
+    notify(db, deal, r.user_id, "file_download_decision", None,
+           f"Скачивание файла «{r.file_name}» {'разрешено на 24 часа' if body.approve else 'отклонено'}" + (f": {r.comment}" if r.comment else ""))
+    db.commit()
+    return {"id": r.id, "status": r.status, "expires_at": r.expires_at.isoformat() if r.expires_at else None}
 
 
 # ------------------------------------------------------------------ план vs факт

@@ -1,3 +1,4 @@
+import FilePreviewHost from "./components/FilePreview";
 import AssistantDrawer from "./components/AssistantDrawer";
 import { SupportAdmin, SupportButton, SupportList, SupportTicketRoute } from "./pages/SupportPage";
 import { useEffect, useState } from "react";
@@ -161,6 +162,7 @@ export default function App() {
       </header>
       <FloatingScrollbar />
       <StepUpDialog />
+      {me && <FilePreviewHost me={me} />}
       {me && perm("assistant_use") && <AssistantDrawer open={aiOpen} onClose={() => setAiOpen(false)} />}
       <SessionExpiryWarning />
       <main>
