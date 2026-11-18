@@ -12,7 +12,15 @@ type UtilRef = { base_rate_rub: number; coefficient: number | null; rule: { hs_p
 
 /** Блок логиста (раздел 5): партии, статьи по позициям, ТН ВЭД, проверка по истории с комментарием. */
 export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: Me; reload: () => void }) {
-  const canEdit = me.roles.some((r) => r.code === "logistician" || r.code === "gd") && ["logistics_calc", "service_calc", "rework"].includes(deal.status);
+  const hasRole = me.roles.some((r) => r.code === "logistician" || r.code === "gd");
+  const atStage = ["logistics_calc", "service_calc", "rework"].includes(deal.status);
+  const canEdit = hasRole && atStage;
+  // почему блок только для чтения — словами, с тем, что сделать (D-072)
+  const lockReason = canEdit ? "" : !atStage
+    ? deal.status === "draft"
+      ? "Сделка ещё в черновике. Блок логистики открывается, когда менеджер нажмёт «Отправить на расчёт» (вкладка «Позиции»): для этого в позициях должны быть заполнены поля «перед расчётом» — по умолчанию завод, модель, количество, цена и валюта."
+      : `Сделка на этапе «${STATUS_TITLES[deal.status] || deal.status}» — логистика уже передана дальше. Чтобы поправить, КД или ЗГД возвращает сделку на доработку («Вернуть на доработку»), после этого блок снова открыт.`
+    : "Заполнять логистику могут логист и ЗГД. У вашей учётной записи этих ролей нет — войдите под нужной учётной записью или попросите администратора добавить роль.";
   const [err, setErr] = useState("");
   const [hs, setHs] = useState<{ code: string; description: string; duty_pct: number; vat_pct: number; certification: string[] }[]>([]);
   const batches = deal.batches || [];
@@ -133,6 +141,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
 
   return (
     <>
+      {lockReason && <div className="alert warn" role="status" style={{ marginBottom: 10 }}><b>Блок логистики только для просмотра.</b> {lockReason}</div>}
       {err && <div className="alert error">{err}</div>}
       <div className="card row" style={{ justifyContent: "space-between" }}>
         <span>Статус: <span className="badge accent">{STATUS_TITLES[deal.status] || deal.status}</span> · логистика: {deal.logistics_done ? <span className="badge ok">рассчитана, передана далее</span> : <span className="badge warn">в работе</span>}</span>
