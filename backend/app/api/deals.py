@@ -137,8 +137,16 @@ def list_deals(status: Optional[str] = None, archived: bool = False, db: Session
             stages.setdefault(st.deal_id, []).append(st)
     today = _date.today()
     fin = user.can("finance_analytics")   # суммы в списке сделок — только ФД, КД, ЗГД
+    # что сделать мне по сделке и к какому сроку (D-073): открытые задачи на меня или на мою роль без исполнителя
+    from ..models import Task as _Task
+    my_tasks: dict[str, list] = {}
+    ids = [d.id for d in deals]
+    if ids:
+        for t in db.scalars(select(_Task).where(_Task.deal_id.in_(ids), _Task.done_at.is_(None))).all():
+            if t.assignee_id == user.id or (t.assignee_id is None and t.role in {r.value for r in user.roles}):
+                my_tasks.setdefault(t.deal_id, []).append(t)
     for d in deals:
-        row = serialize(d, exclude={"client_payments", "bank_guarantee", "operating_conditions", "scenario_override"})
+        row = serialize(d, exclude={"client_payments", "bank_guarantee", "operating_conditions", "scenario_override", "logistics_info"})
         row["client_name"] = d.client.name if d.client else None
         row["status_detail"] = status_detail(d)
         row["manager_name"] = users.get(d.manager_id, "")
@@ -150,6 +158,8 @@ def list_deals(status: Optional[str] = None, archived: bool = False, db: Session
         # для сводной таблицы: наименование и количество отдельными столбцами, построчно по позициям
         row["equipment_lines"] = [{"qty": int(p.qty or 1), "name": " ".join(x for x in (p.machine_type or "", p.trademark or "", p.model or "") if x).strip()} for p in poss[:4]]
         row["equipment_more"] = max(0, len(poss) - 4)
+        mt = sorted(my_tasks.get(d.id, []), key=lambda t: (t.due or _date.max))
+        row["my_tasks"] = [{"title": t.title, "due": t.due.isoformat() if t.due else None, "overdue": bool(t.due and t.due < today), "block": t.block} for t in mt]
         v = won_variant(d) if d.variants else None
         if fin and v is not None and v.price_rub is not None:
             row["price_rub"] = v.price_rub

@@ -13,7 +13,8 @@ import type { PaymentLine } from "../types";
 type PartsStats = { requests: number; open: number; done: number; last_on: string | null; last_number: string; sum_rub: number | null };
 type Stats = { deals: number; open: number; won: number; lost: number; last_on: string | null; last_number: string; last_status: string; manager: string; sum_won_rub: number | null; parts?: PartsStats };
 type Client = { id: string; name: string; inn: string; is_active?: boolean; address: string; sites: { name: string }[]; contacts: { name: string; email?: string }[];
-  full_name?: string; kpp?: string; ogrn?: string; director?: string; legal_status?: string; okved?: string; registry_checked_at?: string | null; stats?: Stats; requisites_count?: number };
+  full_name?: string; kpp?: string; ogrn?: string; director?: string; legal_status?: string; okved?: string; registry_checked_at?: string | null; stats?: Stats; requisites_count?: number;
+  delivery_addresses?: { id: string; address: string; status: string; deal_number?: string; proposed_at?: string; proposed_by_name?: string }[] };
 type SortKey = "name" | "deals" | "open" | "won" | "sum" | "last" | "preq" | "popen" | "psum" | "plast";
 const NO_PARTS: PartsStats = { requests: 0, open: 0, done: 0, last_on: null, last_number: "", sum_rub: null };
 type Found = { inn: string; name: string; full_name: string; kpp: string; ogrn: string; address: string; director: string; status: string; okved: string;
@@ -225,6 +226,15 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
               <tr><td className="muted">Реестр</td><td>{card.registry_checked_at ? `проверено ${fmtDate(card.registry_checked_at)}` : "не проверялось"}
                 {canCreate && <button className="btn ghost" style={{ marginLeft: 8, padding: "1px 8px" }} onClick={() => api.post(`/api/refs/clients/${card.id}/refresh-registry`).then(() => api.get<Card>(`/api/refs/clients/${card.id}`).then(setCard)).catch((e) => setErr((e as Error).message))}>обновить из реестра</button>}</td></tr>
             </tbody></table>
+            {(card.delivery_addresses || []).length > 0 && <div style={{ marginBottom: 10 }}><b>Адреса доставки</b>
+              <table><tbody>{(card.delivery_addresses || []).map((a) => (
+                <tr key={a.id}><td>{a.address}</td>
+                  <td className="muted" style={{ fontSize: 12 }}>{a.status === "approved" ? <span className="badge ok">утверждён</span> : <span className="badge warn">на утверждении ЗГД</span>}
+                    {a.deal_number && <> · из сделки {a.deal_number}</>}{a.proposed_at && <> · {fmtDate(a.proposed_at)}</>}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{a.status === "pending" && me.roles.some((r) => r.code === "gd") && <>
+                    <button className="btn ghost" style={{ padding: "1px 8px" }} onClick={() => api.post(`/api/refs/clients/${card.id}/delivery-addresses/${a.id}/approve`).then(() => api.get<Card>(`/api/refs/clients/${card.id}`).then(setCard)).catch((e) => setErr((e as Error).message))}>утвердить</button>
+                    <button className="btn ghost" style={{ padding: "1px 8px" }} onClick={() => api.post(`/api/refs/clients/${card.id}/delivery-addresses/${a.id}/reject`).then(() => api.get<Card>(`/api/refs/clients/${card.id}`).then(setCard)).catch((e) => setErr((e as Error).message))}>отклонить</button></>}</td></tr>))}
+              </tbody></table></div>}
             <div className="row" style={{ gap: 24 }}>
               <div className="kpi"><span className="v">{card.funnel.requests}</span><span className="l">запросов</span></div>
               <div className="kpi"><span className="v">{card.funnel.kp_sent}</span><span className="l">КП</span></div>

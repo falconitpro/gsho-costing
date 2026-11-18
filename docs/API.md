@@ -160,3 +160,15 @@
 | GET | `/api/deals/{id}/positions/{pid}/tech-params` | + `section` у строк (разделы опросника) и `req_status` (match / mismatch / none — соответствие значения требованию заказчика), `mismatched` |
 
 Запрос заводу уходит контактам с направлением «Заявки и КП» (почта, WeCom); если таких нет — всем контактам завода. Импорт RFQ в позицию переносит и поля опросника, которых нет в файле завода (пустыми).
+
+## Рабочее место логиста (D-073)
+
+- `GET /api/deals/{id}/logistics/workspace` — выбранные поля по позициям, адреса, логистические компании, история запросов, ответы, `mail_enabled`, `can_edit`, `can_choose_fields`.
+- `PUT /api/deals/{id}/logistics/addresses` — логист / ЗГД: `{pickup: {factory_id: адрес}, delivery_address, propose_to_client}` → `{proposed}`.
+- `GET /api/deals/{id}/logistics/request/file?fmt=xlsx|pdf&answer_days=3` — типовой запрос на расчёт доставки.
+- `POST /api/deals/{id}/logistics/request/send` — `{emails, message, answer_days, manual}`; без почты и без `manual` — 409.
+- `POST /api/deals/{id}/logistics/quotes` (multipart: carrier, amount, currency, transit_days, valid_until, scope, comment, file) → 201; `DELETE .../quotes/{qid}` → 204.
+- `GET/PUT /api/refs/logistics-fields` — поля для логиста (`?deal_id=` — варианты из шаблонов сделки); PUT — ЗГД.
+- `GET/PUT /api/refs/logistics-carriers` — логистические компании; PUT — логист / ЗГД.
+- `POST /api/refs/clients/{cid}/delivery-addresses/{aid}/approve|reject` — ЗГД.
+- `GET /api/deals` — у строк «в обработке» поле `my_tasks: [{title, due, overdue, block}]`.

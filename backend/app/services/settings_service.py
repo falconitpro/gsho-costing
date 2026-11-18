@@ -14,6 +14,8 @@ from .request_fields import FIELDS as _REQUEST_FIELDS   # обязательны
 DEFAULTS: dict[str, Any] = {
     "margin_threshold_pct": 3.0,
     "margin_threshold_scale": [],
+    "logistics_tech_fields": None,     # какие характеристики видит логист (D-073): выбирает ЗГД в блоке логистики
+    "logistics_carriers": [],          # логистические компании для запросов на расчёт (D-073): правят логист и ЗГД
     "request_header_rows": None,       # шапка заявки (D-071): правится редактором шаблонов («Каталог → Шаблоны → Шапка заявки»)
     "request_required_fields": {"create": ["machine_type", "qty"], "calc": ["factory", "model", "qty", "unit_price", "currency"]},   # D-069
     "file_scan_bypass": None,          # ручной обход антивируса (D-068): {until, reason, by, since}; задаётся только экраном безопасности      # порог маржи по стоимости сделки (D-067): [{up_to_rub, pct}], пусто — «Порог маржи» для всех
@@ -340,7 +342,7 @@ GROUP_ORDER = ["Заявка", "Маржа и визы", "Комиссии", "У
 
 
 # служебные ключи: не показываются на экране «Настройки» и не меняются через него (только своим действием с подтверждением)
-INTERNAL_KEYS = {"file_scan_bypass", "request_header_rows"}
+INTERNAL_KEYS = {"file_scan_bypass", "request_header_rows", "logistics_tech_fields", "logistics_carriers"}
 
 
 def meta() -> dict:

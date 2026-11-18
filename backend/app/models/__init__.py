@@ -120,6 +120,8 @@ class Client(TimestampMixin, Base):
     #   legal_address, postal_address, bank_name, bik, account, corr_account, signatory_name, signatory_position, signatory_basis, phone, email, comment}]
     requisites: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)              # архив: клиент используется в сделках — не удаляется, а скрывается
+    # адреса доставки (D-073): [{id, address, status: approved|pending, proposed_by, proposed_at, deal_number, approved_by, approved_at}]
+    delivery_addresses: Mapped[list[dict]] = mapped_column(JSONType, default=list)
 
 
 def designation(trademark: Optional[str], model: Optional[str]) -> str:
@@ -412,6 +414,8 @@ class Deal(TimestampMixin, Base):
     client_payment_wishes: Mapped[str] = mapped_column(Text, default="")             # пожелания клиента по оплате (менеджер)
     bank_guarantee: Mapped[dict] = mapped_column(JSONType, default=dict)             # {mode: one_time_pct|annual_pct|fixed, value} — переопределение КД
     scenario_override: Mapped[dict] = mapped_column(JSONType, default=dict)    # ΔK/Δt сделки (КД, с комментарием)
+    # рабочее место логиста (D-073): {pickup: {factory_id: адрес}, delivery_address, requests: [...], quotes: [...]}
+    logistics_info: Mapped[dict] = mapped_column(JSONType, default=dict)
     logistics_done: Mapped[bool] = mapped_column(Boolean, default=False)
     service_done: Mapped[bool] = mapped_column(Boolean, default=False)
     current_version_no: Mapped[int] = mapped_column(Integer, default=0)

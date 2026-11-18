@@ -567,3 +567,34 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .te-save { position: sticky; bottom: 0; z-index: 5; background: #fff; border-top: 2px solid var(--accent); padding: 8px; margin-top: 10px; display: flex; gap: 10px; align-items: center; }
 .pf-table tr.pf-own td { background: #fbfbf4; }
 .pf-table .pf-sec td .te-acts button { font-weight: 400; }
+
+/* рабочее место логиста (D-073) */
+.lw-h { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; font-size: 15px; }
+.lw-h:first-of-type { margin-top: 0; }
+.lw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px 16px; }
+.lw-sub { font-size: 12px; margin: 4px 0 0; display: flex; gap: 6px; align-items: center; }
+.lw-req { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .lw-req { grid-template-columns: 1fr; } }
+.lw-req-col { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: #fff; }
+.lw-carriers { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 6px; }
+.lw-opt { display: flex; gap: 6px; align-items: center; font-size: 13px; padding: 2px 0; cursor: pointer; }
+.lw-inline { display: flex; gap: 6px; flex-wrap: wrap; }
+.lw-inline input { flex: 1 1 140px; }
+.lw-table { margin-top: 8px; font-size: 13px; }
+.lw-best td { background: var(--accent-soft); }
+.lw-quote-form { display: grid; grid-template-columns: 1.3fr 1.3fr 0.8fr 0.6fr 0.6fr 0.9fr 1.6fr auto auto; gap: 6px; margin-top: 8px; align-items: center; }
+@media (max-width: 1200px) { .lw-quote-form { grid-template-columns: repeat(3, 1fr); } }
+.lw-quote-form input, .lw-quote-form select { min-width: 0; width: 100%; }
+.lw-file { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.lw-fields { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; background: #fafafa; }
+.lw-fields-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin-bottom: 6px; }
+.lw-fields-head .btn { margin-left: auto; padding: 2px 10px; }
+.lw-fields-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 14px; }
+.lw-f { display: flex; flex-direction: column; font-size: 13px; }
+.lw-f .muted { font-size: 11px; }
+.lw-f-empty b { color: var(--muted); font-weight: 400; }
+.lw-f-note { font-style: italic; }
+.lw-modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.lw-modal-body { width: min(640px, 94vw); max-height: 86vh; display: flex; flex-direction: column; }
+.lw-modal-list { overflow: auto; flex: 1; border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.pf-field .lw-sub input[type=checkbox], .lw-opt input[type=checkbox] { width: auto; height: auto; flex: 0 0 auto; }
