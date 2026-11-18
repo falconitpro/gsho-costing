@@ -4,7 +4,7 @@ import type { Variant } from "../types";
 
 type Offer = {
   id: string; variant_id: string | null; competitor_id: string | null; competitor: string; on: string; equipment: string; qty: number;
-  amount: number; currency: string; vat_included: boolean; vat_pct: number; fx_rate: number; fx_on: string | null; source: string; comment: string;
+  amount: number; currency: string; vat_included: boolean; vat_pct: number; fx_rate: number; fx_on: string | null; source: string; comment: string; delivery_term: string; payment_terms: string;
   created_by: string; deleted: boolean; net: number; gross: number; rub_net: number; rub_gross: number; contract_net: number; contract_gross: number;
   our_variant?: string; our_rub_net?: number; diff_rub?: number; diff_pct?: number;
 };
@@ -15,7 +15,7 @@ type CompHist = { competitor: { id: string; name: string }; offers: (Offer & { d
 
 const CURS = ["RUB", "CNY", "USD", "EUR"];
 const ACTION: Record<string, string> = { create: "добавлено", update: "изменено", delete: "удалено" };
-const empty = (vid: string) => ({ competitor: "", on: new Date().toISOString().slice(0, 10), equipment: "", qty: "1", amount: "", currency: "RUB", vat_included: true, vat_pct: "", variant_id: vid, source: "", comment: "" });
+const empty = (vid: string) => ({ competitor: "", on: new Date().toISOString().slice(0, 10), equipment: "", qty: "1", amount: "", currency: "RUB", vat_included: true, vat_pct: "", variant_id: vid, source: "", comment: "", delivery_term: "", payment_terms: "" });
 const pct = (v?: number | null) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(1)} %`);
 
 /** Цены конкурентов (D-066): ввод с НДС / без, валюта, справочно в рублях и валюте контракта; хронология, история правок,
@@ -47,7 +47,8 @@ export default function CompetitorsTab({ dealId, variants }: { dealId: string; v
   const startEdit = (o: Offer) => {
     setEditId(o.id);
     setForm({ competitor: o.competitor, on: o.on, equipment: o.equipment, qty: String(o.qty), amount: String(o.amount), currency: o.currency, vat_included: o.vat_included,
-      vat_pct: String(o.vat_pct), variant_id: o.variant_id || "", source: o.source, comment: o.comment });
+      vat_pct: String(o.vat_pct), variant_id: o.variant_id || "", source: o.source, comment: o.comment,
+      delivery_term: o.delivery_term || "", payment_terms: o.payment_terms || "" });
   };
   async function remove(o: Offer) {
     if (!window.confirm(`Удалить цену конкурента ${o.competitor || "(название неизвестно)"} от ${fmtDate(o.on)}? Запись останется в истории.`)) return;
@@ -83,6 +84,8 @@ export default function CompetitorsTab({ dealId, variants }: { dealId: string; v
         <label className="f">ставка, %<input type="number" value={form.vat_pct} placeholder={String(data.vat_pct)} style={{ width: 60 }} onChange={(e) => setForm({ ...form, vat_pct: e.target.value })} /></label>
         <label className="f">Сравнить с нашим<select value={form.variant_id} onChange={(e) => setForm({ ...form, variant_id: e.target.value })}>
           <option value="">—</option>{variants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
+        <label className="f">Срок поставки<input value={form.delivery_term} placeholder="напр. 90 дней" onChange={(e) => setForm({ ...form, delivery_term: e.target.value })} /></label>
+        <label className="f">Условия оплаты<input value={form.payment_terms} placeholder="напр. 30 % аванс / 70 % по отгрузке" onChange={(e) => setForm({ ...form, payment_terms: e.target.value })} /></label>
         <label className="f">Источник<input value={form.source} placeholder="тендер, клиент…" onChange={(e) => setForm({ ...form, source: e.target.value })} /></label>
         <label className="f">Комментарий<input value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} /></label>
         <button className="btn" disabled={!(amt > 0)} onClick={save}>{editId ? "Сохранить" : "Добавить"}</button>
@@ -104,7 +107,7 @@ export default function CompetitorsTab({ dealId, variants }: { dealId: string; v
               <td>{!o.deleted && <input type="checkbox" checked={sel.includes(o.id)} onChange={(e) => setSel(e.target.checked ? [...sel, o.id] : sel.filter((x) => x !== o.id))} />}</td>
               <td>{fmtDate(o.on)}</td>
               <td>{o.competitor_id ? <a href="#" onClick={(e) => { e.preventDefault(); openComp(o.competitor_id!); }}>{o.competitor}</a> : <span className="muted">название неизвестно</span>}</td>
-              <td>{o.equipment || "—"}{o.qty !== 1 ? ` × ${o.qty}` : ""}{o.source ? <div className="muted">{o.source}</div> : null}{o.comment ? <div className="muted">{o.comment}</div> : null}</td>
+              <td>{o.equipment || "—"}{o.qty !== 1 ? ` × ${o.qty}` : ""}{(o.delivery_term || o.payment_terms) ? <div className="muted">{[o.delivery_term && `срок: ${o.delivery_term}`, o.payment_terms && `оплата: ${o.payment_terms}`].filter(Boolean).join(" · ")}</div> : null}{o.source ? <div className="muted">{o.source}</div> : null}{o.comment ? <div className="muted">{o.comment}</div> : null}</td>
               <td className="num">{fmtRub(o.amount)} {o.currency} <span className="muted">{o.vat_included ? "с НДС" : "без НДС"}</span></td>
               <td className="num">{fmtRub(o.net)} {o.currency}</td><td className="num">{fmtRub(o.gross)} {o.currency}</td>
               <td className="num">{fmtRub(o.rub_net)}{o.currency !== "RUB" && <div className="muted" style={{ fontSize: 11 }}>курс {o.fx_rate.toFixed(4)} на {fmtDate(o.fx_on)}</div>}</td>

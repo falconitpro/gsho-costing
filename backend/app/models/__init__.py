@@ -715,6 +715,31 @@ class KpRevision(Base):
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
+class NegotiationStep(Base):
+    """Шаг торгов (D-074): снижение цены и (или) изменение условий после КП; порождает редакцию КП."""
+    __tablename__ = "negotiation_steps"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    version_id: Mapped[Optional[str]] = mapped_column(String(36))
+    no: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    kind: Mapped[str] = mapped_column(String(20), default="price")                # price | terms | price_terms
+    reason: Mapped[str] = mapped_column(String(30), default="client")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    input: Mapped[dict] = mapped_column(JSONType, default=dict)                   # {variant_id: {mode, basis, currency, value}}
+    terms: Mapped[dict] = mapped_column(JSONType, default=dict)                   # {variant_id: {client_payments, delivery_term}}
+    result: Mapped[dict] = mapped_column(JSONType, default=dict)                  # {variant_id: цены, маржа по сценариям, минимальная цена…}
+    price_before_rub: Mapped[Optional[float]] = mapped_column(Float)
+    price_rub: Mapped[Optional[float]] = mapped_column(Float)
+    margin_pct: Mapped[Optional[float]] = mapped_column(Float)
+    show_discount: Mapped[bool] = mapped_column(Boolean, default=False)
+    kp_revision_id: Mapped[Optional[str]] = mapped_column(String(36))
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    sent_to: Mapped[list] = mapped_column(JSONType, default=list)
+    client_answer: Mapped[str] = mapped_column(Text, default="")
+
+
 class DealVersion(Base):
     """Версия расчёта: создаётся при каждом возврате на доработку и каждом утверждении. Неизменяема."""
     __tablename__ = "deal_versions"
@@ -2248,6 +2273,8 @@ class CompetitorOffer(TimestampMixin, Base):
     fx_rate: Mapped[float] = mapped_column(Float, default=1.0)               # RUB за единицу валюты на дату сведений
     fx_on: Mapped[Optional[date]] = mapped_column(Date)
     source: Mapped[str] = mapped_column(String(255), default="")             # откуда сведения (тендер, клиент, рынок…)
+    delivery_term: Mapped[str] = mapped_column(String(255), default="")      # срок поставки конкурента (D-074)
+    payment_terms: Mapped[str] = mapped_column(String(500), default="")      # условия оплаты конкурента (D-074)
     comment: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[Optional[str]] = mapped_column(String(36))
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
