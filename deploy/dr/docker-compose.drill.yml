@@ -1,0 +1,10 @@
+# Еженедельная проверка резерва (deploy/dr/drill.sh): копия рабочей базы в режиме recovery —
+# без почты, мессенджера, переводчика, внешней модели и фоновых заданий (D-050, recovery-smoke.md §3).
+services:
+  backend:
+    environment:
+      APP_ENV: recovery
+      MAIL_PROVIDER: console
+      MESSENGER_PROVIDER: console
+      TRANSLATOR_PROVIDER: console
+      ASSISTANT_PROVIDER: none

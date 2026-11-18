@@ -1,0 +1,11 @@
+[Unit]
+Description=GSHO DR: переадресация crm → crm2, пока идёт работа на резервном сервере (D-082)
+Documentation=file:///opt/gsho-costing/deploy/dr/README.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/gsho/dr-guard.env
+ExecStart=/bin/bash /opt/gsho-costing/deploy/dr/flag-guard.sh
+TimeoutStartSec=60

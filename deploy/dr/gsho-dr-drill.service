@@ -1,0 +1,15 @@
+[Unit]
+Description=GSHO DR: еженедельная проверка резерва, если ВМ включило расписание (D-082)
+Documentation=file:///opt/gsho-costing/deploy/dr/README.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Проверка идёт, только если расписание при запуске ВМ записало в метаданные dr-drill-until (unix-время) и оно ещё не прошло.
+# Ручной запуск ВМ для переключения (failover.sh) проверку не запускает и ВМ не выключает.
+ExecStart=/bin/bash -c 'u=$(curl -fsS -m 5 -H Metadata-Flavor:Google http://169.254.169.254/computeMetadata/v1/instance/attributes/dr-drill-until 2>/dev/null || echo 0); case "$u" in (*[!0-9]*|"") u=0;; esac; if [ "$u" -gt "$(date +%%s)" ]; then exec /bin/bash /opt/gsho-costing/deploy/dr/drill.sh --poweroff; else echo "gsho-dr-drill: обычный запуск ВМ — проверка не нужна"; fi'
+TimeoutStartSec=45min
+
+[Install]
+WantedBy=multi-user.target
