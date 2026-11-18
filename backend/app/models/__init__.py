@@ -715,6 +715,23 @@ class KpRevision(Base):
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
+class FileDownloadRequest(Base):
+    """Запрос на скачивание файла сделки, когда скачивание закрыто для роли (D-077); одобрение действует 24 часа."""
+    __tablename__ = "file_download_requests"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    deal_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    storage_path: Mapped[str] = mapped_column(String(1024))
+    file_name: Mapped[str] = mapped_column(String(512), default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="pending")     # pending | approved | declined
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_by: Mapped[Optional[str]] = mapped_column(String(36))
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
 class NegotiationStep(Base):
     """Шаг торгов (D-074): снижение цены и (или) изменение условий после КП; порождает редакцию КП."""
     __tablename__ = "negotiation_steps"

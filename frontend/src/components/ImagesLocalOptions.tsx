@@ -1,3 +1,4 @@
+import { viewUrl } from "./FilePreview";
 import { useEffect, useState } from "react";
 import { lbl, IMAGE_KIND, IMAGE_SOURCE, OUTCOME, STATUS } from "../labels";
 import { api, fmtRub } from "../api";
@@ -29,8 +30,8 @@ export function ImagesBlock({ dealId, position, me, onChanged }: { dealId: strin
       <div className="row" style={{ marginTop: 6, flexWrap: "wrap" }}>
         {images.map((im) => (
           <div key={im.id} style={{ width: 200, border: "1px solid var(--line)", borderRadius: 6, padding: 6, background: im.in_kp ? "var(--accent-soft)" : "#fff" }}>
-            {im.is_image ? <a href={im.url} target="_blank" rel="noreferrer"><img src={im.url} alt={im.caption} style={{ width: "100%", height: 110, objectFit: "cover", borderRadius: 4 }} /></a>
-              : <a href={im.url} target="_blank" rel="noreferrer" className="badge">{im.file_name}</a>}
+            {im.is_image ? <a href={im.url} title={im.file_name}><img src={viewUrl(im.url)} alt={im.caption} style={{ width: "100%", height: 110, objectFit: "cover", borderRadius: 4 }} /></a>
+              : <a href={im.url} className="badge">{im.file_name}</a>}
             <div style={{ fontSize: 12, marginTop: 4 }}>{im.caption || <span className="muted">без подписи</span>}</div>
             <div className="muted" style={{ fontSize: 11 }}>{lbl(IMAGE_KIND, im.kind)} · {lbl(IMAGE_SOURCE, im.source)}{im.has_factory_logo && " · логотип завода"}{im.send_to_factory && " · отправлено заводу"}</div>
             {canSelect && <label className="row" style={{ fontSize: 12 }}><input type="checkbox" checked={im.in_kp} onChange={(e) => patch(im, { in_kp: e.target.checked })} /> в КП

@@ -85,6 +85,8 @@ FIELD_GROUPS: dict[str, tuple[str, set[str]]] = {
     "local_options": ("Опции, реализуемые в России", LOCAL_OPTIONS_FIELDS),
     "tech_params": ("Таблица технических характеристик и запрос заводу", set()),
     "images": ("Изображения и чертежи", set()),
+    # D-077: просмотр файлов сделки — всем, кто видит сделку; скачивание — по этой группе или по одобренному запросу
+    "file_download": ("Скачивание файлов сделок (просмотр в системе — всем, кто видит сделку)", set()),
     "kp_images_select": ("Выбор файлов и бренда для КП", set()),
     "catalog": ("Каталог оборудования (правка)", set()),
     "glossary": ("Глоссарий переводов", set()),
@@ -137,6 +139,7 @@ DEFAULT_MATRIX: dict[Role, dict[str, int]] = {
 # Помощник CRM (09 §2): пользоваться — всем активным ролям (исключением можно закрыть), настройки — ЗГД
 for _r in Role:
     DEFAULT_MATRIX.setdefault(_r, {}).setdefault("assistant_use", READ)
+    DEFAULT_MATRIX[_r].setdefault("file_download", READ)   # по умолчанию скачивание открыто всем; закрывается в «Уровнях доступа»
 DEFAULT_MATRIX[Role.GD]["assistant_admin"] = EDIT
 
 PROTECTED = {Role.GD: {"access_admin", "security_admin"}, Role.ADMIN: {"access_admin"}}
