@@ -1,0 +1,113 @@
+"""Рабочее место логиста (D-073): адреса, поля от ЗГД, запрос логистическим компаниям (Excel/PDF/почта), ответы, задачи в списке."""
+import io
+import uuid
+
+from openpyxl import load_workbook
+
+from tests.test_api_flow import client, _ok, H, MGR, LOG, CD, GD  # noqa: F401
+
+
+def _deal(client):
+    clients = _ok(client.get("/api/refs/clients", headers=H(MGR)))
+    factories = _ok(client.get("/api/refs/factories", headers=H(MGR)))
+    did = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "Рудник Северный"}), 201)["id"]
+    pos = _ok(client.post(f"/api/deals/{did}/positions", headers=H(MGR), json={"factory_id": factories[0]["id"], "model": "WS-1",
+              "machine_type": "ПДМ", "qty": 2, "unit_price": 1000000, "currency": "CNY"}), 201)
+    _ok(client.post(f"/api/deals/{did}/send-to-calc", headers=H(MGR)))
+    return did, pos, clients[0]["id"]
+
+
+def test_workspace_shape_and_roles(client):
+    did, pos, _ = _deal(client)
+    ws = _ok(client.get(f"/api/deals/{did}/logistics/workspace", headers=H(LOG)))
+    assert ws["can_edit"] and not ws["can_choose_fields"]
+    assert ws["fields"][0]["position_id"] == pos["id"] and ws["fields"][0]["rows"]
+    assert ws["addresses"]["pickup"] and ws["addresses"]["delivery_address"]          # подставлено из сделки/карточек
+    assert ws["mail_enabled"] is False
+    assert _ok(client.get(f"/api/deals/{did}/logistics/workspace", headers=H(GD)))["can_choose_fields"]
+    assert not _ok(client.get(f"/api/deals/{did}/logistics/workspace", headers=H(MGR)))["can_edit"]
+
+
+def test_fields_chosen_by_gd_only(client):
+    did, _, _ = _deal(client)
+    opts = _ok(client.get(f"/api/refs/logistics-fields?deal_id={did}", headers=H(LOG)))
+    assert opts["options"]
+    pick = [{"code": o["code"], "name": o["name"]} for o in opts["options"][:2]]
+    assert client.put("/api/refs/logistics-fields", headers=H(LOG), json=pick).status_code == 403
+    _ok(client.put("/api/refs/logistics-fields", headers=H(GD), json=pick))
+    ws = _ok(client.get(f"/api/deals/{did}/logistics/workspace", headers=H(LOG)))
+    assert [r["name"] for r in ws["fields"][0]["rows"]] == [p["name"] for p in pick]
+    # настройка внутренняя — на общем экране настроек её нет и через него не меняется
+    assert client.put("/api/admin/settings/logistics_tech_fields", headers=H(GD), json={"value": []}).status_code in (403, 404)
+
+
+def test_delivery_address_proposed_and_approved_by_gd(client):
+    did, _, cid = _deal(client)
+    tag = uuid.uuid4().hex[:6]
+    ws = _ok(client.get(f"/api/deals/{did}/logistics/workspace", headers=H(LOG)))
+    fid = ws["addresses"]["pickup"][0]["factory_id"]
+    r = _ok(client.put(f"/api/deals/{did}/logistics/addresses", headers=H(LOG),
+                       json={"pickup": {fid: "Сюйчжоу, пр. Тестовый 1"}, "delivery_address": f"Норильск, ул. Новая {tag}", "propose_to_client": True}))
+    assert r["proposed"]
+    ws = _ok(client.get(f"/api/deals/{did}/logistics/workspace", headers=H(LOG)))
+    assert ws["addresses"]["delivery_address"] == f"Норильск, ул. Новая {tag}"
+    assert ws["addresses"]["pickup"][0]["address"] == "Сюйчжоу, пр. Тестовый 1" and ws["addresses"]["pickup"][0]["edited"]
+    card = _ok(client.get(f"/api/refs/clients/{cid}", headers=H(GD)))
+    a = next(x for x in card["delivery_addresses"] if x["address"] == f"Норильск, ул. Новая {tag}")
+    assert a["status"] == "pending"
+    assert client.post(f"/api/refs/clients/{cid}/delivery-addresses/{a['id']}/approve", headers=H(LOG)).status_code == 403
+    out = _ok(client.post(f"/api/refs/clients/{cid}/delivery-addresses/{a['id']}/approve", headers=H(GD)))
+    assert next(x for x in out["delivery_addresses"] if x["id"] == a["id"])["status"] == "approved"
+    # повторное предложение того же адреса не плодит дубль
+    _ok(client.put(f"/api/deals/{did}/logistics/addresses", headers=H(LOG), json={"delivery_address": f"норильск, ул. новая {tag} ", "propose_to_client": True}))
+    card = _ok(client.get(f"/api/refs/clients/{cid}", headers=H(GD)))
+    assert sum(1 for x in card["delivery_addresses"] if x["address"].strip().lower() == f"норильск, ул. новая {tag}") == 1
+    # менеджер адреса не меняет
+    assert client.put(f"/api/deals/{did}/logistics/addresses", headers=H(MGR), json={"delivery_address": "x"}).status_code == 403
+
+
+def test_request_files_and_sending(client):
+    did, _, _ = _deal(client)
+    r = client.get(f"/api/deals/{did}/logistics/request/file?fmt=xlsx&answer_days=4", headers=H(LOG))
+    assert r.status_code == 200 and "spreadsheet" in r.headers["content-type"]
+    wb = load_workbook(io.BytesIO(r.content))
+    text = " ".join(str(c.value) for ws in wb.worksheets for row in ws.iter_rows() for c in row if c.value)
+    assert "Запрос" in text and "WS-1" in text and "Стоимость" in text
+    r = client.get(f"/api/deals/{did}/logistics/request/file?fmt=pdf", headers=H(LOG))
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"
+    # почта не подключена: отправка из системы — 409, отметка «вручную» — записывается
+    body = {"emails": ["calc@carrier.example"], "answer_days": 3}
+    assert client.post(f"/api/deals/{did}/logistics/request/send", headers=H(LOG), json=body).status_code == 409
+    _ok(client.post(f"/api/deals/{did}/logistics/request/send", headers=H(LOG), json={**body, "manual": True}))
+    ws = _ok(client.get(f"/api/deals/{did}/logistics/workspace", headers=H(LOG)))
+    assert len(ws["requests"]) == 1 and ws["requests"][0]["sent_to"] == ["calc@carrier.example"] and ws["requests"][0]["no"].endswith("-Л1")
+    assert client.post(f"/api/deals/{did}/logistics/request/send", headers=H(LOG), json={"emails": ["не-почта"], "manual": True}).status_code == 422
+
+
+def test_carriers_directory(client):
+    _ok(client.put("/api/refs/logistics-carriers", headers=H(LOG), json=[{"name": "Транс-Восток", "email": "calc@tv.example"}]))
+    assert _ok(client.get("/api/refs/logistics-carriers", headers=H(MGR)))[0]["name"] == "Транс-Восток"
+    assert client.put("/api/refs/logistics-carriers", headers=H(LOG), json=[{"name": "X", "email": "bad"}]).status_code == 422
+    assert client.put("/api/refs/logistics-carriers", headers=H(MGR), json=[]).status_code == 403
+
+
+def test_quotes_upload_and_delete(client):
+    did, _, _ = _deal(client)
+    files = {"file": ("ответ.pdf", b"%PDF-1.4 test", "application/pdf")}
+    q = _ok(client.post(f"/api/deals/{did}/logistics/quotes", headers=H(LOG), files=files,
+                        data={"carrier": "Транс-Восток", "amount": "350000", "currency": "CNY", "transit_days": "21", "scope": "door_to_door"}), 201)
+    assert q["amount"] == 350000 and q["storage_path"]
+    ws = _ok(client.get(f"/api/deals/{did}/logistics/workspace", headers=H(CD)))
+    assert ws["quotes"][0]["carrier"] == "Транс-Восток"
+    assert client.delete(f"/api/deals/{did}/logistics/quotes/{q['id']}", headers=H(MGR)).status_code == 403
+    assert client.delete(f"/api/deals/{did}/logistics/quotes/{q['id']}", headers=H(LOG)).status_code == 204
+    assert _ok(client.get(f"/api/deals/{did}/logistics/workspace", headers=H(LOG)))["quotes"] == []
+
+
+def test_my_tasks_in_deals_list(client):
+    did, _, _ = _deal(client)
+    rows = _ok(client.get("/api/deals", headers=H(LOG)))
+    rows = rows["items"] if isinstance(rows, dict) else rows
+    row = next(r for r in rows if r["id"] == did)
+    assert "logistics_info" not in row
+    assert row["my_tasks"] and all({"title", "due", "overdue"} <= set(t) for t in row["my_tasks"])

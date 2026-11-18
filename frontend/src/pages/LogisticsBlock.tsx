@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
 import { STATUS_TITLES, type Batch, type Deal, type Me } from "../types";
-import TechParamsView from "../components/TechParamsView";
+import LogistWorkspace, { LogistFields, FieldsChooser, type Workspace, type Quote } from "../components/LogistWorkspace";
 import SpecTable from "../components/SpecTable";
 import { UndoButton, useUndoHistory } from "../undo";
 
@@ -22,6 +22,11 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
       : `Сделка на этапе «${STATUS_TITLES[deal.status] || deal.status}» — логистика уже передана дальше. Чтобы поправить, КД или ЗГД возвращает сделку на доработку («Вернуть на доработку»), после этого блок снова открыт.`
     : "Заполнять логистику могут логист и ЗГД. У вашей учётной записи этих ролей нет — войдите под нужной учётной записью или попросите администратора добавить роль.";
   const [err, setErr] = useState("");
+  // рабочее место логиста (D-073): адреса, выбранные характеристики, запрос перевозчикам, ответы
+  const [ws, setWs] = useState<Workspace | null>(null);
+  const [chooser, setChooser] = useState(false);
+  const loadWs = () => api.get<Workspace>(`/api/deals/${deal.id}/logistics/workspace`).then(setWs).catch(() => setWs(null));
+  useEffect(() => { loadWs(); }, [deal.id]);
   const [hs, setHs] = useState<{ code: string; description: string; duty_pct: number; vat_pct: number; certification: string[] }[]>([]);
   const batches = deal.batches || [];
   const positions = deal.positions || [];
@@ -51,6 +56,16 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
     setPosSel(positions.filter((p) => p.batch_id === b.id).map((p) => p.id));
   };
   const resetBatchForm = () => { const f = emptyBatch(); setEditId(null); setBatch(f); setBatchSaved(JSON.stringify(f)); setBc({}); setPosSel(freePositions()); };
+  // ответ логистической компании → в форму партии (сохранение — обычной кнопкой партии)
+  const applyQuote = (q: Quote) => {
+    const c = `${q.carrier}${q.comment ? ": " + q.comment : ""}`;
+    if (q.scope === "door_to_door") setBatch((b) => ({ ...b, d2d: true, d2d_amount: q.amount, d2d_currency: q.currency, comment_freight: c, transit_days: q.transit_days || b.transit_days }));
+    else if (q.scope === "intl_freight") setBatch((b) => ({ ...b, d2d: false, intl_freight: q.amount, intl_currency: q.currency, comment_freight: c, transit_days: q.transit_days || b.transit_days }));
+    else if (q.scope === "customs") setBatch((b) => ({ ...b, d2d: false, broker_rub: q.amount, comment_broker: c }));
+    else if (q.scope === "rf_delivery") setBatch((b) => ({ ...b, d2d: false, rf_delivery_rub: q.amount, comment_rf: c, rf_delivery_days: q.transit_days || b.rf_delivery_days }));
+    else { setErr("Эта услуга не переносится в партию автоматически — внесите вручную."); return; }
+    setErr(""); document.getElementById("batch-form")?.scrollIntoView({ behavior: "smooth" });
+  };
   const batchCost = batch.d2d ? batch.d2d_amount : batch.intl_freight + batch.rf_delivery_rub + batch.broker_rub;
   const batchDirty = JSON.stringify(batch) !== batchSaved;
   const bcc = (k: string) => <input value={bc[k] || ""} placeholder="комментарий" onChange={(e) => setBc({ ...bc, [k]: e.target.value })} />;
@@ -143,6 +158,8 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
     <>
       {lockReason && <div className="alert warn" role="status" style={{ marginBottom: 10 }}><b>Блок логистики только для просмотра.</b> {lockReason}</div>}
       {err && <div className="alert error">{err}</div>}
+      {chooser && <FieldsChooser dealId={deal.id} onClose={() => { setChooser(false); loadWs(); }} />}
+      {ws && <LogistWorkspace dealId={deal.id} ws={ws} reload={loadWs} onApplyQuote={applyQuote} />}
       <div className="card row" style={{ justifyContent: "space-between" }}>
         <span>Статус: <span className="badge accent">{STATUS_TITLES[deal.status] || deal.status}</span> · логистика: {deal.logistics_done ? <span className="badge ok">рассчитана, передана далее</span> : <span className="badge warn">в работе</span>}</span>
         {canEdit && !deal.logistics_done && <button className="btn" onClick={() => complete()}>Отправить далее на расчёт</button>}
@@ -160,7 +177,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
               {canEdit && <td><button className="btn ghost" onClick={() => startEdit(b)}>изменить</button> <button className="btn ghost" onClick={() => deleteBatch(b)}>удалить</button></td>}</tr>); })}</tbody></table>
         {canEdit && (
           <>
-            <h3 style={{ marginBottom: 4 }}>{editId ? `Изменение партии «${batches.find((b) => b.id === editId)?.name || batch.name}»` : "Новая партия"}</h3>
+            <h3 id="batch-form" style={{ marginBottom: 4 }}>{editId ? `Изменение партии «${batches.find((b) => b.id === editId)?.name || batch.name}»` : "Новая партия"}</h3>
             <SpecTable refTitle="Примечание" sections={[
               { title: "Маршрут и сроки", rows: [
                 { key: "name", name: "Название партии", filled: !!batch.name, required: true, value: <input value={batch.name} onChange={(e) => setBatch({ ...batch, name: e.target.value })} />, comment: bcc("name") },
@@ -218,9 +235,8 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
           return <span className={c.needs_comment ? "badge warn" : "muted"} style={{ fontSize: 12 }}>ср. {fmtRub(c.history_avg)}{c.deviation_pct != null ? `, ${c.deviation_pct > 0 ? "+" : ""}${c.deviation_pct} %` : ""}</span>; };
         return (
           <div className="card" key={p.id}>
-            <h2 style={{ marginTop: 0 }}>{p.machine_type} {designation(p)} × {p.qty} <span className="muted">· технических характеристик заполнено: {(p.tech_param_rows || []).filter((r) => r.value_ru || r.value_zh).length}</span></h2>
-            <details style={{ marginBottom: 10 }} open><summary className="muted" style={{ cursor: "pointer" }}>Технические характеристики позиции</summary>
-              <div style={{ marginTop: 6 }}><TechParamsView rows={p.tech_param_rows || []} /></div></details>
+            <h2 style={{ marginTop: 0 }}>{p.machine_type} {designation(p)} × {p.qty}</h2>
+            <LogistFields pos={ws?.fields.find((x) => x.position_id === p.id)} canChoose={!!ws?.can_choose_fields} onChoose={() => setChooser(true)} />
             <SpecTable refTitle="По истории / справочник" nameTitle="Статья" sections={[
               { title: "Китай: до границы", rows: [
                 d2dCovers(p) ? { key: "dl", name: "Внутрикитайская логистика завод → граница", filled: true,

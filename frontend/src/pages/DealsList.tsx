@@ -9,7 +9,7 @@ import PartsCreateForm from "../components/PartsRequestCreate";
 
 type Exec = { done: number; total: number; overdue: number; next: { title: string; on: string } | null; delay_days: number | null };
 type Row = Deal & { group?: string; parent_number?: string; related_count?: number; manager_name?: string; machines?: number; equipment?: string; equipment_lines?: { qty: number; name: string }[]; equipment_more?: number;
-  price_rub?: number | null; price_amount?: number | null; price_currency?: string | null; exec?: Exec; factory_contract_number?: string | null;
+  price_rub?: number | null; price_amount?: number | null; price_currency?: string | null; exec?: Exec; my_tasks?: { title: string; due: string | null; overdue: boolean; block?: string | null }[]; factory_contract_number?: string | null;
   kind?: "gsho" | "parts"; stage?: Stage; stage_title?: string; block?: Exclude<Block, "archive">; status_text?: string; lines?: number; urgent?: boolean; closed?: string };
 // Заявка на запчасти в списке сделок (единый раздел «Сделки»: ГШО и запчасти)
 type PartsRow = { id: string; number: string; client_id: string; client_name: string; machine: string; urgent: boolean; created_at: string; manager_id: string | null; manager_name: string;
@@ -42,15 +42,28 @@ const today = () => new Date().toISOString().slice(0, 10);
 const daysTo = (iso?: string | null) => (iso ? Math.round((new Date(iso.slice(0, 10)).getTime() - new Date(today()).getTime()) / 86400000) : null);
 const kpOverdue = (d: Row) => d.kind !== "parts" && BLOCK_STATUSES.work.slice(0, 9).includes(d.status) && (daysTo(d.kp_due) ?? 1) < 0;
 
-type SortKey = "number" | "date" | "client" | "status" | "kp_due" | "priority" | "manager" | "price" | "next" | "progress" | "machines";
+const taskDue = (d: Row) => (d.my_tasks || []).map((t) => t.due || "9999").sort()[0] || (d.my_tasks?.length ? "9998" : "99999");
+type SortKey = "number" | "date" | "client" | "status" | "kp_due" | "priority" | "manager" | "price" | "next" | "progress" | "machines" | "task" | "prio_task";
 const sortVal = (d: Row, k: SortKey): string | number => {
   switch (k) {
     case "number": return d.number; case "date": return dealDate(d); case "client": return d.client_name || "";
     case "status": return d.kind === "parts" ? ["request", "calc", "kp", "execution", "closed"].indexOf(stageOf(d)) * 10 + 5 : BLOCK_STATUSES.work.concat(BLOCK_STATUSES.won, BLOCK_STATUSES.lost).indexOf(d.status);
     case "kp_due": return d.kp_due || "9999"; case "priority": return PRIO_ORDER[d.priority] ?? 1; case "manager": return d.manager_name || "";
     case "price": return d.price_rub ?? -1; case "machines": return d.machines ?? 0; case "next": return d.exec?.next?.on || "9999"; case "progress": return d.exec ? d.exec.done / Math.max(d.exec.total, 1) : -1;
+    // мои задачи по сделке (D-073): ближайший срок; «приоритет + срок» — сначала важнее, внутри — раньше срок
+    case "task": return taskDue(d);
+    case "prio_task": return `${9 - (PRIO_ORDER[d.priority] ?? 1)}|${taskDue(d)}`;
   }
 };
+
+/** Мои открытые задачи по сделке — прямо в общем списке, с дедлайном (D-073). */
+function MyTasks({ t }: { t?: Row["my_tasks"] }) {
+  if (!t?.length) return <span className="muted">—</span>;
+  return <div style={{ fontSize: 12, minWidth: 170 }}>{t.slice(0, 3).map((x, i) => (
+    <div key={i} style={{ color: x.overdue ? "var(--accent)" : undefined, fontWeight: x.overdue ? 600 : undefined }}>{x.title}
+      <span className="muted" style={x.overdue ? { color: "var(--accent)" } : undefined}> · {x.due ? new Date(x.due).toLocaleDateString("ru-RU") : "без срока"}{x.overdue ? " · просрочено" : ""}</span></div>))}
+    {t.length > 3 && <div className="muted">ещё {t.length - 3}</div>}</div>;
+}
 
 /** Задача 9: связанные заявки (исходная и её дубли) идут подряд — дубли сразу под исходной, с отступом. */
 function grouped(deals: Row[]): Row[] {
@@ -332,6 +345,12 @@ export default function DealsList({ me }: { me: Me }) {
               <div className="muted" style={{ fontSize: 12 }}>{t}</div></div>))}
         </div>
       </div>
+      {block === "work" && <div className="row" style={{ gap: 6, margin: "0 0 8px", alignItems: "center", flexWrap: "wrap" }}>
+        <span className="muted">Порядок:</span>
+        {([["task", "по сроку моих задач"], ["prio_task", "по приоритету и сроку"], ["kp_due", "по сроку КП"], ["date", "по дате заявки"]] as const).map(([k, t]) => (
+          <button key={k} className={"btn " + (sort.key === k ? "" : "ghost")} style={{ padding: "3px 10px" }}
+            onClick={() => { const n = { key: k as SortKey, dir: (k === "date" ? -1 : 1) as 1 | -1 }; setSort(n); save("gsho.dealsSort2", n); }}>{t}</button>))}
+      </div>}
       <div className="card" style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ minWidth: 900 }}>
           {block === "won" ? (
@@ -339,7 +358,7 @@ export default function DealsList({ me }: { me: Me }) {
               {th("progress", "Исполнение", 130)}{th("next", "Ближайший этап")}{th("status", "Статус")}{th("manager", "Менеджер")}</tr></thead>
           ) : (
             <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th>{th("machines", "Кол-во", 70)}{th("kp_due", "Срок КП", 120)}{th("priority", "Приоритет", 100)}
-              {th("status", "Статус")}{th("manager", "Менеджер")}{fin && block !== "work" && th("price", "Сумма")}<th>Версия</th></tr></thead>)}
+              {block === "work" && th("task", "Мне сделать / срок", 190)}{th("status", "Статус")}{th("manager", "Менеджер")}{fin && block !== "work" && th("price", "Сумма")}<th>Версия</th></tr></thead>)}
           <tbody>
             {grouped(sorted).map((d) => {
               const late = kpOverdue(d) || (d.exec?.overdue || 0) > 0;
@@ -357,6 +376,7 @@ export default function DealsList({ me }: { me: Me }) {
                 </tr>) : (
                 <tr key={d.id} style={rowStyle}>
                   {numCell(d)}{clientCell(d)}{eqCell(d)}{qtyCell(d)}<td><KpDue d={d} /></td><td><Prio p={d.priority} /></td>
+                  {block === "work" && <td><MyTasks t={d.my_tasks} /></td>}
                   <td><StatusBadge d={d} /></td><td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>{fin && block !== "work" && <td>{money(d)}</td>}
                   <td className="muted">{d.kind === "parts" ? "" : d.current_version_no || ""}</td>
                 </tr>);
