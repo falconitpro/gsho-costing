@@ -152,22 +152,25 @@ export default function NegotiationTab({ dealId, variants, onChanged }: { dealId
                   </div>); })}
               <label className="ng-check"><input type="checkbox" checked={termsOn} onChange={(e) => setTermsOn(e.target.checked)} /> изменить условия: оплата, предоплата, срок поставки</label>
               {termsOn && d.variants.map((v) => { const t = terms[v.id]; if (!t) return null; const setT = (x: Partial<typeof t>) => setTerms({ ...terms, [v.id]: { ...t, ...x } });
-                const sum = t.client_payments.reduce((s, l) => s + (Number(l.share_pct) || 0), 0);
+                const sum = t.client_payments.reduce((s2, l) => s2 + (Number(l.share_pct) || 0), 0);
+                const line = (i: number, x: Partial<PaymentLine>) => setT({ client_payments: t.client_payments.map((l, j) => (j === i ? { ...l, ...x } : l)) });
                 return (
                   <div key={v.id} className="ng-terms">
-                    {d.variants.length > 1 && <b>{v.name}</b>}
-                    <table><thead><tr><th className="num">Доля, %</th><th>Событие</th><th className="num">через, дн.</th><th /></tr></thead>
-                      <tbody>{t.client_payments.map((l, i) => (
-                        <tr key={i}>
-                          <td><input inputMode="decimal" value={l.share_pct ?? ""} style={{ width: 64 }} onChange={(e) => setT({ client_payments: t.client_payments.map((x, j) => (j === i ? { ...x, share_pct: Number(e.target.value) } : x)) })} /></td>
-                          <td><select value={l.event} onChange={(e) => setT({ client_payments: t.client_payments.map((x, j) => (j === i ? { ...x, event: e.target.value } : x)) })}>
-                            {Object.entries(EVENT_TITLES).map(([k, n]) => <option key={k} value={k}>{n}</option>)}</select></td>
-                          <td><input type="number" value={l.offset_days} style={{ width: 64 }} onChange={(e) => setT({ client_payments: t.client_payments.map((x, j) => (j === i ? { ...x, offset_days: Number(e.target.value) } : x)) })} /></td>
-                          <td><button className="btn ghost" onClick={() => setT({ client_payments: t.client_payments.filter((_, j) => j !== i) })}>×</button></td></tr>))}</tbody></table>
-                    <div className="row" style={{ gap: 8, alignItems: "center" }}>
-                      <button className="btn ghost" onClick={() => setT({ client_payments: [...t.client_payments, { no: t.client_payments.length + 1, share_pct: 0, event: "delivery", offset_days: 0 }] })}>+ платёж</button>
-                      <span className={Math.abs(sum - 100) > 0.01 ? "badge bad" : "muted"}>итого {sum} %</span></div>
-                    <label className="pf-field" style={{ marginTop: 6 }}><span className="pf-label">Срок поставки в КП (пусто — по расчёту)</span>
+                    <div className="ng-terms-h">{d.variants.length > 1 ? <b>{v.name}: </b> : null}<b>График оплаты клиента</b>
+                      <span className="muted">сейчас: {v.client_payments.map((l) => `${l.share_pct ?? "—"} % — ${EVENT_TITLES[l.event] || l.event}${l.offset_days ? ` +${l.offset_days} дн.` : ""}`).join("; ") || "по типовой схеме"}</span></div>
+                    <div className="ng-pay ng-pay-head"><span>Доля, %</span><span>Событие</span><span>Через, дн.</span><span /></div>
+                    {t.client_payments.map((l, i) => (
+                      <div key={i} className="ng-pay">
+                        <input inputMode="decimal" value={l.share_pct ?? ""} onChange={(e) => line(i, { share_pct: Number(e.target.value.replace(",", ".")) || 0 })} />
+                        <select value={l.event} onChange={(e) => line(i, { event: e.target.value })}>{Object.entries(EVENT_TITLES).map(([kk, n]) => <option key={kk} value={kk}>{n}</option>)}</select>
+                        <input type="number" value={l.offset_days} onChange={(e) => line(i, { offset_days: Number(e.target.value) })} />
+                        <button className="ng-x" title="удалить платёж" onClick={() => setT({ client_payments: t.client_payments.filter((_, j) => j !== i) })}>×</button>
+                      </div>))}
+                    <div className="ng-pay-foot">
+                      <button className="btn ghost" onClick={() => setT({ client_payments: [...t.client_payments, { no: t.client_payments.length + 1, share_pct: Math.max(0, 100 - sum), event: "delivery", offset_days: 0 }] })}>+ платёж</button>
+                      <span className={Math.abs(sum - 100) > 0.01 ? "badge bad" : "badge ok"}>итого {sum} %{Math.abs(sum - 100) > 0.01 ? " — нужно 100 %" : ""}</span>
+                    </div>
+                    <label className="pf-field" style={{ marginTop: 8 }}><span className="pf-label">Срок поставки в КП{v.delivery_term ? ` (сейчас: ${v.delivery_term})` : " (пусто — по расчёту)"}</span>
                       <input value={t.delivery_term} placeholder="напр. 150 дней с даты предоплаты" onChange={(e) => setT({ delivery_term: e.target.value })} /></label>
                   </div>); })}
               <div className="ng-grid2">
