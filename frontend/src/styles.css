@@ -120,14 +120,14 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; colo
 .tabs button.active { border-color: var(--accent); font-weight: 700; }
 /* экран «Расчёт и утверждение»: вкладки — отдельные кнопки равной ширины на всю строку, текст по центру (D-067) */
 .tabs.tabs-compact { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; border-bottom: 0; overflow: visible; margin-bottom: 14px;
-  background: #26262b; padding: 6px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.18); }
-/* подвкладки «Расчёт и утверждение»: тёмная полоса, крупные светлые кнопки, активная — красная (D-081) */
-.tabs.tabs-compact button { display: flex; align-items: center; justify-content: center; text-align: center; white-space: normal; min-height: 54px; padding: 6px 10px;
-  font-size: 14px; font-weight: 600; line-height: 1.25; letter-spacing: .01em; color: #f4f4f5; background: #3a3a41; border: 1px solid #4a4a52; border-radius: 8px;
-  cursor: pointer; transition: background .15s, border-color .15s, color .15s, transform .1s; }
-.tabs.tabs-compact button:hover { background: #4b4b54; border-color: #8a8a94; color: #fff; }
-.tabs.tabs-compact button:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
-.tabs.tabs-compact button.active { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 700; box-shadow: 0 2px 10px rgba(227,38,43,.45); transform: translateY(-1px); }
+  background: #f1f1f2; padding: 5px; border: 1px solid var(--line); border-radius: 12px; }
+/* подвкладки «Расчёт и утверждение»: светлая полоса, белые кнопки с чётким текстом, активная — фирменный красный (D-081, по замечанию владельца) */
+.tabs.tabs-compact button { display: flex; align-items: center; justify-content: center; text-align: center; white-space: normal; min-height: 50px; padding: 6px 10px;
+  font-size: 14px; font-weight: 600; line-height: 1.25; color: #1f1f1f; background: #fff; border: 1px solid #d9d9dc; border-radius: 9px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06); cursor: pointer; transition: background .15s, border-color .15s, color .15s, box-shadow .15s; }
+.tabs.tabs-compact button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.tabs.tabs-compact button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tabs.tabs-compact button.active { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 700; box-shadow: 0 3px 10px rgba(255,49,49,.28); }
 @media (max-width: 900px) { .tabs.tabs-compact { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
 .alert { padding: 10px 12px; border-radius: 6px; margin: 8px 0; }
 .alert.error { background: var(--bad-bg); color: var(--bad); border-left: 4px solid var(--bad); }
@@ -611,10 +611,11 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .ng-kpi-s { font-size: 12px; color: var(--muted); }
 .ng-kpi.ng-warn { border-top-color: var(--warn); } .ng-kpi.ng-ok { border-top-color: var(--ok); } .ng-kpi.ng-bad { border-top-color: var(--accent); }
 .ng-chart { padding: 6px 12px; }
-.ng-sections { display: flex; gap: 0; margin: 4px 0 10px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
-.ng-sections button { flex: 1; border: 0; background: transparent; padding: 9px 10px; font-weight: 600; cursor: pointer; color: #444; border-right: 1px solid var(--line); }
+.ng-sections { display: flex; gap: 4px; margin: 4px 0 10px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #f1f1f2; padding: 4px; }
+.ng-sections button { flex: 1; border: 0; background: transparent; padding: 8px 10px; font-weight: 600; font-size: 14px; cursor: pointer; color: #333; border-radius: 7px; }
+.ng-sections button:hover:not(.active) { color: var(--accent); }
 .ng-sections button:last-child { border-right: 0; }
-.ng-sections button.active { background: #222; color: #fff; }
+.ng-sections button.active { background: #fff; color: var(--accent); box-shadow: 0 1px 3px rgba(0,0,0,.1); border-radius: 7px; }
 .ng-work { display: grid; grid-template-columns: minmax(340px, 0.9fr) minmax(0, 1.1fr); gap: 12px; align-items: start; }
 @media (max-width: 1100px) { .ng-work { grid-template-columns: 1fr; } }
 .ng-h { margin: 0 0 10px; font-size: 15px; }
