@@ -188,3 +188,5 @@
 - `GET .../logistics/workspace` — добавлены `services`, `service_options`, `compare` (`rows`, `best`, `fastest`, `chosen`, `chosen_status`: approved | pending_gd | declined, `waiting`).
 - `POST .../logistics/quotes/choose` — `{carrier, comment, need_gd}`; не самое дешёвое без причины — 422.
 - `POST .../logistics/quotes/choose/decision` — ЗГД: `{approve, comment}`; отказ без причины — 422.
+- `PUT /api/deals/{id}/negotiation/steps/{sid}/review` — «на рассмотрении клиента»: `{remind_on, assignee: manager|me, note}` → задача-напоминание (D-076).
+- `POST /api/deals/{id}/negotiation/steps/{sid}/review/close` — `{client_answer}`; не на рассмотрении — 409.

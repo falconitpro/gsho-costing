@@ -167,7 +167,7 @@ def step_dict(s: NegotiationStep, names: dict[str, str]) -> dict:
             "kind": s.kind, "reason": s.reason, "reason_title": REASONS.get(s.reason, s.reason), "comment": s.comment, "input": s.input, "terms": s.terms,
             "result": s.result, "price_before_rub": s.price_before_rub, "price_rub": s.price_rub, "margin_pct": s.margin_pct,
             "show_discount": s.show_discount, "kp_revision_id": s.kp_revision_id, "sent_at": s.sent_at.isoformat() if s.sent_at else None,
-            "sent_to": s.sent_to or [], "client_answer": s.client_answer or ""}
+            "sent_to": s.sent_to or [], "client_answer": s.client_answer or "", "review": s.review or {}}
 
 
 def analytics(deal: Deal, ver: DealVersion, st: dict, rows: list[NegotiationStep], comps: list[dict]) -> dict:
