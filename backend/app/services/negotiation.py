@@ -185,7 +185,8 @@ def analytics(deal: Deal, ver: DealVersion, st: dict, rows: list[NegotiationStep
     return {"first_rub": round(first, 2), "current_rub": round(now, 2), "discount_rub": round(first - now, 2),
             "discount_pct": round((first - now) / first * 100, 2) if first else None,
             # коэффициент утарговывания: доля снижения от первой цены КП (0 — без снижения); и итоговая цена к первой
-            "bargain_coef": round((first - now) / first, 4) if first else None, "price_ratio": round(now / first, 4) if first else None,
+            "bargain_coef": round((first - now) / first, 4) if first else None,
+            "bargain_pct": round((first - now) / first * 100, 2) if first else None,   # процент утарговывания (D-078) "price_ratio": round(now / first, 4) if first else None,
             "steps": len(rows), "price_steps": len(steps_price), "terms_steps": sum(1 for r in rows if r.terms),
             "avg_step_pct": round(sum((r.price_before_rub - r.price_rub) / r.price_before_rub * 100 for r in steps_price) / len(steps_price), 2) if steps_price else None,
             "days": (end - start).days if start and end else 0, "first_kp_on": start.isoformat() if start else None, "last_step_on": end.isoformat() if end else None,

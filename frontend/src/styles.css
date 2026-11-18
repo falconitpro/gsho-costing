@@ -688,3 +688,4 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .fp-none { color: #ddd; font-size: 15px; }
 .fp-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,.12); color: #fff; border: 0; font-size: 40px; width: 44px; height: 80px; cursor: pointer; border-radius: 6px; }
 .fp-prev { left: 6px; } .fp-next { right: 6px; }
+.ng-vat { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 8px; font-size: 13px; }
