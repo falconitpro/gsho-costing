@@ -67,7 +67,47 @@ def _rate(cur: str, kp_cur: str, kp_rate: float, rates: dict) -> Optional[float]
     return float(r) if r else None
 
 
-def new_price(st: dict, inp: dict, vat: float, rates: dict) -> float:
+def client_rates(deal: Deal) -> dict[str, float]:
+    """Внутренние курсы заказчика для торгов (D-079): RUB за единицу валюты; в расчёте сделки не участвуют."""
+    return {k: float(v) for k, v in ((deal.negotiation_info or {}).get("client_rates") or {}).items() if v}
+
+
+def _input_rate(cur: str, st: dict, rates: dict, client: dict) -> Optional[float]:
+    """Сколько рублей расчёта (по курсу цены КП) в единице введённой валюты. По курсам заказчика — если они заданы:
+    рубли и другие валюты пересчитываются в валюту КП по его курсам, дальше — по курсу цены КП."""
+    cur, kp = (cur or "RUB").upper(), st["currency"]
+    if cur == kp:
+        return st["kp_rate"]
+    if kp != "RUB" and kp in client:
+        if cur == "RUB":
+            return st["kp_rate"] / client[kp]
+        if cur in client:
+            return client[cur] / client[kp] * st["kp_rate"]
+    return _rate(cur, kp, st["kp_rate"], rates)
+
+
+def set_client_rates(deal: Deal, rates: dict, user_id: str, comment: str) -> dict:
+    clean = {}
+    for k, v in (rates or {}).items():
+        k = str(k).upper()[:3]
+        if v in (None, "", 0):
+            continue
+        try:
+            x = float(str(v).replace(",", "."))
+        except ValueError:
+            raise ValueError(f"Курс {k}: введите число")
+        if not 0 < x < 100000:
+            raise ValueError(f"Курс {k} вне разумных пределов")
+        clean[k] = round(x, 6)
+    info = dict(deal.negotiation_info or {})
+    hist = list(info.get("client_rates_history") or [])
+    hist.append({"at": now().isoformat(timespec="seconds"), "by": user_id, "rates": clean, "comment": comment.strip()[:300]})
+    info.update(client_rates=clean, client_rates_history=hist[-50:])
+    deal.negotiation_info = info
+    return clean
+
+
+def new_price(st: dict, inp: dict, vat: float, rates: dict, client: Optional[dict] = None) -> float:
     """Новая цена без НДС, RUB, по вводу шага: {mode, basis, currency, value}."""
     mode, basis = inp.get("mode") or "pct", inp.get("basis") or "net"
     if mode not in MODES or basis not in BASES:
@@ -81,7 +121,7 @@ def new_price(st: dict, inp: dict, vat: float, rates: dict) -> float:
         if not 0 <= val < 100:
             raise ValueError("Снижение в процентах — от 0 до 100")
         return round(cur_rub * (1 - val / 100.0), 2)
-    rate = _rate(inp.get("currency") or st["currency"], st["currency"], st["kp_rate"], rates)
+    rate = _input_rate(inp.get("currency") or st["currency"], st, rates, client or {})
     if rate is None:
         raise ValueError(f"Нет курса ЦБ для {inp.get('currency')}")
     rub = val * rate / ((1 + vat / 100.0) if basis == "gross" else 1.0)

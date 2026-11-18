@@ -52,7 +52,9 @@ def overview(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
             "variants": [{"id": vid, "name": s["name"], "currency": s["currency"], "kp_rate": s["kp_rate"], "first_rub": s["first_rub"],
                           "price_rub": s["price_rub"], "client_payments": s["client_payments"], "delivery_term": s["delivery_term"]} for vid, s in st.items()],
             "decision": ng.evaluate(db, deal, ver, {}, {}), "steps": [ng.step_dict(r, names) for r in rows], "competitors": comps,
-            "analytics": ng.analytics(deal, ver, st, rows, comps), "fx": _rates(db, deal)}
+            "analytics": ng.analytics(deal, ver, st, rows, comps), "fx": _rates(db, deal),
+            "client_rates": ng.client_rates(deal),
+            "client_rates_history": [{**h, "by_name": names.get(h.get("by") or "", "")} for h in (deal.negotiation_info or {}).get("client_rates_history") or []]}
 
 
 def _rates(db: Session, deal) -> dict:
@@ -80,7 +82,7 @@ def _compute(db: Session, deal, ver, body: StepIn) -> tuple[dict, dict, dict]:
         if inp.get("value") in (None, ""):
             continue
         try:
-            prices[vid] = ng.new_price(st[vid], inp, vat, rates)
+            prices[vid] = ng.new_price(st[vid], inp, vat, rates, ng.client_rates(deal))
         except ValueError as e:
             raise HTTPException(422, str(e))
         inputs[vid] = {k: inp.get(k) for k in ("mode", "basis", "currency", "value")}
@@ -327,3 +329,22 @@ def close_review(deal_id: str, step_id: str, body: ReviewCloseIn, db: Session = 
     audit(db, user.id, deal.id, "negotiation", s.id, "client_review_closed", after={"client_answer": s.client_answer})
     db.commit()
     return ng.step_dict(s, ng.names(db))
+
+
+class ClientRatesIn(BaseModel):
+    rates: dict[str, Optional[float | str]] = Field(default_factory=dict)   # {CNY: 12.4}; пусто — курсы заказчика сняты
+    comment: str = ""
+
+
+@router.put("/client-rates")
+def put_client_rates(deal_id: str, body: ClientRatesIn, db: Session = Depends(get_db), user: CurrentUser = Depends(CD_GD)):
+    """Внутренние курсы заказчика (D-079): в «Торгах» рубли пересчитываются только по ним; расчёт сделки — по курсам ЦБ."""
+    deal = get_deal_or_404(db, deal_id, user)
+    before = ng.client_rates(deal)
+    try:
+        out = ng.set_client_rates(deal, body.rates, user.id, body.comment)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    audit(db, user.id, deal.id, "negotiation", deal.id, "client_rates", before or None, out or None, body.comment.strip() or None)
+    db.commit()
+    return {"client_rates": out}
