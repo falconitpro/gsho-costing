@@ -12,7 +12,7 @@ type Totals = Record<string, { name: string; base: number; extras: [string, numb
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(2).replace(".", ",")} %`);
 
 /** История КП и его изменение (КД / ЗГД): скидки и надбавки, услуги, комплектация — новая редакция с файлом и описанием. */
-export default function KpRevisions({ dealId, status, onDone }: { dealId: string; status: string; onDone: () => void }) {
+export default function KpRevisions({ dealId, status, onDone, readonly = false, onNegotiate }: { dealId: string; status: string; onDone: () => void; readonly?: boolean; onNegotiate?: () => void }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [variants, setVariants] = useState<Variant[]>([]);
   const [canEdit, setCanEdit] = useState(false);
@@ -56,18 +56,19 @@ export default function KpRevisions({ dealId, status, onDone }: { dealId: string
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h2 style={{ marginTop: 0 }}>История КП</h2>
-        {canEdit && !open && <button className="btn secondary" onClick={start}>Изменить КП: скидки, услуги, комплектация</button>}
+        {!readonly && canEdit && !open && <button className="btn secondary" onClick={start}>Изменить КП: услуги, комплектация</button>}
+        {readonly && onNegotiate && <button className="btn secondary" onClick={onNegotiate}>Снижение цены и условия — во вкладке «Торги» →</button>}
       </div>
       {msg && <div className="alert info">{msg}</div>}
       <table>
-        <thead><tr><th>№</th><th>Дата</th><th>Автор</th><th className="num">Цена без НДС, RUB</th><th className="num">Изменение</th><th className="num">Маржа</th><th>Описание изменений</th><th>Файлы</th></tr></thead>
+        <thead><tr><th>№</th><th>Дата</th><th>Автор</th><th className="num">Цена без НДС, RUB</th><th className="num">Изменение</th>{!readonly && <th className="num">Маржа</th>}<th>Описание изменений</th><th>Файлы</th></tr></thead>
         <tbody>{rows.map((r) => (
           <tr key={r.no} style={{ background: r.no === rows[rows.length - 1]?.no ? "#f4f4f4" : undefined }}>
             <td>{r.no === 0 ? "исходное" : `ред. ${r.no}`}{r.no === rows[rows.length - 1]?.no && <div className="badge accent">актуальное</div>}</td>
             <td>{fmtDate(r.at)}{r.sent_at && <div className="badge ok">отправлено {fmtDate(r.sent_at)}</div>}</td><td>{r.author}</td>
             <td className="num"><b>{fmtRub(r.price_rub)}</b></td>
             <td className="num">{r.price_before_rub != null && r.price_rub != null ? <span className={r.price_rub < r.price_before_rub ? "badge warn" : "badge ok"}>{r.price_rub >= r.price_before_rub ? "+" : "−"}{fmtRub(Math.abs(r.price_rub - r.price_before_rub))}</span> : "—"}</td>
-            <td className="num"><span className={r.margin_pct != null && r.margin_pct < thr ? "badge bad" : ""}>{pct(r.margin_pct)}</span></td>
+            {!readonly && <td className="num"><span className={r.margin_pct != null && r.margin_pct < thr ? "badge bad" : ""}>{pct(r.margin_pct)}</span></td>}
             <td style={{ fontSize: 12 }}>{r.description}</td>
             <td>{r.has_file && <>
               <a href={r.id ? `/api/deals/${dealId}/kp/revisions/${r.id}/file?format=docx` : `/api/deals/${dealId}/kp/file?format=docx&original=1`}>Word</a> · <a href={r.id ? `/api/deals/${dealId}/kp/revisions/${r.id}/file?format=pdf` : `/api/deals/${dealId}/kp/file?format=pdf&original=1`}>PDF</a></>}</td>

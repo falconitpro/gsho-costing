@@ -172,3 +172,12 @@
 - `GET/PUT /api/refs/logistics-carriers` — логистические компании; PUT — логист / ЗГД.
 - `POST /api/refs/clients/{cid}/delivery-addresses/{aid}/approve|reject` — ЗГД.
 - `GET /api/deals` — у строк «в обработке» поле `my_tasks: [{title, due, overdue, block}]`.
+
+## Торги (D-074, только КД и ЗГД)
+
+- `GET /api/deals/{id}/negotiation` — предложения (первая и текущая цена, условия), `decision` (маржа по сценариям, минимальная цена по порогу и безубыточная, запас), шаги, конкуренты, `analytics` (снижение, `bargain_coef`, `price_ratio`, шаги, дни, маржа было/стало).
+- `POST /api/deals/{id}/negotiation/preview` — пересчёт без записи. Тело: `{prices: {variant_id: {mode: pct|amount|target, basis: net|gross, currency, value}}, terms: {variant_id: {client_payments, delivery_term}}}`.
+- `POST /api/deals/{id}/negotiation/steps` — то же + `reason`, `comment`, `show_discount`, `confirm_below_threshold` → 201, шаг и редакция КП. Ниже порога без подтверждения — 422 `{confirm: "below_threshold"}`.
+- `POST /api/deals/{id}/negotiation/steps/{sid}/send` — `{to, body, format, manual}`; без почты и без `manual` — 409.
+- `PUT /api/deals/{id}/negotiation/steps/{sid}/answer` — `{client_answer}`.
+- Цены конкурентов: новые поля `delivery_term`, `payment_terms`.

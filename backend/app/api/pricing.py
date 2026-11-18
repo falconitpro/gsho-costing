@@ -497,7 +497,7 @@ def revision_totals(deal: Deal, ver: DealVersion, changes: dict) -> dict:
         if not v.in_kp or v.price_rub is None:
             continue
         ch = (changes or {}).get(v.id) or {}
-        base = float(v.price_rub)
+        base = float(ch.get("base_rub") or v.price_rub)   # торги (D-074): цена шага вместо цены версии
         extras = [(str(e.get("name") or "").strip(), (float(e["price_rub"]) if e.get("price_rub") not in (None, "") else None))
                   for e in ch.get("extras") or [] if str(e.get("name") or "").strip()]
         subtotal = base + sum(a for _, a in extras if a)
@@ -541,7 +541,8 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion, changes: Optional[
         poss = [p for p in deal.positions if p.id in v.position_ids]
         qty = sum(p.qty for p in poss)
         base = res["variants"][v.id]["base"]
-        pay = v.client_payments or deal.client_payments or s.get("default_client_payment_scheme") or []
+        vch = (changes or {}).get(v.id) or {}
+        pay = vch.get("client_payments") or v.client_payments or deal.client_payments or s.get("default_client_payment_scheme") or []   # торги: условия шага
         terms = []
         for pc in base.get("positions", []):
             dt = pc.get("delivery_term") or {}
@@ -565,6 +566,8 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion, changes: Optional[
             kv.base_total_rub, kv.extra_lines, kv.adjustments, kv.total_rub = r["base"], r["extras"], r["adjustments"], r["total"]
             if r["configuration"]:
                 kv.configuration = r["configuration"]
+            if vch.get("delivery_term"):
+                kv.delivery_term_text = vch["delivery_term"]
             if r["service_in_kp"] is not None and deal.service_flag:
                 kv.service_line = "включено в цену" if r["service_in_kp"] else None
     kp_currency = _kp_currency(deal)
@@ -899,6 +902,25 @@ def _thr_for(db: Session, price_rub: Optional[float]) -> float:
                       margin_scale=[OverheadStep(**o) for o in (s.get("margin_threshold_scale") or []) if o.get("pct") is not None]).margin_for(price_rub)
 
 
+def _carry_negotiation(db: Session, deal: Deal, ver: DealVersion, changes: dict) -> dict:
+    """Правка КП (услуги, комплектация) после шагов торгов сохраняет цену и условия последнего шага (D-074)."""
+    prev = _last_revision(db, deal, ver)
+    out = {k: dict(v or {}) for k, v in (changes or {}).items()}
+    for vid, ch in ((prev.changes or {}) if prev else {}).items():
+        cur = out.setdefault(vid, {})
+        for k in ("base_rub", "client_payments", "delivery_term"):
+            if k in ch and k not in cur:
+                cur[k] = ch[k]
+        if "base_rub" not in ch and ch.get("adjustments") and not cur.get("adjustments") and prev and prev.id in _negotiation_revs(db, deal):
+            cur["adjustments"] = ch["adjustments"]
+    return out
+
+
+def _negotiation_revs(db: Session, deal: Deal) -> set[str]:
+    from ..models import NegotiationStep
+    return {r for r in db.scalars(select(NegotiationStep.kp_revision_id).where(NegotiationStep.deal_id == deal.id)).all() if r}
+
+
 class KpRevisionIn(BaseModel):
     changes: dict = {}          # {variant_id: {adjustments: [{kind, mode, value, label}], extras: [{name, price_rub}], configuration, service_in_kp}}
     description: str = ""
@@ -909,7 +931,7 @@ def kp_revision_preview(deal_id: str, body: KpRevisionIn, db: Session = Depends(
     deal = get_deal_or_404(db, deal_id, user)
     _cd_gd(user)
     ver = _approved_version(db, deal)
-    totals = revision_totals(deal, ver, body.changes)
+    totals = revision_totals(deal, ver, _carry_negotiation(db, deal, ver, body.changes))
     return {"variants": totals, "threshold_pct": _thr_for(db, sum((t.get("total") or 0) for t in totals.values()) or None)}
 
 
@@ -924,6 +946,7 @@ def kp_revision_create(deal_id: str, body: KpRevisionIn, db: Session = Depends(g
     if not body.description.strip():
         raise HTTPException(422, "Опишите, что изменено в КП")
     ver = _approved_version(db, deal)
+    body.changes = _carry_negotiation(db, deal, ver, body.changes)
     totals = revision_totals(deal, ver, body.changes)
     prev = _last_revision(db, deal, ver)
     before = prev.price_rub if prev else sum(float(v.price_rub or 0) for v in deal.variants if v.in_kp and v.price_rub is not None)

@@ -74,7 +74,7 @@ def money(db: Session, amount: float, currency: str, vat_included: bool, vat_pct
 def _offer_dict(db: Session, o: CompetitorOffer, comp: Optional[Competitor], contract_ccy: str, names: dict[str, str]) -> dict:
     return {"id": o.id, "deal_id": o.deal_id, "variant_id": o.variant_id, "competitor_id": o.competitor_id, "competitor": comp.name if comp else "",
             "on": o.on.isoformat(), "equipment": o.equipment, "qty": o.qty, "amount": o.amount, "currency": o.currency, "vat_included": o.vat_included,
-            "vat_pct": o.vat_pct, "fx_rate": o.fx_rate, "fx_on": o.fx_on.isoformat() if o.fx_on else None, "source": o.source, "comment": o.comment,
+            "vat_pct": o.vat_pct, "delivery_term": o.delivery_term or "", "payment_terms": o.payment_terms or "", "fx_rate": o.fx_rate, "fx_on": o.fx_on.isoformat() if o.fx_on else None, "source": o.source, "comment": o.comment,
             "created_by": names.get(o.created_by or "", ""), "created_at": o.created_at.isoformat() if o.created_at else None,
             "deleted": o.deleted_at is not None, "deleted_at": o.deleted_at.isoformat() if o.deleted_at else None,
             **money(db, o.amount, o.currency, o.vat_included, o.vat_pct, o.fx_rate, contract_ccy, o.on)}
@@ -82,7 +82,8 @@ def _offer_dict(db: Session, o: CompetitorOffer, comp: Optional[Competitor], con
 
 def _snapshot(o: CompetitorOffer, comp: Optional[Competitor]) -> dict:
     return {"competitor": comp.name if comp else "", "on": o.on.isoformat(), "equipment": o.equipment, "qty": o.qty, "amount": o.amount,
-            "currency": o.currency, "vat_included": o.vat_included, "vat_pct": o.vat_pct, "variant_id": o.variant_id, "source": o.source, "comment": o.comment}
+            "currency": o.currency, "vat_included": o.vat_included, "vat_pct": o.vat_pct, "variant_id": o.variant_id, "source": o.source, "comment": o.comment,
+            "delivery_term": o.delivery_term or "", "payment_terms": o.payment_terms or ""}
 
 
 def _names(db: Session) -> dict[str, str]:
@@ -101,6 +102,8 @@ class OfferIn(BaseModel):
     variant_id: Optional[str] = None
     source: str = ""
     comment: str = ""
+    delivery_term: str = ""                # срок поставки конкурента (D-074)
+    payment_terms: str = ""                # условия оплаты конкурента
 
 
 def _competitor(db: Session, name: str, user_id: str) -> Optional[Competitor]:
@@ -129,6 +132,7 @@ def _apply(db: Session, deal: Deal, o: CompetitorOffer, body: OfferIn, user: Cur
     o.vat_included = body.vat_included
     o.vat_pct = body.vat_pct if body.vat_pct is not None else float(settings_service.get(db, "sales_vat_pct") or 22.0)
     o.variant_id, o.source, o.comment = body.variant_id, body.source.strip()[:255], body.comment.strip()
+    o.delivery_term, o.payment_terms = body.delivery_term.strip()[:255], body.payment_terms.strip()[:500]
     o.fx_rate, o.fx_on = rate_on(db, cur, body.on)
     return comp
 
@@ -136,13 +140,19 @@ def _apply(db: Session, deal: Deal, o: CompetitorOffer, body: OfferIn, user: Cur
 def _our(db: Session, deal: Deal, contract_ccy: str) -> list[dict]:
     vat = float(settings_service.get(db, "sales_vat_pct") or 22.0)
     out = []
+    # после торгов (D-074) наша цена — последней редакции КП
+    from ..models import DealVersion
+    from ..services.negotiation import current
+    ver = db.get(DealVersion, deal.approved_version_id) if deal.approved_version_id else None
+    now = current(db, deal, ver) if ver else {}
     for v in deal.variants:
         if v.price_rub is None:
             continue
+        price = now.get(v.id, {}).get("price_rub", v.price_rub)
         crate, _ = rate_on(db, contract_ccy, date.today())
-        out.append({"variant_id": v.id, "name": v.name, "rub_net": round(v.price_rub, 2), "rub_gross": round(v.price_rub * (1 + vat / 100), 2),
+        out.append({"variant_id": v.id, "name": v.name, "rub_net": round(price, 2), "rub_gross": round(price * (1 + vat / 100), 2),
                     "currency": v.price_currency or "RUB", "net": v.price_amount, "vat_included": v.price_vat_included,
-                    "contract_net": round(v.price_rub / crate, 2), "contract_gross": round(v.price_rub * (1 + vat / 100) / crate, 2)})
+                    "contract_net": round(price / crate, 2), "contract_gross": round(price * (1 + vat / 100) / crate, 2)})
     return out
 
 

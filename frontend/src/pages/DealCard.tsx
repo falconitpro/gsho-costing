@@ -192,7 +192,8 @@ export default function DealCard({ me }: { me: Me }) {
       {phase === "sale" && <WaitingPanel deal={deal} me={me} onDone={(m) => { setErr(m); load(); }} />}
       <OutcomePanel deal={deal} me={me} onDone={(m) => { setErr(m); load(); if (m.startsWith("Сделка выиграна")) setTab("execution"); }} />
       {phase === "sale" && <div style={{ margin: "6px 0" }}><KpActions dealId={deal.id} status={deal.status} canAct={isOwner || has("cd", "gd", "admin")} onDone={() => { load(); }} /></div>}
-      {["approved", "kp_sent"].includes(deal.status) && <KpRevisions dealId={deal.id} status={deal.status} onDone={() => { load(); }} />}
+      {["approved", "kp_sent"].includes(deal.status) && <KpRevisions dealId={deal.id} status={deal.status} onDone={() => { load(); }} readonly
+        onNegotiate={has("cd", "gd") ? () => { window.history.replaceState(null, "", `${window.location.pathname}?tab=pricing&sub=negotiation`); setTab("pricing"); } : undefined} />}
       {(editable || has("cd", "gd")) && ["draft", "rework"].includes(deal.status) && (deal.check_items || []).length > 0 &&
         <ChecksPanel items={deal.check_items!} onGo={(it) => { setTab(it.tab as Tab); if (it.position_id) openPos(it.position_id); }} />}
       <RelatedDeals dealId={deal.id} me={me} />
