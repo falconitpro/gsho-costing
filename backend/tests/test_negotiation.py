@@ -2,7 +2,7 @@
 from tests.test_api_flow import client, _ok, H, MGR, LOG, CD, FD, GD  # noqa: F401
 
 
-def _approved(client, margin=20.0):
+def _approved(client, margin=20.0, currency=None):
     clients = _ok(client.get("/api/refs/clients", headers=H(MGR)))
     factories = _ok(client.get("/api/refs/factories", headers=H(MGR)))
     did = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "Торги"}), 201)["id"]
@@ -14,7 +14,7 @@ def _approved(client, margin=20.0):
     _ok(client.post(f"/api/deals/{did}/logistics/batches", headers=H(LOG), json={"items": items, "position_ids": [pos["id"]]}), 201)
     _ok(client.put(f"/api/deals/{did}/logistics/positions/{pos['id']}", headers=H(LOG), json={"hs_code": "8429519000", "util_applies": False}))
     _ok(client.post(f"/api/deals/{did}/logistics/complete", headers=H(LOG)))
-    _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "margin", "value": margin}))
+    _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "margin", "value": margin, **({"currency": currency} if currency else {})}))
     schemes = _ok(client.get("/api/refs/payment-schemes", headers=H(CD)))
     calc = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))
     _ok(client.post(f"/api/deals/{did}/payment-terms", headers=H(CD), json={"client_payments": schemes[0]["lines"],
@@ -138,3 +138,25 @@ def test_client_review_status_and_reminder(client):
     out = _ok(client.post(f"/api/deals/{did}/negotiation/steps/{st[1]['id']}/review/close", headers=H(CD), json={"client_answer": "согласны"}))
     assert out["review"]["status"] == "answered" and out["client_answer"] == "согласны"
     assert client.post(f"/api/deals/{did}/negotiation/steps/{st[1]['id']}/review/close", headers=H(CD), json={}).status_code == 409
+
+
+def test_client_rates_only_for_negotiation(client):
+    did, vid, _ = _approved(client, currency="CNY")
+    ov = _ok(client.get(f"/api/deals/{did}/negotiation", headers=H(CD)))
+    v = ov["variants"][0]
+    assert v["currency"] == "CNY" and ov["client_rates"] == {}
+    calc_before = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))["input"]["fx"]["rates"]
+    assert client.put(f"/api/deals/{did}/negotiation/client-rates", headers=H(MGR), json={"rates": {"CNY": 11}}).status_code == 403
+    assert client.put(f"/api/deals/{did}/negotiation/client-rates", headers=H(CD), json={"rates": {"CNY": -1}}).status_code == 422
+    _ok(client.put(f"/api/deals/{did}/negotiation/client-rates", headers=H(CD), json={"rates": {"CNY": 11.0}, "comment": "курс заказчика"}))
+    ov = _ok(client.get(f"/api/deals/{did}/negotiation", headers=H(CD)))
+    assert ov["client_rates"] == {"CNY": 11.0} and ov["client_rates_history"][-1]["comment"] == "курс заказчика"
+    # снижение на 110 000 ₽ без НДС по курсу заказчика = 10 000 CNY → в расчёте — 10 000 × курс цены КП
+    pv = _ok(client.post(f"/api/deals/{did}/negotiation/preview", headers=H(CD),
+                         json={"prices": {vid: {"mode": "amount", "basis": "net", "currency": "RUB", "value": 110000}}}))["variants"][vid]
+    assert abs((pv["before"]["net"] - pv["price"]["net"]) - 10000) < 0.5
+    assert abs(-pv["change_rub"] - 10000 * v["kp_rate"]) < 1
+    # расчёт сделки — по курсам ЦБ, курсы заказчика его не меняют
+    assert _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))["input"]["fx"]["rates"] == calc_before
+    _ok(client.put(f"/api/deals/{did}/negotiation/client-rates", headers=H(CD), json={"rates": {}}))
+    assert _ok(client.get(f"/api/deals/{did}/negotiation", headers=H(CD)))["client_rates"] == {}

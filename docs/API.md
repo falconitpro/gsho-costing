@@ -196,3 +196,4 @@
 - `GET /api/files/{path}?view=1` — просмотр: изображения / видео inline; PDF и Word / Excel — `&info=1` → `{pages}`, `&page=N` → страница PNG. Неподдерживаемый тип — 415.
 - `GET /api/files/{path}` — скачивание: группа `file_download` или одобренный запрос (24 ч), иначе 403 `{code: "download_restricted"}`.
 - `POST /api/files-download-requests` — `{path, reason}` → 201 `{id, status}`; `GET /api/files-download-requests?status=pending` (ЗГД — все, остальные — свои); `POST /api/files-download-requests/{id}` — ЗГД: `{approve, comment}`.
+- `PUT /api/deals/{id}/negotiation/client-rates` — КД / ЗГД: `{rates: {CNY: 11.5}, comment}`; пустой `rates` — снять. В `GET .../negotiation` — `client_rates`, `client_rates_history` (D-079).

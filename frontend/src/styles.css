@@ -689,3 +689,6 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .fp-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,.12); color: #fff; border: 0; font-size: 40px; width: 44px; height: 80px; cursor: pointer; border-radius: 6px; }
 .fp-prev { left: 6px; } .fp-next { right: 6px; }
 .ng-vat { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 8px; font-size: 13px; }
+.ng-rates { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: 12px; padding-left: 12px; border-left: 1px solid var(--line); }
+.ng-rates-form { display: inline-flex; gap: 6px; align-items: center; }
+.ng-rates-h summary { cursor: pointer; font-size: 12px; }

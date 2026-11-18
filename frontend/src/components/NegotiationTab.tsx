@@ -23,18 +23,20 @@ type An = { first_rub: number; current_rub: number; discount_rub: number; discou
   steps: number; price_steps: number; terms_steps: number; avg_step_pct: number | null; days: number; first_kp_on: string | null; last_step_on: string | null;
   margin_first_pct: number | null; margin_now_pct: number | null; margin_lost_pp: number | null; best_competitor_rub: number | null; gap_to_competitor_pct: number | null };
 type Data = { ready: boolean; message?: string; can_edit: boolean; status: string; vat_pct: number; reasons: Record<string, string>; variants: Var[];
-  decision: Record<string, Dec>; steps: Step[]; competitors: Comp[]; analytics: An; fx: Record<string, number> };
+  decision: Record<string, Dec>; steps: Step[]; competitors: Comp[]; analytics: An; fx: Record<string, number>;
+  client_rates: Record<string, number>; client_rates_history: { at: string; by_name: string; rates: Record<string, number>; comment: string }[] };
 type PIn = { mode: "pct" | "amount" | "target"; basis: "net" | "gross"; currency: string; value: string };
 
 const pct = (v: number | null | undefined, sign = false) => (v == null ? "—" : `${sign && v > 0 ? "+" : ""}${v.toFixed(2).replace(".", ",")} %`);
 const mcls = (m: number | null | undefined, thr: number) => (m == null ? "" : m < 0 ? "ng-bad" : m < thr ? "ng-warn" : "ng-ok");
 const cur2 = (m: Money, gross = false) => (m.currency === "RUB" ? `${fmtRub(gross ? m.gross_rub : m.net_rub)} ₽` : `${fmtRub(gross ? m.gross : m.net)} ${m.currency}`);
 // цены — в валюте контракта (валюте КП) с НДС или без, справочно в рублях (D-078)
-type Fx = { cur: string; rate: number; gross: boolean; vat: number };
+type Fx = { cur: string; rate: number; gross: boolean; vat: number; ref?: number; client?: boolean };
 const k = (fx: Fx) => (fx.gross ? 1 + fx.vat / 100 : 1);
 const sym = (c: string) => (c === "RUB" ? "₽" : c);
 const inCur = (fx: Fx, rub: number | null | undefined, sign = false) => (rub == null ? "—" : `${sign && rub > 0 ? "+" : sign && rub < 0 ? "−" : ""}${fmtRub(Math.abs(rub) * k(fx) / fx.rate)} ${sym(fx.cur)}`);
-const rubRef = (fx: Fx, rub: number | null | undefined) => (rub == null || fx.cur === "RUB" ? "" : `≈ ${fmtRub(Math.abs(rub) * k(fx))} ₽`);
+// справочно в рублях: по внутреннему курсу заказчика, если он задан в торгах (D-079), иначе — по курсу цены КП
+const rubRef = (fx: Fx, rub: number | null | undefined) => (rub == null || fx.cur === "RUB" ? "" : `≈ ${fmtRub(Math.abs(rub) / fx.rate * (fx.ref || fx.rate) * k(fx))} ₽${fx.client ? " (курс заказчика)" : ""}`);
 const vatLbl = (fx: Fx) => (fx.gross ? `с НДС ${fx.vat} %` : "без НДС");
 const mm = (m: Money, gross: boolean) => cur2(m, gross);
 
@@ -98,7 +100,8 @@ export default function NegotiationTab({ dealId, variants, onChanged }: { dealId
   const a = d.analytics;
   const show = prev || d.decision;
   const one = new Set(d.variants.map((v) => v.currency)).size === 1;
-  const fx: Fx = { cur: one ? d.variants[0]?.currency || "RUB" : "RUB", rate: one ? d.variants[0]?.kp_rate || 1 : 1, gross, vat: d.vat_pct };
+  const fxCur = one ? d.variants[0]?.currency || "RUB" : "RUB";
+  const fx: Fx = { cur: fxCur, rate: one ? d.variants[0]?.kp_rate || 1 : 1, gross, vat: d.vat_pct, ref: d.client_rates[fxCur], client: !!d.client_rates[fxCur] };
   const curs = (v: Var) => [...new Set(["RUB", v.currency, ...Object.keys(d.fx).filter((c) => ["CNY", "USD", "EUR"].includes(c))])];
 
   return (
@@ -107,6 +110,7 @@ export default function NegotiationTab({ dealId, variants, onChanged }: { dealId
         <span className="muted">Цены {fx.cur !== "RUB" ? `в ${fx.cur} (валюта КП), справочно в рублях` : "в рублях"} ·</span>
         <div className="ng-seg">{([[false, "без НДС"], [true, `с НДС ${d.vat_pct} %`]] as const).map(([g, t]) => <button key={t} className={gross === g ? "active" : ""} onClick={() => setG(g)}>{t}</button>)}</div>
         <span className="muted">— так же вводится снижение в новом шаге</span>
+        {fx.cur !== "RUB" && <ClientRates dealId={dealId} d={d} cur={fx.cur} reload={load} edit={d.can_edit} />}
       </div>
       <div className="ng-kpis">
         <Kpi t={`Первая цена КП, ${vatLbl(fx)}`} v={inCur(fx, a.first_rub)} s={[rubRef(fx, a.first_rub), a.first_kp_on ? `от ${fmtDate(a.first_kp_on)}` : ""].filter(Boolean).join(" · ")} />
@@ -142,7 +146,7 @@ export default function NegotiationTab({ dealId, variants, onChanged }: { dealId
                     <div className="ng-inrow">
                       <input inputMode="decimal" placeholder={p.mode === "pct" ? "напр. 3" : "сумма"} value={p.value} onChange={(e) => set({ value: e.target.value })} />
                       {p.mode === "pct" ? <span className="muted">% от текущей цены</span> : <>
-                        <select value={p.currency} onChange={(e) => set({ currency: e.target.value })}>{curs(v).map((c) => <option key={c}>{c}</option>)}</select>
+                        <select value={p.currency} onChange={(e) => set({ currency: e.target.value })}>{curs(v).map((c) => <option key={c} value={c}>{c}{c !== v.currency && d.client_rates[v.currency] && (c === "RUB" || d.client_rates[c]) ? " · по курсу заказчика" : ""}</option>)}</select>
                         <select value={p.basis} onChange={(e) => set({ basis: e.target.value as PIn["basis"] })}><option value="net">без НДС</option><option value="gross">с НДС {d.vat_pct} %</option></select></>}
                     </div>
                   </div>); })}
@@ -181,9 +185,9 @@ export default function NegotiationTab({ dealId, variants, onChanged }: { dealId
                 <button className="btn" disabled={busy || !dirty} onClick={() => fix(false)}>Зафиксировать шаг и сформировать КП</button>
                 {dirty && <button className="btn ghost" onClick={() => reset(d)}>Очистить</button>}</div>}
             </div>
-            <Decision dec={show} preview={!!prev} vars={d.variants} comps={d.competitors} gross={gross} />
+            <Decision dec={show} preview={!!prev} vars={d.variants} comps={d.competitors} gross={gross} client={d.client_rates} />
           </div>
-        ) : <><div className="alert info">Торги закрыты: сделка на этапе «{d.status}». История и аналитика — ниже.</div><Decision dec={d.decision} preview={false} vars={d.variants} comps={d.competitors} gross={gross} /></>}
+        ) : <><div className="alert info">Торги закрыты: сделка на этапе «{d.status}». История и аналитика — ниже.</div><Decision dec={d.decision} preview={false} vars={d.variants} comps={d.competitors} gross={gross} client={d.client_rates} /></>}
         <History d={d} dealId={dealId} reload={load} fx={fx} />
       </>}
       {section === "competitors" && <CompetitorsTab dealId={dealId} variants={variants} />}
@@ -196,7 +200,7 @@ function Kpi({ t, v, s, tone = "" }: { t: string; v: string; s?: string; tone?: 
 }
 
 /** Данные для решения: до → после, маржа по сценариям, минимальная цена по порогу и безубыточная, конкуренты. */
-function Decision({ dec, preview, vars, comps, gross }: { dec: Record<string, Dec>; preview: boolean; vars: Var[]; comps: Comp[]; gross: boolean }) {
+function Decision({ dec, preview, vars, comps, gross, client }: { dec: Record<string, Dec>; preview: boolean; vars: Var[]; comps: Comp[]; gross: boolean; client: Record<string, number> }) {
   const best = comps.length ? Math.min(...comps.map((c) => c.rub_net)) : null;
   return (
     <div className="card ng-dec">
@@ -207,7 +211,7 @@ function Decision({ dec, preview, vars, comps, gross }: { dec: Record<string, De
         return (
           <div key={v.id} className="ng-dec-var">
             {vars.length > 1 && <b>{v.name}</b>}
-            {(() => { const v2: Fx = { cur: x.price.currency, rate: (x.price.net_rub / (x.price.net || 1)) || 1, gross, vat: x.price.net_rub ? Math.round((x.price.gross_rub / x.price.net_rub - 1) * 1000) / 10 : 22 }; return (
+            {(() => { const v2: Fx = { cur: x.price.currency, rate: (x.price.net_rub / (x.price.net || 1)) || 1, ref: client[x.price.currency], client: !!client[x.price.currency], gross, vat: x.price.net_rub ? Math.round((x.price.gross_rub / x.price.net_rub - 1) * 1000) / 10 : 22 }; return (
             <div className="ng-price">
               <div><span className="muted">цена {vatLbl(v2)}</span><b>{mm(x.price, gross)}</b>{x.price.currency !== "RUB" && <span className="muted">{rubRef(v2, x.price.net_rub)}</span>}</div>
               <div><span className="muted">{gross ? "без НДС" : "с НДС"}</span><b>{mm(x.price, !gross)}</b></div>
@@ -226,11 +230,11 @@ function Decision({ dec, preview, vars, comps, gross }: { dec: Record<string, De
               <tr><td>Маржа: базовый / пессимистичный / оптимистичный</td><td className="num">
                 <b className={mcls(x.margin.base, thr)}>{pct(x.margin.base)}</b> / <span className={mcls(x.margin.pessimistic, 0.0001)}>{pct(x.margin.pessimistic)}</span> / {pct(x.margin.optimistic)}</td></tr>
               <tr><td>Порог маржи для этой суммы</td><td className="num">{thr} %</td></tr>
-              <tr><td>Минимальная цена по порогу</td><td className="num"><b>{x.min_price_threshold ? mm(x.min_price_threshold, gross) : "—"}</b>{x.min_price_threshold && x.min_price_threshold.currency !== "RUB" && <div className="muted">≈ {fmtRub(gross ? x.min_price_threshold.gross_rub : x.min_price_threshold.net_rub)} ₽</div>}</td></tr>
+              <tr><td>Минимальная цена по порогу</td><td className="num"><b>{x.min_price_threshold ? mm(x.min_price_threshold, gross) : "—"}</b>{x.min_price_threshold && x.min_price_threshold.currency !== "RUB" && <div className="muted">≈ {fmtRub((gross ? x.min_price_threshold.gross : x.min_price_threshold.net) * (client[x.min_price_threshold.currency] || (x.min_price_threshold.net_rub / (x.min_price_threshold.net || 1))))} ₽</div>}</td></tr>
               <tr><td>Запас снижения до порога</td><td className="num"><b className={x.room_rub != null && x.room_rub < 0 ? "ng-bad" : ""}>{x.room_rub != null ? `${fmtRub(x.room_rub * (gross ? x.price.gross_rub / (x.price.net_rub || 1) : 1) * (x.price.net || x.price.net_rub) / (x.price.net_rub || 1))} ${sym(x.price.currency)}` : "—"}</b> <span className="muted">{pct(x.room_pct)}</span></td></tr>
               <tr><td>Безубыточная цена (маржа 0 %)</td><td className="num">{x.min_price_zero ? mm(x.min_price_zero, gross) : "—"}</td></tr>
               {(() => { const r = (x.price.net_rub / (x.price.net || 1)) || 1, c = x.price.currency, g = gross ? x.price.gross_rub / (x.price.net_rub || 1) : 1;
-                const cc = (v: number | null | undefined) => (v == null ? "—" : `${fmtRub(v / r)} ${sym(c)}`), ref = (v: number | null | undefined) => (c === "RUB" || v == null ? "" : `≈ ${fmtRub(v)} ₽`);
+                const cc = (v: number | null | undefined) => (v == null ? "—" : `${fmtRub(v / r)} ${sym(c)}`), ref = (v: number | null | undefined) => (c === "RUB" || v == null ? "" : `≈ ${fmtRub(v)} ₽ (ЦБ)`);   // себестоимость и прибыль — по курсам расчёта
                 return <>
                   <tr><td>Себестоимость без НДС (базовый / пессимистичный)</td><td className="num">{cc(x.cost_rub)} / {cc(x.cost_pess_rub)}<div className="muted">{ref(x.cost_rub)}</div></td></tr>
                   <tr><td>Прибыль</td><td className="num">{cc(x.profit_rub)}<div className="muted">{ref(x.profit_rub)}</div></td></tr>
@@ -329,4 +333,32 @@ function History({ d, dealId, reload, fx }: { d: Data; dealId: string; reload: (
         {d.steps.length === 0 && <p className="muted" style={{ marginLeft: 22 }}>Шагов пока нет. Каждое снижение или изменение условий фиксируйте здесь — по каждому шагу формируется КП.</p>}
       </div>
     </div>);
+}
+
+/** Внутренние курсы заказчика (D-079): только для торгов — пересчёт рублей и ввод снижения в рублях; расчёт сделки — по ЦБ. */
+function ClientRates({ dealId, d, cur, reload, edit }: { dealId: string; d: Data; cur: string; reload: () => void; edit: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState(d.client_rates[cur] ? String(d.client_rates[cur]) : "");
+  const [comment, setComment] = useState("");
+  const [err, setErr] = useState("");
+  const cbr = d.fx[cur];
+  const set = d.client_rates[cur];
+  const save = (rates: Record<string, number | string>) => api.put(`/api/deals/${dealId}/negotiation/client-rates`, { rates, comment })
+    .then(() => { setOpen(false); setComment(""); setErr(""); reload(); }).catch((e) => setErr((e as Error).message));
+  return (
+    <span className="ng-rates">
+      <span className={set ? "badge warn" : "muted"}>{set ? `курс заказчика ${cur}: ${String(set).replace(".", ",")} ₽` : `рубли — по курсу цены КП`}</span>
+      {cbr && <span className="muted">ЦБ {cbr.toFixed(4).replace(".", ",")}</span>}
+      {edit && !open && <button className="btn ghost" style={{ padding: "1px 8px" }} onClick={() => setOpen(true)}>{set ? "изменить" : "задать курс заказчика"}</button>}
+      {open && <span className="ng-rates-form">
+        <input inputMode="decimal" placeholder={`₽ за 1 ${cur}`} value={val} style={{ width: 110 }} onChange={(e) => setVal(e.target.value)} />
+        <input placeholder="откуда курс (необязательно)" value={comment} onChange={(e) => setComment(e.target.value)} />
+        <button className="btn" disabled={!val.trim()} onClick={() => save({ ...d.client_rates, [cur]: val })}>Применить</button>
+        {set && <button className="btn ghost" onClick={() => { const r = { ...d.client_rates }; delete r[cur]; save(r); }}>Снять</button>}
+        <button className="btn ghost" onClick={() => setOpen(false)}>×</button></span>}
+      {err && <span className="badge bad">{err}</span>}
+      {d.client_rates_history.length > 0 && <details className="ng-rates-h"><summary className="muted">история</summary>
+        {[...d.client_rates_history].reverse().map((h, i) => <div key={i} className="muted" style={{ fontSize: 12 }}>{fmtDate(h.at)} · {h.by_name}: {Object.entries(h.rates).map(([c, r]) => `${c} ${r}`).join(", ") || "сняты"}{h.comment ? ` · ${h.comment}` : ""}</div>)}</details>}
+      <span className="muted" style={{ fontSize: 12 }}>— только для торгов; расчёт сделки и маржа — по курсам ЦБ</span>
+    </span>);
 }

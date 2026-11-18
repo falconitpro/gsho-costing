@@ -416,6 +416,7 @@ class Deal(TimestampMixin, Base):
     scenario_override: Mapped[dict] = mapped_column(JSONType, default=dict)    # ΔK/Δt сделки (КД, с комментарием)
     # рабочее место логиста (D-073): {pickup: {factory_id: адрес}, delivery_address, requests: [...], quotes: [...]}
     logistics_info: Mapped[dict] = mapped_column(JSONType, default=dict)
+    negotiation_info: Mapped[dict] = mapped_column(JSONType, default=dict)   # торги: внутренние курсы заказчика и их история (D-079)
     logistics_done: Mapped[bool] = mapped_column(Boolean, default=False)
     service_done: Mapped[bool] = mapped_column(Boolean, default=False)
     current_version_no: Mapped[int] = mapped_column(Integer, default=0)
