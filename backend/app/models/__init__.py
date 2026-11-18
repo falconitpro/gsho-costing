@@ -407,6 +407,7 @@ class Deal(TimestampMixin, Base):
     logistician_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     service_head_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     base_currency: Mapped[str] = mapped_column(String(3), default="CNY")
+    deal_currency: Mapped[Optional[str]] = mapped_column(String(3))   # валюта сделки (КП, контракт); пусто — валюта предложения поставщика (D-080)
     operating_conditions: Mapped[dict] = mapped_column(JSONType, default=dict)   # 0.4–0.6
     service_flag: Mapped[bool] = mapped_column(Boolean, default=False)
     target_hours: Mapped[Optional[float]] = mapped_column(Float)
@@ -685,6 +686,7 @@ class Variant(TimestampMixin, Base):
     price_vat_included: Mapped[bool] = mapped_column(Boolean, default=False)   # КД ввёл цену с НДС (D-066); price_amount / price_rub — всегда без НДС
     price_vat_pct: Mapped[Optional[float]] = mapped_column(Float)              # ставка НДС на момент ввода
     price_input_amount: Mapped[Optional[float]] = mapped_column(Float)         # сумма, как её ввёл КД (с НДС или без)
+    price_input_currency: Mapped[Optional[str]] = mapped_column(String(3))     # валюта ввода (D-080); цена хранится в валюте сделки
     service_in_kp: Mapped[bool] = mapped_column(Boolean, default=False)
     client_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     client_payments_alt: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # сравнение двух условий оплаты

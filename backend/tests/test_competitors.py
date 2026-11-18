@@ -30,7 +30,8 @@ def test_price_with_vat(client):
     v = r["variant"]
     assert v["price_rub"] == 20_000_000 and v["price_vat_included"] and v["price_input_amount"] == 24_400_000 and v["price_vat_pct"] == 22.0
     calc = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))
-    assert calc["sales_vat_pct"] == 22.0 and calc["contract_currency"]["code"] == "RUB"
+    assert calc["sales_vat_pct"] == 22.0 and calc["contract_currency"]["code"] == calc["deal_currency"]["code"] == v["price_currency"]   # D-080: валюта сделки
+    assert v["price_input_currency"] == "RUB" and v["price_input_amount"] == 24_400_000
     # логист цену и признак НДС не видит (новые поля — в той же группе прав, что и цена)
     mv = _ok(client.get(f"/api/deals/{did}", headers=H(LOG)))["variants"][0]
     assert "price_rub" not in mv and "price_vat_included" not in mv and "price_input_amount" not in mv

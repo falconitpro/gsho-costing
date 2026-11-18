@@ -136,7 +136,18 @@ def test_full_flow(client, tmp_path):
     p_cny = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "amount", "value": pv_["price_amount"]}))
     assert abs(p_cny["variant"]["price_rub"] - pv_["price_rub"]) < 1                                       # та же сумма в валюте завода
     p_rub = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "amount", "value": 1000000, "currency": "RUB"}))
-    assert p_rub["variant"]["price_rub"] == 1000000 and p_rub["variant"]["price_currency"] == "RUB"
+    # D-080: сумма в рублях пересчитывается в валюту сделки (валюту предложения поставщика); рубли — справочно
+    pr = p_rub["variant"]
+    assert pr["price_rub"] == 1000000 and pr["price_currency"] == pos["currency"] and pr["price_input_currency"] == "RUB"
+    assert abs(pr["price_amount"] * pr["price_fx_rate"] - 1000000) < 1
+    # валюту сделки меняют КД / ЗГД; цена пересчитывается
+    assert client.put(f"/api/deals/{did}/deal-currency", headers=H(MGR), json={"currency": "USD"}).status_code == 403
+    dc = _ok(client.put(f"/api/deals/{did}/deal-currency", headers=H(CD), json={"currency": "USD"}))
+    assert dc["deal_currency"] == "USD" and dc["offer_currency"] == pos["currency"]
+    vv = next(v for v in _ok(client.get(f"/api/deals/{did}", headers=H(CD)))["variants"] if v["id"] == var["id"])
+    assert vv["price_currency"] == "USD" and abs(vv["price_rub"] - 1000000) < 1
+    assert _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))["deal_currency"]["code"] == "USD"
+    assert _ok(client.put(f"/api/deals/{did}/deal-currency", headers=H(CD), json={"currency": None}))["deal_currency"] == pos["currency"]
     p = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "margin", "value": 8.0, "currency": pos["currency"]}))
     # без условий оплаты от КД утверждение не проходит
     assert client.post(f"/api/deals/{did}/submit", headers=H(CD)).status_code == 422
