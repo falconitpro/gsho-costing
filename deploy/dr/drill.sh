@@ -12,7 +12,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 POWEROFF=""; [ "${1:-}" = "--poweroff" ] && POWEROFF=1
 [ "$(id -u)" = 0 ] || dr_die "запускать от root"
-set -a; if [ -r /etc/gsho/dr.env ]; then . /etc/gsho/dr.env; fi; set +a
+set -a
+if [ -r /etc/gsho/dr.env ]; then
+  # shellcheck disable=SC1091  # файл есть только на сервере
+  . /etc/gsho/dr.env
+fi
+set +a
 DOMAIN="${DR_STANDBY_DOMAIN:-crm2.dobrov.pro}"
 REPORT="$DR_WORK/drill-last.json"
 install -d -m 0700 "$DR_WORK"

@@ -39,7 +39,10 @@ case "$STAGE" in
     ;;
   finish)
     [ -r /etc/gsho/dr.env ] || dr_die "нет /etc/gsho/dr.env"
-    set -a; . /etc/gsho/dr.env; set +a
+    set -a
+    # shellcheck disable=SC1091  # файл есть только на сервере
+    . /etc/gsho/dr.env
+    set +a
     dr_flag_delete
     dr_log "флаг снят — в течение минуты crm.dobrov.pro снова пускает в приложение"
     systemctl disable --now gsho-backup.timer >/dev/null 2>&1 || true

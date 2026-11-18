@@ -99,7 +99,9 @@ dr_restore_latest() {
 # Флаг «работаем на резерве» в Object Storage: рабочий сервер читает его (deploy/dr/flag-guard.sh) и переадресует на crm2
 dr_flag_put() {
   local body="$1"
-  [ -n "${DR_FLAG_BUCKET_URL:-}" ] && [ -n "${DR_FLAG_ACCESS_KEY_ID:-}" ] || dr_die "в /etc/gsho/dr.env не заданы DR_FLAG_BUCKET_URL / ключ флага"
+  if [ -z "${DR_FLAG_BUCKET_URL:-}" ] || [ -z "${DR_FLAG_ACCESS_KEY_ID:-}" ]; then
+    dr_die "в /etc/gsho/dr.env не заданы DR_FLAG_BUCKET_URL / ключ флага"
+  fi
   printf '%s' "$body" | curl -fsS -m 30 -X PUT --aws-sigv4 "aws:amz:ru-central1:s3" \
     --user "$DR_FLAG_ACCESS_KEY_ID:$DR_FLAG_SECRET_ACCESS_KEY" -H 'Content-Type: application/json' \
     -H 'x-amz-acl: public-read' --data-binary @- "$DR_FLAG_BUCKET_URL/failover.json" >/dev/null

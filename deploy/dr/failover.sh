@@ -14,7 +14,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 YES=""; [ "${1:-}" = "--yes" ] && YES=1
 [ "$(id -u)" = 0 ] || dr_die "запускать от root"
 [ -r /etc/gsho/dr.env ] || dr_die "нет /etc/gsho/dr.env (deploy/dr/README.md §2)"
-set -a; . /etc/gsho/dr.env; set +a
+set -a
+# shellcheck disable=SC1091  # файл есть только на сервере
+. /etc/gsho/dr.env
+set +a
 DOMAIN="${DR_STANDBY_DOMAIN:-crm2.dobrov.pro}"
 grep -q "^DOMAIN=$DOMAIN$" "$GSHO_DIR/.env" || dr_die "в $GSHO_DIR/.env DOMAIN не $DOMAIN — это не резервная ВМ?"
 
