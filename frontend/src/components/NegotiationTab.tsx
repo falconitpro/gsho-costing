@@ -16,7 +16,8 @@ type Var = { id: string; name: string; currency: string; kp_rate: number; first_
 type Step = { id: string; no: number; at: string; by_name: string; kind: string; reason: string; reason_title: string; comment: string;
   input: Record<string, { mode: string; basis: string; currency: string; value: number }>; terms: Record<string, { client_payments?: PaymentLine[]; delivery_term?: string }>;
   result: Record<string, Dec>; price_before_rub: number; price_rub: number; margin_pct: number | null; show_discount: boolean; kp_revision_id: string;
-  sent_at: string | null; sent_to: string[]; client_answer: string };
+  sent_at: string | null; sent_to: string[]; client_answer: string;
+  review: { status?: string; since?: string; remind_on?: string; assignee_name?: string; note?: string; closed_at?: string } };
 type Comp = { id: string; competitor: string; on: string; equipment: string; rub_net: number; delivery_term: string; payment_terms: string };
 type An = { first_rub: number; current_rub: number; discount_rub: number; discount_pct: number | null; bargain_coef: number | null; price_ratio: number | null;
   steps: number; price_steps: number; terms_steps: number; avg_step_pct: number | null; days: number; first_kp_on: string | null; last_step_on: string | null;
@@ -99,6 +100,8 @@ export default function NegotiationTab({ dealId, variants, onChanged }: { dealId
           tone={mcls(a.margin_now_pct, Object.values(d.decision)[0]?.threshold_pct ?? 3).replace("ng-", "")} />
         <Kpi t="Лучший конкурент" v={a.best_competitor_rub ? `${fmtRub(a.best_competitor_rub)} ₽` : "—"} s={a.gap_to_competitor_pct != null ? `мы ${a.gap_to_competitor_pct > 0 ? "дороже" : "дешевле"} на ${pct(Math.abs(a.gap_to_competitor_pct))}` : "сведений нет"} />
       </div>
+      {(() => { const r = d.steps.find((x) => x.review?.status === "client_review"); return r ? (
+        <div className="alert warn">КП шага {r.no} <b>на рассмотрении клиента</b> с {fmtDate(r.review.since)} · уточнить результат {fmtDate(r.review.remind_on)}{r.review.assignee_name ? ` — ${r.review.assignee_name}` : ""}{r.review.note ? ` · ${r.review.note}` : ""}</div>) : null; })()}
       <PriceChart steps={d.steps} first={a.first_rub} />
 
       <div className="ng-sections">
@@ -240,6 +243,11 @@ function History({ d, dealId, reload }: { d: Data; dealId: string; reload: () =>
   const [text, setText] = useState("");
   const [ans, setAns] = useState<Record<string, string>>({});
   const [e, setE] = useState("");
+  const plus = (n: number) => { const x = new Date(); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+  const [rv, setRv] = useState<{ id: string; remind_on: string; assignee: string; note: string } | null>(null);
+  const saveReview = () => rv && api.put(`/api/deals/${dealId}/negotiation/steps/${rv.id}/review`, { remind_on: rv.remind_on, assignee: rv.assignee, note: rv.note })
+    .then(() => { setRv(null); reload(); }).catch((x) => setE(x.message));
+  const closeReview = (id: string) => api.post(`/api/deals/${dealId}/negotiation/steps/${id}/review/close`, { client_answer: ans[id] ?? "" }).then(reload).catch((x) => setE(x.message));
   const open = (id: string) => {
     setSend(id); setE("");
     api.get<typeof rcp>(`/api/deals/${dealId}/kp/recipients`).then((r) => { setRcp(r); setTo((r?.recipients || []).map((x) => x.email).join(", ")); setText(r?.body || ""); }).catch(() => setRcp(null));
@@ -267,7 +275,17 @@ function History({ d, dealId, reload }: { d: Data; dealId: string; reload: () =>
               <span className="muted">маржа {pct(s.margin_pct)}</span>
               <span className="ng-files"><a href={`/api/deals/${dealId}/kp/revisions/${s.kp_revision_id}/file?format=docx`}>Word</a> · <a href={`/api/deals/${dealId}/kp/revisions/${s.kp_revision_id}/file?format=pdf`}>PDF</a></span>
               {s.sent_at ? <span className="badge ok" title={s.sent_to.join(", ")}>отправлено {fmtDate(s.sent_at)}</span>
-                : d.can_edit && <button className="btn ghost" onClick={() => open(s.id)}>✉ отправить клиенту</button>}</div>
+                : d.can_edit && <button className="btn ghost" onClick={() => open(s.id)}>✉ отправить клиенту</button>}
+              {s.review?.status === "client_review" && <span className="badge ng-review" title={s.review.note || ""}>на рассмотрении клиента · напомнить {fmtDate(s.review.remind_on)}{s.review.assignee_name ? ` (${s.review.assignee_name})` : ""}</span>}
+              {d.can_edit && s.review?.status !== "client_review" && s.no === d.steps[d.steps.length - 1]?.no && <button className="btn ghost" onClick={() => setRv({ id: s.id, remind_on: plus(3), assignee: "manager", note: "" })}>⏳ на рассмотрении клиента</button>}</div>
+            {rv?.id === s.id && <div className="ng-send">
+              <b>На рассмотрении клиента — когда уточнить результат?</b>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {[1, 3, 5, 7].map((n) => <button key={n} className={"btn " + (rv.remind_on === plus(n) ? "" : "ghost")} style={{ padding: "2px 10px" }} onClick={() => setRv({ ...rv, remind_on: plus(n) })}>через {n} дн.</button>)}
+                <input type="date" value={rv.remind_on} onChange={(x) => setRv({ ...rv, remind_on: x.target.value })} />
+                <select value={rv.assignee} onChange={(x) => setRv({ ...rv, assignee: x.target.value })}><option value="manager">напомнить менеджеру сделки</option><option value="me">напомнить мне</option></select></div>
+              <input placeholder="что ждём от клиента (необязательно)" value={rv.note} onChange={(x) => setRv({ ...rv, note: x.target.value })} />
+              <div className="row" style={{ gap: 8 }}><button className="btn" onClick={saveReview}>Установить статус и напоминание</button><button className="btn ghost" onClick={() => setRv(null)}>Отмена</button></div></div>}
             {Object.entries(s.input).map(([vid, i]) => <div key={vid} className="muted ng-tl-line">{d.variants.length > 1 ? `${s.result[vid]?.name}: ` : ""}
               {i.mode === "pct" ? `снижение ${i.value} %` : i.mode === "amount" ? `снижение на ${fmtRub(i.value)} ${i.currency} ${i.basis === "gross" ? "с НДС" : "без НДС"}` : `новая цена ${fmtRub(i.value)} ${i.currency} ${i.basis === "gross" ? "с НДС" : "без НДС"}`}
               {s.show_discount ? " · в КП строкой «Скидка»" : ""}</div>)}
@@ -282,7 +300,9 @@ function History({ d, dealId, reload }: { d: Data; dealId: string; reload: () =>
                 <button className="btn ghost" onClick={() => setSend(null)}>Отмена</button></div>
               {!rcp?.mail_configured && <span className="muted" style={{ fontSize: 12 }}>Почта не подключена: скачайте PDF или Word выше, отправьте и отметьте отправку.</span>}</div>}
             <div className="ng-answer"><input placeholder="ответ клиента: принял / просит ещё / ушёл к конкуренту…" value={ans[s.id] ?? s.client_answer} disabled={!d.can_edit}
-              onChange={(x) => setAns({ ...ans, [s.id]: x.target.value })} />{(ans[s.id] ?? s.client_answer) !== s.client_answer && <button className="btn ghost" onClick={() => saveAns(s.id)}>сохранить</button>}</div>
+              onChange={(x) => setAns({ ...ans, [s.id]: x.target.value })} />
+              {s.review?.status === "client_review" && d.can_edit ? <button className="btn secondary" onClick={() => closeReview(s.id)}>Клиент ответил</button>
+                : (ans[s.id] ?? s.client_answer) !== s.client_answer && <button className="btn ghost" onClick={() => saveAns(s.id)}>сохранить</button>}</div>
           </div></div>); })}
         {d.steps.length === 0 && <p className="muted" style={{ marginLeft: 22 }}>Шагов пока нет. Каждое снижение или изменение условий фиксируйте здесь — по каждому шагу формируется КП.</p>}
       </div>

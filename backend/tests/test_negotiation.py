@@ -114,3 +114,27 @@ def test_kp_edit_after_step_keeps_negotiated_price(client):
     s2 = _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD),
                          json={"prices": {vid: {"mode": "pct", "value": 1}}, "reason": "client", "show_discount": True}), 201)
     assert abs(s2["price_rub"] - r["price_rub"] * 0.99) < 1
+
+
+def test_client_review_status_and_reminder(client):
+    from datetime import date, timedelta
+    did, vid, _ = _approved(client)
+    s = _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD), json={"prices": {vid: {"mode": "pct", "value": 1}}, "reason": "client"}), 201)
+    on = (date.today() + timedelta(days=3)).isoformat()
+    assert client.put(f"/api/deals/{did}/negotiation/steps/{s['id']}/review", headers=H(MGR), json={"remind_on": on}).status_code == 403
+    assert client.put(f"/api/deals/{did}/negotiation/steps/{s['id']}/review", headers=H(CD), json={"remind_on": "2020-01-01"}).status_code == 422
+    r = _ok(client.put(f"/api/deals/{did}/negotiation/steps/{s['id']}/review", headers=H(CD), json={"remind_on": on, "assignee": "manager", "note": "ждём ответа закупки"}))
+    assert r["review"]["status"] == "client_review" and r["review"]["remind_on"] == on
+    tasks = _ok(client.get("/api/tasks/my", headers=H(MGR)))
+    t = next(x for x in tasks if x["deal_id"] == did and x["block"] == "negotiation_review")
+    assert t["due"] == on and "Уточнить у клиента" in t["title"]
+    # следующий шаг закрывает «на рассмотрении» и напоминание
+    _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD), json={"prices": {vid: {"mode": "pct", "value": 1}}, "reason": "client"}), 201)
+    st = _ok(client.get(f"/api/deals/{did}/negotiation", headers=H(CD)))["steps"]
+    assert st[0]["review"]["status"] == "answered"
+    assert not any(x["deal_id"] == did and x["block"] == "negotiation_review" for x in _ok(client.get("/api/tasks/my", headers=H(MGR))))
+    # ручное закрытие с ответом клиента
+    _ok(client.put(f"/api/deals/{did}/negotiation/steps/{st[1]['id']}/review", headers=H(CD), json={"remind_on": on, "assignee": "me"}))
+    out = _ok(client.post(f"/api/deals/{did}/negotiation/steps/{st[1]['id']}/review/close", headers=H(CD), json={"client_answer": "согласны"}))
+    assert out["review"]["status"] == "answered" and out["client_answer"] == "согласны"
+    assert client.post(f"/api/deals/{did}/negotiation/steps/{st[1]['id']}/review/close", headers=H(CD), json={}).status_code == 409

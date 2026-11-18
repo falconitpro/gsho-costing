@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,7 +16,7 @@ from ..core.auth import CurrentUser, require_roles
 from ..core.roles import Role
 from ..core.workflow import DealStatus
 from ..db import get_db
-from ..models import Attachment, DealVersion, FeedEntry, KpRevision, NegotiationStep
+from ..models import Attachment, DealVersion, FeedEntry, KpRevision, NegotiationStep, Task, User
 from ..services import negotiation as ng
 from ..services.deal_service import audit, ensure_folders, notify
 from .common import get_deal_or_404
@@ -158,6 +159,14 @@ def create_step(deal_id: str, body: StepIn, db: Session = Depends(get_db), user:
                            margin_pct=margin, show_discount=body.show_discount, kp_revision_id=rev.id)
     db.add(step)
     db.flush()
+    for prev_step in rows:   # новый шаг — клиент ответил на прошлое КП: снимаем «на рассмотрении» и напоминание
+        r = dict(prev_step.review or {})
+        if r.get("status") == "client_review":
+            t = db.get(Task, r.get("task_id")) if r.get("task_id") else None
+            if t is not None and t.done_at is None:
+                t.done_at = ng.now()
+            r.update(status="answered", closed_at=ng.now().isoformat(timespec="seconds"), closed_by=user.id)
+            prev_step.review = r
     db.add(FeedEntry(deal_id=deal.id, kind="comment", direction="out", counterparty="", subject=f"Торги, шаг {step.no}", body=desc, user_id=user.id))
     audit(db, user.id, deal.id, "negotiation", step.id, "negotiation_step", {"price_rub": before},
           {"no": step.no, "price_rub": total, "margin_pct": margin, "kind": kind, "reason": body.reason}, body.comment.strip() or None)
@@ -253,5 +262,68 @@ def step_send(deal_id: str, step_id: str, body: SendIn, db: Session = Depends(ge
         db.add(FeedEntry(deal_id=deal.id, kind="mail_out", direction="out", counterparty=", ".join(to), subject=f"КП ред. {rev.no} (торги, шаг {s.no})",
                          body=f"Отправлено: {via}", user_id=user.id))
     audit(db, user.id, deal.id, "negotiation", s.id, "negotiation_kp_sent", after={"to": to, "via": via, "revision": rev.no})
+    db.commit()
+    return ng.step_dict(s, ng.names(db))
+
+
+class ReviewIn(BaseModel):
+    remind_on: date
+    assignee: str = "manager"      # manager — менеджер сделки, me — я
+    note: str = ""
+
+
+@router.put("/steps/{step_id}/review")
+def set_review(deal_id: str, step_id: str, body: ReviewIn, db: Session = Depends(get_db), user: CurrentUser = Depends(CD_GD)):
+    """«На рассмотрении клиента»: КП шага у клиента; в дату напоминания — задача уточнить у клиента результат (D-076)."""
+    from ..services.deal_service import notify_new_task
+    deal = get_deal_or_404(db, deal_id, user)
+    s = db.get(NegotiationStep, step_id)
+    if s is None or s.deal_id != deal.id:
+        raise HTTPException(404)
+    if body.remind_on < ng.today():
+        raise HTTPException(422, "Дата напоминания — сегодня или позже")
+    assignee = deal.manager_id if body.assignee == "manager" and deal.manager_id else user.id
+    prev = dict(s.review or {})
+    if prev.get("task_id"):
+        old = db.get(Task, prev["task_id"])
+        if old is not None and old.done_at is None:
+            old.done_at = ng.now()
+    u = db.get(User, assignee)
+    task = Task(deal_id=deal.id, role=(Role.MANAGER.value if assignee == deal.manager_id else Role.CD.value), assignee_id=assignee,
+                title=f"Уточнить у клиента результат рассмотрения КП (торги, шаг {s.no})" + (f": {body.note.strip()[:120]}" if body.note.strip() else ""),
+                block="negotiation_review", due=body.remind_on)
+    db.add(task)
+    db.flush()
+    s.review = {"status": "client_review", "since": prev.get("since") or ng.now().isoformat(timespec="seconds"), "remind_on": body.remind_on.isoformat(),
+                "task_id": task.id, "assignee_id": assignee, "assignee_name": (u.display_name or u.email) if u else "", "note": body.note.strip()[:500], "set_by": user.id}
+    db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"КП (торги, шаг {s.no}) на рассмотрении клиента; напоминание {body.remind_on:%d.%m.%Y}", body=body.note.strip()))
+    audit(db, user.id, deal.id, "negotiation", s.id, "client_review", prev or None, s.review)
+    notify_new_task(db, task)
+    db.commit()
+    return ng.step_dict(s, ng.names(db))
+
+
+class ReviewCloseIn(BaseModel):
+    client_answer: str = ""
+
+
+@router.post("/steps/{step_id}/review/close")
+def close_review(deal_id: str, step_id: str, body: ReviewCloseIn, db: Session = Depends(get_db), user: CurrentUser = Depends(CD_GD)):
+    """Клиент ответил: статус снимается, напоминание закрывается, ответ клиента записывается."""
+    deal = get_deal_or_404(db, deal_id, user)
+    s = db.get(NegotiationStep, step_id)
+    if s is None or s.deal_id != deal.id:
+        raise HTTPException(404)
+    r = dict(s.review or {})
+    if r.get("status") != "client_review":
+        raise HTTPException(409, "Шаг не на рассмотрении клиента")
+    t = db.get(Task, r.get("task_id")) if r.get("task_id") else None
+    if t is not None and t.done_at is None:
+        t.done_at = ng.now()
+    r.update(status="answered", closed_at=ng.now().isoformat(timespec="seconds"), closed_by=user.id)
+    s.review = r
+    if body.client_answer.strip():
+        s.client_answer = body.client_answer.strip()[:2000]
+    audit(db, user.id, deal.id, "negotiation", s.id, "client_review_closed", after={"client_answer": s.client_answer})
     db.commit()
     return ng.step_dict(s, ng.names(db))

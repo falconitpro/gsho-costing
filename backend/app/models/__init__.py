@@ -738,6 +738,7 @@ class NegotiationStep(Base):
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     sent_to: Mapped[list] = mapped_column(JSONType, default=list)
     client_answer: Mapped[str] = mapped_column(Text, default="")
+    review: Mapped[dict] = mapped_column(JSONType, default=dict)                  # «на рассмотрении клиента»: since, remind_on, task_id, assignee_id, note, closed_at
 
 
 class DealVersion(Base):

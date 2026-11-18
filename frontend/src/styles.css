@@ -672,3 +672,4 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .lb-steps > a.done { border-color: var(--ok); }
 .lb-steps > a.done::before { content: "✓ "; color: var(--ok); }
 .lb-links { font-size: 13px; }
+.badge.ng-review { background: #fff4d6; color: #7a5200; }
