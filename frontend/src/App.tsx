@@ -11,6 +11,7 @@ import type { Me } from "./types";
 import DealsList from "./pages/DealsList";
 import WorkplacePage from "./pages/WorkplacePage";
 import DealCard from "./pages/DealCard";
+import NegotiationPage from "./pages/NegotiationPage";
 import TasksPage from "./pages/TasksPage";
 import SummaryPage from "./pages/SummaryPage";
 import FinanceQuestionPage from "./pages/FinanceQuestionPage";
@@ -173,6 +174,7 @@ export default function App() {
             <Route path="/deals" element={<DealsList me={me} />} />
             <Route path="/deals/parts/:id" element={<PartsRequestRoute me={me} />} />
             <Route path="/deals/:id" element={<DealCard me={me} />} />
+            <Route path="/deals/:id/negotiation" element={<NegotiationPage me={me} />} />
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/finance/questions/:id" element={<FinanceQuestionPage />} />
             <Route path="/board" element={<BoardPage />} />

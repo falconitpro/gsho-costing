@@ -5,13 +5,14 @@ import { COST_ITEMS, EVENT_TITLES, can, type CalcResponse, type Deal, type Me, t
 import CashflowChart from "../components/CashflowChart";
 import PaymentTermsEditor from "../components/PaymentTermsEditor";
 import ProductionTermBlock from "../components/ProductionTermBlock";
-import NegotiationTab from "../components/NegotiationTab";
+import { useNavigate } from "react-router-dom";
 
 const SCEN = [["pessimistic", "Пессимистичный"], ["base", "Базовый"], ["optimistic", "Оптимистичный"]] as const;
 
 /** Экран утверждения КД (раздел 10): слева варианты, справа 14 статей × 3 сценария, цена с живым пересчётом, индикатор маржи,
  *  денежный поток, комментарии, история цен, курсы. ФД видит то же и даёт визу. */
 export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: Me; reload: () => void }) {
+  const nav = useNavigate();
   const [calc, setCalc] = useState<CalcResponse | null>(null);
   const [vid, setVid] = useState<string>((deal.variants || [])[0]?.id || "");
   const [mode, setMode] = useState<"amount" | "markup" | "margin">("amount");
@@ -20,7 +21,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   const [withVat, setWithVat] = useState(false);   // сумма вводится с НДС (D-066)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [tab, setTab] = useState<"cost" | "terms" | "cashflow" | "fx" | "history" | "kp" | "negotiation">(() => (new URLSearchParams(window.location.search).get("sub") === "negotiation" ? "negotiation" : "cost"));
+  const [tab, setTab] = useState<"cost" | "terms" | "cashflow" | "fx" | "history" | "kp">("cost");
   const [rework, setRework] = useState({ block: "logistics", reason: "" });
   const [visaComment, setVisaComment] = useState("");
   const [insistComment, setInsistComment] = useState("");
@@ -142,7 +143,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                   {cc && cc.code !== priceCur && cc.rate && (priceCur === "RUB" || calc.input.fx.rates[priceCur]) ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * (priceCur === "RUB" ? 1 : calc.input.fx.rates[priceCur]) / cc.rate)} ${cc.code} без НДС` : ""}</div>}</div>}
               <div className="muted">наценка {fmtPct(base?.markup_pct)} · прибыль {fmtRub(base?.profit_rub)} RUB · разрыв {fmtRub(base?.cash_gap.amount_rub)} RUB ({base?.cash_gap.days} дн)</div>
             </div>
-            {isCD && ["approved", "kp_sent"].includes(deal.status) && <button className="btn secondary" onClick={() => setTab("negotiation")} title="снижение цены и изменение условий после КП фиксируются шагами торгов">Цена утверждена · изменить — в «Торгах» →</button>}
+            {isCD && ["approved", "kp_sent"].includes(deal.status) && <button className="btn secondary" onClick={() => nav(`/deals/${deal.id}/negotiation`)} title="снижение цены и изменение условий после КП фиксируются шагами торгов">Цена утверждена · изменить — в «Торгах» →</button>}
             {canPrice && (
               <div className="row">
                 <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
@@ -187,7 +188,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
           {can(me, "kp_images_select", 2) && <button className={tab === "kp" ? "active" : ""} onClick={() => setTab("kp")}>Подача КП</button>}
           <button className={tab === "fx" ? "active" : ""} onClick={() => setTab("fx")}>Курсы<br />и прогноз</button>
           <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>Комментарии<br />и история</button>
-          {isCD && <button className={tab === "negotiation" ? "active" : ""} onClick={() => setTab("negotiation")}>Торги</button>}
+          {isCD && <button className="tab-go" onClick={() => nav(`/deals/${deal.id}/negotiation`)} title="отдельная страница торгов">Торги →</button>}
         </div>
 
         {tab === "cost" && (
@@ -277,7 +278,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
               </table>
             </div>);
         })()}
-        {tab === "negotiation" && isCD && <NegotiationTab dealId={deal.id} variants={deal.variants || []} onChanged={() => { reload(); load(); }} />}
+        
         {tab === "history" && (
           <div className="grid cols-2">
             <div className="card"><h2 style={{ marginTop: 0 }}>Комментарии логиста и менеджера</h2>
