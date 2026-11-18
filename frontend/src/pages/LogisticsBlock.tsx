@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
 import { STATUS_TITLES, type Batch, type Deal, type Me } from "../types";
-import LogistWorkspace, { LogistFields, FieldsChooser, type Workspace, type Quote } from "../components/LogistWorkspace";
+import LogistRequests, { LogistAddresses, LogistFields, FieldsChooser, type Workspace, type Quote } from "../components/LogistWorkspace";
 import SpecTable from "../components/SpecTable";
 import { UndoButton, useUndoHistory } from "../undo";
 
@@ -30,6 +30,10 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const [hs, setHs] = useState<{ code: string; description: string; duty_pct: number; vat_pct: number; certification: string[] }[]>([]);
   const batches = deal.batches || [];
   const positions = deal.positions || [];
+  // читаемость (D-075): форма новой партии и заполненные позиции свёрнуты, сверху — сводка со ссылками
+  const [showBatchForm, setShowBatchForm] = useState(batches.length === 0);
+  const savedHs = (p: { logistics?: unknown }) => !!((p.logistics || {}) as { hs_code?: string }).hs_code;
+  const [openPos, setOpenPos] = useState<string[]>(() => positions.filter((p) => !savedHs(p)).map((p) => p.id));
   const emptyBatch = () => ({ name: `Партия ${batches.length + 1}`, route: "завод → Маньчжурия → Забайкальск → пункт поставки", transport_units: 1, transit_days: 14, customs_days: 5, rf_delivery_days: 5, border_planned: "", allocation: "cost",
     intl_freight: 0, intl_currency: "CNY", insurance_pct: 0.3, broker_rub: 0, rf_delivery_rub: 0, comment_freight: "", comment_broker: "", comment_rf: "", d2d: true, d2d_amount: 0, d2d_currency: "CNY" });
   // правка сохранённой партии: значения — в ту же форму, сохранение обновляет партию
@@ -51,7 +55,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   useEffect(() => { api.get<{ door_to_door_border_pct: number }>(`/api/deals/${deal.id}/logistics/defaults`).then((r) => setBorderPct(r.door_to_door_border_pct)).catch(() => undefined); }, [deal.id]);
   const [bc, setBc] = useState<Record<string, string>>({});   // комментарии к остальным полям партии
   const startEdit = (b: Batch) => {
-    const f = batchForm(b); setEditId(b.id); setBatch(f); setBatchSaved(JSON.stringify(f));
+    const f = batchForm(b); setEditId(b.id); setBatch(f); setBatchSaved(JSON.stringify(f)); setShowBatchForm(true);
     setBc(Object.fromEntries(Object.entries(((b.items || {}) as { comments?: Record<string, string> }).comments || {}).filter(([k]) => !["intl_freight", "door_to_door", "broker_rub", "rf_delivery_rub"].includes(k))));
     setPosSel(positions.filter((p) => p.batch_id === b.id).map((p) => p.id));
   };
@@ -61,10 +65,14 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
     const c = `${q.carrier}${q.comment ? ": " + q.comment : ""}`;
     if (q.scope === "door_to_door") setBatch((b) => ({ ...b, d2d: true, d2d_amount: q.amount, d2d_currency: q.currency, comment_freight: c, transit_days: q.transit_days || b.transit_days }));
     else if (q.scope === "intl_freight") setBatch((b) => ({ ...b, d2d: false, intl_freight: q.amount, intl_currency: q.currency, comment_freight: c, transit_days: q.transit_days || b.transit_days }));
-    else if (q.scope === "customs") setBatch((b) => ({ ...b, d2d: false, broker_rub: q.amount, comment_broker: c }));
+    else if (q.scope === "customs") setBatch((b) => ({ ...b, broker_rub: q.amount, comment_broker: c }));
     else if (q.scope === "rf_delivery") setBatch((b) => ({ ...b, d2d: false, rf_delivery_rub: q.amount, comment_rf: c, rf_delivery_days: q.transit_days || b.rf_delivery_days }));
-    else { setErr("Эта услуга не переносится в партию автоматически — внесите вручную."); return; }
-    setErr(""); document.getElementById("batch-form")?.scrollIntoView({ behavior: "smooth" });
+  };
+  // выбранное предложение логистической компании → в форму партии: единая ставка или участки (страхование — % в партии, вручную)
+  const applyChosen = (lines: Quote[]) => {
+    const d2d = lines.find((q) => q.scope === "door_to_door");
+    (d2d ? [d2d, ...lines.filter((q) => q.scope === "customs")] : lines).forEach(applyQuote);
+    setErr(""); setShowBatchForm(true); setTimeout(() => document.getElementById("batch-form")?.scrollIntoView({ behavior: "smooth" }), 50);
   };
   const batchCost = batch.d2d ? batch.d2d_amount : batch.intl_freight + batch.rf_delivery_rub + batch.broker_rub;
   const batchDirty = JSON.stringify(batch) !== batchSaved;
@@ -159,14 +167,24 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
       {lockReason && <div className="alert warn" role="status" style={{ marginBottom: 10 }}><b>Блок логистики только для просмотра.</b> {lockReason}</div>}
       {err && <div className="alert error">{err}</div>}
       {chooser && <FieldsChooser dealId={deal.id} onClose={() => { setChooser(false); loadWs(); }} />}
-      {ws && <LogistWorkspace dealId={deal.id} ws={ws} reload={loadWs} onApplyQuote={applyQuote} />}
-      <div className="card row" style={{ justifyContent: "space-between" }}>
-        <span>Статус: <span className="badge accent">{STATUS_TITLES[deal.status] || deal.status}</span> · логистика: {deal.logistics_done ? <span className="badge ok">рассчитана, передана далее</span> : <span className="badge warn">в работе</span>}</span>
-        {canEdit && !deal.logistics_done && <button className="btn" onClick={() => complete()}>Отправить далее на расчёт</button>}
+      <div className="card lb-sum">
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <span>Статус: <span className="badge accent">{STATUS_TITLES[deal.status] || deal.status}</span> · логистика: {deal.logistics_done ? <span className="badge ok">рассчитана, передана далее</span> : <span className="badge warn">в работе</span>}</span>
+          {canEdit && !deal.logistics_done && <button className="btn" onClick={() => complete()}>Отправить далее на расчёт</button>}
+        </div>
+        <div className="lb-steps">
+          <a href="#lb-adr" className={ws?.addresses.delivery_address ? "done" : ""}>Адреса</a>
+          <a href="#lb-batches" className={batches.length ? "done" : ""}>Партии: {batches.length || "нет"}</a>
+          <a href="#lb-pos" className={positions.every(savedHs) ? "done" : ""}>Позиции, ТН ВЭД: {positions.filter(savedHs).length} из {positions.length}</a>
+          <a href="#lb-req" className={ws?.compare.chosen_status === "approved" ? "done" : ""}>Логистические компании: {ws?.compare.rows.length ? `ответов ${ws.compare.rows.length}` : "запросов " + (ws?.requests.length || 0)}{ws?.compare.chosen ? ` · выбрано: ${ws.compare.chosen}` : ""}</a>
+          <span className="lb-links muted">· <a href="?tab=positions">все характеристики позиций</a> · <a href="?tab=offers">ответы заводов</a></span>
+        </div>
       </div>
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>Доставка</h2>
-        <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление / по РФ, дн</th><th>CMR план / факт</th><th>Доставка до границы РФ</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Позиции</th>{canEdit && <th />}</tr></thead>
+      {ws && <div id="lb-adr"><LogistAddresses dealId={deal.id} ws={ws} reload={loadWs} /></div>}
+      <div className="card" id="lb-batches">
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}><h2 style={{ margin: 0 }}>Доставка: партии</h2>
+          {canEdit && !showBatchForm && <button className="btn secondary" onClick={() => { resetBatchForm(); setShowBatchForm(true); }}>+ Новая партия</button>}</div>
+        {batches.length > 0 && <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление / по РФ, дн</th><th>CMR план / факт</th><th>Доставка до границы РФ</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Позиции</th>{canEdit && <th />}</tr></thead>
           <tbody>{batches.map((b) => { const it = b.items as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; const d2d = it.door_to_door as Money | null | undefined; return (
             <tr key={b.id}><td>{b.name}</td><td>{b.route}</td><td className="num">{b.transport_units}</td><td className="num">{b.transit_days} / {b.customs_days} / {b.rf_delivery_days ?? 5}</td><td>{fmtDate(b.border_planned)} / {b.border_actual ? <b>{fmtDate(b.border_actual)}</b> : "—"}</td>
               {d2d?.amount ? <td colSpan={1} title="единая стоимость завод → клиент">{fmtRub(d2d.amount * borderPct / 100)} {d2d.currency} <span className="muted">({borderPct} % от {fmtRub(d2d.amount)})</span></td>
@@ -174,8 +192,9 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
               <td>{it.insurance_pct != null ? `${it.insurance_pct} %` : "—"}</td><td className="num">{fmtRub(it.broker_rub as number)}</td>
               <td className="num">{d2d?.amount ? <>{fmtRub(d2d.amount * (100 - borderPct) / 100)} {d2d.currency} <span className="muted">({100 - borderPct} %)</span></> : fmtRub(it.rf_delivery_rub as number)}</td>
               <td>{positions.filter((p) => p.batch_id === b.id).map((p) => designation(p)).join(", ") || <span className="badge warn">нет позиций — расходы не учитываются</span>}</td>
-              {canEdit && <td><button className="btn ghost" onClick={() => startEdit(b)}>изменить</button> <button className="btn ghost" onClick={() => deleteBatch(b)}>удалить</button></td>}</tr>); })}</tbody></table>
-        {canEdit && (
+              {canEdit && <td><button className="btn ghost" onClick={() => startEdit(b)}>изменить</button> <button className="btn ghost" onClick={() => deleteBatch(b)}>удалить</button></td>}</tr>); })}</tbody></table>}
+        {batches.length === 0 && <p className="muted">Партий пока нет.</p>}
+        {canEdit && showBatchForm && (
           <>
             <h3 id="batch-form" style={{ marginBottom: 4 }}>{editId ? `Изменение партии «${batches.find((b) => b.id === editId)?.name || batch.name}»` : "Новая партия"}</h3>
             <SpecTable refTitle="Примечание" sections={[
@@ -217,7 +236,8 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
                 <label key={p.id}><input type="checkbox" checked={posSel.includes(p.id)} onChange={(e) => setPosSel(e.target.checked ? [...posSel, p.id] : posSel.filter((x) => x !== p.id))} />{" "}
                   {designation(p)}{p.batch_id && p.batch_id !== editId ? <span className="muted"> ({batches.find((b) => b.id === p.batch_id)?.name})</span> : null}</label>))}</div></div>
             <div className="row" style={{ marginTop: 8 }}><button className="btn secondary" onClick={() => saveBatch()}>{editId ? "Сохранить партию" : "Создать партию"}</button>
-              {editId && <button className="btn ghost" onClick={resetBatchForm}>Отменить правку</button>}<UndoButton h={history} />
+              {editId && <button className="btn ghost" onClick={resetBatchForm}>Отменить правку</button>}
+              {batches.length > 0 && <button className="btn ghost" onClick={() => { resetBatchForm(); setShowBatchForm(false); }}>Свернуть</button>}<UndoButton h={history} />
               {batchDirty && batchCost > 0 && <span className="badge warn">не сохранено — сохранится при «Отправить далее»</span>}</div>
           </>
         )}
@@ -234,8 +254,12 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
         const hist = (k: string) => { const c = checks[k]; if (!c || c.history_avg == null) return <span className="muted">—</span>;
           return <span className={c.needs_comment ? "badge warn" : "muted"} style={{ fontSize: 12 }}>ср. {fmtRub(c.history_avg)}{c.deviation_pct != null ? `, ${c.deviation_pct > 0 ? "+" : ""}${c.deviation_pct} %` : ""}</span>; };
         return (
-          <div className="card" key={p.id}>
-            <h2 style={{ marginTop: 0 }}>{p.machine_type} {designation(p)} × {p.qty}</h2>
+          <div className="card" key={p.id} id={p.id === positions[0]?.id ? "lb-pos" : undefined}>
+            <h2 style={{ margin: 0, cursor: "pointer" }} onClick={() => setOpenPos(openPos.includes(p.id) ? openPos.filter((x) => x !== p.id) : [...openPos, p.id])}>
+              <span className="muted" style={{ fontSize: 14 }}>{openPos.includes(p.id) ? "▾" : "▸"}</span> {p.machine_type} {designation(p)} × {p.qty}{" "}
+              <span style={{ fontSize: 13, fontWeight: 400 }}>{savedHs(p) ? <span className="badge ok">ТН ВЭД {((p.logistics || {}) as { hs_code?: string }).hs_code}</span> : <span className="badge warn">не заполнена</span>}
+                {" "}<span className="muted">партия: {batches.find((b) => b.id === p.batch_id)?.name || "не распределена"}</span></span></h2>
+            {openPos.includes(p.id) && <div style={{ marginTop: 10 }}>
             <LogistFields pos={ws?.fields.find((x) => x.position_id === p.id)} canChoose={!!ws?.can_choose_fields} onChoose={() => setChooser(true)} />
             <SpecTable refTitle="По истории / справочник" nameTitle="Статья" sections={[
               { title: "Китай: до границы", rows: [
@@ -293,9 +317,11 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
               ] },
             ]} />
             {canEdit && <div className="row" style={{ marginTop: 8 }}><button className="btn secondary" onClick={() => savePos(p.id)}>Сохранить позицию</button><UndoButton h={history} /><span className="muted">партия: {batches.find((b) => b.id === p.batch_id)?.name || "не распределена"}</span></div>}
+            </div>}
           </div>
         );
       })}
+      {ws && <div id="lb-req"><LogistRequests dealId={deal.id} ws={ws} reload={loadWs} onApplyChosen={canEdit ? applyChosen : undefined} /></div>}
       {canEdit && <div className="row"><button className="btn" onClick={() => complete()}>Отправить далее на расчёт</button><span className="muted">несохранённые данные партии и позиций сохранятся; позиции без партии войдут в первую партию</span></div>}
     </>
   );

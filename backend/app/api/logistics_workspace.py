@@ -20,7 +20,7 @@ from ..core.roles import Role
 from ..db import get_db
 from ..models import Attachment, Client, Deal, FeedEntry
 from ..services import logistics_workspace as lw
-from ..services.deal_service import audit, ensure_folders
+from ..services.deal_service import audit, ensure_folders, notify
 from .common import get_deal_or_404
 
 router = APIRouter(prefix="/api/deals/{deal_id}/logistics", tags=["logistics"])
@@ -55,6 +55,75 @@ def set_addresses(deal_id: str, body: AddressesIn, db: Session = Depends(get_db)
     res = lw.set_addresses(db, deal, user, body.pickup, body.delivery_address, body.propose_to_client)
     db.commit()
     return {**res, "addresses": lw.addresses(db, deal)}
+
+
+class ServicesIn(BaseModel):
+    services: list[str]
+
+
+@router.put("/services")
+def set_services(deal_id: str, body: ServicesIn, db: Session = Depends(get_db), user: CurrentUser = Depends(LOGIST)):
+    """Какие услуги запрашиваем у логистических компаний (обычно без таможни в РФ и экспортного оформления)."""
+    deal = get_deal_or_404(db, deal_id, user)
+    _editable(deal)
+    try:
+        out = lw.set_services(deal, body.services)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    db.commit()
+    return {"services": out}
+
+
+class ChooseIn(BaseModel):
+    carrier: str
+    comment: str = ""
+    need_gd: bool = False          # логист просит согласование ЗГД
+
+
+@router.post("/quotes/choose")
+def choose_quote(deal_id: str, body: ChooseIn, db: Session = Depends(get_db), user: CurrentUser = Depends(LOGIST)):
+    """Выбор лучшего предложения логистической компании (по умолчанию — самое дешёвое полное); пусто — снять выбор."""
+    deal = get_deal_or_404(db, deal_id, user)
+    _editable(deal)
+    known = {lw._key(q.get("carrier") or "") for q in (deal.logistics_info or {}).get("quotes") or []}
+    if body.carrier.strip() and lw._key(body.carrier) not in known:
+        raise HTTPException(422, "От этой компании нет ответов")
+    cmp = lw.compare(db, deal, (deal.logistics_info or {}).get("quotes") or [], lw.carriers(db))
+    if body.carrier.strip() and cmp["best"] and lw._key(body.carrier) != lw._key(cmp["best"]) and not body.comment.strip():
+        raise HTTPException(422, f"Выбрано не самое дешёвое предложение (лучшее — {cmp['best']}) — укажите причину")
+    need = body.need_gd and not user.has(Role.GD)
+    if need and not body.comment.strip():
+        raise HTTPException(422, "Для согласования ЗГД опишите, что нужно согласовать")
+    status = lw.choose(deal, body.carrier, user.id, body.comment, need)
+    audit(db, user.id, deal.id, "logistics", deal.id, "carrier_chosen", after={"carrier": body.carrier, "comment": body.comment, "status": status})
+    if status == "pending_gd":
+        from ..services.legal_contracts import role_users
+        for u in role_users(db, "gd"):
+            notify(db, deal, u.id, "logistics_choice", None,
+                   f"Сделка {deal.number}: логист просит согласовать выбор логистической компании «{body.carrier}». {body.comment.strip()}")
+    db.commit()
+    return lw.compare(db, deal, (deal.logistics_info or {}).get("quotes") or [], lw.carriers(db))
+
+
+class DecisionIn(BaseModel):
+    approve: bool
+    comment: str = ""
+
+
+@router.post("/quotes/choose/decision")
+def choice_decision(deal_id: str, body: DecisionIn, db: Session = Depends(get_db), user: CurrentUser = Depends(GD)):
+    """ЗГД согласует или отклоняет выбор логистической компании."""
+    deal = get_deal_or_404(db, deal_id, user)
+    if (deal.logistics_info or {}).get("chosen_status") != "pending_gd":
+        raise HTTPException(409, "Выбор не ждёт согласования")
+    if not body.approve and not body.comment.strip():
+        raise HTTPException(422, "Укажите причину отказа")
+    lw.decide_choice(deal, user.id, body.approve, body.comment)
+    audit(db, user.id, deal.id, "logistics", deal.id, "carrier_choice_" + ("approved" if body.approve else "declined"), comment=body.comment or None)
+    db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"ЗГД {'согласовал' if body.approve else 'отклонил'} выбор логистической компании «{deal.logistics_info.get('chosen_carrier')}»",
+                     body=body.comment))
+    db.commit()
+    return lw.compare(db, deal, (deal.logistics_info or {}).get("quotes") or [], lw.carriers(db))
 
 
 @router.get("/request/file")
@@ -115,9 +184,11 @@ def send_request(deal_id: str, body: SendIn, db: Session = Depends(get_db), user
 
 
 def _mail(emails: list[str], data: dict, text: str, files: list[str]):
+    import html
     from ..adapters.mail import OutgoingMail
     return OutgoingMail(to=emails, subject=f"Запрос на расчёт доставки № {data['no']} — ООО «БЕРГ-ХАУС»",
-                        body_html=f"<p>{text}</p><p>Ответ просим до {data['answer_by']}.</p>", attachments=files)
+                        body_html=f"<p>{html.escape(text)}</p><p>Просим рассчитать: {html.escape('; '.join(data['services']))}.</p>"
+                                  f"<p>Ответ просим до {data['answer_by']}.</p>", attachments=files)
 
 
 @router.post("/quotes", status_code=201)

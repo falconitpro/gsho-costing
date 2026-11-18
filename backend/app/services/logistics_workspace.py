@@ -23,9 +23,30 @@ from ..models import Client, Deal, Factory, User
 DEFAULT_FIELDS = [{"code": c, "name": n} for c, n in (
     ("1.3", "Страна производства"), ("1.5", "Длина (транспортное положение)"), ("1.6", "Ширина"), ("1.7", "Высота"),
     ("1.14", "Снаряжённая масса"), ("1.15", "Полная масса"))]
-SERVICES = (("door_to_door", "Доставка «до двери» (всё включено)"), ("intl_freight", "Международная перевозка до границы РФ"),
-            ("customs", "Таможенное оформление в РФ (брокер, СВХ)"), ("rf_delivery", "Доставка по РФ до пункта поставки"),
-            ("insurance", "Страхование груза"), ("export", "Экспортное оформление в стране отправления"))
+SERVICES = (("door_to_door", "Доставка завод → пункт поставки единой ставкой (без таможенного оформления)"),
+            ("intl_freight", "Международная перевозка до границы РФ"), ("rf_delivery", "Доставка по РФ до пункта поставки"),
+            ("insurance", "Страхование груза"), ("customs", "Таможенное оформление в РФ (брокер, СВХ)"),
+            ("export", "Экспортное оформление в стране отправления"))
+SERVICE_TITLES = dict(SERVICES)
+# обычно таможню в РФ и экспортное оформление делаем без логистической компании (D-075)
+DEFAULT_SERVICES = ["door_to_door", "intl_freight", "rf_delivery", "insurance"]
+
+
+def services(deal: Deal) -> list[str]:
+    sel = (deal.logistics_info or {}).get("services")
+    return [k for k, _ in SERVICES if k in sel] if isinstance(sel, list) else list(DEFAULT_SERVICES)
+
+
+def set_services(deal: Deal, codes: list[str]) -> list[str]:
+    bad = [c for c in codes if c not in SERVICE_TITLES]
+    if bad:
+        raise ValueError(f"Неизвестные услуги: {', '.join(bad)}")
+    if not codes:
+        raise ValueError("Выберите хотя бы одну услугу")
+    info = dict(deal.logistics_info or {})
+    info["services"] = [k for k, _ in SERVICES if k in codes]
+    deal.logistics_info = info
+    return info["services"]
 
 
 def _now() -> str:
@@ -197,7 +218,7 @@ def request_data(db: Session, deal: Deal, answer_days: int = 3) -> dict:
     no = f"{deal.number}-Л{len(info.get('requests') or []) + 1}"
     return {"no": no, "date": date.today().isoformat(), "answer_by": (date.today() + timedelta(days=answer_days)).isoformat(),
             "deal": deal.number, "client_region": adr["delivery_address"], "pickup": adr["pickup"], "delivery": adr["delivery_address"],
-            "readiness": readiness.isoformat() if readiness else "", "positions": pos, "services": [t for _k, t in SERVICES],
+            "readiness": readiness.isoformat() if readiness else "", "positions": pos, "services": [SERVICE_TITLES[k] for k in services(deal)], "service_codes": services(deal),
             "basis": sorted({p.basis for p in deal.positions if p.basis}) or ["FCA"]}
 
 
@@ -286,7 +307,8 @@ td,th{{border:0.5pt solid #999;padding:3pt;vertical-align:top}} th{{background:#
 
 def record_request(deal: Deal, data: dict, user_id: str, sent_to: list[str], files: dict[str, str]) -> dict:
     info = dict(deal.logistics_info or {})
-    req = {"id": uuid.uuid4().hex[:12], "no": data["no"], "at": _now(), "by": user_id, "answer_by": data["answer_by"], "sent_to": sent_to, "files": files}
+    req = {"id": uuid.uuid4().hex[:12], "no": data["no"], "at": _now(), "by": user_id, "answer_by": data["answer_by"], "sent_to": sent_to, "files": files,
+           "services": data.get("service_codes") or []}
     info["requests"] = [*(info.get("requests") or []), req]
     deal.logistics_info = info
     return req
@@ -311,6 +333,74 @@ def remove_quote(deal: Deal, qid: str) -> bool:
     return len(left) != len(rows)
 
 
+def compare(db: Session, deal: Deal, quotes: list[dict], carriers_list: list[dict]) -> dict:
+    """Сравнение предложений логистических компаний по выбранным услугам: итог в рублях по курсу ЦБ, срок, полнота, лучшее."""
+    from .deal_calc import load_fx
+    rates = load_fx(db, date.today())[0].rates
+    sel = services(deal)
+    need = [k for k in sel if k != "door_to_door"]
+    by_mail = {(c.get("email") or "").lower(): c.get("name") for c in carriers_list}
+    rows: dict[str, dict] = {}
+    for q in quotes:
+        name = (q.get("carrier") or "").strip()
+        r = rows.setdefault(_key(name), {"carrier": name, "lines": {}, "quote_ids": []})
+        ccy = (q.get("currency") or "RUB").upper()
+        rate = 1.0 if ccy == "RUB" else float(rates.get(ccy) or 0)
+        rub = float(q.get("amount") or 0) * rate
+        cur = r["lines"].get(q.get("scope"))
+        if cur is None or q.get("at", "") > cur.get("at", ""):     # по услуге берём последний ответ компании
+            r["lines"][q.get("scope")] = {"id": q["id"], "amount": q.get("amount"), "currency": q.get("currency"), "rub": round(rub, 2),
+                                         "transit_days": q.get("transit_days"), "valid_until": q.get("valid_until") or "", "at": q.get("at", ""), "comment": q.get("comment") or ""}
+        r["quote_ids"].append(q["id"])
+    out = []
+    for r in rows.values():
+        L = r["lines"]
+        split = [k for k in need if k not in ("insurance",)]
+        if "door_to_door" in L and "door_to_door" in sel:
+            total = L["door_to_door"]["rub"] + sum(L[k]["rub"] for k in need if k in L and k not in ("intl_freight", "rf_delivery"))
+            days = L["door_to_door"].get("transit_days")
+            missing = [SERVICE_TITLES[k] for k in need if k not in L and k not in ("intl_freight", "rf_delivery", "insurance")]
+            mode = "единой ставкой"
+        else:
+            total = sum(L[k]["rub"] for k in need if k in L)
+            days = sum(int(L[k].get("transit_days") or 0) for k in ("intl_freight", "rf_delivery") if k in L) or None
+            missing = [SERVICE_TITLES[k] for k in split if k not in L]
+            mode = "по участкам"
+        out.append({**r, "total_rub": round(total, 2), "transit_days": days, "missing": missing, "complete": not missing and total > 0, "mode": mode})
+    full = [r for r in out if r["complete"]]
+    best = min(full, key=lambda r: r["total_rub"])["carrier"] if full else None
+    fastest = min((r for r in full if r["transit_days"]), key=lambda r: r["transit_days"], default=None)
+    info = deal.logistics_info or {}
+    out.sort(key=lambda r: (not r["complete"], r["total_rub"]))
+    # кто из адресатов запросов ещё не ответил
+    asked = {}
+    for req in info.get("requests") or []:
+        for m in req.get("sent_to") or []:
+            asked[m.lower()] = by_mail.get(m.lower()) or m
+    answered = {_key(r["carrier"]) for r in out}
+    waiting = sorted({n for n in asked.values() if _key(n) not in answered})
+    return {"services": sel, "rows": out, "best": best, "fastest": fastest["carrier"] if fastest else None,
+            "chosen": info.get("chosen_carrier") or "", "chosen_at": info.get("chosen_at") or "", "waiting": waiting,
+            "chosen_status": info.get("chosen_status") or ("approved" if info.get("chosen_carrier") else ""),
+            "chosen_comment": info.get("chosen_comment") or "", "gd_comment": info.get("gd_comment") or "", "gd_decision_at": info.get("gd_decision_at") or ""}
+
+
+def choose(deal: Deal, carrier: str, user_id: str, comment: str, need_gd: bool) -> str:
+    """Выбор предложения; со согласованием ЗГД — статус «на согласовании» до решения ЗГД (D-075)."""
+    info = dict(deal.logistics_info or {})
+    status = "" if not carrier.strip() else "pending_gd" if need_gd else "approved"
+    info.update(chosen_carrier=carrier.strip(), chosen_at=_now(), chosen_by=user_id, chosen_comment=comment.strip(), chosen_status=status,
+                gd_decision_by=None, gd_decision_at=None, gd_comment="")
+    deal.logistics_info = info
+    return status
+
+
+def decide_choice(deal: Deal, user_id: str, approve: bool, comment: str) -> None:
+    info = dict(deal.logistics_info or {})
+    info.update(chosen_status="approved" if approve else "declined", gd_decision_by=user_id, gd_decision_at=_now(), gd_comment=comment.strip())
+    deal.logistics_info = info
+
+
 def workspace(db: Session, deal: Deal, user: Any) -> dict:
     from ..core.config import get_settings
     info = deal.logistics_info or {}
@@ -318,4 +408,6 @@ def workspace(db: Session, deal: Deal, user: Any) -> dict:
     return {"fields": position_fields(db, deal), "addresses": addresses(db, deal), "carriers": carriers(db),
             "requests": [{**r, "by_name": names.get(r.get("by"), "")} for r in info.get("requests") or []],
             "quotes": [{**q, "by_name": names.get(q.get("by"), "")} for q in info.get("quotes") or []],
-            "mail_enabled": get_settings().mail_provider != "console"}
+            "mail_enabled": get_settings().mail_provider != "console",
+            "services": services(deal), "service_options": [{"code": k, "title": t} for k, t in SERVICES],
+            "compare": compare(db, deal, info.get("quotes") or [], carriers(db))}

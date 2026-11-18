@@ -111,3 +111,49 @@ def test_my_tasks_in_deals_list(client):
     row = next(r for r in rows if r["id"] == did)
     assert "logistics_info" not in row
     assert row["my_tasks"] and all({"title", "due", "overdue"} <= set(t) for t in row["my_tasks"])
+
+
+def test_services_selection_in_request(client):
+    did, _, _ = _deal(client)
+    ws = _ok(client.get(f"/api/deals/{did}/logistics/workspace", headers=H(LOG)))
+    assert "customs" not in ws["services"] and "export" not in ws["services"] and "intl_freight" in ws["services"]
+    _ok(client.put(f"/api/deals/{did}/logistics/services", headers=H(LOG), json={"services": ["intl_freight", "rf_delivery"]}))
+    r = client.get(f"/api/deals/{did}/logistics/request/file?fmt=xlsx", headers=H(LOG))
+    wb = load_workbook(io.BytesIO(r.content))
+    text = " ".join(str(c.value) for ws_ in wb.worksheets for row in ws_.iter_rows() for c in row if c.value)
+    assert "Международная перевозка" in text and "Таможенное оформление" not in text and "Страхование" not in text
+    assert client.put(f"/api/deals/{did}/logistics/services", headers=H(LOG), json={"services": []}).status_code == 422
+    assert client.put(f"/api/deals/{did}/logistics/services", headers=H(MGR), json={"services": ["rf_delivery"]}).status_code == 403
+
+
+def test_compare_several_carriers_and_choose(client):
+    did, _, _ = _deal(client)
+    _ok(client.put(f"/api/deals/{did}/logistics/services", headers=H(LOG), json={"services": ["door_to_door", "intl_freight", "rf_delivery"]}))
+    add = lambda c, scope, amount, cur="RUB", days="": _ok(client.post(f"/api/deals/{did}/logistics/quotes", headers=H(LOG),  # noqa: E731
+                                                                    data={"carrier": c, "scope": scope, "amount": str(amount), "currency": cur, "transit_days": str(days) if days else ""}), 201)
+    add("Альфа", "door_to_door", 900000, days=30)
+    add("Бета", "intl_freight", 400000, days=20)
+    add("Бета", "rf_delivery", 300000, days=7)
+    add("Гамма", "intl_freight", 100000)                       # неполное: нет доставки по РФ
+    cmp = _ok(client.get(f"/api/deals/{did}/logistics/workspace", headers=H(LOG)))["compare"]
+    rows = {r["carrier"]: r for r in cmp["rows"]}
+    assert rows["Бета"]["total_rub"] == 700000 and rows["Бета"]["complete"] and rows["Бета"]["transit_days"] == 27
+    assert not rows["Гамма"]["complete"] and rows["Гамма"]["missing"]
+    assert cmp["best"] == "Бета"
+    assert client.post(f"/api/deals/{did}/logistics/quotes/choose", headers=H(LOG), json={"carrier": "Альфа"}).status_code == 422   # не лучшее — нужна причина
+    out = _ok(client.post(f"/api/deals/{did}/logistics/quotes/choose", headers=H(LOG), json={"carrier": "Альфа", "comment": "надёжнее, один подрядчик"}))
+    assert out["chosen"] == "Альфа"
+    assert client.post(f"/api/deals/{did}/logistics/quotes/choose", headers=H(LOG), json={"carrier": "Неизвестная"}).status_code == 422
+
+
+def test_choice_needs_gd_approval(client):
+    did, _, _ = _deal(client)
+    _ok(client.post(f"/api/deals/{did}/logistics/quotes", headers=H(LOG), data={"carrier": "Дельта", "scope": "door_to_door", "amount": "500000", "currency": "RUB"}), 201)
+    assert client.post(f"/api/deals/{did}/logistics/quotes/choose", headers=H(LOG), json={"carrier": "Дельта", "need_gd": True}).status_code == 422
+    out = _ok(client.post(f"/api/deals/{did}/logistics/quotes/choose", headers=H(LOG), json={"carrier": "Дельта", "need_gd": True, "comment": "предоплата 100 %"}))
+    assert out["chosen_status"] == "pending_gd"
+    assert client.post(f"/api/deals/{did}/logistics/quotes/choose/decision", headers=H(LOG), json={"approve": True}).status_code == 403
+    assert client.post(f"/api/deals/{did}/logistics/quotes/choose/decision", headers=H(GD), json={"approve": False}).status_code == 422
+    out = _ok(client.post(f"/api/deals/{did}/logistics/quotes/choose/decision", headers=H(GD), json={"approve": True, "comment": "ок"}))
+    assert out["chosen_status"] == "approved" and out["gd_comment"] == "ок"
+    assert client.post(f"/api/deals/{did}/logistics/quotes/choose/decision", headers=H(GD), json={"approve": True}).status_code == 409
