@@ -80,7 +80,9 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   // валюта предложения завода — самая частая валюта цен позиций предложения
   const posCurs = (deal.positions || []).filter((p) => !variant.position_ids?.length || variant.position_ids.includes(p.id)).map((p) => (p.currency || "").toUpperCase()).filter(Boolean);
   const offerCur = posCurs.sort((a, b) => posCurs.filter((x) => x === b).length - posCurs.filter((x) => x === a).length)[0] || (deal.base_currency || "CNY").toUpperCase();
-  const priceCur = cur || variant.price_currency || offerCur;
+  // D-080: валюта сделки — по умолчанию валюта предложения поставщика; цена, введённая в другой валюте, пересчитывается в неё
+  const dealCur = (calc.deal_currency?.code || offerCur).toUpperCase();
+  const priceCur = cur || dealCur;   // валюта ввода суммы
   const curs = Array.from(new Set(["RUB", offerCur, ...Object.keys(calc.input.fx.rates || {})])).filter((c) => c === "RUB" || calc.input.fx.rates[c]);
   const inCur = (v: { price_currency?: string | null; price_amount?: number | null }) =>
     v.price_currency && v.price_currency !== "RUB" && v.price_amount != null ? `${fmtRub(v.price_amount)} ${v.price_currency}` : "";
@@ -131,8 +133,10 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                 {inCur(variant) && <span className="muted"> · по курсу {variant.price_fx_rate?.toFixed(4)} ≈ {fmtRub(base.price_rub)} RUB · КП — в {variant.price_currency}</span>}
                 <div>с НДС {vatPct} %: <b>{fmtRub((variant.price_amount ?? base.price_rub) * (1 + vatPct / 100))} {variant.price_currency || "RUB"}</b>
                   {(variant.price_currency || "RUB") !== "RUB" && <span className="muted"> ≈ {fmtRub(base.price_rub * (1 + vatPct / 100))} RUB</span>}
-                  {variant.price_vat_included && variant.price_input_amount != null && <span className="muted"> · введено с НДС: {fmtRub(variant.price_input_amount)} {variant.price_currency}</span>}</div>
+                  {variant.price_input_amount != null && (variant.price_vat_included || (variant.price_input_currency && variant.price_input_currency !== variant.price_currency)) && <span className="muted"> · введено: {fmtRub(variant.price_input_amount)} {variant.price_input_currency || variant.price_currency}{variant.price_vat_included ? " с НДС" : " без НДС"}</span>}</div>
                 {cc && cc.code !== (variant.price_currency || "RUB") && cc.rate && <div className="muted">в валюте контракта ({cc.code}, {cc.source}): {fmtRub(base.price_rub / cc.rate)} без НДС · {fmtRub(base.price_rub * (1 + vatPct / 100) / cc.rate)} с НДС</div>}
+                {mode === "amount" && value && Number(value) > 0 && priceCur !== dealCur && (priceCur === "RUB" || calc.input.fx.rates[priceCur]) && (dealCur === "RUB" || calc.input.fx.rates[dealCur]) &&
+                  <div className="muted">в валюте сделки: <b>{fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * (priceCur === "RUB" ? 1 : calc.input.fx.rates[priceCur]) / (dealCur === "RUB" ? 1 : calc.input.fx.rates[dealCur]))} {dealCur}</b> без НДС по курсу ЦБ</div>}
                 {mode === "amount" && value && Number(value) > 0 && <div className="muted">вводимая сумма: без НДС {fmtRub(withVat ? Number(value) / (1 + vatPct / 100) : Number(value))} · с НДС {fmtRub(withVat ? Number(value) : Number(value) * (1 + vatPct / 100))} {priceCur}
                   {priceCur !== "RUB" && calc.input.fx.rates[priceCur] ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * calc.input.fx.rates[priceCur])} RUB без НДС` : ""}
                   {cc && cc.code !== priceCur && cc.rate && (priceCur === "RUB" || calc.input.fx.rates[priceCur]) ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * (priceCur === "RUB" ? 1 : calc.input.fx.rates[priceCur]) / cc.rate)} ${cc.code} без НДС` : ""}</div>}</div>}
@@ -148,10 +152,10 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                   <option value="net">без НДС</option><option value="gross">с НДС {vatPct} %</option></select>}
                 <input type="number" value={value} onChange={(e) => setValue(e.target.value)}
                   placeholder={mode === "amount" ? String((priceCur === variant.price_currency ? variant.price_amount : null) ?? (priceCur === "RUB" ? base?.price_rub ?? "" : "")) : ""} style={{ width: 160 }} />
-                <label className="muted" style={{ fontSize: 12 }} title={`по умолчанию — валюта предложения завода (${offerCur}); пересчёт в RUB по курсу ЦБ на дату расчёта`}>
-                  {mode === "amount" ? "валюта" : "цена в"}{" "}
-                  <select value={priceCur} onChange={(e) => setCur(e.target.value)}>{curs.map((c) => <option key={c} value={c}>{c}{c === offerCur ? " (завод)" : ""}</option>)}</select>
-                </label>
+                {mode === "amount" && <label className="muted" style={{ fontSize: 12 }} title={`сумма в другой валюте пересчитывается в валюту сделки (${dealCur}) по курсу ЦБ на дату расчёта`}>
+                  ввод в{" "}
+                  <select value={priceCur} onChange={(e) => setCur(e.target.value)}>{curs.map((c) => <option key={c} value={c}>{c}{c === dealCur ? " (валюта сделки)" : ""}</option>)}</select>
+                </label>}
                 <button className="btn" onClick={setPrice} disabled={busy}>Назначить цену</button>
               </div>
             )}
@@ -165,6 +169,8 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
               {deal.report_date && <button className="btn ghost" disabled={busy} onClick={() => saveReportDate(null)}>вернуть «сегодня»</button>}
             </>}
           </div>
+          <DealCurrencyRow dealId={deal.id} dc={calc.deal_currency} fallback={offerCur} curs={curs} canEdit={isCD && !["approved", "kp_sent", "won", "contract", "execution", "closed"].includes(deal.status)}
+            onDone={() => { reload(); load(); setCur(""); }} />
           {base?.sensitivity && (
             <div className="muted" style={{ marginTop: 6 }}>
               Чувствительность: курс +1 % → маржа {base.sensitivity.margin_delta_pct_per_1pct_fx.toFixed(2)} п.п. ({fmtRub(base.sensitivity.margin_delta_rub_per_1pct_fx)} RUB);
@@ -382,5 +388,25 @@ function GroupMargin({ g, vid }: { g: GroupChain; vid: string }) {
             <td className="num">{r.group_price != null ? `${fmtRub(r.group_price)} ${r.currency}` : "—"}{r.transfer_price != null && <div className="muted">трансфертная</div>}</td>
             <td className="num">{fmtRub(r.group_margin_rub)}{r.group_margin_rub_unit != null && <div className="muted">{fmtRub(r.group_margin_rub_unit)} за ед.</div>}</td></tr>))}</tbody>
       </table>
+    </div>);
+}
+
+/** Валюта сделки (D-080): по умолчанию — валюта предложения поставщика; КД / ЗГД меняют до утверждения. */
+function DealCurrencyRow({ dealId, dc, fallback, curs, canEdit, onDone }: { dealId: string; dc?: { code: string; chosen: string | null; offer: string }; fallback: string; curs: string[];
+  canEdit: boolean; onDone: () => void }) {
+  const [edit, setEdit] = useState(false);
+  const [err, setErr] = useState("");
+  const code = dc?.code || fallback, offer = dc?.offer || fallback;
+  const save = (c: string | null) => api.put(`/api/deals/${dealId}/deal-currency`, { currency: c }).then(() => { setEdit(false); setErr(""); onDone(); }).catch((e) => setErr((e as Error).message));
+  return (
+    <div className="row muted" style={{ marginTop: 6, gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      Валюта сделки: <b style={{ color: "var(--text, #222)" }}>{code}</b>{dc?.chosen ? " — выбрана вручную" : " — валюта предложения поставщика"}
+      {code !== "RUB" && <span>· цены справочно в рублях по курсу ЦБ</span>}
+      {canEdit && !edit && <button className="btn ghost" style={{ padding: "1px 8px" }} onClick={() => setEdit(true)}>изменить</button>}
+      {edit && <>
+        <select defaultValue={code} onChange={(e) => save(e.target.value === offer ? null : e.target.value)}>{Array.from(new Set([offer, ...curs])).map((c) => <option key={c} value={c}>{c}{c === offer ? " (поставщик)" : ""}</option>)}</select>
+        <button className="btn ghost" onClick={() => setEdit(false)}>×</button>
+        <span style={{ fontSize: 12 }}>назначенные цены пересчитаются в новую валюту по курсу ЦБ</span></>}
+      {err && <span className="badge bad">{err}</span>}
     </div>);
 }

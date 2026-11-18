@@ -52,10 +52,13 @@ def contract_currency(db: Session, deal: Deal) -> tuple[str, str]:
                                           Contract.status.notin_(["archived", "superseded", "cancelled"])).order_by(Contract.created_at.desc())).first()
     if c is not None and c.currency:
         return c.currency.upper(), "договор с клиентом"
+    if deal.deal_currency:
+        return deal.deal_currency.upper(), "валюта сделки"
     v = next((x for x in deal.variants if x.price_currency), None)
     if v is not None:
         return v.price_currency.upper(), "валюта нашего предложения"
-    return "RUB", "по умолчанию"
+    from .pricing import offer_currency
+    return offer_currency(deal), "валюта предложения поставщика"
 
 
 def money(db: Session, amount: float, currency: str, vat_included: bool, vat_pct: float, rate: float, contract_ccy: str, on: date) -> dict:

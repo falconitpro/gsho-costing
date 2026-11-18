@@ -197,3 +197,4 @@
 - `GET /api/files/{path}` — скачивание: группа `file_download` или одобренный запрос (24 ч), иначе 403 `{code: "download_restricted"}`.
 - `POST /api/files-download-requests` — `{path, reason}` → 201 `{id, status}`; `GET /api/files-download-requests?status=pending` (ЗГД — все, остальные — свои); `POST /api/files-download-requests/{id}` — ЗГД: `{approve, comment}`.
 - `PUT /api/deals/{id}/negotiation/client-rates` — КД / ЗГД: `{rates: {CNY: 11.5}, comment}`; пустой `rates` — снять. В `GET .../negotiation` — `client_rates`, `client_rates_history` (D-079).
+- `PUT /api/deals/{id}/deal-currency` — КД / ЗГД до утверждения: `{currency}` (пусто — валюта предложения поставщика) → `{deal_currency, chosen, offer_currency}`; в `GET .../calc` — `deal_currency {code, chosen, offer}`. `POST .../price` — `currency` теперь валюта ввода; цена сохраняется в валюте сделки, ввод — в `price_input_currency` (D-080).
