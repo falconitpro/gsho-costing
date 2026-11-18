@@ -658,3 +658,17 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .ng-send { display: flex; flex-direction: column; gap: 6px; background: #fafafa; border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin-top: 6px; }
 .ng-answer { display: flex; gap: 6px; margin-top: 4px; }
 .ng-answer input { flex: 1; font-size: 13px; height: 30px; }
+/* услуги и сравнение логистических компаний (D-075) */
+.lw-svc { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 6px; }
+.lw-svc-i { display: flex; gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; cursor: pointer; background: #fff; font-size: 13px; }
+.lw-svc-i input { width: auto; height: auto; }
+.lw-svc-i.on { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.lw-cmp td { vertical-align: top; }
+.lw-chosen td { background: #fff3f3; box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+.lw-pick { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: #fff; }
+.lb-steps { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+.lb-steps > a { border: 1px solid var(--line); border-radius: 14px; padding: 3px 12px; font-size: 13px; text-decoration: none; color: #333; background: #fff; }
+.lb-steps > a::before { content: "○ "; color: var(--muted); }
+.lb-steps > a.done { border-color: var(--ok); }
+.lb-steps > a.done::before { content: "✓ "; color: var(--ok); }
+.lb-links { font-size: 13px; }

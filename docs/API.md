@@ -181,3 +181,10 @@
 - `POST /api/deals/{id}/negotiation/steps/{sid}/send` — `{to, body, format, manual}`; без почты и без `manual` — 409.
 - `PUT /api/deals/{id}/negotiation/steps/{sid}/answer` — `{client_answer}`.
 - Цены конкурентов: новые поля `delivery_term`, `payment_terms`.
+
+### Логистика: услуги и выбор (D-075)
+
+- `PUT /api/deals/{id}/logistics/services` — `{services: [door_to_door, intl_freight, rf_delivery, insurance, customs, export]}`.
+- `GET .../logistics/workspace` — добавлены `services`, `service_options`, `compare` (`rows`, `best`, `fastest`, `chosen`, `chosen_status`: approved | pending_gd | declined, `waiting`).
+- `POST .../logistics/quotes/choose` — `{carrier, comment, need_gd}`; не самое дешёвое без причины — 422.
+- `POST .../logistics/quotes/choose/decision` — ЗГД: `{approve, comment}`; отказ без причины — 422.
