@@ -164,3 +164,12 @@ def test_dr_scripts_notify_by_postbox_without_secrets():
     assert "postbox.cloud.yandex.net" in lib and "X-YaCloud-SubjectToken" in lib
     assert 'dr_notify "CRM резерв' in (DR / "drill.sh").read_text()
     assert "dr_notify" in (DR / "failover.sh").read_text()
+
+
+def test_dr_env_example_is_valid_shell():
+    # /etc/gsho/dr.env читается через `set -a; . файл`: строка с «;» без кавычек ломала failover и drill (19.11)
+    lines = [ln for ln in (DR / "dr.env.example").read_text().splitlines() if ln.startswith("DR_NOTIFY_")]
+    p = subprocess.run(["bash", "-euc", "set -a; eval \"$1\"; printf %s \"$DR_NOTIFY_TO\"", "_", "\n".join(lines)],
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.count("@") == 3
