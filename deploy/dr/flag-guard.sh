@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Защита от расхождения данных (D-083): на РАБОЧЕМ сервере раз в минуту (gsho-dr-guard.timer) читает флаг
+# Защита от расхождения данных (D-084): на РАБОЧЕМ сервере раз в минуту (gsho-dr-guard.timer) читает флаг
 # «работаем на резерве» из Object Storage. Флаг стоит → Caddy на crm.dobrov.pro переадресует на crm2 и не пускает
 # в приложение (устаревшая база не принимает данные). Флага нет → обычная работа.
 # Нет ответа или непонятный ответ → ничего не меняется: сбой Яндекса не должен останавливать рабочий CRM.
@@ -47,7 +47,7 @@ esac
 if [ "$TARGET" = "off" ]; then
   if [ -f "$SNIPPET" ]; then rm -f "$SNIPPET"; echo "gsho-dr-guard: флаг снят — переадресация на резерв выключена"; reload; fi
 elif [ -n "$TARGET" ]; then
-  WANT="# создано deploy/dr/flag-guard.sh: идёт работа на резервном сервере (D-083)
+  WANT="# создано deploy/dr/flag-guard.sh: идёт работа на резервном сервере (D-084)
 redir $TARGET{uri} 302"
   if [ ! -f "$SNIPPET" ] || [ "$(cat "$SNIPPET")" != "$WANT" ]; then
     printf '%s\n' "$WANT" > "$SNIPPET"; echo "gsho-dr-guard: флаг стоит — переадресация на $TARGET"; reload
