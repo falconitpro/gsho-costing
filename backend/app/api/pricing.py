@@ -22,7 +22,7 @@ from ..core.workflow import (
 from ..db import get_db
 from ..models import Approval, Attachment, ClientPriceHistory, Deal, DealVersion, Factory, FactoryPriceHistory, FeedEntry, Position, User, Variant
 from ..services import settings_service
-from ..services.deal_calc import approval_flags, build_calc_input, run_calc
+from ..services.deal_calc import approval_flags, build_calc_input, negotiated, run_calc
 from ..services.deal_service import apply_transition, audit, complete_tasks, create_version, ensure_folders, notify, sla
 from ..services.kp_generator import KpData, KpVariant, build_kp
 from ..services.offers_service import kp_brand_check, kp_model_name
@@ -99,6 +99,7 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
         "contract_currency": _contract_ccy(db, deal, inp),
         "deal_currency": {"code": deal_currency(deal), "chosen": deal.deal_currency, "offer": offer_currency(deal)},
         "units": {v.id: variant_units(deal, v) for v in deal.variants},
+        "negotiated": negotiated(db, deal),
         "status": deal.status.value, "scenario_override": deal.scenario_override, "kp_brand": deal.kp_brand, "kp_images_mode": deal.kp_images_mode,
         "payment_terms": {"client_payments": deal.client_payments, "client_payment_wishes": deal.client_payment_wishes, "bank_guarantee": deal.bank_guarantee,
                           "default_client": settings_service.get(db, "default_client_payment_scheme"),

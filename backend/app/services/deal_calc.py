@@ -92,6 +92,58 @@ def _local_options(rows: list[LocalOption], units: int = 1) -> list[LocalOptionI
     return out
 
 
+def negotiated(db: Session, deal: Deal) -> dict[str, dict]:
+    """Актуальная цена после торгов (D-093): последняя редакция КП утверждённой версии — цена оборудования без услуг,
+    добавленных в КП, и условия оплаты последнего шага торгов. Пока торгов не было — пусто (цена версии)."""
+    from ..models import KpRevision, NegotiationStep
+    if not deal.approved_version_id or deal.status.value not in ("approved", "kp_sent", "won", "contract", "execution", "closed"):
+        return {}
+    rev = db.scalar(select(KpRevision).where(KpRevision.deal_id == deal.id, KpRevision.version_id == deal.approved_version_id)
+                    .order_by(KpRevision.no.desc()).limit(1))
+    step = db.scalar(select(NegotiationStep).where(NegotiationStep.deal_id == deal.id, NegotiationStep.version_id == deal.approved_version_id)
+                     .order_by(NegotiationStep.no.desc()).limit(1))
+    out: dict[str, dict] = {}
+    if rev is not None:
+        from ..api.pricing import revision_totals
+        from ..models import DealVersion
+        ver = db.get(DealVersion, deal.approved_version_id)
+        for vid, t in revision_totals(deal, ver, rev.changes or {}).items():
+            eq = round(t["total"] - sum(a for _, a in t["extras"] if a), 2)
+            first = next((float(v.price_rub) for v in deal.variants if v.id == vid and v.price_rub is not None), None)
+            if first is not None and abs(eq - first) > 0.005:
+                out[vid] = {"price_rub": eq, "first_rub": first, "revision_no": rev.no}
+    for vid, t in ((step.terms or {}) if step is not None else {}).items():
+        if (t or {}).get("client_payments"):
+            out.setdefault(vid, {})["client_payments"] = t["client_payments"]
+            out[vid]["step_no"] = step.no
+    return out
+
+
+def actual_offer(deal: Deal, v, db: Session | None = None) -> dict:
+    """Актуальная цена предложения для клиента (D-093): итог последней редакции КП утверждённой версии (после торгов и
+    правок КП), в валюте КП; условия оплаты — последнего шага торгов. Пока редакций нет — цена утверждённой версии."""
+    from sqlalchemy.orm import object_session
+    from ..models import KpRevision, NegotiationStep
+    out = {"price_rub": v.price_rub, "price_amount": v.price_amount, "currency": (v.price_currency or "RUB").upper(),
+           "client_payments": v.client_payments or deal.client_payments, "negotiated": False}
+    db = db or object_session(deal)
+    if db is None or v is None or v.price_rub is None or not deal.approved_version_id:
+        return out
+    rev = db.scalar(select(KpRevision).where(KpRevision.deal_id == deal.id, KpRevision.version_id == deal.approved_version_id)
+                    .order_by(KpRevision.no.desc()).limit(1))
+    if rev is not None and (rev.prices or {}).get(v.id) is not None:
+        rub = float(rev.prices[v.id])
+        rate = float(v.price_fx_rate or 0) if out["currency"] != "RUB" else 1.0
+        out.update(price_rub=round(rub, 2), price_amount=round(rub / rate, 2) if rate else v.price_amount, negotiated=abs(rub - float(v.price_rub)) > 0.005,
+                   revision_no=rev.no)
+    step = db.scalar(select(NegotiationStep).where(NegotiationStep.deal_id == deal.id, NegotiationStep.version_id == deal.approved_version_id)
+                     .order_by(NegotiationStep.no.desc()).limit(1))
+    if step is not None and ((step.terms or {}).get(v.id) or {}).get("client_payments"):
+        out["client_payments"] = step.terms[v.id]["client_payments"]
+        out["negotiated"] = True
+    return out
+
+
 def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> DealCalcInput:
     s = settings_service.get_all(db)
     calc_date = calc_date or deal.report_date or date.today()   # дата отчёта — задают КД / ЗГД
@@ -189,10 +241,12 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             actual_events={**_dates(b.actual_events), **({"border": b.border_actual} if b.border_actual else {})},
         ))
     variants = []
+    neg = negotiated(db, deal)
     for v in deal.variants:
-        cp = _lines(v.client_payments or deal.client_payments)
+        nv = neg.get(v.id) or {}
+        cp = _lines(nv.get("client_payments") or v.client_payments or deal.client_payments)
         variants.append(VariantInput(
-            id=v.id, name=v.name, position_ids=v.position_ids, price_rub=v.price_rub, service_in_kp=v.service_in_kp,
+            id=v.id, name=v.name, position_ids=v.position_ids, price_rub=nv.get("price_rub", v.price_rub), service_in_kp=v.service_in_kp,
             client_payments=cp or default_client or VariantInput.model_fields["client_payments"].default_factory(),
             client_payments_default=not cp,
             overhead_pct_override=v.overhead_pct_override, overhead_override_comment=v.overhead_override_comment or "",

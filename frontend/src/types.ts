@@ -118,6 +118,7 @@ export interface CalcResponse {
   sales_vat_pct?: number; contract_currency?: { code: string; source: string; rate: number | null };
   deal_currency?: { code: string; chosen: string | null; offer: string };
   units?: Record<string, number>;
+  negotiated?: Record<string, { price_rub?: number; first_rub?: number; revision_no?: number; client_payments?: PaymentLine[]; step_no?: number }>;
   production?: Record<string, import("./components/ProductionTermBlock").ProductionInfo>; can_edit_production?: boolean;
   approval_flags: Record<string, boolean>; threshold_pct: number; warnings: string[]; comments: { from: string; item: string; ref: string; comment: string }[];
   factory_price_history?: { model: string; unit_price: number; currency: string; on: string }[];

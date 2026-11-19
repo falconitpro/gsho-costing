@@ -218,3 +218,25 @@ def test_factory_price_what_if_solve_request_apply(client):
     out = _ok(client.post(f"/api/deals/{did}/factory-price/apply", headers=H(CD), json={"position_id": pos["id"], "unit_price": 900000, "comment": "письмо завода 19.11"}))
     assert out["unit_price"] == 900000 and out["before"] == 1000000
     assert next(p for p in _ok(client.get(f"/api/deals/{did}", headers=H(CD)))["positions"] if p["id"] == pos["id"])["unit_price"] == 900000
+
+
+def test_negotiated_price_is_actual_in_calc(client):
+    """D-093: после шага торгов расчёт сделки идёт по актуальной цене (последняя редакция КП), первая цена — справочно."""
+    did, vid, schemes = _approved(client)
+    before = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))
+    p0 = before["result"]["variants"][vid]["base"]["price_rub"]
+    assert before["negotiated"] == {}
+    s = _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD), json={"prices": {vid: {"mode": "pct", "value": 4}}, "reason": "client"}), 201)
+    after = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))
+    assert abs(after["result"]["variants"][vid]["base"]["price_rub"] - s["price_rub"]) < 1 and abs(after["result"]["variants"][vid]["base"]["price_rub"] - p0 * 0.96) < 1
+    assert after["result"]["variants"][vid]["base"]["margin_pct"] < before["result"]["variants"][vid]["base"]["margin_pct"]
+    n = after["negotiated"][vid]
+    assert abs(n["first_rub"] - p0) < 1 and n["revision_no"] == 1
+    # услуги, добавленные в КП, в цену оборудования для расчёта не входят
+    _ok(client.post(f"/api/deals/{did}/kp/revisions", headers=H(CD), json={"changes": {vid: {"extras": [{"name": "Обучение", "price_rub": 100000}]}}, "description": "обучение"}), 201)
+    again = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))
+    assert abs(again["result"]["variants"][vid]["base"]["price_rub"] - s["price_rub"]) < 1
+    # новые условия оплаты шага — в расчёт
+    alt = schemes[-1]["lines"]
+    _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD), json={"terms": {vid: {"client_payments": alt}}, "reason": "terms"}), 201)
+    assert _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))["negotiated"][vid]["client_payments"] == alt
