@@ -157,3 +157,10 @@ def test_choice_needs_gd_approval(client):
     out = _ok(client.post(f"/api/deals/{did}/logistics/quotes/choose/decision", headers=H(GD), json={"approve": True, "comment": "ок"}))
     assert out["chosen_status"] == "approved" and out["gd_comment"] == "ок"
     assert client.post(f"/api/deals/{did}/logistics/quotes/choose/decision", headers=H(GD), json={"approve": True}).status_code == 409
+
+
+def test_calc_survives_text_in_numeric_tech_field():
+    """Регресс 19.11.2026: «указать» в поле массы ронял расчёт (500 на «Расчёт и утверждение»)."""
+    from app.services.deal_calc import _num
+    assert _num("указать") == 0.0 and _num("указать", 5.0) == 5.0
+    assert _num("12 500 кг") == 12500.0 and _num("12,5") == 12.5 and _num(None, 1.0) == 1.0 and _num(7) == 7.0 and _num("") == 0.0

@@ -43,8 +43,15 @@ def load_fx(db: Session, on: date) -> tuple[FxRates, dict[str, list[tuple[date, 
 
 
 def _num(v, default: float = 0.0) -> float:
-    """JSON-поля могут содержать null — в ядро передаём число."""
-    return default if v is None else float(v)
+    """JSON-поля могут содержать null или текст («указать», «12 500 кг», «12,5») — в ядро передаём число:
+    число из текста, а если его нет — значение по умолчанию (расчёт не должен падать из-за подписи в поле)."""
+    if v is None or v == "":
+        return default
+    if isinstance(v, (int, float)):
+        return float(v)
+    import re
+    m = re.search(r"-?\d+(?:[.,]\d+)?", str(v).replace("\u00a0", "").replace(" ", ""))
+    return float(m.group(0).replace(",", ".")) if m else default
 
 
 def _lines(raw: list[dict]) -> list[PaymentLine]:
