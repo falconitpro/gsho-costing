@@ -130,6 +130,14 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
     positions = []
     for p in deal.positions:
         lg = p.logistics or {}
+        # D-087: заполненные расходы позиции — на 1 машину (× количество). Прежние записи без флага — на всю позицию,
+        # кроме утилизационного сбора по ставке × коэффициенту: он по закону за каждую единицу техники
+        n = max(1, int(p.qty or 1))
+        mult = n if lg.get("per_unit") else 1
+        util_mult = n if (lg.get("per_unit") or lg.get("util_coefficient") is not None) else 1
+        dl = dict(lg.get("domestic_logistics") or {"amount": 0, "currency": "CNY"})
+        ef = dict(lg.get("export_formalities") or {"amount": 0, "currency": "CNY"})
+        dl["amount"], ef["amount"] = _num(dl.get("amount")) * mult, _num(ef.get("amount")) * mult
         sc = p.service_calc or {}
         service = None
         if deal.service_flag and sc.get("result"):
@@ -144,10 +152,9 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             factory_payments=fp or default_factory or PositionInput.model_fields["factory_payments"].default_factory(),
             factory_payments_default=not fp, local_options=_local_options(p.local_option_rows or []),
             actual_events=_dates(p.actual_events),
-            domestic_logistics=Money(**lg.get("domestic_logistics", {"amount": 0, "currency": "CNY"})),
-            export_formalities=Money(**lg.get("export_formalities", {"amount": 0, "currency": "CNY"})),
+            domestic_logistics=Money(**dl), export_formalities=Money(**ef),
             hs_code=lg.get("hs_code") or "", duty_pct=_num(lg.get("duty_pct")), vat_pct=_num(lg.get("vat_pct"), 22.0),
-            util_fee_rub=_num(lg.get("util_fee_rub")), certification_rub=_num(lg.get("certification_rub")),
+            util_fee_rub=_num(lg.get("util_fee_rub")) * util_mult, certification_rub=_num(lg.get("certification_rub")) * mult,
             weight_kg=_num(((p.logistics_params or {}).get("1.15") or (p.logistics_params or {}).get("1.14") or {}).get("value")) * p.qty,
             volume_m3=_num(lg.get("volume_m3")),
             warranty_reserve_pct=p.warranty_reserve_pct if p.warranty_reserve_pct is not None else wr.get(p.machine_type, wr.get("default", 1.5)),
@@ -155,7 +162,14 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
         ))
     batches = []
     for b in deal.batches:
-        it = b.items or {}
+        it = dict(b.items or {})
+        if it.get("per_unit"):   # D-087: суммы партии — на 1 машину → × количество машин в партии
+            bn = sum(max(1, int(p.qty or 1)) for p in deal.positions if p.batch_id == b.id) or 1
+            for key in ("intl_freight", "insurance_amount", "door_to_door"):
+                if isinstance(it.get(key), dict) and it[key].get("amount"):
+                    it[key] = {**it[key], "amount": _num(it[key]["amount"]) * bn}
+            for key in ("broker_rub", "rf_delivery_rub"):
+                it[key] = _num(it.get(key)) * bn
         batches.append(BatchInput(
             id=b.id, route=b.route, transport_units=b.transport_units,
             intl_freight=Money(**it.get("intl_freight", {"amount": 0, "currency": "CNY"})),

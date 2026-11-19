@@ -37,8 +37,18 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const emptyBatch = () => ({ name: `Партия ${batches.length + 1}`, route: "завод → Маньчжурия → Забайкальск → пункт поставки", transport_units: 1, transit_days: 14, customs_days: 5, rf_delivery_days: 5, border_planned: "", allocation: "cost",
     intl_freight: 0, intl_currency: "CNY", insurance_pct: 0.3, broker_rub: 0, rf_delivery_rub: 0, comment_freight: "", comment_broker: "", comment_rf: "", d2d: true, d2d_amount: 0, d2d_currency: "CNY" });
   // правка сохранённой партии: значения — в ту же форму, сохранение обновляет партию
+  // D-087: суммы партии — на 1 машину; прежние партии (без признака) хранили итог на партию — в форме делим на число машин
+  const batchUnits = (ids: string[]) => positions.filter((p) => ids.includes(p.id)).reduce((a, p) => a + Math.max(1, p.qty || 1), 0) || 1;
+  const perUnitItems = (b: Batch) => {
+    const raw = (b.items || {}) as Record<string, unknown>;
+    const dv = raw.per_unit ? 1 : batchUnits(positions.filter((p) => p.batch_id === b.id).map((p) => p.id));
+    const dm = (m: unknown) => (m && typeof m === "object" ? { ...(m as Money), amount: Math.round(((m as Money).amount || 0) / dv * 100) / 100 } : m);
+    return { ...raw, intl_freight: dm(raw.intl_freight), door_to_door: dm(raw.door_to_door), insurance_amount: dm(raw.insurance_amount),
+      broker_rub: Number(raw.broker_rub || 0) / dv, rf_delivery_rub: Number(raw.rf_delivery_rub || 0) / dv } as Record<string, unknown>;
+  };
   const batchForm = (b: Batch) => {
-    const it = (b.items || {}) as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; const d = it.door_to_door as Money | null | undefined;
+    const it = perUnitItems(b);
+    const fr = it.intl_freight as Money | undefined; const d = it.door_to_door as Money | null | undefined;
     const cm = (it.comments || {}) as Record<string, string>;
     return { name: b.name, route: b.route, transport_units: b.transport_units, transit_days: b.transit_days, customs_days: b.customs_days, rf_delivery_days: b.rf_delivery_days ?? 5,
       border_planned: b.border_planned || "", allocation: b.allocation || "cost", intl_freight: fr?.amount || 0, intl_currency: fr?.currency || "CNY",
@@ -61,8 +71,9 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   };
   const resetBatchForm = () => { const f = emptyBatch(); setEditId(null); setBatch(f); setBatchSaved(JSON.stringify(f)); setBc({}); setPosSel(freePositions()); };
   // ответ логистической компании → в форму партии (сохранение — обычной кнопкой партии)
-  const applyQuote = (q: Quote) => {
-    const c = `${q.carrier}${q.comment ? ": " + q.comment : ""}`;
+  const applyQuote = (q0: Quote) => {
+    const nU = batchUnits(posSel), q = { ...q0, amount: Math.round(q0.amount / nU * 100) / 100 };   // ответ — на весь груз, в партию — на 1 машину
+    const c = `${q.carrier}${q.comment ? ": " + q.comment : ""}${nU > 1 ? ` (${fmtRub(q0.amount)} ${q0.currency} на ${nU} шт.)` : ""}`;
     if (q.scope === "door_to_door") setBatch((b) => ({ ...b, d2d: true, d2d_amount: q.amount, d2d_currency: q.currency, comment_freight: c, transit_days: q.transit_days || b.transit_days }));
     else if (q.scope === "intl_freight") setBatch((b) => ({ ...b, d2d: false, intl_freight: q.amount, intl_currency: q.currency, comment_freight: c, transit_days: q.transit_days || b.transit_days }));
     else if (q.scope === "customs") setBatch((b) => ({ ...b, broker_rub: q.amount, comment_broker: c }));
@@ -78,7 +89,12 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const batchDirty = JSON.stringify(batch) !== batchSaved;
   const bcc = (k: string) => <input value={bc[k] || ""} placeholder="комментарий" onChange={(e) => setBc({ ...bc, [k]: e.target.value })} />;
   const [forms, setForms] = useState<Record<string, PosForm>>(() => Object.fromEntries(positions.map((p) => {
-    const l = (p.logistics || {}) as Partial<PosForm>;
+    const l0 = (p.logistics || {}) as Partial<PosForm> & { per_unit?: boolean };
+    // D-087: расходы позиции — на 1 машину; прежние записи (без признака) хранили сумму на всю позицию — в форме делим на количество
+    const dq = l0.per_unit ? 1 : Math.max(1, p.qty || 1);
+    const dmo = (m?: Money) => (m ? { ...m, amount: Math.round((m.amount || 0) / dq * 100) / 100 } : m);
+    const l = { ...l0, domestic_logistics: dmo(l0.domestic_logistics as Money), export_formalities: dmo(l0.export_formalities as Money),
+      certification_rub: (l0.certification_rub || 0) / dq } as Partial<PosForm>;
     const cat = (p as { catalog_hs?: { code: string; description?: string; duty_pct?: number | null; vat_pct?: number | null } }).catalog_hs;   // код из карточки оборудования каталога
     return [p.id, { domestic_logistics: (l.domestic_logistics as Money) || { amount: 0, currency: "CNY" }, export_formalities: (l.export_formalities as Money) || { amount: 0, currency: "CNY" },
       hs_code: l.hs_code || cat?.code || "", duty_pct: l.duty_pct != null ? String(l.duty_pct) : cat?.duty_pct != null ? String(cat.duty_pct) : "",
@@ -105,7 +121,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
         rf_delivery_days: batch.rf_delivery_days, border_planned: batch.border_planned || null, allocation: batch.allocation,
         items: { intl_freight: { amount: batch.d2d ? 0 : batch.intl_freight, currency: batch.intl_currency }, insurance_pct: batch.insurance_pct, broker_rub: batch.broker_rub,
           rf_delivery_rub: batch.d2d ? 0 : batch.rf_delivery_rub, door_to_door: batch.d2d ? { amount: batch.d2d_amount, currency: batch.d2d_currency } : null,
-          comments: { ...bc, intl_freight: batch.comment_freight, door_to_door: batch.comment_freight, broker_rub: batch.comment_broker, rf_delivery_rub: batch.comment_rf } },
+          comments: { ...bc, intl_freight: batch.comment_freight, door_to_door: batch.comment_freight, broker_rub: batch.comment_broker, rf_delivery_rub: batch.comment_rf }, per_unit: true },
         position_ids: posSel };
       if (editId) await api.patch(`/api/deals/${deal.id}/logistics/batches/${editId}`, body);
       else await api.post(`/api/deals/${deal.id}/logistics/batches`, body);
@@ -182,10 +198,10 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
       </div>
       {ws && <div id="lb-adr"><LogistAddresses dealId={deal.id} ws={ws} reload={loadWs} /></div>}
       <div className="card" id="lb-batches">
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}><h2 style={{ margin: 0 }}>Доставка: партии</h2>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}><h2 style={{ margin: 0 }}>Доставка: партии <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}>· суммы на 1 машину</span></h2>
           {canEdit && !showBatchForm && <button className="btn secondary" onClick={() => { resetBatchForm(); setShowBatchForm(true); }}>+ Новая партия</button>}</div>
         {batches.length > 0 && <table><thead><tr><th>Партия</th><th>Маршрут</th><th className="num">Трансп. ед.</th><th className="num">Транзит / оформление / по РФ, дн</th><th>CMR план / факт</th><th>Доставка до границы РФ</th><th>Страховка</th><th className="num">Брокер и СВХ</th><th className="num">Доставка по РФ</th><th>Позиции</th>{canEdit && <th />}</tr></thead>
-          <tbody>{batches.map((b) => { const it = b.items as Record<string, unknown>; const fr = it.intl_freight as Money | undefined; const d2d = it.door_to_door as Money | null | undefined; return (
+          <tbody>{batches.map((b) => { const it = perUnitItems(b); const fr = it.intl_freight as Money | undefined; const d2d = it.door_to_door as Money | null | undefined; return (
             <tr key={b.id}><td>{b.name}</td><td>{b.route}</td><td className="num">{b.transport_units}</td><td className="num">{b.transit_days} / {b.customs_days} / {b.rf_delivery_days ?? 5}</td><td>{fmtDate(b.border_planned)} / {b.border_actual ? <b>{fmtDate(b.border_actual)}</b> : "—"}</td>
               {d2d?.amount ? <td colSpan={1} title="единая стоимость завод → клиент">{fmtRub(d2d.amount * borderPct / 100)} {d2d.currency} <span className="muted">({borderPct} % от {fmtRub(d2d.amount)})</span></td>
                 : <td>{fr ? `${fmtRub(fr.amount)} ${fr.currency}` : "—"}</td>}
@@ -197,6 +213,8 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
         {canEdit && showBatchForm && (
           <>
             <h3 id="batch-form" style={{ marginBottom: 4 }}>{editId ? `Изменение партии «${batches.find((b) => b.id === editId)?.name || batch.name}»` : "Новая партия"}</h3>
+            {(() => { const nU = batchUnits(posSel); const tot = batch.d2d ? batch.d2d_amount : batch.intl_freight; return (
+              <div className="alert info" style={{ margin: "4px 0 8px" }}>Суммы — <b>на 1 машину</b>{nU > 1 ? <>; в партии {nU} шт. — в расчёт × {nU}: {batch.d2d ? "доставка" : "перевозка"} {fmtRub(tot * nU)} {batch.d2d ? batch.d2d_currency : batch.intl_currency}, брокер {fmtRub(batch.broker_rub * nU)} руб{batch.d2d ? "" : `, по РФ ${fmtRub(batch.rf_delivery_rub * nU)} руб`}</> : ""}. Ответ логистической компании на весь груз при «в партию» делится на число машин.</div>); })()}
             <SpecTable refTitle="Примечание" sections={[
               { title: "Маршрут и сроки", rows: [
                 { key: "name", name: "Название партии", filled: !!batch.name, required: true, value: <input value={batch.name} onChange={(e) => setBatch({ ...batch, name: e.target.value })} />, comment: bcc("name") },
@@ -261,6 +279,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
                 {" "}<span className="muted">партия: {batches.find((b) => b.id === p.batch_id)?.name || "не распределена"}</span></span></h2>
             {openPos.includes(p.id) && <div style={{ marginTop: 10 }}>
             <LogistFields pos={ws?.fields.find((x) => x.position_id === p.id)} canChoose={!!ws?.can_choose_fields} onChoose={() => setChooser(true)} />
+            {(p.qty || 1) > 1 && <div className="alert info" style={{ margin: "0 0 8px" }}>Расходы позиции (логистика, экспорт, сертификация, утилизационный сбор) — <b>на 1 машину</b>; в расчёт × {p.qty} шт. Пошлина и НДС — в процентах, от стоимости всех машин.</div>}
             <SpecTable refTitle="По истории / справочник" nameTitle="Статья" sections={[
               { title: "Китай: до границы", rows: [
                 d2dCovers(p) ? { key: "dl", name: "Внутрикитайская логистика завод → граница", filled: true,

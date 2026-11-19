@@ -164,3 +164,23 @@ def test_calc_survives_text_in_numeric_tech_field():
     from app.services.deal_calc import _num
     assert _num("указать") == 0.0 and _num("указать", 5.0) == 5.0
     assert _num("12 500 кг") == 12500.0 and _num("12,5") == 12.5 and _num(None, 1.0) == 1.0 and _num(7) == 7.0 and _num("") == 0.0
+
+
+def test_logistics_amounts_per_machine(client):
+    """D-087: заполненные расходы — на 1 машину: позиция × количество, партия × количество машин в партии."""
+    clients = _ok(client.get("/api/refs/clients", headers=H(MGR)))
+    factories = _ok(client.get("/api/refs/factories", headers=H(MGR)))
+    did = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "На машину"}), 201)["id"]
+    pos = _ok(client.post(f"/api/deals/{did}/positions", headers=H(MGR), json={"factory_id": factories[0]["id"], "model": "PU-2",
+              "machine_type": "ПДМ", "qty": 2, "unit_price": 1000000, "currency": "CNY"}), 201)
+    _ok(client.post(f"/api/deals/{did}/send-to-calc", headers=H(MGR)))
+    _ok(client.post(f"/api/deals/{did}/logistics/batches", headers=H(LOG), json={"items": {"door_to_door": {"amount": 100000, "currency": "CNY"}, "broker_rub": 50000,
+        "comments": {"door_to_door": "x", "broker_rub": "x"}}, "position_ids": [pos["id"]]}), 201)
+    _ok(client.put(f"/api/deals/{did}/logistics/positions/{pos['id']}", headers=H(LOG), json={"hs_code": "8429519000", "util_applies": False,
+        "export_formalities": {"amount": 1000, "currency": "CNY"}, "certification_rub": 30000, "comments": {"export_formalities": "x", "certification_rub": "x"}}))
+    _ok(client.post(f"/api/deals/{did}/logistics/complete", headers=H(LOG)))
+    calc = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))
+    p = calc["input"]["positions"][0]
+    assert p["export_formalities"]["amount"] == 2000 and p["certification_rub"] == 60000
+    b = calc["input"]["batches"][0]
+    assert b["door_to_door"]["amount"] == 200000 and b["broker_rub"] == 100000

@@ -60,6 +60,7 @@ class PositionLogisticsIn(BaseModel):
     certifications: list[str] = Field(default_factory=list)
     volume_m3: Optional[float] = None
     comments: dict[str, str] = Field(default_factory=dict)   # статья → комментарий к отклонению
+    per_unit: bool = True        # D-087: суммы — на 1 машину (в расчёт — × количество позиции)
 
 
 def _ensure_logistics_stage(deal: Deal) -> None:
@@ -107,6 +108,8 @@ def _finance_sync(db: Session, b: Batch, user_id: str) -> None:
 
 
 def _check_batch_items(db: Session, deal: Deal, b: Batch, items: dict) -> dict:
+    # D-087: суммы партии вводятся на 1 машину (в расчёт — × количество машин в партии); прежние партии без флага — на всю партию
+    items = {**items, "per_unit": bool(items.get("per_unit", True))}
     thr = settings_service.get(db, "logistics_deviation_pct")
     checks = {}
     comments = items.get("comments", {})
