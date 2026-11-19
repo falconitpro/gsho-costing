@@ -711,3 +711,16 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .ng-x:hover { color: var(--accent); border-color: var(--accent); }
 .ng-pay-foot { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
 .tabs.tabs-compact button.tab-go { border-style: dashed; }
+/* шкала цены в «Торгах» без наложений подписей (D-083) */
+.ng-scale2 { position: relative; height: 84px; margin: 4px 14px 2px; }
+.ng-scale-bar2 { position: absolute; left: 0; right: 0; top: 38px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #f3b1b1 0%, #f6d58b 35%, #cfe8cf 70%, #cfe8cf 100%); }
+.ng-mark2 { position: absolute; top: 32px; width: 3px; height: 20px; margin-left: -1px; border-radius: 2px; background: #555; }
+.ng-lbl { position: absolute; transform: translateX(-50%); font-size: 11px; white-space: nowrap; line-height: 14px; font-weight: 600; }
+.ng-b-zero { background: #b91c1c !important; } .ng-c-zero { color: #b91c1c; }
+.ng-b-thr { background: #b7791f !important; } .ng-c-thr { color: #b7791f; }
+.ng-b-comp { background: #6b5bd6 !important; } .ng-c-comp { color: #6b5bd6; }
+.ng-b-first { background: #222 !important; } .ng-c-first { color: #222; }
+.ng-b-now { background: var(--accent) !important; } .ng-c-now { color: var(--accent); }
+.ng-mark2.ng-b-now { width: 5px; height: 26px; top: 29px; margin-left: -2px; }
+.ng-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: #444; margin: 0 4px 10px; }
+.ng-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
