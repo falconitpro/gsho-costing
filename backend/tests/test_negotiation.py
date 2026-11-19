@@ -240,3 +240,33 @@ def test_negotiated_price_is_actual_in_calc(client):
     alt = schemes[-1]["lines"]
     _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD), json={"terms": {vid: {"client_payments": alt}}, "reason": "terms"}), 201)
     assert _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))["negotiated"][vid]["client_payments"] == alt
+
+
+def test_kp_after_negotiation_shows_final_price(client):
+    """D-094: в КП после торгов — конечная цена: и итог, и цена за единицу."""
+    import io
+    from docx import Document
+    did, vid, _ = _approved(client)
+    first = _ok(client.get(f"/api/deals/{did}/negotiation", headers=H(CD)))["variants"][0]["first_rub"]
+    s = _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD), json={"prices": {vid: {"mode": "pct", "value": 10}}, "reason": "client"}), 201)
+    vv = next(v for v in _ok(client.get(f"/api/deals/{did}", headers=H(CD)))["variants"] if v["id"] == vid)
+    k = vv["price_fx_rate"] if (vv["price_currency"] or "RUB") != "RUB" else 1.0       # КП — в валюте сделки
+    s = {**s, "price_rub": s["price_rub"] / k}
+    first = first / k
+
+    def kp_text():
+        r = client.get(f"/api/deals/{did}/kp/file?format=docx", headers=H(CD))
+        doc = Document(io.BytesIO(r.content))
+        return {row.cells[0].text: row.cells[1].text for t in doc.tables for row in t.rows if len(row.cells) > 1}
+    rows = kp_text()
+    num = lambda x: float(x.replace(" ", "").replace(" ", ""))  # noqa: E731
+    unit = num(next(v for k, v in rows.items() if k.startswith("Цена за единицу")))
+    total = num(next(v for k, v in rows.items() if k.startswith("Итого") and "без НДС" in k))
+    qty = int(next(v for k, v in rows.items() if k == "Количество"))
+    assert abs(total - s["price_rub"]) < 2 and abs(unit * qty - s["price_rub"]) < 2 * qty and abs(total - first) > 1
+    # второй шаг — снова конечная цена
+    s2 = _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD), json={"prices": {vid: {"mode": "pct", "value": 1}}, "reason": "client"}), 201)
+    rows = kp_text()
+    p2 = s2["price_rub"] / k
+    assert abs(num(next(v for kk, v in rows.items() if kk.startswith("Итого") and "без НДС" in kk)) - p2) < 2
+    assert abs(num(next(v for kk, v in rows.items() if kk.startswith("Цена за единицу"))) * qty - p2) < 2 * qty
