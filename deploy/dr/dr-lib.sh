@@ -123,3 +123,24 @@ dr_flag_delete() {
   curl -fsS -m 30 -X DELETE --aws-sigv4 "aws:amz:ru-central1:s3" \
     --user "$DR_FLAG_ACCESS_KEY_ID:$DR_FLAG_SECRET_ACCESS_KEY" "$DR_FLAG_BUCKET_URL/failover.json" >/dev/null
 }
+
+# Письмо через Yandex Cloud Postbox по IAM-токену сервисного аккаунта ВМ (роль postbox.sender; паролей нет).
+# dr_notify "<тема>" "<текст>"; адреса — DR_NOTIFY_TO (через ; или ,), отправитель — DR_NOTIFY_FROM (из /etc/gsho/dr.env).
+# Не задано или не отправилось — только запись в журнал: письмо не должно ломать переключение или проверку.
+dr_notify() {
+  if [ -z "${DR_NOTIFY_TO:-}" ] || [ -z "${DR_NOTIFY_FROM:-}" ]; then return 0; fi
+  local tok
+  tok="$(curl -fsS -m 5 -H Metadata-Flavor:Google \
+    http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' 2>/dev/null)" || tok=""
+  if [ -z "$tok" ]; then dr_log "письмо не отправлено: нет токена сервисного аккаунта ВМ"; return 0; fi
+  python3 - "$1" "$2" <<'PY2' | curl -fsS -m 20 -X POST https://postbox.cloud.yandex.net/v2/email/outbound-emails \
+      -H "X-YaCloud-SubjectToken: $tok" -H 'Content-Type: application/json' --data-binary @- >/dev/null \
+    || dr_log "письмо не отправлено (Postbox)"
+import json, os, re, sys
+to = [a for a in re.split(r"[;,\s]+", os.environ["DR_NOTIFY_TO"]) if a]
+print(json.dumps({"FromEmailAddress": os.environ["DR_NOTIFY_FROM"], "Destination": {"ToAddresses": to},
+                  "Content": {"Simple": {"Subject": {"Data": sys.argv[1], "Charset": "UTF-8"},
+                                         "Body": {"Text": {"Data": sys.argv[2], "Charset": "UTF-8"}}}}}))
+PY2
+}

@@ -78,7 +78,22 @@ systemctl list-timers 'gsho-*'
 3. Резерв: `sudo bash /usr/local/lib/gsho-dr/failback.sh --stage=finish` — снимает флаг, останавливает стенд. Выключить ВМ.
 4. Сотрудникам: «вернулись на crm.dobrov.pro».
 
-## 5. Еженедельная проверка
+## 5. Мониторинг и еженедельная проверка
+
+**Развёртывание** (Cloud Shell консоли Яндекса, повторный запуск обновляет код):
+`git clone -q https://github.com/falconitpro/gsho-costing && bash gsho-costing/deploy/dr/functions/deploy.sh`.
+Создаёт SA `sa-crm-monitor`, бакет состояния `berghaus-crm-monitor-state`, функции `crm-monitor` (раз в 5 минут) и
+`crm2-drill` (воскресенье 03:30 МСК), таймеры. Вручную в консоли (бакет → «Безопасность» → «Назначить роли»):
+`sa-crm-monitor` — `storage.viewer` на `berghaus-crm-prod-backup` и `storage.editor` на `berghaus-crm-monitor-state`.
+
+**Письма** — через Yandex Cloud Postbox с адреса `crm-monitor@notify.dobrov.pro` (DKIM — две CNAME
+`*._domainkey.notify` у R01) по IAM-токену, без паролей. Получатели: evgeniy@dobrov.pro, e.dobrov@berg-haus.com,
+s.volokhov@berg-haus.com. `crm-monitor` пишет, когда crm.dobrov.pro не отвечает, когда копии старше 50 минут, когда
+резервная ВМ включена дольше 3 часов без флага и раз в 6 часов, пока стоит флаг; повторяет раз в час и сообщает
+«восстановлено». Резервная ВМ сама пишет о переключении и о результате еженедельной проверки (`dr_notify`,
+`DR_NOTIFY_TO`/`DR_NOTIFY_FROM` в `/etc/gsho/dr.env`, роль `postbox.sender` у её SA).
+
+### Еженедельная проверка
 
 Расписание в Yandex Cloud (Cloud Functions по таймеру, раз в неделю ночью) записывает в метаданные ВМ
 `dr-drill-until=<сейчас + 30 мин>` и запускает её. `gsho-dr-drill.service` видит метку, выполняет `drill.sh --poweroff`:

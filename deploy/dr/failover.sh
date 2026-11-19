@@ -48,6 +48,10 @@ if [ -n "${DR_DNS_UPDATE_CMD:-}" ]; then
   DR_IP="$IP" bash -c "$DR_DNS_UPDATE_CMD" || dr_log "ВНИМАНИЕ: запись не обновлена — сделайте вручную у R01"
 fi
 
+dr_notify "CRM переключён на резервный сервер $DOMAIN" "Переключение выполнено $(date -u '+%F %T') UTC.
+Данные на $DR_SNAPSHOT_CREATED UTC (снимок ${DR_SNAPSHOT:0:8}). Сотрудники работают на https://$DOMAIN.
+Возврат на рабочий сервер — раздел 5 инструкции администратора."
+
 cat <<TXT
 
 ГОТОВО: резерв работает на https://$DOMAIN
