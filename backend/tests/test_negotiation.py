@@ -270,3 +270,22 @@ def test_kp_after_negotiation_shows_final_price(client):
     p2 = s2["price_rub"] / k
     assert abs(num(next(v for kk, v in rows.items() if kk.startswith("Итого") and "без НДС" in kk)) - p2) < 2
     assert abs(num(next(v for kk, v in rows.items() if kk.startswith("Цена за единицу"))) * qty - p2) < 2 * qty
+
+
+def test_kp_history_in_deal_currency_per_unit(client):
+    """D-095: история КП — в валюте сделки, за 1 шт. и за всё количество; рубли справочно."""
+    did, vid, _ = _approved(client)
+    s = _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD), json={"prices": {vid: {"mode": "pct", "value": 10}}, "reason": "client"}), 201)
+    vv = next(v for v in _ok(client.get(f"/api/deals/{did}", headers=H(CD)))["variants"] if v["id"] == vid)
+    h = _ok(client.get(f"/api/deals/{did}/kp/revisions", headers=H(CD)))
+    cur = (vv["price_currency"] or "RUB").upper()
+    k = vv["price_fx_rate"] if cur != "RUB" else 1.0
+    assert h["currency"] == cur
+    last = h["rows"][-1]
+    line = last["variants"][0]
+    n = line["units"]
+    assert abs(last["price_rub"] - s["price_rub"]) < 1
+    assert abs(line["total"] - s["price_rub"] / k) < 0.05 and abs(line["unit"] * n - line["total"]) < 0.05 * n
+    assert abs(line["unit_rub"] * n - line["total_rub"]) < n
+    assert abs(last["price"] - s["price_rub"] / k) < 0.05 and abs(last["unit_price"] - last["price"] / n) < 0.05
+    assert h["rows"][0]["price"] > last["price"]          # исходное КП дороже

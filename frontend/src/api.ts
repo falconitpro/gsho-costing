@@ -101,6 +101,9 @@ export const ru = (t: unknown) => {
 
 export const fmtRub = (v: number | null | undefined, digits = 0) =>
   v == null ? "—" : new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(v);
+/** Сумма в валюте сделки: всегда два знака после запятой (D-095). */
+export const fmtCur = (v: number | null | undefined) =>
+  v == null ? "—" : new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 export const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(2).replace(".", ",")} %`);
 export const fmtDate = (s: string | null | undefined) => (s ? new Date(s).toLocaleDateString("ru-RU") : "—");
 

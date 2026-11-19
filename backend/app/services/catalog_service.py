@@ -58,6 +58,9 @@ def record_client_prices(db: Session, deal: Deal, user_id: Optional[str]) -> Non
         if not v.in_kp or v.price_rub is None:
             continue
         v_price = float((rev.prices or {}).get(v.id, v.price_rub)) if rev else v.price_rub
+        cur = (v.price_currency or "RUB").upper()
+        k = float(v.price_fx_rate) if cur != "RUB" and v.price_fx_rate else None
+        cur = cur if k else "RUB"
         poss = [p for p in deal.positions if p.id in v.position_ids]
         total_qty = sum(p.qty for p in poss) or 1
         base = ((res.get("variants") or {}).get(v.id) or {}).get("base") or {}
@@ -73,6 +76,7 @@ def record_client_prices(db: Session, deal: Deal, user_id: Optional[str]) -> Non
                 version_no=ver.version_no if ver else deal.current_version_no, kp_no=f"КП-{deal.number[2:]}" + (f"/{rev.no}" if rev else ""), variant_id=v.id,
                 variant_name="" if v.is_default else v.name, factory_id=p.factory_id, factory_name=factories.get(p.factory_id, ""),
                 model=p.model, execution_id=p.execution_id, qty=p.qty, unit_price_rub=round(share / max(p.qty, 1), 2), total_rub=round(share, 2),
+                currency=cur, fx_rate=k,
                 payment_terms=v.client_payments or deal.client_payments or [], delivery_term=term, kp_brand=deal.kp_brand or "factory",
                 kp_path=(rev.kp_path if rev else ver.kp_path if ver else ""), manager_id=deal.manager_id, on=date.today(), outcome=deal.outcome,
             ))
@@ -83,6 +87,14 @@ def update_client_price_outcome(db: Session, deal: Deal) -> None:
         h.outcome = deal.outcome
         if deal.won_variant_id and h.variant_id:
             h.chosen = h.variant_id == deal.won_variant_id
+
+
+def price_in_currency(r: ClientPriceHistory) -> dict:
+    """D-095: цены истории КП в валюте КП (сделки); рубли — справочно."""
+    k = r.fx_rate if (r.currency or "RUB") != "RUB" and r.fx_rate else None
+    return {"currency": (r.currency or "RUB") if k else "RUB",
+            "unit_price": round(r.unit_price_rub / k, 2) if k and r.unit_price_rub is not None else r.unit_price_rub,
+            "total": round(r.total_rub / k, 2) if k and r.total_rub is not None else r.total_rub}
 
 
 def client_kp_history(db: Session, client_id: str, manager_only: Optional[str] = None) -> list[dict]:
@@ -96,6 +108,7 @@ def client_kp_history(db: Session, client_id: str, manager_only: Optional[str] =
     for r in rows:
         key = (r.deal_id, r.variant_id, r.model)
         entry = {"version_no": r.version_no, "on": r.on.isoformat(), "unit_price_rub": r.unit_price_rub, "total_rub": r.total_rub,
+                 **price_in_currency(r),
                  "payment_terms": r.payment_terms, "delivery_term": r.delivery_term, "kp_brand": r.kp_brand, "kp_path": r.kp_path, "kp_no": r.kp_no}
         if key not in out:
             out[key] = {"deal_id": r.deal_id, "deal_number": r.deal_number, "variant": r.variant_name, "factory": r.factory_name, "model": r.model,

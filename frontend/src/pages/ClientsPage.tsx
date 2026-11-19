@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { lbl, OUTCOME } from "../labels";
 import { UndoButton, useUndoHistory } from "../undo";
-import { api, ApiError, fmtDate, fmtPct, fmtRub } from "../api";
+import { api, ApiError, fmtDate, fmtPct, fmtCur, fmtRub } from "../api";
 import { STATUS_TITLES } from "../types";
 import { toneOf } from "../colors";
 import LegalProfileBlock from "../components/LegalProfileBlock";
@@ -20,19 +20,30 @@ const NO_PARTS: PartsStats = { requests: 0, open: 0, done: 0, last_on: null, las
 type Found = { inn: string; name: string; full_name: string; kpp: string; ogrn: string; address: string; director: string; status: string; okved: string;
   registered_on: string | null; kind: string; source: string; raw: Record<string, unknown> };
 const STATUS_RU: Record<string, string> = { ACTIVE: "действующая", LIQUIDATING: "ликвидируется", LIQUIDATED: "ликвидирована", BANKRUPT: "банкротство", REORGANIZING: "реорганизация" };
-type KpVer = { version_no: number; on: string; unit_price_rub: number; total_rub: number; payment_terms: PaymentLine[]; delivery_term: string; kp_brand: string; kp_path: string; kp_no: string };
+type KpVer = { version_no: number; on: string; unit_price_rub: number; total_rub: number; currency?: string; unit_price?: number | null; total?: number | null; payment_terms: PaymentLine[]; delivery_term: string; kp_brand: string; kp_path: string; kp_no: string };
 type KpHist = { deal_id: string; deal_number: string; variant: string; factory: string; model: string; qty: number; outcome: string | null; chosen: boolean | null; manager: string; latest: KpVer; versions: KpVer[] };
 type Card = Client & { funnel: { requests: number; kp_sent: number; won: number }; deals: { id: string; number: string; status: string; outcome: string | null }[];
   last_kp?: { deal: string; variant: string; price_rub: number; status: string }[]; kp_history?: KpHist[]; kp_totals?: { kp_count: number; won: number; sum_rub: number };
   avg_margin_pct?: number | null; sum_won_rub?: number };
 
 /** Что изменилось в версии КП относительно предыдущей: цена, сумма, срок, условия оплаты, бренд подачи. */
+/** Цена в валюте КП (сделки), рубли — мелко справочно (D-095). */
+function CurPrice({ v, rub, cur }: { v?: number | null; rub: number | null | undefined; cur?: string }) {
+  const fc = !!cur && cur !== "RUB" && v != null;
+  return <>{fc ? `${fmtCur(v)} ${cur}` : fmtRub(rub)}{fc && <div className="muted" style={{ fontSize: 11 }}>≈ {fmtRub(rub)} ₽</div>}</>;
+}
+const vMoney = (v: KpVer, k: "unit" | "total") => {
+  const fc = v.currency && v.currency !== "RUB" && v[k === "unit" ? "unit_price" : "total"] != null;
+  const x = k === "unit" ? (fc ? v.unit_price! : v.unit_price_rub) : (fc ? v.total! : v.total_rub);
+  return fc ? `${fmtCur(x)} ${v.currency}` : fmtRub(x);
+};
+
 function verDiff(newer: KpVer, older?: KpVer): string[] {
   if (!older) return [];
   const out: string[] = [];
   const pct = (a: number, b: number) => (b ? `${a >= b ? "+" : ""}${(((a - b) / b) * 100).toFixed(1).replace(".", ",")} %` : "");
-  if (newer.unit_price_rub !== older.unit_price_rub) out.push(`цена ${fmtRub(older.unit_price_rub)} → ${fmtRub(newer.unit_price_rub)} (${pct(newer.unit_price_rub, older.unit_price_rub)})`);
-  else if (newer.total_rub !== older.total_rub) out.push(`сумма ${fmtRub(older.total_rub)} → ${fmtRub(newer.total_rub)}`);
+  if (newer.unit_price_rub !== older.unit_price_rub) out.push(`цена за ед. ${vMoney(older, "unit")} → ${vMoney(newer, "unit")} (${pct(newer.unit_price_rub, older.unit_price_rub)})`);
+  else if (newer.total_rub !== older.total_rub) out.push(`сумма ${vMoney(older, "total")} → ${vMoney(newer, "total")}`);
   if ((newer.delivery_term || "") !== (older.delivery_term || "")) out.push(`срок: «${older.delivery_term || "—"}» → «${newer.delivery_term || "—"}»`);
   const pay = (v: KpVer) => (v.payment_terms || []).map(payText).join("; ");
   if (pay(newer) !== pay(older)) out.push("изменены условия оплаты");
@@ -256,7 +267,7 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
                   <label className="row muted">с <input type="date" value={filter.from} onChange={(e) => setFilter({ ...filter, from: e.target.value })} /></label>
                   <label className="row muted">по <input type="date" value={filter.to} onChange={(e) => setFilter({ ...filter, to: e.target.value })} /></label>
                   {(filter.model || filter.outcome || filter.factory || filter.from || filter.to) && <button className="btn ghost" onClick={() => setFilter({ model: "", outcome: "", factory: "", from: "", to: "" })}>сбросить</button>}</div>
-                <table><thead><tr><th>Дата</th><th>Сделка</th><th>Оборудование</th><th className="num">Кол-во</th><th className="num">Цена за ед., RUB</th><th className="num">Итого, RUB</th><th>Оплата</th><th>Срок</th><th>Результат</th><th>Менеджер</th><th>Файл</th></tr></thead>
+                <table><thead><tr><th>Дата</th><th>Сделка</th><th>Оборудование</th><th className="num">Кол-во</th><th className="num">Цена за ед. без НДС</th><th className="num">Итого за кол-во</th><th>Оплата</th><th>Срок</th><th>Результат</th><th>Менеджер</th><th>Файл</th></tr></thead>
                   <tbody>{card.kp_history.filter((h) => (!filter.model || h.model.toLowerCase().includes(filter.model.toLowerCase())) && (!filter.outcome || (filter.outcome === "open" ? !h.outcome : h.outcome === filter.outcome))
                     && (!filter.factory || h.factory === filter.factory) && (!filter.from || String(h.latest.on) >= filter.from) && (!filter.to || String(h.latest.on) <= filter.to)).map((h, i) => {
                     const latestDiff = verDiff(h.versions[0] || h.latest, h.versions[1]);
@@ -265,13 +276,13 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
                       <tr style={{ cursor: h.versions.length > 1 ? "pointer" : undefined }} onClick={() => setOpen({ ...open, [key]: !open[key] })}>
                         <td>{fmtDate(h.latest.on)}</td><td><a href={`/deals/${h.deal_id}`} onClick={(e) => e.stopPropagation()}>{h.deal_number}</a>{h.variant && <div className="muted">{h.variant}{h.chosen && " ✓"}</div>}</td>
                         <td>{h.model}<div className="muted" style={{ fontSize: 11 }}>{h.latest.kp_brand === "company" ? "бренд компании" : h.factory}</div></td><td className="num">{h.qty}</td>
-                        <td className="num">{fmtRub(h.latest.unit_price_rub)}</td><td className="num">{fmtRub(h.latest.total_rub)}</td><td className="muted" style={{ fontSize: 11 }}>{(h.latest.payment_terms || []).map(payText).join("; ")}</td>
+                        <td className="num"><b><CurPrice v={h.latest.unit_price} rub={h.latest.unit_price_rub} cur={h.latest.currency} /></b></td><td className="num"><CurPrice v={h.latest.total} rub={h.latest.total_rub} cur={h.latest.currency} /></td><td className="muted" style={{ fontSize: 11 }}>{(h.latest.payment_terms || []).map(payText).join("; ")}</td>
                         <td className="muted" style={{ fontSize: 11 }}>{h.latest.delivery_term}{latestDiff.length > 0 && <div style={{ color: "var(--accent)" }}>к v{h.versions[1]?.version_no}: {latestDiff.join("; ")}</div>}</td><td><span className={"badge " + (h.outcome === "won" ? "ok" : h.outcome ? "bad" : "")}>{lbl(OUTCOME, h.outcome)}</span></td><td>{h.manager}</td>
                         <td>{h.latest.kp_path && <a href={`/api/files/${h.latest.kp_path}`} onClick={(e) => e.stopPropagation()}>v{h.latest.version_no}</a>}{h.versions.length > 1 && <span className="muted"> (+{h.versions.length - 1})</span>}</td>
                       </tr>
                       {open[key] && h.versions.slice(1).map((v, k) => { const d = verDiff(v, h.versions[k + 2]); return (
                         <tr key={key + v.version_no} style={{ background: "#f7f7f7" }}><td className="muted">{fmtDate(v.on)}</td><td className="muted">v{v.version_no}</td><td colSpan={2} className="muted" style={{ fontSize: 11 }}>{d.length > 0 ? `изменения к v${h.versions[k + 2]?.version_no}: ${d.join("; ")}` : k + 2 < h.versions.length ? "без изменений цены и условий" : "первая версия"}</td>
-                          <td className="num">{fmtRub(v.unit_price_rub)}</td><td className="num">{fmtRub(v.total_rub)}</td><td className="muted" style={{ fontSize: 11 }}>{(v.payment_terms || []).map(payText).join("; ")}</td><td className="muted" style={{ fontSize: 11 }}>{v.delivery_term}</td><td /><td /><td>{v.kp_path && <a href={`/api/files/${v.kp_path}`}>файл</a>}</td></tr>); })}
+                          <td className="num"><CurPrice v={v.unit_price} rub={v.unit_price_rub} cur={v.currency} /></td><td className="num"><CurPrice v={v.total} rub={v.total_rub} cur={v.currency} /></td><td className="muted" style={{ fontSize: 11 }}>{(v.payment_terms || []).map(payText).join("; ")}</td><td className="muted" style={{ fontSize: 11 }}>{v.delivery_term}</td><td /><td /><td>{v.kp_path && <a href={`/api/files/${v.kp_path}`}>файл</a>}</td></tr>); })}
                     </Fragment>);
                   })}</tbody></table>
               </>

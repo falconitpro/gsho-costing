@@ -22,6 +22,7 @@ from ..core.workflow import (
 from ..db import get_db
 from ..models import Approval, Attachment, ClientPriceHistory, Deal, DealVersion, Factory, FactoryPriceHistory, FeedEntry, Position, User, Variant
 from ..services import settings_service
+from ..services.catalog_service import price_in_currency
 from ..services.deal_calc import approval_flags, build_calc_input, negotiated, run_calc
 from ..services.deal_service import apply_transition, audit, complete_tasks, create_version, ensure_folders, notify, sla
 from ..services.kp_generator import KpData, KpVariant, build_kp
@@ -54,7 +55,8 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     for h in db.scalars(select(ClientPriceHistory).where(ClientPriceHistory.client_id == deal.client_id, ClientPriceHistory.deal_id != deal.id)
                         .order_by(ClientPriceHistory.on.desc()).limit(30)).all():
         client_kp_history.append({"deal": h.deal_number, "variant": h.variant_name, "version_no": h.version_no, "price_rub": h.total_rub,
-                                  "unit_price_rub": h.unit_price_rub, "status": h.outcome or "kp_sent", "models": [h.model], "on": h.on.isoformat()})
+                                  "unit_price_rub": h.unit_price_rub, "status": h.outcome or "kp_sent", "models": [h.model], "on": h.on.isoformat(),
+                                  "qty": h.qty, **price_in_currency(h)})
     warn_lower = []
     for v in deal.variants:
         models = {p.model for p in deal.positions if p.id in v.position_ids}
@@ -937,19 +939,59 @@ def kp_revisions(deal_id: str, db: Session = Depends(get_db), user: CurrentUser 
                    for v in deal.variants if v.in_kp and v.price_rub is not None)
     except Exception:
         pass
+    kp_vars = [v for v in deal.variants if v.in_kp and v.price_rub is not None]
+    cur, rates = _kp_history_currency(db, deal, kp_vars)
+
+    def money(prices: dict, total_rub: Optional[float], before_rub: Optional[float]) -> dict:
+        """D-095: цены строки истории в валюте сделки — за 1 шт. и за всё количество; рубли — справочно."""
+        lines = []
+        for v in kp_vars:
+            rub = prices.get(v.id)
+            if rub is None:
+                continue
+            n, k = variant_units(deal, v), rates.get(v.id) or 0
+            lines.append({"id": v.id, "name": v.name, "units": n, "total_rub": round(rub, 2), "unit_rub": round(rub / n, 2),
+                          "total": round(rub / k, 2) if k else None, "unit": round(rub / n / k, 2) if k else None})
+        k0 = rates.get(kp_vars[0].id) if kp_vars else None
+        units = lines[0]["units"] if len(lines) == 1 else None
+        return {"variants": lines, "units": units,
+                "price": round(total_rub / k0, 2) if total_rub is not None and k0 else None,
+                "price_before": round(before_rub / k0, 2) if before_rub is not None and k0 else None,
+                "unit_price": round(total_rub / k0 / units, 2) if total_rub is not None and k0 and units else None,
+                "unit_price_rub": round(total_rub / units, 2) if total_rub is not None and units else None}
+
     rows = [{"id": None, "no": 0, "at": ver.created_at.isoformat() if ver.created_at else None, "author": users.get(ver.created_by or "", ""),
              "description": f"КП по утверждённой версии расчёта {ver.version_no}", "price_rub": base_total, "price_before_rub": None,
              "margin_pct": round((base_total - cost) / base_total * 100, 2) if cost and base_total else None, "has_file": bool(ver.kp_path),
-             "changes": {}, "sent_at": None}]
+             "changes": {}, "sent_at": None, **money({v.id: float(v.price_rub) for v in kp_vars}, base_total, None)}]
     for r in db.scalars(select(KpRevision).where(KpRevision.deal_id == deal.id, KpRevision.version_id == ver.id).order_by(KpRevision.no)).all():
+        prices = {vid: float(x) for vid, x in (r.prices or {}).items() if x is not None} or ({kp_vars[0].id: float(r.price_rub)} if len(kp_vars) == 1 and r.price_rub is not None else {})
         rows.append({"id": r.id, "no": r.no, "at": r.created_at.isoformat() if r.created_at else None, "author": users.get(r.created_by or "", ""),
                      "description": r.description, "price_rub": r.price_rub, "price_before_rub": r.price_before_rub, "margin_pct": r.margin_pct,
-                     "has_file": bool(r.kp_path), "changes": r.changes, "sent_at": r.sent_at.isoformat() if r.sent_at else None})
+                     "has_file": bool(r.kp_path), "changes": r.changes, "sent_at": r.sent_at.isoformat() if r.sent_at else None,
+                     **money(prices, r.price_rub, r.price_before_rub)})
     variants = [{"id": v.id, "name": v.name, "price_rub": v.price_rub, "service_flag": deal.service_flag, "service_in_kp": v.service_in_kp,
                  "configuration": "; ".join(o.get("name", "") for p in deal.positions if p.id in v.position_ids for o in (p.options or [])) or "базовая"}
                 for v in deal.variants if v.in_kp and v.price_rub is not None]
-    return {"rows": rows, "variants": variants, "can_edit": user.has(Role.CD, Role.GD) and deal.status in (DealStatus.APPROVED, DealStatus.KP_SENT),
+    return {"rows": rows, "variants": variants, "currency": cur, "can_edit": user.has(Role.CD, Role.GD) and deal.status in (DealStatus.APPROVED, DealStatus.KP_SENT),
             "threshold_pct": _thr_for(db, sum(v["price_rub"] or 0 for v in variants) or None)}
+
+
+def _kp_history_currency(db: Session, deal: Deal, kp_vars: list) -> tuple[str, dict]:
+    """Валюта истории КП (D-095) — как в самом КП: валюта назначенной цены и её курс на момент назначения;
+    иначе — валюта сделки по курсу ЦБ расчёта."""
+    cur = _kp_currency(deal) or deal_currency(deal)
+    if cur == "RUB":
+        return cur, {v.id: 1.0 for v in kp_vars}
+    rates = {v.id: float(v.price_fx_rate) for v in kp_vars if (v.price_currency or "").upper() == cur and v.price_fx_rate}
+    if len(rates) < len(kp_vars):
+        try:
+            r = (build_calc_input(db, deal).fx.rates or {}).get(cur)
+        except Exception:
+            r = None
+        if r:
+            rates.update({v.id: float(r) for v in kp_vars if v.id not in rates})
+    return cur, rates
 
 
 def _thr_for(db: Session, price_rub: Optional[float]) -> float:

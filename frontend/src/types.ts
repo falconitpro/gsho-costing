@@ -122,7 +122,8 @@ export interface CalcResponse {
   production?: Record<string, import("./components/ProductionTermBlock").ProductionInfo>; can_edit_production?: boolean;
   approval_flags: Record<string, boolean>; threshold_pct: number; warnings: string[]; comments: { from: string; item: string; ref: string; comment: string }[];
   factory_price_history?: { model: string; unit_price: number; currency: string; on: string }[];
-  client_kp_history?: { deal: string; variant: string; price_rub: number; status: string; version_no?: number; on?: string }[]; status: string;
+  client_kp_history?: { deal: string; variant: string; price_rub: number; unit_price_rub?: number | null; status: string; version_no?: number; on?: string;
+    qty?: number; currency?: string; unit_price?: number | null; total?: number | null; models?: string[] }[]; status: string;
   cd_checks?: string[];
   terms?: Record<string, { position_id: string; model: string; delivery_term: DeliveryTermResult | null; events: Record<string, string> }[]>;
   payment_terms?: { client_payments: PaymentLine[]; client_payment_wishes: string; bank_guarantee: Record<string, unknown>; default_client: PaymentLine[]; default_factory: PaymentLine[];

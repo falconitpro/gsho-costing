@@ -266,6 +266,8 @@ class ClientPriceHistory(Base):
     qty: Mapped[int] = mapped_column(Integer, default=1)
     unit_price_rub: Mapped[Optional[float]] = mapped_column(Float)
     total_rub: Mapped[Optional[float]] = mapped_column(Float)
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")          # валюта КП (D-095); цены в ней = RUB / fx_rate
+    fx_rate: Mapped[Optional[float]] = mapped_column(Float)                 # курс на момент назначения цены (RUB за единицу)
     payment_terms: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     delivery_term: Mapped[str] = mapped_column(String(255), default="")
     kp_brand: Mapped[str] = mapped_column(String(16), default="factory")   # factory | company
