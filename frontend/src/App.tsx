@@ -2,6 +2,7 @@ import FilePreviewHost from "./components/FilePreview";
 import AssistantDrawer from "./components/AssistantDrawer";
 import { SupportAdmin, SupportList, SupportTicketRoute } from "./pages/SupportPage";
 import { HelpMenu, UserMenu } from "./components/HeaderMenus";
+import RoleNav from "./components/RoleNav";
 import { useEffect, useState } from "react";
 import FloatingScrollbar from "./components/FloatingScrollbar";
 import NotificationBell from "./components/NotificationBell";
@@ -123,20 +124,7 @@ export default function App() {
           <NavLink to="/" className="brand">
             <img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" />
           </NavLink>
-          {me && (
-            <nav>
-              <NavLink to="/" end>Рабочее место</NavLink>
-              <NavLink to="/deals">Сделки</NavLink>
-              <NavLink to="/tasks">Мои задачи</NavLink>
-              {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
-              {has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager") && <NavLink to="/summary">Сводка</NavLink>}
-              {perm("finance_section") && <NavLink to="/finance">Финансы</NavLink>}
-              <NavLink to="/legal">Юридический блок</NavLink>
-              <NavLink to="/catalog">Каталог</NavLink>
-              {has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head") && <NavLink to="/supply">Снабжение и склад</NavLink>}
-              <NavLink to="/settings">Настройки</NavLink>
-            </nav>
-          )}
+          {me && <RoleNav me={me} />}
           <div className="account">
             {me && has("cd", "fd", "gd") && <InfoBar />}
             {devUsers.length > 0 && (

@@ -14,6 +14,7 @@ type TaskRow = { id: string; title: string; due: string; days_left: number; over
 type DealRow = { id: string; number: string; client_name: string; site: string; equipment: string; status: string; status_title: string; price_rub: number | null; manager_name: string; action: string; tone: string; exec: { done: number; total: number; delay: number } | null; priority: string; url?: string };
 type Approval = { kind: string; title: string; sub: string; url: string; waiting_since: string | null; tone: string };
 type Att = { title: string; sub: string; url: string; tone: string };
+type Todo = { kind: string; title: string; sub: string; url: string; action: string; tone: string; due: string | null; days_left: number | null; overdue: boolean; when: string; task_id: string | null };
 type Data = {
   user: { name: string; first_name: string; role: string; role_title: string; greeting: string };
   date: { iso: string; text: string };
@@ -21,7 +22,7 @@ type Data = {
   kpis: { title: string; value: string; sub: string; tone: string; url?: string }[];
   focus: { title: string; text: string; action: string; url: string; tone: string } | null;
   today: { events: Ev[]; week: { date: string; wd: string; day: number; today: boolean; count: number; tones: string[] }[] };
-  upcoming: Ev[]; tasks: TaskRow[]; tasks_total: number; tasks_overdue: number; deals: DealRow[]; approvals: Approval[]; attention: Att[];
+  upcoming: Ev[]; todo?: Todo[]; tasks: TaskRow[]; tasks_total: number; tasks_overdue: number; deals: DealRow[]; approvals: Approval[]; attention: Att[];
   money: { curve: { week: string; label: string; in: number; out: number; net: number; cum: number | null }[]; receivable_sum: number; receivable_count: number; min_cum: number | null; min_week: string;
     balance_status?: "confirmed" | "partial" | "unknown"; url?: string } | null;
   funnel: { code: string; title: string; count: number; parts?: number }[]; team: { name: string; open: number; exec: number; overdue: number; share: number }[];
@@ -35,12 +36,12 @@ type Data = {
 const TONE_BG: Record<string, string> = { bad: "var(--bad-bg)", warn: "var(--warn-bg)", info: "var(--info-bg)", ok: "var(--ok-bg)", "": "#fafafa" };
 const TONE_FG: Record<string, string> = { bad: "var(--bad)", warn: "var(--warn)", info: "var(--info)", ok: "var(--ok)", "": "var(--muted)" };
 const TONE_DOT: Record<string, string> = { bad: "#ff3131", warn: "#f59e0b", info: "#2563eb", ok: "#15803d", "": "#a1a1aa" };
-// Раскладка по трём колонкам подбирается по оценке высоты блоков: «Сегодня» — слева сверху, «Главное сейчас» — в центре сверху,
-// остальные блоки (в порядке пользователя) ставятся в самую короткую колонку, широкие таблицы — только в центр.
-const PIN: Record<string, 0 | 1 | 2> = { today: 0, focus: 1 };
-const WIDE = new Set(["briefing", "deals", "money", "approvals"]);
+// Раскладка (D-097): две колонки — основная (широкая: «Что сделать», сделки, деньги) и боковая; остальные блоки — в более короткую.
+const PIN: Record<string, 0 | 1> = { todo: 0, focus: 0, today: 1 };
+const WIDE = new Set(["todo", "briefing", "deals", "money", "approvals"]);
 const estimate = (d: Data, b: string): number => {
   switch (b) {
+    case "todo": return 80 + 58 * Math.max(1, Math.min(12, (d.todo || []).length));
     case "focus": return d.focus ? 150 : 0;
     case "briefing": return d.briefing ? 90 + 96 * Math.max(1, d.briefing.items.length) : 0;
     case "today": return 130 + 58 * d.today.events.length + (d.today.events.length ? 0 : 30);
@@ -59,20 +60,16 @@ const estimate = (d: Data, b: string): number => {
   }
 };
 const arrange = (d: Data, visible: string[], measured: Record<string, number> = {}): string[][] => {
-  const cols: string[][] = [[], [], []];
-  const h = [0, 0, 0];
+  const cols: string[][] = [[], []];
+  const h = [0, 0];
   const size = (b: string) => (measured[b] ?? estimate(d, b)) + 14;
   const put = (b: string, c: number) => { cols[c].push(b); h[c] += size(b); };
   const rest = visible.filter((b) => !(b in PIN) && b !== "kpis" && size(b) > 14);
-  visible.filter((b) => b in PIN).forEach((b) => put(b, PIN[b]));
-  rest.filter((b) => WIDE.has(b)).forEach((b) => put(b, 1));
-  // остальные — от самого высокого к низкому в самую короткую колонку (балансировка), порядок внутри колонки — пользовательский
-  [...rest.filter((b) => !WIDE.has(b))].sort((a, b) => size(b) - size(a)).forEach((b) => {
-    let best = 0;
-    for (const c of [2, 1]) if (h[c] < h[best] - 1) best = c;
-    put(b, best);
-  });
-  const idx = (b: string) => (b in PIN ? -1 : visible.indexOf(b));   // закреплённые — всегда сверху своей колонки
+  visible.filter((b) => b in PIN && size(b) > 14).forEach((b) => put(b, PIN[b]));
+  rest.filter((b) => WIDE.has(b)).forEach((b) => put(b, 0));
+  // остальные — в боковую колонку; если она заметно выше основной — в основную (основная в 2 раза шире, поэтому её высота ×0,6)
+  rest.filter((b) => !WIDE.has(b)).forEach((b) => put(b, h[1] > h[0] * 1.4 + 200 ? 0 : 1));
+  const idx = (b: string) => (b in PIN ? -1 : visible.indexOf(b));
   return cols.map((c) => c.sort((a, b) => idx(a) - idx(b)));
 };
 const dShort = (iso: string) => { const d = new Date(iso); return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`; };
@@ -89,7 +86,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
   const visible = useMemo(() => d ? d.layout.order.filter((b) => !d.layout.hidden.includes(b)) : [], [d]);
   const [measured, setMeasured] = useState<Record<string, number>>({});
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const cols = useMemo(() => d ? arrange(d, visible, measured) : [[], [], []], [d, visible, measured]);
+  const cols = useMemo(() => d ? arrange(d, visible, measured) : [[], []], [d, visible, measured]);
   // второй проход: после отрисовки измеряем настоящие высоты блоков и раскладываем по колонкам заново
   useLayoutEffect(() => {
     if (!d || !rootRef.current) return;
@@ -102,8 +99,29 @@ export default function WorkplacePage({ me }: { me: Me }) {
   if (!d) return <div className="muted" style={{ padding: 24 }}>Загрузка рабочего места…</div>;
   const done = (t: TaskRow) => api.post(`/api/tasks/${t.id}/done`, { comment: "с рабочего места" }).then(load).catch((e) => setErr((e as Error).message));
 
+  const closeTask = (id: string, title: string) => { if (window.confirm(`Закрыть задачу «${title}»?`)) api.post(`/api/tasks/${id}/done`, { comment: "с рабочего места" }).then(load).catch((e) => setErr((e as Error).message)); };
   const block = (code: string) => {
     switch (code) {
+      case "todo": { const list = d.todo || []; const [top, ...rest] = list; const shown = rest.slice(0, 11); return (
+        <div key={code} data-block={code} className="wp-card wp-todo">
+          <div className="wp-head"><h2>Что сделать {list.length > 0 && <span className="muted">· {list.length}</span>}{list.some((x) => x.overdue) && <span className="badge bad" style={{ marginLeft: 6 }}>{list.filter((x) => x.overdue).length} просроч.</span>}</h2><Link to="/tasks" className="muted">все задачи →</Link></div>
+          {!top && <div className="muted" style={{ fontSize: 13 }}>Сейчас ничего не ждёт вашего действия.</div>}
+          {top && (
+            <div className={`wp-todo-top tone-${top.tone}`}>
+              <div style={{ minWidth: 0 }}><div className="wp-todo-when">{top.when}</div><div className="wp-todo-title">{top.title}</div><div className="muted" style={{ fontSize: 13 }}>{top.sub}</div></div>
+              <div className="row" style={{ gap: 6, flex: "0 0 auto" }}>
+                {top.task_id && <button className="btn ghost" onClick={() => closeTask(top.task_id!, top.title)}>Выполнено</button>}
+                <button className="btn" onClick={() => nav(top.url)}>{top.action}</button></div>
+            </div>)}
+          {shown.length > 0 && <ul className="wp-todo-list">{shown.map((x, i) => (
+            <li key={i}>
+              <i className={`wp-todo-dot tone-${x.tone}`} />
+              <Link to={x.url} style={{ flex: 1, minWidth: 0 }}><div className="wp-todo-t">{x.title}</div><small className="muted">{x.sub}</small></Link>
+              <span className={`wp-todo-w tone-${x.tone}`}>{x.when}</span>
+              {x.task_id ? <button className="btn ghost wp-todo-done" title="Отметить выполненной" aria-label={`Выполнено: ${x.title}`} onClick={() => closeTask(x.task_id!, x.title)}>✓</button> : <span className="wp-todo-done" />}
+            </li>))}</ul>}
+          {rest.length > shown.length && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>ещё {rest.length - shown.length} — в «Мои задачи» и в списке сделок</div>}
+        </div>); }
       case "focus": return d.focus && (
         <div key={code} data-block={code} className="wp-card wp-focus" style={{ borderColor: TONE_DOT[d.focus.tone] || "#141413" }}>
           <div className="wp-h" style={{ color: "var(--accent)" }}>Главное сейчас</div>
@@ -240,7 +258,6 @@ export default function WorkplacePage({ me }: { me: Me }) {
       <section className="wp-cols">
         <div className="wp-col">{cols[0].map(block)}</div>
         <div className="wp-col">{cols[1].map(block)}</div>
-        <div className="wp-col">{cols[2].map(block)}</div>
       </section>
     </div>
   );

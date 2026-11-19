@@ -64,3 +64,41 @@ def test_workplace_by_role_and_layout():
         # снять закрепление
         c.put("/api/workplace/role-blocks", headers=H(GD), json={"role": "manager", "required": []})
         c.put("/api/workplace/layout", headers=H(MGR), json={"order": [], "hidden": []})
+
+
+def test_workplace_todo_feed_drafts_and_default_layout():
+    """D-097: «Что сделать» — одна лента (задачи, решения, сроки, черновики без движения), по умолчанию — короткая раскладка роли."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import text
+
+    from app.db import SessionLocal
+    seed()
+    with TestClient(app) as c:
+        mgr_id = c.get("/api/auth/me", headers=H(MGR)).json()["id"]
+        cl = c.get("/api/refs/clients", headers=H(MGR)).json()[0]
+        did = c.post("/api/deals", headers=H(MGR), json={"client_id": cl["id"], "site": "черновик"}).json()["id"]
+        db = SessionLocal()
+        # раскладка до D-097 сбрасывается на новую по умолчанию
+        db.execute(text("update users set prefs = jsonb_build_object('workplace', jsonb_build_object('order', '[]'::jsonb, 'hidden', '[]'::jsonb)) where id = :u"), {"u": mgr_id})
+        old = datetime.now(timezone.utc) - timedelta(days=10)
+        db.execute(text("update deals set status = 'DRAFT', updated_at = :t where id = :d"), {"t": old, "d": did})
+        db.commit()
+        db.close()
+        m = c.get("/api/workplace", headers=H(MGR)).json()
+        lay = m["layout"]
+        assert lay["order"][:2] == ["kpis", "todo"]
+        assert {"focus", "tasks", "deadlines", "notifications", "briefing"} <= set(lay["hidden"]) and "todo" not in lay["hidden"] and "deals" not in lay["hidden"]
+        drafts = [x for x in m["todo"] if x["kind"] == "draft"]
+        assert drafts and drafts[0]["when"] == "10 дн. без движения" and "на расчёт или в архив" in drafts[0]["sub"] and drafts[0]["url"] == f"/deals/{did}"
+        # без повторов: одна строка на задачу, задачи с id можно закрыть
+        assert all(x["kind"] != "task" or x["task_id"] for x in m["todo"])
+        assert len({(x["kind"], x["title"], x["url"]) for x in m["todo"]}) == len(m["todo"])
+        # руководитель видит сводно черновики старше недели
+        cd = c.get("/api/workplace", headers=H(CD)).json()
+        assert any(a["title"].startswith("Черновиков без движения") for a in cd["attention"])
+        assert "todo" in cd["layout"]["order"] and "attention" not in cd["layout"]["hidden"]
+        # личная раскладка сохраняется с версией и больше не сбрасывается
+        r = c.put("/api/workplace/layout", headers=H(MGR), json={"order": lay["order"], "hidden": ["funnel"]}).json()
+        assert r["v"] == 2
+        assert c.get("/api/workplace", headers=H(MGR)).json()["layout"]["hidden"] == ["funnel"]
