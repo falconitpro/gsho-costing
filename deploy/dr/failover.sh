@@ -52,7 +52,7 @@ cat <<TXT
 
 ГОТОВО: резерв работает на https://$DOMAIN
   данные на:  $DR_SNAPSHOT_CREATED (снимок ${DR_SNAPSHOT:0:8}, commit ${DR_COMMIT:0:12})
-  IP сервера: $IP — у R01 A-запись ${DOMAIN%%.*} должна указывать на него (TTL 300)
+  IP сервера: $IP — статический; A-запись ${DOMAIN%%.*} у R01 указывает на него постоянно (проверка: nslookup $DOMAIN)
 Сообщение сотрудникам: «CRM временно работает на https://$DOMAIN. Данные на $DR_SNAPSHOT_CREATED UTC,
 введённое позже — повторите. Вход прежний».
 Возврат на рабочий сервер — deploy/dr/README.md §4 (failback.sh).

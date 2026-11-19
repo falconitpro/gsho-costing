@@ -24,9 +24,10 @@ git -C "$DEPLOY/.." rev-parse --short=12 HEAD > "$LIB/VERSION" 2>/dev/null || ec
 
 reload() { [ -n "${DR_LIB:-}" ] || systemctl daemon-reload; }
 if [ "$ROLE" = --standby ]; then
-  install -m 0644 "$DEPLOY/dr/gsho-dr-drill.service" "$UNITS/"
+  install -m 0750 "$DEPLOY/fetch-cert.sh" "$LIB/"
+  install -m 0644 "$DEPLOY/dr/gsho-dr-drill.service" "$DEPLOY/dr/gsho-cert.service" "$DEPLOY/dr/gsho-cert.timer" "$UNITS/"
   reload
-  [ -n "${DR_LIB:-}" ] || systemctl enable gsho-dr-drill.service >/dev/null
+  [ -n "${DR_LIB:-}" ] || systemctl enable gsho-dr-drill.service gsho-cert.timer >/dev/null
   # Таймеры копий на резерве не включаются: их включает failover.sh
   echo "резерв: скрипты в $LIB ($(cat "$LIB/VERSION")); переключение — sudo bash $LIB/failover.sh"
 else
