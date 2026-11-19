@@ -52,7 +52,8 @@ def handler(event, context):
     if inst.get("status") != "STOPPED":
         print(json.dumps({"skipped": inst.get("status")}))
         return {"statusCode": 200, "body": f"ВМ в статусе {inst.get('status')} — проверка не запускается"}
-    until = int(time.time()) + int(os.environ.get("DRILL_WINDOW_MIN", "50")) * 60
+    # Окно короткое: ВМ загружается за 1–2 минуты, а ручной запуск для переключения в это окно запустил бы проверку
+    until = int(time.time()) + int(os.environ.get("DRILL_WINDOW_MIN", "15")) * 60
     # В REST нет updateMetadata: метаданные меняются PATCH целиком — берём текущие (OS Login, серийная консоль) и добавляем метку
     meta = dict(inst.get("metadata") or {})
     meta["dr-drill-until"] = str(until)
