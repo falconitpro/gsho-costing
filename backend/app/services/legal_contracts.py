@@ -307,14 +307,16 @@ def _won_variant(deal: Deal):
 
 def deal_client_terms(deal: Deal) -> tuple[list[dict], Optional[float], str]:
     v = _won_variant(deal)
-    lines = list((v.client_payments if v else None) or deal.client_payments or DEFAULT_CLIENT_PAYMENTS)
+    from .deal_calc import actual_offer
+    ao = actual_offer(deal, v) if v is not None else {}     # D-093: цена и условия после торгов
+    lines = list((ao.get("client_payments") if v else None) or deal.client_payments or DEFAULT_CLIENT_PAYMENTS)
     amount = None
     cur = "RUB"
     if v is not None:
-        if v.price_amount is not None and v.price_currency:
-            amount, cur = float(v.price_amount), v.price_currency
-        elif v.price_rub is not None:
-            amount, cur = float(v.price_rub), "RUB"
+        if ao.get("price_amount") is not None and v.price_currency:
+            amount, cur = float(ao["price_amount"]), v.price_currency
+        elif ao.get("price_rub") is not None:
+            amount, cur = float(ao["price_rub"]), "RUB"
     return [_norm_line(l, i) for i, l in enumerate(lines)], amount, cur
 
 

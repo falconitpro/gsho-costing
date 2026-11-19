@@ -162,8 +162,10 @@ def list_deals(status: Optional[str] = None, archived: bool = False, db: Session
         row["my_tasks"] = [{"title": t.title, "due": t.due.isoformat() if t.due else None, "overdue": bool(t.due and t.due < today), "block": t.block} for t in mt]
         v = won_variant(d) if d.variants else None
         if fin and v is not None and v.price_rub is not None:
-            row["price_rub"] = v.price_rub
-            row["price_amount"] = v.price_amount
+            from ..services.deal_calc import actual_offer
+            ao = actual_offer(d, v, db)      # D-093: после торгов — актуальная цена (последняя редакция КП)
+            row["price_rub"] = ao["price_rub"]
+            row["price_amount"] = ao["price_amount"]
             row["price_currency"] = v.price_currency
         sts = stages.get(d.id) or []
         if sts:

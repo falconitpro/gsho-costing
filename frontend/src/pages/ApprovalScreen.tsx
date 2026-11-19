@@ -133,8 +133,15 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
               <div className="muted">маржа от выручки (базовый) · {indicator.text}</div>
               {base?.price_rub != null && (() => {
                 // D-085: при количестве больше одной цена фиксируется за 1 шт., итог на количество — справочно
-                const c = variant.price_currency || "RUB", amt = variant.price_amount ?? base.price_rub, k = 1 + vatPct / 100;
+                const neg = calc.negotiated?.[variant.id];
+                const c = variant.price_currency || "RUB", k = 1 + vatPct / 100;
+                const fxr = c === "RUB" ? 1 : variant.price_fx_rate || 1;
+                const amt = neg?.price_rub != null ? base.price_rub / fxr : variant.price_amount ?? base.price_rub;   // D-093: после торгов — актуальная цена
                 return <div style={{ fontSize: 13 }}>
+                  {neg?.price_rub != null && <div className="alert info" style={{ margin: "0 0 6px" }}>После торгов: расчёт по <b>актуальной цене</b> (КП ред. {neg.revision_no})
+                    {" "}— {fmtRub(neg.price_rub / fxr / units)} {c}{units > 1 ? " за 1 шт." : ""} без НДС; первая цена КП — {fmtRub((neg.first_rub ?? 0) / fxr / units)} {c}
+                    {" "}({(((neg.price_rub - (neg.first_rub ?? neg.price_rub)) / (neg.first_rub || 1)) * 100).toFixed(2).replace(".", ",")} %).{neg.client_payments ? " Условия оплаты — из торгов." : ""}</div>}
+                  {neg?.price_rub == null && neg?.client_payments && <div className="alert info" style={{ margin: "0 0 6px" }}>Условия оплаты — из торгов (шаг {neg.step_no}).</div>}
                   <div>Цена клиенту{units > 1 ? " за 1 шт." : ""} без НДС: <b>{fmtRub(amt / units)} {c}</b>{c !== "RUB" && <span className="muted"> ≈ {fmtRub(base.price_rub / units)} RUB</span>}
                     {" "}· с НДС {vatPct} %: <b>{fmtRub(amt * k / units)} {c}</b>{c !== "RUB" && <span className="muted"> ≈ {fmtRub(base.price_rub * k / units)} RUB</span>}</div>
                   {units > 1 && <div className="muted">за {units} шт. (справочно): без НДС {fmtRub(amt)} {c} · с НДС {fmtRub(amt * k)} {c}{c !== "RUB" ? ` ≈ ${fmtRub(base.price_rub)} RUB без НДС` : ""}</div>}

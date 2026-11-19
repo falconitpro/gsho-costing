@@ -100,7 +100,10 @@ def build_sale_context(db: Session, deal: Deal, ch: SaleChoice) -> dict:
     src["items"] = f"выигранное предложение «{v.name}»" if v else "позиции сделки" + (" · режим бренда компании: завод не раскрывается" if brand_company else "")
     src["params"] = "таблица технических характеристик (требование заказчика / согласованное значение)"
     # цена клиенту — из утверждённого предложения (только итог, для протокола/копии; в техспецификацию не идёт)
-    price = {"amount": v.price_amount if v and v.price_amount is not None else v.price_rub if v else None, "currency": (v.price_currency if v and v.price_currency else "RUB") if v else "RUB"}
+    from .deal_calc import actual_offer
+    ao = actual_offer(deal, v) if v else {}      # D-093: после торгов — актуальная цена
+    price = {"amount": ao.get("price_amount") if v and ao.get("price_amount") is not None else ao.get("price_rub") if v else None,
+             "currency": (v.price_currency if v and v.price_currency else "RUB") if v else "RUB"}
     first = positions[0] if positions else None
     dterm = ""
     if ver and ver.calc_result and v:
