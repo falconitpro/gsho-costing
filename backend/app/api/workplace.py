@@ -27,20 +27,31 @@ BLOCKS: dict[str, str] = {
     "kpis": "Показатели", "focus": "Главное сейчас", "today": "Сегодня и неделя", "tasks": "Задачи и поручения", "deals": "Сделки — требуют действия",
     "approvals": "Ждут моего решения", "attention": "Требует вмешательства", "money": "Денежный поток", "funnel": "Воронка квартала",
     "team": "Команда · нагрузка", "notifications": "Уведомления", "deadlines": "Ближайшие сроки", "legal": "Юридический блок", "quick": "Быстрые действия",
-    "briefing": "Ваши приоритеты",
+    "briefing": "Ваши приоритеты", "todo": "Что сделать",
 }
 ROLE_BLOCKS: dict[str, list[str]] = {
-    "manager":      ["kpis", "focus", "briefing", "today", "tasks", "deals", "funnel", "notifications", "deadlines", "quick"],
-    "cd":           ["kpis", "focus", "briefing", "approvals", "today", "tasks", "deals", "funnel", "team", "attention", "notifications", "deadlines", "quick"],
-    "gd":           ["kpis", "focus", "briefing", "approvals", "attention", "money", "today", "tasks", "team", "legal", "notifications", "deadlines", "quick"],
-    "fd":           ["kpis", "focus", "briefing", "money", "approvals", "attention", "today", "tasks", "notifications", "deadlines", "quick"],
-    "lawyer":       ["kpis", "focus", "briefing", "legal", "today", "tasks", "approvals", "notifications", "deadlines", "quick"],
-    "logistician":  ["kpis", "focus", "briefing", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
-    "service_head": ["kpis", "focus", "briefing", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
-    "purchasing":   ["kpis", "focus", "briefing", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
-    "admin":        ["kpis", "briefing", "approvals", "today", "tasks", "notifications", "quick"],
+    "manager":      ["kpis", "todo", "focus", "briefing", "today", "tasks", "deals", "funnel", "notifications", "deadlines", "quick"],
+    "cd":           ["kpis", "todo", "focus", "briefing", "approvals", "today", "tasks", "deals", "funnel", "team", "attention", "notifications", "deadlines", "quick"],
+    "gd":           ["kpis", "todo", "focus", "briefing", "approvals", "attention", "money", "today", "tasks", "team", "legal", "notifications", "deadlines", "quick"],
+    "fd":           ["kpis", "todo", "focus", "briefing", "money", "approvals", "attention", "today", "tasks", "notifications", "deadlines", "quick"],
+    "lawyer":       ["kpis", "todo", "focus", "briefing", "legal", "today", "tasks", "approvals", "notifications", "deadlines", "quick"],
+    "logistician":  ["kpis", "todo", "focus", "briefing", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
+    "service_head": ["kpis", "todo", "focus", "briefing", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
+    "purchasing":   ["kpis", "todo", "focus", "briefing", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
+    "admin":        ["kpis", "todo", "briefing", "approvals", "today", "tasks", "notifications", "quick"],
     "observer":     ["kpis", "briefing", "deals", "funnel", "notifications"],
 }
+# D-097: по умолчанию на рабочем месте — «Что сделать», показатели и 1–3 блока роли; остальные скрыты (включаются в «Главная страница — блоки»).
+# Раскладка версии 2: прежние личные раскладки (до D-097) один раз сбрасываются на новую.
+LAYOUT_VERSION = 2
+DEFAULT_SHOWN: dict[str, list[str]] = {
+    "manager": ["kpis", "todo", "deals", "funnel"], "cd": ["kpis", "todo", "deals", "attention", "team"],
+    "gd": ["kpis", "todo", "attention", "money", "team", "legal"], "fd": ["kpis", "todo", "money", "attention"],
+    "lawyer": ["kpis", "todo", "legal"], "logistician": ["kpis", "todo", "deals"], "service_head": ["kpis", "todo", "deals"],
+    "purchasing": ["kpis", "todo", "deals"], "admin": ["kpis", "todo", "approvals"], "observer": ["kpis", "deals", "funnel"],
+}
+DRAFT_STALE_DAYS = 3          # черновик без движения — напомнить менеджеру
+DRAFT_STALE_LEAD_DAYS = 7     # руководителю — сводно по черновикам старше недели
 APPROVAL_STATUS_ROLE = {DealStatus.CD_APPROVAL: Role.CD, DealStatus.FD_VISA: Role.FD, DealStatus.GD_VISA: Role.GD}
 WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
@@ -91,6 +102,51 @@ def _my_tasks(db: Session, user: CurrentUser, today: date) -> list[dict]:
                     "deal_number": d.number if d else "", "client_name": d.client.name if d and d.client else "", "block": t.block.split(":")[0],
                     "priority": "urgent" if days < 0 else "high" if days <= 1 else "normal", "as_deputy": bool(t.assignee_id and t.assignee_id in user.acting_for)})
     return out
+
+
+def _todo(user: CurrentUser, today: date, tasks: list[dict], approvals: list[dict], open_deals: list[Deal], events: list[dict]) -> list[dict]:
+    """Лента «Что сделать»: решения, задачи, сроки и черновики без движения — без повторов, по срочности.
+    Задача по сделке, которая уже ждёт решения (виза / утверждение), не дублируется; срок КП — только если по сделке нет задачи."""
+    items: list[dict] = []
+    appr_deals = {a.get("deal_id") for a in approvals if a.get("deal_id")}
+    for a in approvals:
+        waited = None
+        try:
+            waited = (today - datetime.fromisoformat(a["waiting_since"]).date()).days if a.get("waiting_since") else None
+        except ValueError:
+            pass
+        items.append({"kind": "decision", "title": a["title"], "sub": a["sub"], "url": a["url"], "action": "Рассмотреть", "tone": a.get("tone") or "warn",
+                      "due": None, "days_left": None, "overdue": False, "when": "ждёт решения" + (f" {waited} дн." if waited else ""), "task_id": None, "rank": 1})
+    task_deals = set()
+    for t in tasks:
+        task_deals.add(t["deal_id"])
+        if t["deal_id"] in appr_deals and t.get("block") in ("visa", "pricing", "gd"):
+            continue
+        dl = t["days_left"]
+        when = f"просрочено {-dl} дн." if dl < 0 else "сегодня" if dl == 0 else "завтра" if dl == 1 else f"до {t['due'][8:10]}.{t['due'][5:7]}"
+        items.append({"kind": "task", "title": t["title"], "sub": f"{t['deal_number']} {t['client_name']}".strip() + (" · замещение" if t.get("as_deputy") else ""),
+                      "url": f"/deals/{t['deal_id']}", "action": "Открыть", "tone": "bad" if dl < 0 else "warn" if dl <= 1 else "info",
+                      "due": t["due"], "days_left": dl, "overdue": dl < 0, "when": when, "task_id": t["id"], "rank": 0 if dl < 0 else 2})
+    for e in events:
+        if e["kind"] == "task" or (e["kind"] == "kp" and any(e["url"].endswith(x) for x in task_deals)):
+            continue
+        dl = (date.fromisoformat(e["on"]) - today).days
+        if dl > 7:
+            continue
+        items.append({"kind": e["kind"], "title": e["title"], "sub": e["sub"], "url": e["url"], "action": "Открыть", "tone": e["tone"] if dl > 0 else "warn",
+                      "due": e["on"], "days_left": dl, "overdue": False, "when": "сегодня" if dl == 0 else "завтра" if dl == 1 else f"{e['on'][8:10]}.{e['on'][5:7]}", "task_id": None, "rank": 2})
+    for d in open_deals:
+        if d.status != DealStatus.DRAFT or not d.updated_at or not (d.manager_id == user.id or d.manager_id in user.acting_for):
+            continue
+        age = (today - d.updated_at.date()).days
+        if age >= DRAFT_STALE_DAYS:
+            items.append({"kind": "draft", "title": f"Черновик {d.number} · {d.client.name if d.client else ''}", "sub": " · ".join(x for x in (_equipment(d), "отправьте на расчёт или в архив") if x),
+                          "url": f"/deals/{d.id}", "action": "Открыть", "tone": "warn" if age < 14 else "bad", "due": None, "days_left": None, "overdue": False,
+                          "when": f"{age} дн. без движения", "task_id": None, "rank": 3})
+    items.sort(key=lambda x: (x["rank"], x["days_left"] if x["days_left"] is not None else 99, x["title"]))
+    for x in items:
+        x.pop("rank")
+    return items
 
 
 def _action_for(d: Deal, user: CurrentUser, today: date, tasks_by_deal: dict[str, list[dict]]) -> tuple[str, str]:
@@ -236,7 +292,7 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
             sub = f"{_equipment(d)} · менеджер {names.get(d.manager_id, '')}"
             if fin and v is not None and v.price_rub:
                 sub += f" · {_fmt_money(float(v.price_rub))}" + (f" · маржа {v.margin_pct:.1f} %" if getattr(v, 'margin_pct', None) is not None else "")
-            approvals.append({"kind": "deal", "title": f"{'КП' if d.status == DealStatus.CD_APPROVAL else 'Виза'} {d.number} · {d.client.name if d.client else ''}", "sub": sub,
+            approvals.append({"kind": "deal", "deal_id": d.id, "title": f"{'КП' if d.status == DealStatus.CD_APPROVAL else 'Виза'} {d.number} · {d.client.name if d.client else ''}", "sub": sub,
                               "url": f"/deals/{d.id}?tab=pricing", "waiting_since": d.updated_at.isoformat() if d.updated_at else None, "tone": "warn"})
     if user.has(Role.LAWYER, Role.CD, Role.GD):
         want = {"lawyer_review"} if user.has(Role.LAWYER) else set()
@@ -291,6 +347,13 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
                 per[t.assignee_id] = per.get(t.assignee_id, 0) + 1
         if per:
             attention.append({"title": f"{len(all_over)} задач просрочено у {len(per)} сотрудников", "sub": ", ".join(f"{names.get(k, '?')} — {v}" for k, v in sorted(per.items(), key=lambda x: -x[1])[:4]), "url": "/tasks", "tone": "warn"})
+        stale = [d for d in open_deals if d.status == DealStatus.DRAFT and d.updated_at and (today - d.updated_at.date()).days >= DRAFT_STALE_LEAD_DAYS]
+        if stale:
+            per_m: dict[str, int] = {}
+            for d in stale:
+                per_m[d.manager_id] = per_m.get(d.manager_id, 0) + 1
+            attention.append({"title": f"Черновиков без движения больше недели: {len(stale)}", "sub": ", ".join(f"{names.get(k, '?')} — {v}" for k, v in sorted(per_m.items(), key=lambda x: -x[1])[:4]) + " · отправить на расчёт или в архив",
+                              "url": "/deals?block=work", "tone": "warn"})
         exp = [x for x in cin["expiring"]]
         if exp:
             attention.append({"title": f"Договоров истекает в 30 дней: {len(exp)}", "sub": ", ".join(f"{x['number']} ({x['cp_name']}) — {x['days']} дн." for x in exp[:3]), "url": "/legal?tab=contracts", "tone": "warn"})
@@ -352,7 +415,7 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
         board = user.has(Role.CD, Role.FD, Role.GD, Role.OBSERVER)
         kpis = [{"title": "Воронка · в работе", "value": str(len(open_deals) + len(open_parts)), "sub": (_fmt_money(in_work_sum) + " · " if fin else "") + f"ГШО {len(open_deals)} · ЗЧ {len(open_parts)}" + (f" · машина стоит: {len(urgent_parts)}" if urgent_parts else ""), "tone": "bad" if urgent_parts else "", "url": "/board" if board else "/deals?block=work"},
                 {"title": "Выиграно в квартале", "value": str(len(won_q) + len(won_q_parts)), "sub": (_fmt_money(won_sum) + " · " if fin else "") + f"ГШО {len(won_q)} · ЗЧ {len(won_q_parts)}", "tone": "ok" if won_q or won_q_parts else "", "url": "/deals?block=won"},
-                {"title": "Ждут решения", "value": str(len(approvals)), "sub": "согласований", "tone": "warn" if approvals else "ok", "url": "#approvals"},
+                {"title": "Ждут решения", "value": str(len(approvals)), "sub": "согласований", "tone": "warn" if approvals else "ok", "url": "#todo"},
                 ({"title": "Дебиторка просрочена", "value": str(money["receivable_count"]), "sub": _fmt_money(money["receivable_sum"]) if money["receivable_count"] else "платежей", "tone": "bad" if money["receivable_count"] else "ok", "url": money["url"]} if money else
                  {"title": "Дебиторка просрочена", "value": str(len(receivables)), "sub": "платежей", "tone": "bad" if receivables else "ok", "url": "/summary?kind=money"}) if lead else
                 {"title": "Просрочено задач", "value": str(len(overdue_tasks)), "sub": "", "tone": "bad" if overdue_tasks else "ok", "url": "/tasks"},
@@ -389,11 +452,17 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
                  "claims_open": sum(1 for cl in claims), "claims_signing": sum(1 for cl in claims if cl.status == "signing"),
                  "claims_answer_overdue": sum(1 for cl in claims if cl.answer_due and cl.answer_due < today and cl.status in ("sent", "received"))}
 
+    # ---------------- что сделать (D-097): одна лента вместо «Главное сейчас», задач, согласований и сроков; первая строка — главное
+    todo = _todo(user, today, tasks, approvals, open_deals, events)
+
     # ---------------- раскладка
     default_order = ROLE_BLOCKS.get(role, ROLE_BLOCKS["observer"])
     all_required = settings_service.get(db, "workplace_blocks") or {}
     required = all_required.get(role, [])
     prefs = ((u.prefs if u else None) or {}).get("workplace", {})
+    if prefs.get("v") != LAYOUT_VERSION:   # раскладка до D-097 — по умолчанию роли
+        shown = DEFAULT_SHOWN.get(role, default_order)
+        prefs = {"order": [], "hidden": [b for b in default_order if b not in shown]}
     saved = [b for b in (prefs.get("order") or []) if b in default_order]
     if saved and "briefing" in default_order and "briefing" not in saved:
         # новая сводка в сохранённой раскладке: один раз после «Главное сейчас», остальной порядок не трогаем (07 §2)
@@ -407,7 +476,7 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
             "date": {"iso": today.isoformat(), "text": f"{WEEKDAYS[today.weekday()]}, {today.day} {MONTHS[today.month - 1]}", "weekday": today.weekday()},
             "layout": {"order": order, "hidden": hidden, "required": required, "available": [{"code": b, "title": BLOCKS[b]} for b in default_order], "can_lock": user.has(Role.GD), "role_required": all_required if user.has(Role.GD) else {}, "roles": {k: ROLE_TITLES.get(Role(k), k) for k in ROLE_BLOCKS}, "role_blocks": ROLE_BLOCKS, "all_blocks": BLOCKS},
             "kpis": kpis, "focus": focus, "today": {"events": today_events, "week": week}, "upcoming": upcoming, "tasks": tasks[:10], "tasks_total": len(tasks), "tasks_overdue": len(overdue_tasks),
-            "deals": deal_rows, "approvals": approvals, "attention": attention, "money": money, "funnel": funnel, "team": team, "notifications": notifications, "legal": legal,
+            "deals": deal_rows, "approvals": approvals, "todo": todo, "attention": attention, "money": money, "funnel": funnel, "team": team, "notifications": notifications, "legal": legal,
             "fin": fin, "quick": _quick(user)}
     ctx = {"today": today, "local": local, "tasks": tasks, "approvals": approvals, "poas": poas, "cin": cin, "claims": claims, "money": money}
     return out, ctx
@@ -464,7 +533,7 @@ def save_layout(body: LayoutIn, db: Session = Depends(get_db), user: CurrentUser
     allowed = set(ROLE_BLOCKS.get(role, []))
     required = set((settings_service.get(db, "workplace_blocks") or {}).get(role, []))
     prefs = dict(u.prefs or {})
-    prefs["workplace"] = {"order": [b for b in body.order if b in allowed], "hidden": [b for b in body.hidden if b in allowed and b not in required]}
+    prefs["workplace"] = {"order": [b for b in body.order if b in allowed], "hidden": [b for b in body.hidden if b in allowed and b not in required], "v": LAYOUT_VERSION}
     u.prefs = prefs
     db.commit()
     return prefs["workplace"]
