@@ -221,14 +221,35 @@ function Decision({ dec, preview, vars, comps, gross, client }: { dec: Record<st
               <div><span className="muted">к прошлому шагу</span><b className={x.change_rub < 0 ? "ng-warn-t" : ""}>{x.change_rub ? inCur(v2, x.change_rub, true) : "—"}</b><span className="muted">{x.change_pct ? pct(x.change_pct, true) : ""}</span></div>
               <div><span className="muted">к первой цене КП</span><b>{x.from_first_pct ? pct(x.from_first_pct, true) : "—"}</b></div>
             </div>); })()}
-            <div className="ng-scale" title="шкала цены: безубыточность · порог маржи · конкурент · текущая · первая цена КП">
-              <div className="ng-scale-bar" />
-              {x.min_price_zero && <i className="ng-mark ng-m-zero" style={{ left: pos(x.min_price_zero.net_rub) }}><span>0 %</span></i>}
-              {x.min_price_threshold && <i className="ng-mark ng-m-thr" style={{ left: pos(x.min_price_threshold.net_rub) }}><span>порог {thr} %</span></i>}
-              {best && <i className="ng-mark ng-m-comp" style={{ left: pos(best) }}><span>конкурент</span></i>}
-              <i className="ng-mark ng-m-first" style={{ left: pos(x.first.net_rub) }}><span>1-я цена</span></i>
-              <i className="ng-mark ng-m-now" style={{ left: pos(x.price.net_rub) }}><span>{preview ? "новая" : "сейчас"}</span></i>
-            </div>
+            {(() => {
+              // шкала цены: отметки на полосе, подписи разведены по рядам, значения — в легенде под шкалой (без наложений)
+              const marks = [
+                x.min_price_zero && { k: "zero", t: "безубыточность", rub: x.min_price_zero.net_rub, m: x.min_price_zero },
+                x.min_price_threshold && { k: "thr", t: `порог ${thr} %`, rub: x.min_price_threshold.net_rub, m: x.min_price_threshold },
+                best && { k: "comp", t: "конкурент", rub: best, m: null },
+                { k: "first", t: "1-я цена КП", rub: x.first.net_rub, m: x.first },
+                { k: "now", t: preview ? "новая цена" : "сейчас", rub: x.price.net_rub, m: x.price },
+              ].filter(Boolean) as { k: string; t: string; rub: number; m: Money | null }[];
+              const pct = (rub: number) => Math.max(0, Math.min(100, (rub - lo) / (scale - lo) * 100));
+              const last = [-100, -100, -100, -100];
+              const placed = [...marks].sort((a, b) => pct(a.rub) - pct(b.rub)).map((mk) => {
+                const p = pct(mk.rub);
+                let row = [0, 1, 2, 3].find((r) => p - last[r] >= 16);
+                if (row === undefined) row = last.indexOf(Math.min(...last));
+                last[row] = p;
+                return { ...mk, p, row };
+              });
+              const rate = (x.price.net_rub / (x.price.net || 1)) || 1;
+              const val = (mk: { rub: number; m: Money | null }) => mk.m ? mm(mk.m, gross) : `${fmtRub(mk.rub * (gross ? x.price.gross_rub / (x.price.net_rub || 1) : 1) / rate)} ${sym(x.price.currency)}`;
+              return <>
+                <div className="ng-scale2">
+                  {placed.filter((m) => m.row < 2).map((m) => <span key={m.k + "t"} className={`ng-lbl ng-c-${m.k}`} style={{ left: `${m.p}%`, top: m.row === 0 ? 14 : 0 }}>{m.t}</span>)}
+                  <div className="ng-scale-bar2" />
+                  {placed.map((m) => <i key={m.k} className={`ng-mark2 ng-b-${m.k}`} style={{ left: `${m.p}%` }} title={`${m.t}: ${val(m)}`} />)}
+                  {placed.filter((m) => m.row >= 2).map((m) => <span key={m.k + "b"} className={`ng-lbl ng-c-${m.k}`} style={{ left: `${m.p}%`, top: m.row === 2 ? 52 : 66 }}>{m.t}</span>)}
+                </div>
+                <div className="ng-legend">{[...placed].sort((a, b) => a.p - b.p).map((m) => <span key={m.k}><i className={`ng-b-${m.k}`} />{m.t}: <b>{val(m)}</b></span>)}</div>
+              </>; })()}
             <table className="ng-mt"><tbody>
               <tr><td>Маржа: базовый / пессимистичный / оптимистичный</td><td className="num">
                 <b className={mcls(x.margin.base, thr)}>{pct(x.margin.base)}</b> / <span className={mcls(x.margin.pessimistic, 0.0001)}>{pct(x.margin.pessimistic)}</span> / {pct(x.margin.optimistic)}</td></tr>
