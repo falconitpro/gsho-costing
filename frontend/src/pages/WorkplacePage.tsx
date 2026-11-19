@@ -2,7 +2,7 @@ import DownloadRequests from "../components/DownloadRequests";
 import BriefingBlock, { type Briefing } from "../components/BriefingBlock";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ActionMenu, Crumbs, EntryGrid, useQueryParam, type Entry } from "../components/Levels";
+import { ActionMenu, Crumbs, EntryGrid, UiModeSwitch, useQueryParam, useUiMode, type Entry } from "../components/Levels";
 import { api } from "../api";
 import type { Me } from "../types";
 
@@ -97,8 +97,10 @@ export default function WorkplacePage({ me }: { me: Me }) {
   const nav = useNavigate();
   const loc = useLocation();
   const [w] = useQueryParam("w");                       // уровень: null — входы, "all" — все блоки, иначе — направление
-  const group = w && w !== "all" ? WP_GROUPS.find((g) => g.key === w) || null : null;
-  const level: "entries" | "group" | "all" = w === "all" ? "all" : group ? "group" : "entries";
+  const [uiMode] = useUiMode();
+  const classic = uiMode === "classic";                 // «прежний вид»: все включённые блоки сразу, как в основной версии
+  const group = !classic && w && w !== "all" ? WP_GROUPS.find((g) => g.key === w) || null : null;
+  const level: "entries" | "group" | "all" = classic || w === "all" ? "all" : group ? "group" : "entries";
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState("");
   const load = () => api.get<Data>("/api/workplace").then(setD).catch((e) => setErr((e as Error).message));
@@ -276,14 +278,15 @@ export default function WorkplacePage({ me }: { me: Me }) {
           const b = k.url.slice(1);
           const el = rootRef.current?.querySelector<HTMLElement>(`[data-block="${b}"]`);
           if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); el.classList.add("wp-flash"); setTimeout(() => el.classList.remove("wp-flash"), 1600); }
-          else nav(`/?w=${groupOf(b)}#${b}`);          // на уровне входов блока нет — открыть его направление
+          else if (!classic) nav(`/?w=${groupOf(b)}#${b}`);          // на уровне входов блока нет — открыть его направление
         } else nav(k.url); }}>
         <small>{k.title}</small><b style={{ color: TONE_FG[k.tone] && k.tone ? TONE_FG[k.tone] : "inherit" }}>{k.value}</b><span className="muted">{k.sub}</span></button>))}</section>);
   const quickRest = visibleAll.includes("quick") ? d.quick.slice(1) : [];
   const head = (
     <header className="wp-top">
       <div><h1>{d.user.greeting}, {d.user.first_name || d.user.name}</h1><div className="muted" style={{ fontSize: 13 }}>{d.date.text} · {d.user.role_title} · {d.today.events.length} событий сегодня{d.tasks_overdue ? ` · ${d.tasks_overdue} задач просрочено` : ""}</div></div>
-      <div className="row" style={{ gap: 8 }}>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <UiModeSwitch />
         <button className="btn ghost" onClick={() => nav("/support?new=1&from=/")} title="Обращение в поддержку внутри CRM">Сообщить о проблеме</button>
         {level === "entries" && <ActionMenu label="Быстрые действия" items={quickRest} onPick={(u) => nav(u)} />}
         {d.quick[0] && <button className="btn add" onClick={() => nav(d.quick[0].url)}>{d.quick[0].title}</button>}
@@ -302,9 +305,9 @@ export default function WorkplacePage({ me }: { me: Me }) {
   if (level !== "entries") {
     return (
       <div className="wp" ref={rootRef}>
-        <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: level === "all" ? "Все блоки" : group!.title }]} />
+        {!classic && <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: level === "all" ? "Все блоки" : group!.title }]} />}
         {head}
-        {views}
+        {!classic && views}
         {me.roles.some((r) => r.code === "gd") && level === "all" && <DownloadRequests />}
         {level === "all" && kpiRow}
         {level === "group" && visible.length === 0 && <div className="card muted">Блоки этого направления скрыты в настройках рабочего места или недоступны для роли. <Link to="/settings?s=workplace">Настроить блоки</Link></div>}

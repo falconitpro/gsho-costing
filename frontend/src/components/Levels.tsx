@@ -106,3 +106,31 @@ export function ActionMenu({ label, items, onPick }: { label: string; items: { t
       {open && <ul role="menu">{items.map((q) => <li key={q.url + q.title}><button role="menuitem" onClick={() => { setOpen(false); onPick(q.url); }}>{q.title}</button></li>)}</ul>}
     </div>);
 }
+
+// ---------- сравнение вариантов интерфейса: «новый вид» (входы-«матрёшка») и «прежний вид» (как в основной версии)
+export type UiMode = "new" | "classic";
+const UI_KEY = "gsho.uiMode";
+const UI_EVENT = "gsho:ui-mode";
+const readUiMode = (): UiMode => { try { return localStorage.getItem(UI_KEY) === "classic" ? "classic" : "new"; } catch { return "new"; } };
+
+/** Выбранный вариант интерфейса. Хранится в браузере (localStorage), действует сразу во всех открытых разделах и вкладках. */
+export function useUiMode(): [UiMode, (m: UiMode) => void] {
+  const [mode, setMode] = useState<UiMode>(readUiMode);
+  useEffect(() => {
+    const sync = () => setMode(readUiMode());
+    window.addEventListener(UI_EVENT, sync); window.addEventListener("storage", sync);
+    return () => { window.removeEventListener(UI_EVENT, sync); window.removeEventListener("storage", sync); };
+  }, []);
+  const set = (m: UiMode) => { try { localStorage.setItem(UI_KEY, m); } catch { /* приватный режим: выбор действует до обновления страницы */ } setMode(m); window.dispatchEvent(new Event(UI_EVENT)); };
+  return [mode, set];
+}
+
+/** Переключатель «Новый вид / Прежний вид» — для сравнения вариантов на одном стенде. */
+export function UiModeSwitch() {
+  const [mode, setMode] = useUiMode();
+  return (
+    <div className="seg" role="group" aria-label="Вариант интерфейса">
+      {([["new", "Новый вид"], ["classic", "Прежний вид"]] as const).map(([k, t]) => (
+        <button key={k} type="button" className={mode === k ? "on" : ""} aria-pressed={mode === k} onClick={() => setMode(k)}>{t}</button>))}
+    </div>);
+}
