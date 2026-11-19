@@ -98,6 +98,7 @@ def get_calc(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
         "sales_vat_pct": float(settings_service.get(db, "sales_vat_pct") or 22.0),
         "contract_currency": _contract_ccy(db, deal, inp),
         "deal_currency": {"code": deal_currency(deal), "chosen": deal.deal_currency, "offer": offer_currency(deal)},
+        "units": {v.id: variant_units(deal, v) for v in deal.variants},
         "status": deal.status.value, "scenario_override": deal.scenario_override, "kp_brand": deal.kp_brand, "kp_images_mode": deal.kp_images_mode,
         "payment_terms": {"client_payments": deal.client_payments, "client_payment_wishes": deal.client_payment_wishes, "bank_guarantee": deal.bank_guarantee,
                           "default_client": settings_service.get(db, "default_client_payment_scheme"),
@@ -222,6 +223,7 @@ class PriceIn(BaseModel):
     value: float
     currency: Optional[str] = None  # валюта цены клиенту; по умолчанию — валюта предложения завода (или ранее выбранная)
     vat_included: bool = False      # сумма введена с НДС (только mode=amount): в расчёт идёт сумма без НДС (D-066)
+    per_unit: bool = True           # сумма — за 1 шт. (при количестве больше одной), в расчёт идёт × количество (D-085)
     service_in_kp: Optional[bool] = None
     client_payments: Optional[list[dict]] = None
     overhead_pct_override: Optional[float] = None
@@ -255,8 +257,9 @@ def set_price(deal_id: str, body: PriceIn, db: Session = Depends(get_db), user: 
         raise HTTPException(422, f"Нет курса ЦБ для валюты {cur if not rate else in_cur} на дату расчёта")
     vat_pct = float(settings_service.get(db, "sales_vat_pct") or 22.0)
     vat_in = body.mode == "amount" and body.vat_included
+    n = variant_units(deal, v) if body.per_unit else 1
     if body.mode == "amount":
-        price = (body.value / (1 + vat_pct / 100.0) if vat_in else body.value) * in_rate
+        price = (body.value / (1 + vat_pct / 100.0) if vat_in else body.value) * in_rate * n
     elif body.mode == "markup":
         price = solve_price(inp, v.id, target_markup_pct=body.value)
     elif body.mode == "margin":
@@ -269,13 +272,14 @@ def set_price(deal_id: str, body: PriceIn, db: Session = Depends(get_db), user: 
     v.price_vat_included, v.price_vat_pct = vat_in, vat_pct
     v.price_input_amount = round(body.value, 2) if body.mode == "amount" else None
     v.price_input_currency = in_cur if body.mode == "amount" else None
+    v.price_input_units = n if body.mode == "amount" else None
     reset = price_changed_after_visa(DealState(status=deal.status, service_flag=deal.service_flag))
     if reset and before.get("price_rub") != v.price_rub:
         for a in db.scalars(select(Approval).where(Approval.deal_id == deal.id, Approval.reset_at.is_(None))).all():
             a.reset_at = datetime.now(timezone.utc)
         apply_transition(db, deal, reset, user.id)
     audit(db, user.id, deal.id, "variant", v.id, "price", {"price_rub": before.get("price_rub")}, {"price_rub": v.price_rub, "mode": body.mode, "currency": cur, "amount": v.price_amount, "rate": rate,
-                                                                                        "vat_included": vat_in, "vat_pct": vat_pct, "entered": v.price_input_amount, "entered_currency": v.price_input_currency})
+                                                                                        "vat_included": vat_in, "vat_pct": vat_pct, "entered": v.price_input_amount, "entered_currency": v.price_input_currency, "per_units": n})
     db.commit()
     inp, res = run_calc(db, deal)
     return {"variant": serialize(v), "result": res.variants[v.id], "approval_flags": approval_flags(res), "warnings": res.warnings}
@@ -323,6 +327,13 @@ def set_deal_currency(deal_id: str, body: DealCurrencyIn, db: Session = Depends(
     audit(db, user.id, deal.id, "deal", deal.id, "deal_currency", {"currency": before}, {"currency": cur, "chosen": new}, body.comment.strip() or None)
     db.commit()
     return {"deal_currency": cur, "chosen": new, "offer_currency": offer_currency(deal)}
+
+
+def variant_units(deal: Deal, v: Variant) -> int:
+    """Количество единиц техники в предложении (D-085): цена фиксируется за 1 шт., итог — × количество.
+    Одна позиция — её количество; несколько разных позиций — 1 (цена за комплект)."""
+    poss = [p for p in deal.positions if not v.position_ids or p.id in v.position_ids]
+    return max(1, int(poss[0].qty or 1)) if len(poss) == 1 else 1
 
 
 def offer_currency(deal: Deal, v: Optional[Variant] = None) -> str:
