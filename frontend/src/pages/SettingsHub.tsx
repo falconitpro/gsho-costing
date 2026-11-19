@@ -12,11 +12,25 @@ import SecurityAdminPage from "./SecurityAdminPage";
 import AccessReviewPage from "./AccessReviewPage";
 import SecurityAuditPage from "./SecurityAuditPage";
 import { WorkplaceSettings } from "./WorkplacePage";
+import { Crumbs, EntryGrid } from "../components/Levels";
 
 // «Настройки» одним разделом: ставки и нормативы, сотрудники, уровни доступа, администрирование.
 // Доступ к каждому блоку — как и раньше (уровни доступа и администрирование — ЗГД / админ / ФД); блок виден только тем, кому он доступен.
 
 type Sec = "workplace" | "security" | "rates" | "team" | "access" | "admin" | "security_admin" | "access_review" | "security_audit" | "backup";
+
+const SEC_HINT: Record<Sec, string> = {
+  workplace: "блоки главной страницы: порядок, видимость, обязательные по ролям",
+  security: "пароль, вход с кодом из приложения, активные входы",
+  rates: "ставки и нормативы, наценки между компаниями группы, правила внутригрупповых цепочек",
+  team: "сотрудники, роли, пароли для входа",
+  access: "уровни доступа по разделам и исключения",
+  admin: "сотрудники и роли, курсы валют, шаблоны, журналы действий и интеграций, точность оценок, просрочки",
+  security_admin: "безопасность учётных записей сотрудников",
+  access_review: "периодический пересмотр прав сотрудников",
+  security_audit: "журнал безопасности и предупреждения",
+  backup: "состояние резервных копий",
+};
 
 export default function SettingsHub({ me }: { me: Me }) {
   const loc = useLocation();
@@ -37,14 +51,25 @@ export default function SettingsHub({ me }: { me: Me }) {
   ];
   const visible = sections.filter(([, , ok]) => ok);
   const want = new URLSearchParams(loc.search).get("s") as Sec | null;
-  const cur: Sec = visible.some(([k]) => k === want) ? (want as Sec) : visible.find(([k]) => k !== "workplace" && k !== "security")?.[0] || "workplace";
+  // «Матрёшка»: /settings без ?s= — первый уровень, крупные категории, доступные пользователю; ?s=… — выбранная секция (как раньше)
+  if (!want || !visible.some(([k]) => k === want)) {
+    return (
+      <>
+        <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Настройки" }]} />
+        <div className="page-head"><h1>Настройки</h1>{want && <span className="badge warn">секция «{want}» недоступна — выберите другую</span>}</div>
+        <EntryGrid entries={visible.map(([k, t]) => ({ key: k, title: t, to: `/settings?s=${k}`, hint: SEC_HINT[k] }))} />
+      </>);
+  }
+  const cur: Sec = want as Sec;
+  const curTitle = visible.find(([k]) => k === cur)?.[1] || "";
   return (
     <>
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Настройки", to: "/settings" }, { label: curTitle }]} />
       <div className="row" style={{ alignItems: "baseline", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
         <h1 style={{ margin: 0 }}>Настройки</h1>
         <div className="row" style={{ gap: 2, borderBottom: "1px solid var(--line)" }}>
           {visible.map(([k, t]) => (
-            <button key={k} onClick={() => nav(`/settings?s=${k}`, { replace: true })} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
+            <button key={k} onClick={() => nav(`/settings?s=${k}`)} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
               fontWeight: cur === k ? 700 : 500, color: cur === k ? "var(--ink)" : "var(--muted)", borderBottom: cur === k ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>{t}</button>))}
         </div>
       </div>

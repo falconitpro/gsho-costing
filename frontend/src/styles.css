@@ -836,3 +836,43 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 @media (max-width: 1100px) { .dp { grid-template-columns: 1fr 1fr; position: static; } .dp-act { grid-column: 1 / -1; justify-content: flex-start; } }
 .dp-more { margin-top: 4px; } .dp-more summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .dp-fx summary { cursor: pointer; }
+/* ---------- «Матрёшка»: уровни навигации (хлебные крошки, крупные входы) — текущая палитра и карточки ---------- */
+.crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 13px; color: var(--muted); margin: 0 0 8px; }
+.crumbs a { color: var(--muted); text-decoration: none; border-bottom: 1px dotted #b5b5b5; }
+.crumbs a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.crumbs a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.crumbs .sep { color: #b5b5b5; }
+.crumbs .cur { color: var(--ink); font-weight: 600; }
+.lv-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin-bottom: 14px; }
+.lv-grid.main { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 760px) { .lv-grid.main { grid-template-columns: 1fr; } }
+.lv-entry { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.lv-entry.big { padding: 18px 20px; }
+.lv-entry.att { border-color: #f3b4b4; }
+.lv-entry-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px 8px; flex-wrap: wrap; }
+.lv-entry-title { font-size: 16px; font-weight: 700; text-decoration: none; color: var(--ink); }
+.lv-entry.big .lv-entry-title { font-size: 20px; }
+.lv-entry-title:hover, .lv-entry-title:focus-visible { color: var(--accent); }
+.lv-entry-title:focus-visible, .lv-stat:focus-visible, .lv-top:focus-visible, .lv-links a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.lv-hint { font-size: 12px; margin-top: -4px; }
+.lv-stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.lv-stat { display: flex; flex-direction: column; min-width: 90px; padding: 6px 10px; border-radius: 8px; background: #fafafa; text-decoration: none; color: inherit; }
+a.lv-stat:hover { background: var(--accent-soft); }
+.lv-stat b { font-size: 20px; line-height: 1.1; }
+.lv-entry.big .lv-stat b { font-size: 24px; }
+.lv-stat small { font-size: 11px; color: var(--muted); }
+.lv-top { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-left: 4px solid #d4d4d8; background: #fafafa; border-radius: 0 6px 6px 0; text-decoration: none; color: inherit; }
+.lv-top:hover { background: var(--accent-soft); }
+.lv-top small { font-size: 12px; }
+.lv-links { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin-top: auto; }
+.lv-links a { color: var(--muted); }
+.lv-links a:hover { color: var(--accent); }
+.lv-alert { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border: 1px solid #f3b4b4; border-left: 6px solid var(--accent); border-radius: 8px; background: #fff; margin-bottom: 14px; }
+.lv-alert .t { font-weight: 700; }
+.lv-menu { position: relative; }
+.lv-menu > ul { position: absolute; right: 0; top: calc(100% + 4px); z-index: 6; list-style: none; margin: 0; padding: 6px; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.08); min-width: 220px; }
+.lv-menu > ul button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 14px; }
+.lv-menu > ul button:hover, .lv-menu > ul button:focus-visible { background: var(--accent-soft); color: var(--accent); outline: none; }
+.lv-views { display: flex; gap: 4px 14px; flex-wrap: wrap; font-size: 13px; margin: -4px 0 12px; }
+.lv-views a { color: var(--muted); }
+.lv-views a.cur { color: var(--ink); font-weight: 700; text-decoration: none; }

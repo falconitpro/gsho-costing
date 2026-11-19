@@ -1,0 +1,108 @@
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+
+// «Матрёшка»: общие элементы уровней навигации. Уровень выражается в адресе (query-параметры), поэтому обновление
+// страницы, «Назад» браузера и прямые ссылки возвращают на тот же уровень. Бизнес-данных здесь нет — только представление.
+
+export type Crumb = { label: ReactNode; to?: string };
+
+/** Путь до текущего уровня. Все звенья, кроме последнего, — ссылки (клик возвращает на уровень выше). */
+export function Crumbs({ items }: { items: Crumb[] }) {
+  const list = items.filter((c) => c.label !== null && c.label !== undefined && c.label !== "");
+  if (list.length < 2) return null;
+  return (
+    <nav className="crumbs" aria-label="Путь">
+      {list.map((c, i) => {
+        const last = i === list.length - 1;
+        return (
+          <Fragment key={i}>
+            {i > 0 && <span className="sep" aria-hidden="true">→</span>}
+            {last || !c.to ? <span aria-current={last ? "page" : undefined} className={last ? "cur" : ""}>{c.label}</span> : <Link to={c.to}>{c.label}</Link>}
+          </Fragment>);
+      })}
+    </nav>);
+}
+
+/**
+ * Один query-параметр как состояние уровня. Переключение — новая запись в истории (кнопка «Назад» возвращает прежний
+ * уровень); остальные параметры адреса сохраняются. `replace` — для уточнений без смены уровня (фильтры, поиск).
+ */
+export function useQueryParam(key: string): [string | null, (v: string | null, opts?: { replace?: boolean; drop?: string[] }) => void] {
+  const [sp, setSp] = useSearchParams();
+  const value = sp.get(key);
+  const set = (v: string | null, opts?: { replace?: boolean; drop?: string[] }) => {
+    const n = new URLSearchParams(sp);
+    if (v == null || v === "") n.delete(key); else n.set(key, v);
+    (opts?.drop || []).forEach((k) => n.delete(k));
+    if (n.toString() === sp.toString()) return;
+    setSp(n, { replace: !!opts?.replace });
+  };
+  return [value, set];
+}
+
+export type Entry = {
+  key: string;
+  title: string;
+  /** куда ведёт заголовок блока (раздел или следующий уровень) */
+  to: string;
+  /** пояснение, что внутри (видно сразу, не во всплывающей подсказке) */
+  hint?: string;
+  /** главные счётчики блока; tone — цвет статуса из текущей палитры */
+  stats?: { value: ReactNode; label: string; tone?: "bad" | "warn" | "ok" | "info" | ""; to?: string }[];
+  /** приоритетный объект — ссылка сразу на объект */
+  top?: { label: ReactNode; sub?: ReactNode; to: string; tone?: string } | null;
+  /** маркер внимания на блоке */
+  attention?: string;
+  /** дополнительные ссылки (следующий уровень, «Все данные») */
+  links?: { label: string; to: string }[];
+  big?: boolean;
+};
+
+const TONE: Record<string, string> = { bad: "var(--bad)", warn: "var(--warn)", ok: "var(--ok)", info: "var(--info)", "": "inherit" };
+
+/** Крупные входы в подразделы: заголовок — переход в раздел, строки — сразу к объекту. */
+export function EntryGrid({ entries, className }: { entries: Entry[]; className?: string }) {
+  return (
+    <div className={`lv-grid ${className || ""}`}>
+      {entries.map((e) => (
+        <section key={e.key} className={`lv-entry ${e.big ? "big" : ""} ${e.attention ? "att" : ""}`} data-entry={e.key}>
+          <div className="lv-entry-head">
+            <Link to={e.to} className="lv-entry-title">{e.title} <span aria-hidden="true">→</span></Link>
+            {e.attention && <span className="badge bad">{e.attention}</span>}
+          </div>
+          {e.hint && <div className="muted lv-hint">{e.hint}</div>}
+          {!!e.stats?.length && (
+            <div className="lv-stats">{e.stats.map((s, i) => {
+              const body = <><b style={{ color: TONE[s.tone || ""] }}>{s.value}</b><small>{s.label}</small></>;
+              return s.to ? <Link key={i} to={s.to} className="lv-stat">{body}</Link> : <div key={i} className="lv-stat">{body}</div>;
+            })}</div>)}
+          {e.top && (
+            <Link to={e.top.to} className="lv-top" style={{ borderLeftColor: e.top.tone ? TONE[e.top.tone] : undefined }}>
+              <span>{e.top.label}</span>{e.top.sub && <small className="muted">{e.top.sub}</small>}
+            </Link>)}
+          {!!e.links?.length && <div className="lv-links">{e.links.map((l) => <Link key={l.to + l.label} to={l.to}>{l.label} →</Link>)}</div>}
+        </section>))}
+    </div>);
+}
+
+/** Выпадающее меню действий (быстрые действия второго уровня): открывается кликом и с клавиатуры, Esc и клик вне — закрывают. */
+export function ActionMenu({ label, items, onPick }: { label: string; items: { title: string; url: string }[]; onPick: (url: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement | null>(null);
+  const btn = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setOpen(false); btn.current?.focus(); } };
+    const onDown = (e: MouseEvent) => { if (root.current && !root.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    root.current?.querySelector<HTMLButtonElement>("ul button")?.focus();
+    return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("mousedown", onDown); };
+  }, [open]);
+  if (!items.length) return null;
+  return (
+    <div className="lv-menu" ref={root}>
+      <button ref={btn} className="btn ghost" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>{label} ▾</button>
+      {open && <ul role="menu">{items.map((q) => <li key={q.url + q.title}><button role="menuitem" onClick={() => { setOpen(false); onPick(q.url); }}>{q.title}</button></li>)}</ul>}
+    </div>);
+}

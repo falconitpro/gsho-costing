@@ -1,7 +1,8 @@
+import { Crumbs } from "../components/Levels";
 import { useEffect, useMemo, useState } from "react";
 import { PRIORITY_COLOR, toneOf } from "../colors";
 import { lbl, PRIORITY } from "../labels";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, STATUS_TITLES, type Deal, type Me } from "../types";
 import ColleaguesDeals from "../components/ColleaguesDeals";
@@ -153,9 +154,12 @@ export default function DealsList({ me }: { me: Me }) {
     if (canAssign) api.get<{ users: { id: string; display_name: string; roles: string[] }[] }>("/api/team").then((r) => setManagers(r.users.filter((u) => u.roles.includes("manager") && u.id !== me.id))).catch(() => setManagers([]));
   }, [canAssign, me.id]);
 
-  const urlBlock = new URLSearchParams(window.location.search).get("block") as Block | null;   // с рабочего места: ?block=won|work|archive
-  const [block, setBlockState] = useState<Block>(() => (urlBlock && ["work", "won", "lost", "archive"].includes(urlBlock) ? urlBlock : load<Block>("gsho.dealsBlock", "work")));
-  const setBlock = (b: Block) => { setBlockState(b); save("gsho.dealsBlock", b); setF({ ...f, statuses: [] }); };
+  // блок реестра — в адресе (?block=work|won|lost|archive): «Назад» возвращает прежний блок; без параметра — запомненный выбор
+  const [sp, setSp] = useSearchParams();
+  const urlBlock = sp.get("block") as Block | null;   // с рабочего места: ?block=won|work|archive
+  const [storedBlock] = useState<Block>(() => load<Block>("gsho.dealsBlock", "work"));
+  const block: Block = urlBlock && ["work", "won", "lost", "archive"].includes(urlBlock) ? urlBlock : storedBlock;
+  const setBlock = (b: Block) => { save("gsho.dealsBlock", b); setF({ ...f, statuses: [] }); const n = new URLSearchParams(sp); n.set("block", b); setSp(n); };
   const urlType = new URLSearchParams(window.location.search).get("type") as DealType | null;
   const [f, setFState] = useState<Filters>(() => ({ ...EMPTY_F, type: "gsho", ...load<Partial<Filters>>("gsho.dealsFilters", {}), ...(urlType === "gsho" || urlType === "parts" ? { type: urlType } : {}) }));
   const setF = (x: Filters) => { setFState(x); save("gsho.dealsFilters", x); };
@@ -232,6 +236,7 @@ export default function DealsList({ me }: { me: Me }) {
 
   return (
     <>
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Сделки" }]} />
       <div className="page-head">
         <h1>Сделки</h1>
         <div className="tabs" style={{ margin: 0 }}>

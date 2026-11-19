@@ -1,3 +1,4 @@
+import { Crumbs } from "../components/Levels";
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
@@ -48,8 +49,9 @@ export default function SupplyPage({ me }: { me: Me }) {
   const tab: T | undefined = visible.some(([k]) => k === asked) ? asked : visible[0]?.[0];
   return (
     <>
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Снабжение и склад", to: "/supply" }, { label: visible.find(([k]) => k === tab)?.[1] }]} />
       <div className="page-head"><h1>Снабжение и склад</h1>
-        <div className="tabs" style={{ margin: 0 }}>{visible.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => nav(`/supply?tab=${k}`, { replace: true })}>{t}</button>)}</div>
+        <div className="tabs" style={{ margin: 0 }}>{visible.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => nav(`/supply?tab=${k}`)}>{t}</button>)}</div>
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Заявки клиентов на запчасти — в <Link to="/deals?type=parts">Сделках</Link>, каталог запчастей и справочники — в <Link to="/catalog?s=parts">Каталоге</Link>, парк машин — в карточке клиента.</div>
       {tab === "po" && <PartsPurchase me={me} />}

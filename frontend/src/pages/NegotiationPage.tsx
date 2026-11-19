@@ -1,3 +1,4 @@
+import { Crumbs } from "../components/Levels";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
@@ -18,6 +19,7 @@ export default function NegotiationPage({ me }: { me: Me }) {
   if (!deal) return <div className="card muted">Загрузка…</div>;
   return (
     <div className="ngp">
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Сделки", to: "/deals" }, { label: deal.number, to: `/deals/${deal.id}` }, { label: "Расчёт и утверждение", to: `/deals/${deal.id}?tab=pricing` }, { label: "Торги" }]} />
       <div className="ngp-head">
         <Link to={`/deals/${deal.id}?tab=pricing`} className="ngp-back">← к сделке</Link>
         <div className="ngp-title">

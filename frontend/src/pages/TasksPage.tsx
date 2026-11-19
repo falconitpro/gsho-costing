@@ -1,3 +1,4 @@
+import { Crumbs } from "../components/Levels";
 import { useEffect, useState } from "react";
 import { toneOf } from "../colors";
 import { blockTitle } from "../labels";
@@ -61,6 +62,7 @@ export default function TasksPage() {
   };
   return (
     <>
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Мои задачи" }]} />
       <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <h1 style={{ margin: 0 }}>Мои задачи <span className="muted" style={{ fontSize: 16, fontWeight: 400 }}>{tasks.length}{tasks.some((t) => (t.days_left ?? 0) < 0) && <> · <span style={{ color: "var(--bad)" }}>просрочено {tasks.filter((t) => (t.days_left ?? 0) < 0).length}</span></>}</span></h1>
         <div className="row" style={{ gap: 8 }}>

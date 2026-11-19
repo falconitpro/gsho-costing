@@ -9,6 +9,7 @@ import PoaBlock from "../components/PoaBlock";
 import ContractsBlock from "../components/ContractsBlock";
 import ClaimsBlock from "../components/ClaimsBlock";
 import { CounterpartiesBlock } from "./CounterpartiesPage";
+import { Crumbs } from "../components/Levels";
 
 // Юридический блок: договоры, претензии, контрагенты (клиенты и поставщики) с закреплёнными реквизитами БЕРГ-ХАУС
 // (компании группы с юридическими и банковскими профилями — D-067), доверенности, шаблоны и правила.
@@ -36,11 +37,12 @@ export default function LegalPage({ me }: { me: Me }) {
   const ownCard = own ? <OwnCompanies own={own} cur={cur} setCur={setCur} /> : null;
   return (
     <>
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Юридический блок", to: `/legal?tab=${tabs[0][0]}` }, { label: tabs.find(([k]) => k === tab)?.[1] }]} />
       <div className="row" style={{ alignItems: "baseline", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
         <h1 style={{ margin: 0 }}>Юридический блок</h1>
         <div className="row" style={{ gap: 2, borderBottom: "1px solid var(--line)" }}>
           {tabs.map(([k, t, ready]) => (
-            <button key={k} disabled={!ready} title={ready ? "" : "появится на следующих этапах"} onClick={() => nav(`/legal?tab=${k}`, { replace: true })} style={{ border: 0, background: "transparent", cursor: ready ? "pointer" : "default", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
+            <button key={k} disabled={!ready} title={ready ? "" : "появится на следующих этапах"} onClick={() => nav(`/legal?tab=${k}`)} style={{ border: 0, background: "transparent", cursor: ready ? "pointer" : "default", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
               fontWeight: tab === k ? 700 : 500, color: !ready ? "#b9c0c9" : tab === k ? "var(--ink)" : "var(--muted)", borderBottom: tab === k ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>{t}</button>))}
         </div>
       </div>
