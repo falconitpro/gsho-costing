@@ -1,0 +1,11 @@
+[Unit]
+Description=GSHO: дубль копий в Timeweb раз в сутки, после полной копии 19:00 МСК (D-084)
+
+[Timer]
+OnCalendar=*-*-* 16:40:00 UTC
+RandomizedDelaySec=5min
+Persistent=true
+Unit=gsho-backup-mirror.service
+
+[Install]
+WantedBy=timers.target

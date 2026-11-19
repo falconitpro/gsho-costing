@@ -32,6 +32,12 @@ systemctl list-timers 'gsho-*'
 
 Сбой Яндекса рабочему серверу не мешает: если флаг прочитать нельзя, `flag-guard.sh` ничего не меняет.
 
+**Дубль копий в S3 Timeweb** (бакет `berghaus-crm-prod-copy`, холодный, приватный): раз в сутки после полной копии
+`gsho-backup-mirror.timer` копирует репозиторий restic из Яндекса через `rclone copy` — только добавляет файлы, удаления
+в источнике дубль не трогают. Это тот же репозиторий с тем же паролем restic. Включение: в панели Timeweb создать
+пользователя бакета (чтение и запись), затем на рабочем `sudo apt-get install -y rclone && sudo gsho-backup-mirror.sh --setup`
+и ввести его ключи (секрет вводится скрыто). Отчёт: `/var/lib/gsho-backup/status/mirror-last.json`.
+
 ## 2. Резервная ВМ (один раз)
 
 1. **Yandex Cloud:** ВМ Ubuntu 24.04, зона `ru-central1-d`, Intel Ice Lake 2 vCPU · 20 % · 4 ГБ, диск HDD 20 ГБ,

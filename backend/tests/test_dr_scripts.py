@@ -11,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 DR = ROOT / "deploy/dr"
-SCRIPTS = [DR / n for n in ("dr-lib.sh", "failover.sh", "failback.sh", "drill.sh", "flag-guard.sh", "install.sh")]
+SCRIPTS = [DR / n for n in ("dr-lib.sh", "failover.sh", "failback.sh", "drill.sh", "flag-guard.sh", "install.sh")] + [ROOT / "deploy/backup/gsho-backup-mirror.sh"]
 GUARD = DR / "flag-guard.sh"
 
 
@@ -92,6 +92,7 @@ def test_install_copies_scripts_outside_code_tree(tmp_path):
     assert (lib / "fetch-cert.sh").exists() and (units / "gsho-cert.timer").exists()
     subprocess.run(["bash", str(DR / "install.sh"), "--primary"], env=env, check=True, capture_output=True, text=True)
     assert (units / "gsho-dr-guard.timer").exists()
+    assert (sbin / "gsho-backup-mirror.sh").exists() and (units / "gsho-backup-mirror.timer").exists()
 
 
 def test_restore_refuses_when_scripts_run_from_code_tree(tmp_path):
@@ -115,3 +116,11 @@ def test_fetch_cert_does_not_start_stopped_stand():
     s = (ROOT / "deploy/fetch-cert.sh").read_text()
     assert "--status running --services" in s
     assert s.index("--status running --services") < s.index("up -d --force-recreate caddy")
+
+
+def test_mirror_only_adds_and_skips_locks():
+    # дубль в Timeweb не должен повторять удаления в источнике и не копирует блокировки restic
+    s = (ROOT / "deploy/backup/gsho-backup-mirror.sh").read_text()
+    assert "rclone copy" in s and "rclone sync" not in s
+    assert "--exclude 'locks/**'" in s
+    assert "read -r -s" in s   # секрет вводится скрыто
