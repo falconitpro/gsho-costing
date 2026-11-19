@@ -22,7 +22,7 @@ export default function OutcomePanel({ deal, me, onDone }: { deal: Deal; me: Me;
   const [variant, setVariant] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const ready = ["approved", "kp_sent"].includes(deal.status);
+  const ready = deal.status === "kp_sent";   // D-098: решение клиента — после отправки КП
   const closed = ["lost", "cancelled"].includes(deal.status);
   if (!canSet || !(ready || (closed && has("cd", "gd")))) return null;
 

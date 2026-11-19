@@ -21,7 +21,8 @@ type Totals = Record<string, { name: string; base: number; extras: [string, numb
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(2).replace(".", ",")} %`);
 
 /** История КП и его изменение (КД / ЗГД): скидки и надбавки, услуги, комплектация — новая редакция с файлом и описанием. */
-export default function KpRevisions({ dealId, status, onDone, readonly = false, onNegotiate }: { dealId: string; status: string; onDone: () => void; readonly?: boolean; onNegotiate?: () => void }) {
+export default function KpRevisions({ dealId, status, onDone, readonly = false, onNegotiate, collapsible = false }: { dealId: string; status: string; onDone: () => void; readonly?: boolean; onNegotiate?: () => void; collapsible?: boolean }) {
+  const [shown, setShown] = useState(!collapsible);   // D-098: в карточке сделки история КП свёрнута в одну строку
   const [rows, setRows] = useState<Row[]>([]);
   const [variants, setVariants] = useState<Variant[]>([]);
   const [canEdit, setCanEdit] = useState(false);
@@ -68,12 +69,15 @@ export default function KpRevisions({ dealId, status, onDone, readonly = false, 
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between" }}>
-        <h2 style={{ marginTop: 0 }}>История КП</h2>
+        <h2 style={{ marginTop: 0, marginBottom: collapsible && !shown ? 0 : undefined }}>История КП
+          {collapsible && (() => { const last = rows[rows.length - 1]; return last ? <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>
+            {" "}· {rows.length > 1 ? `актуальная ред. ${last.no}` : "исходное КП"}{last.unit_price != null || last.price != null ? ` · ${cur !== "RUB" ? `${fmtCur(last.unit_price ?? last.price)} ${cur}` : `${fmtRub(last.unit_price_rub ?? last.price_rub)} ₽`}${units > 1 ? " за 1 шт." : ""}` : ""}</span> : null; })()}
+          {collapsible && <button className="btn ghost" style={{ marginLeft: 10, minHeight: 28, padding: "2px 10px", fontSize: 12 }} onClick={() => setShown(!shown)}>{shown ? "свернуть" : `показать редакции (${rows.length})`}</button>}</h2>
         {!readonly && canEdit && !open && <button className="btn secondary" onClick={start}>Изменить КП: услуги, комплектация</button>}
         {readonly && onNegotiate && <button className="btn secondary" onClick={onNegotiate}>Снижение цены и условия — во вкладке «Торги» →</button>}
       </div>
       {msg && <div className="alert info">{msg}</div>}
-      <table>
+      {shown && <table>
         <thead><tr><th>№</th><th>Дата</th><th>Автор</th><th className="num">За 1 шт. без НДС, {cur}</th><th className="num">{units > 1 ? `За ${units} шт.` : "Итого"} без НДС, {cur}</th><th className="num">Изменение</th>{!readonly && <th className="num">Маржа</th>}<th>Описание изменений</th><th>Файлы</th></tr></thead>
         <tbody>{rows.map((r) => (
           <tr key={r.no} style={{ background: r.no === rows[rows.length - 1]?.no ? "#f4f4f4" : undefined }}>
@@ -96,7 +100,7 @@ export default function KpRevisions({ dealId, status, onDone, readonly = false, 
             <td>{r.has_file && <>
               <a href={r.id ? `/api/deals/${dealId}/kp/revisions/${r.id}/file?format=docx` : `/api/deals/${dealId}/kp/file?format=docx&original=1`}>Word</a> · <a href={r.id ? `/api/deals/${dealId}/kp/revisions/${r.id}/file?format=pdf` : `/api/deals/${dealId}/kp/file?format=pdf&original=1`}>PDF</a></>}</td>
           </tr>))}</tbody>
-      </table>
+      </table>}
 
       {open && (
         <div style={{ marginTop: 12, borderTop: "1px solid #eee", paddingTop: 10 }}>
