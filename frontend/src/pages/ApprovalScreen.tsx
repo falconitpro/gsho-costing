@@ -203,35 +203,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
 
         {tab === "cost" && (
           <div className="card">
-            {/* D-086: себестоимость — на 1 машину, за весь объём — справочно */}
-            {units > 1 && <div className="muted" style={{ marginBottom: 6 }}>Суммы — <b>на 1 машину</b>; последний столбец — базовый сценарий за весь объём ({units} шт.), справочно. Проценты и сроки не зависят от количества.</div>}
-            <table>
-              <thead><tr><th>№</th><th>Статья</th>{SCEN.map(([k, t]) => <th key={k} className="num">{t}{units > 1 ? ", на 1 шт." : ""}</th>)}
-                {units > 1 && <th className="num" style={{ fontWeight: 400 }}>Базовый, за {units} шт. (справочно)</th>}</tr></thead>
-              <tbody>
-                {(() => {
-                  const u = units, per = (v?: number | null) => (v == null ? v : v / u);
-                  const tot = (v?: number | null) => units > 1 ? <td className="num muted">{fmtRub(v)}</td> : null;
-                  const row = (title: React.ReactNode, get: (x: NonNullable<typeof base>) => number | null | undefined, cls = "", money = true) => (
-                    <tr className={cls}><td /><td>{title}</td>{SCEN.map(([k]) => <td key={k} className="num">{scen[k] ? (money ? fmtRub(per(get(scen[k]!))) : fmtPct(get(scen[k]!))) : ""}</td>)}
-                      {units > 1 && (money ? tot(base ? get(base) : null) : <td className="num muted">{base ? fmtPct(get(base)) : ""}</td>)}</tr>);
-                  return <>
-                    {COST_ITEMS.map(([no, key, title]) => (
-                      <tr key={key}><td>{no}</td><td>{title}</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(per(scen[k]?.items_rub[key]))}</td>)}{tot(base?.items_rub[key])}</tr>))}
-                    {row(<>Себестоимость{units > 1 ? " на 1 машину" : ""}, RUB</>, (x) => x.cost_total_rub, "total")}
-                    {row(<>в {calc.input.base_currency}</>, (x) => x.cost_total_base_ccy)}
-                    {row(<>Цена продажи без НДС{units > 1 ? " за 1 шт." : ""}</>, (x) => x.price_rub)}
-                    <tr><td /><td><b>Маржа от выручки</b></td>{SCEN.map(([k]) => <td key={k} className="num"><b>{fmtPct(scen[k]?.margin_pct)}</b></td>)}{units > 1 && <td className="num muted"><b>{fmtPct(base?.margin_pct)}</b></td>}</tr>
-                    {row("Наценка от себестоимости (справочно)", (x) => x.markup_pct, "", false)}
-                    {row("Прибыль, RUB", (x) => x.profit_rub)}
-                    {row("Прибыль до стоимости денег", (x) => x.profit_before_finance_rub)}
-                    <tr><td /><td>Кассовый разрыв, RUB / дней</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(per(scen[k]?.cash_gap.amount_rub))} / {scen[k]?.cash_gap.days}</td>)}
-                      {units > 1 && <td className="num muted">{fmtRub(base?.cash_gap.amount_rub)} / {base?.cash_gap.days}</td>}</tr>
-                    <tr><td /><td>Срок поставки от договора, дней (расчётный)</td>{SCEN.map(([k]) => <td key={k} className="num">{scen[k]?.delivery_days}</td>)}{units > 1 && <td className="num muted">{base?.delivery_days}</td>}</tr>
-                    {row("Банковская гарантия на аванс, RUB", (x) => x.guarantee_cost_rub)}
-                  </>; })()}
-              </tbody>
-            </table>
+            {base && <CostBreakdown base={base} units={units} baseCcy={calc.input.base_currency} threshold={calc.input.thresholds?.margin_threshold_pct} />}
             {calc.production && Object.keys(calc.production).length > 0 && (
               <ProductionTermBlock dealId={deal.id} production={calc.production} canEdit={!!calc.can_edit_production}
                 events={Object.fromEntries(terms.map((t) => [t.position_id, t.events]))} onSaved={() => { reload(); load(); }} />
@@ -430,5 +402,58 @@ function DealCurrencyRow({ dealId, dc, fallback, curs, canEdit, onDone }: { deal
         <button className="btn ghost" onClick={() => setEdit(false)}>×</button>
         <span style={{ fontSize: 12 }}>назначенные цены пересчитаются в новую валюту по курсу ЦБ</span></>}
       {err && <span className="badge bad">{err}</span>}
+    </div>);
+}
+
+/** Себестоимость (D-088): только базовый сценарий — на 1 машину и за всё количество; статьи по группам, доля в себестоимости,
+ *  итоговые карточки. Пессимистичный и оптимистичный — на вкладке «Денежный поток» и в аналитике. */
+const COST_GROUPS: [string, string[]][] = [
+  ["Закупка у завода", ["factory_price", "domestic_logistics", "export_formalities"]],
+  ["Доставка", ["intl_freight", "insurance", "rf_delivery"]],
+  ["Таможня и разрешения", ["customs_duty", "import_vat", "broker_util", "certification"]],
+  ["Финансы, сервис и гарантия", ["finance", "service", "warranty_reserve"]],
+  ["Накладные, доукомплектование, комиссии", ["overhead", "local_completion", "external_commission", "manager_commission", "cd_commission"]],
+];
+function CostBreakdown({ base, units, baseCcy, threshold }: { base: ScenarioResult; units: number; baseCcy: string; threshold?: number }) {
+  const [showZero, setShowZero] = useState(false);
+  const u = Math.max(1, units), many = u > 1;
+  const title = Object.fromEntries(COST_ITEMS.map(([no, k, t]) => [k, { no, t }]));
+  const total = base.cost_total_rub || 0;
+  const zeroCount = COST_ITEMS.filter(([, k]) => !base.items_rub[k]).length;
+  const m = base.margin_pct ?? null, low = m != null && threshold != null && m < threshold;
+  const card = (t: string, v: number | null | undefined, sub?: string, cls = "") => (
+    <div className={"cb-card " + cls}><span>{t}</span><b>{v == null ? "—" : `${fmtRub(v / u)} ₽`}</b>{many && v != null && <em>за {u} шт.: {fmtRub(v)} ₽</em>}{sub && <em>{sub}</em>}</div>);
+  return (
+    <div className="cb">
+      <div className="cb-cards">
+        {card(many ? "Себестоимость 1 машины" : "Себестоимость", total, `${fmtRub((base.cost_total_base_ccy || 0) / u)} ${baseCcy}${many ? " на 1 шт." : ""}`, "cb-dark")}
+        {card(many ? "Цена 1 машины без НДС" : "Цена без НДС", base.price_rub)}
+        <div className={"cb-card " + (m == null ? "" : m < 0 ? "cb-bad" : low ? "cb-warn" : "cb-ok")}><span>Маржа от выручки</span><b>{fmtPct(m)}</b>
+          <em>наценка {fmtPct(base.markup_pct)}{threshold != null ? ` · порог ${threshold} %` : ""}</em></div>
+        {card(many ? "Прибыль с 1 машины" : "Прибыль", base.profit_rub, `до стоимости денег ${fmtRub((base.profit_before_finance_rub || 0) / u)} ₽`)}
+        {card(many ? "Кассовый разрыв на 1 машину" : "Кассовый разрыв", base.cash_gap.amount_rub, `${base.cash_gap.days} дн. · поставка ${base.delivery_days} дн. от договора`)}
+      </div>
+      <div className="cb-note muted">Базовый сценарий{many ? <> · суммы <b>на 1 машину</b>, справа — за весь объём ({u} шт.)</> : ""} · пессимистичный и оптимистичный — на вкладке «Денежный поток»</div>
+      <table className="cb-table">
+        <thead><tr><th>Статья</th><th className="num">{many ? "На 1 машину, ₽" : "Сумма, ₽"}</th><th className="cb-sharecol">Доля в себестоимости</th>{many && <th className="num">За {u} шт., ₽</th>}</tr></thead>
+        <tbody>
+          {COST_GROUPS.map(([g, keys]) => {
+            const rows = keys.filter((k) => showZero || base.items_rub[k]);
+            const sum = keys.reduce((a, k) => a + (base.items_rub[k] || 0), 0);
+            if (!rows.length) return null;
+            return [
+              <tr key={g} className="cb-group"><td>{g}</td><td className="num">{fmtRub(sum / u)}</td><td>{total ? `${(sum / total * 100).toFixed(1).replace(".", ",")} %` : ""}</td>{many && <td className="num">{fmtRub(sum)}</td>}</tr>,
+              ...rows.map((k) => { const v = base.items_rub[k] || 0, sh = total ? v / total * 100 : 0; return (
+                <tr key={k} className={v ? "" : "cb-zero"}><td><span className="cb-no">{title[k]?.no}</span>{title[k]?.t || k}</td><td className="num">{fmtRub(v / u)}</td>
+                  <td><div className="cb-bar"><i style={{ width: `${Math.min(100, sh)}%` }} /><span>{sh ? `${sh.toFixed(1).replace(".", ",")} %` : ""}</span></div></td>
+                  {many && <td className="num muted">{fmtRub(v)}</td>}</tr>); }),
+            ]; })}
+          <tr className="cb-total"><td>Себестоимость{many ? " 1 машины" : ""}</td><td className="num">{fmtRub(total / u)}</td><td>100 %</td>{many && <td className="num">{fmtRub(total)}</td>}</tr>
+          <tr className="cb-sub"><td>Цена продажи без НДС</td><td className="num">{fmtRub((base.price_rub || 0) / u)}</td><td /> {many && <td className="num">{fmtRub(base.price_rub)}</td>}</tr>
+          <tr className="cb-sub"><td>Прибыль</td><td className="num">{fmtRub((base.profit_rub || 0) / u)}</td><td>{fmtPct(m)} маржи</td>{many && <td className="num">{fmtRub(base.profit_rub)}</td>}</tr>
+          {!!base.guarantee_cost_rub && <tr className="cb-sub"><td>Банковская гарантия на аванс</td><td className="num">{fmtRub(base.guarantee_cost_rub / u)}</td><td />{many && <td className="num">{fmtRub(base.guarantee_cost_rub)}</td>}</tr>}
+        </tbody>
+      </table>
+      {zeroCount > 0 && <button className="btn ghost" style={{ marginTop: 6 }} onClick={() => setShowZero(!showZero)}>{showZero ? "Скрыть нулевые статьи" : `Показать нулевые статьи (${zeroCount})`}</button>}
     </div>);
 }

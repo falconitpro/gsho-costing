@@ -524,7 +524,7 @@ def apply_execution_to_position(db: Session, deal, pos, user_id: Optional[str]) 
     for o in ex.local_options or []:
         if not o.get("name") or o["name"] in names:
             continue
-        db.add(LocalOption(deal_id=deal.id, position_id=pos.id, name=o["name"], qty=int(o.get("qty") or 1), cost=float(o.get("cost") or 0), currency=o.get("currency") or "RUB",
+        db.add(LocalOption(deal_id=deal.id, position_id=pos.id, per_unit=True, name=o["name"], qty=int(o.get("qty") or 1), cost=float(o.get("cost") or 0), currency=o.get("currency") or "RUB",
                            install_stage=o.get("install_stage") or "during_commissioning", comment="из каталога"))
         k += 1
     if k:

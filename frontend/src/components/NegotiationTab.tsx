@@ -260,22 +260,28 @@ function Decision({ dec, preview, vars, comps, gross, client }: { dec: Record<st
                 </div>
                 <div className="ng-legend">{[...placed].sort((a, b) => a.p - b.p).map((m) => <span key={m.k}><i className={`ng-b-${m.k}`} />{m.t}: <b>{val(m)}</b></span>)}</div>
               </>; })()}
-            <table className="ng-mt"><tbody>
-              <tr><td>Маржа: базовый / пессимистичный / оптимистичный</td><td className="num">
-                <b className={mcls(x.margin.base, thr)}>{pct(x.margin.base)}</b> / <span className={mcls(x.margin.pessimistic, 0.0001)}>{pct(x.margin.pessimistic)}</span> / {pct(x.margin.optimistic)}</td></tr>
-              <tr><td>Порог маржи для этой суммы</td><td className="num">{thr} %</td></tr>
-              <tr><td>Минимальная цена по порогу</td><td className="num"><b>{x.min_price_threshold ? mm(x.min_price_threshold, gross) : "—"}</b>{x.min_price_threshold && x.min_price_threshold.currency !== "RUB" && <div className="muted">≈ {fmtRub((gross ? x.min_price_threshold.gross : x.min_price_threshold.net) * (client[x.min_price_threshold.currency] || (x.min_price_threshold.net_rub / (x.min_price_threshold.net || 1))))} ₽</div>}</td></tr>
-              <tr><td>Запас снижения до порога</td><td className="num"><b className={x.room_rub != null && x.room_rub < 0 ? "ng-bad" : ""}>{x.room_rub != null ? `${fmtRub(x.room_rub * (gross ? x.price.gross_rub / (x.price.net_rub || 1) : 1) * (x.price.net || x.price.net_rub) / (x.price.net_rub || 1))} ${sym(x.price.currency)}` : "—"}</b> <span className="muted">{pct(x.room_pct)}</span></td></tr>
-              <tr><td>Безубыточная цена (маржа 0 %)</td><td className="num">{x.min_price_zero ? mm(x.min_price_zero, gross) : "—"}</td></tr>
-              {(() => { const r = (x.price.net_rub / (x.price.net || 1)) || 1, c = x.price.currency, g = gross ? x.price.gross_rub / (x.price.net_rub || 1) : 1;
-                const cc = (v: number | null | undefined) => (v == null ? "—" : `${fmtRub(v / r)} ${sym(c)}`), ref = (v: number | null | undefined) => (c === "RUB" || v == null ? "" : `≈ ${fmtRub(v)} ₽ (ЦБ)`);   // себестоимость и прибыль — по курсам расчёта
-                return <>
-                  <tr><td>Себестоимость без НДС (базовый / пессимистичный){u > 1 ? `, на ${u} шт.` : ""}</td><td className="num">{cc(x.cost_rub)} / {cc(x.cost_pess_rub)}<div className="muted">{ref(x.cost_rub)}</div></td></tr>
-                  <tr><td>Прибыль{u > 1 ? `, на ${u} шт.` : ""}</td><td className="num">{cc(x.profit_rub)}<div className="muted">{ref(x.profit_rub)}</div></td></tr>
-                  <tr><td>Кассовый разрыв · стоимость денег</td><td className="num">{cc(x.cash_gap_rub)} ({x.cash_gap_days ?? "—"} дн.) · {cc(x.finance_rub)}<div className="muted">{ref(x.cash_gap_rub)}</div></td></tr>
-                  {bu && <tr><td>К лучшему конкуренту</td><td className="num"><b>{pct((x.price.net_rub - bu) / bu * 100, true)}</b> <span className="muted">{x.price.net_rub - bu >= 0 ? "+" : "−"}{fmtRub(Math.abs(x.price.net_rub - bu) * g / r)} {sym(c)}</span></td></tr>}
-                </>; })()}
-            </tbody></table>
+            {(() => {
+              // D-088: только базовый сценарий; суммы — на 1 машину и (при количестве больше 1) за всё количество
+              const r = (x.price.net_rub / (x.price.net || 1)) || 1, c = x.price.currency, g = gross ? x.price.gross_rub / (x.price.net_rub || 1) : 1;
+              const money1 = (rubPerUnit: number | null | undefined, vat = false) => (rubPerUnit == null ? "—" : `${fmtRub(rubPerUnit * (vat ? g : 1) / r)} ${sym(c)}`);
+              const row = (t: string, perUnitRub: number | null | undefined, opts: { vat?: boolean; strong?: boolean; cls?: string; note?: string } = {}) => (
+                <tr><td>{t}</td><td className="num">{opts.strong ? <b className={opts.cls}>{money1(perUnitRub, opts.vat)}</b> : money1(perUnitRub, opts.vat)}{opts.note && <span className="muted"> {opts.note}</span>}</td>
+                  {u > 1 && <td className="num muted">{perUnitRub == null ? "—" : money1(perUnitRub * u, opts.vat)}</td>}</tr>);
+              const roomPct = x.room_pct;
+              return (
+                <table className="ng-mt"><thead><tr><th /><th className="num">{u > 1 ? "на 1 шт." : ""}</th>{u > 1 && <th className="num">за {u} шт.</th>}</tr></thead><tbody>
+                  <tr><td>Маржа (базовый сценарий)</td><td className="num"><b className={mcls(x.margin.base, thr)}>{pct(x.margin.base)}</b> <span className="muted">порог {thr} %</span></td>{u > 1 && <td />}</tr>
+                  {row(`Минимальная цена по порогу, ${gross ? "с НДС" : "без НДС"}`, x.min_price_threshold?.net_rub, { vat: true, strong: true })}
+                  {row("Запас снижения до порога", x.room_rub, { vat: true, strong: true, cls: x.room_rub != null && x.room_rub < 0 ? "ng-bad" : "", note: roomPct != null ? pct(roomPct) : "" })}
+                  {row(`Безубыточная цена, ${gross ? "с НДС" : "без НДС"}`, x.min_price_zero?.net_rub, { vat: true })}
+                  {row("Себестоимость без НДС", x0.cost_rub == null ? null : x0.cost_rub / u)}
+                  {row("Прибыль", x0.profit_rub == null ? null : x0.profit_rub / u)}
+                  {row("Кассовый разрыв", x0.cash_gap_rub == null ? null : x0.cash_gap_rub / u, { note: x0.cash_gap_days != null ? `${x0.cash_gap_days} дн.` : "" })}
+                  {row("Стоимость денег", x0.finance_rub == null ? null : x0.finance_rub / u)}
+                  {bu != null && <tr><td>К лучшему конкуренту</td><td className="num"><b>{pct((x.price.net_rub - bu) / bu * 100, true)}</b> <span className="muted">{x.price.net_rub - bu >= 0 ? "+" : "−"}{money1(Math.abs(x.price.net_rub - bu), true)}</span></td>
+                    {u > 1 && <td className="num muted">{x.price.net_rub - bu >= 0 ? "+" : "−"}{money1(Math.abs(x.price.net_rub - bu) * u, true)}</td>}</tr>}
+                </tbody></table>);
+            })()}
             {x.warnings.map((w, i) => <div key={i} className="alert warn" style={{ margin: "6px 0 0" }}>{w}</div>)}
           </div>); })}
     </div>);

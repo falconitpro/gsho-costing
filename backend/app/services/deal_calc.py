@@ -79,11 +79,17 @@ def _production_term(raw: dict | None) -> ProductionTerm | None:
     return ProductionTerm(**data)
 
 
-def _local_options(rows: list[LocalOption]) -> list[LocalOptionInput]:
-    return [LocalOptionInput(id=o.id, name=o.name, qty=o.qty or 1, cost=_num(o.cost), currency=o.currency or "RUB",
-                             supplier_lead_days=o.supplier_lead_days or 0, needs_install=bool(o.needs_install),
-                             install_stage=o.install_stage or "during_commissioning", install_days=o.install_days or 0,
-                             install_cost_rub=_num(o.install_cost_rub)) for o in rows]
+def _local_options(rows: list[LocalOption], units: int = 1) -> list[LocalOptionInput]:
+    """Доукомплектование в РФ (D-089): количество и монтаж опции — на 1 машину, в расчёт × количество позиции;
+    прежние опции (без признака) — как вводились, на всю позицию."""
+    out = []
+    for o in rows:
+        m = max(1, units) if getattr(o, "per_unit", False) else 1
+        out.append(LocalOptionInput(id=o.id, name=o.name, qty=(o.qty or 1) * m, cost=_num(o.cost), currency=o.currency or "RUB",
+                                    supplier_lead_days=o.supplier_lead_days or 0, needs_install=bool(o.needs_install),
+                                    install_stage=o.install_stage or "during_commissioning", install_days=o.install_days or 0,
+                                    install_cost_rub=_num(o.install_cost_rub) * m))
+    return out
 
 
 def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> DealCalcInput:
@@ -150,7 +156,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             options_price=_num(p.options_price), currency=p.currency, production_days=p.production_days or 90, delivery_days=p.delivery_days,
             production_term=_production_term(p.production_term), delivery_term=DeliveryTerm(**dterm),
             factory_payments=fp or default_factory or PositionInput.model_fields["factory_payments"].default_factory(),
-            factory_payments_default=not fp, local_options=_local_options(p.local_option_rows or []),
+            factory_payments_default=not fp, local_options=_local_options(p.local_option_rows or [], p.qty or 1),
             actual_events=_dates(p.actual_events),
             domestic_logistics=Money(**dl), export_formalities=Money(**ef),
             hs_code=lg.get("hs_code") or "", duty_pct=_num(lg.get("duty_pct")), vat_pct=_num(lg.get("vat_pct"), 22.0),
