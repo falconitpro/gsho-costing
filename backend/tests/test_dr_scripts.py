@@ -11,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 DR = ROOT / "deploy/dr"
-SCRIPTS = [DR / n for n in ("dr-lib.sh", "failover.sh", "failback.sh", "drill.sh", "flag-guard.sh")]
+SCRIPTS = [DR / n for n in ("dr-lib.sh", "failover.sh", "failback.sh", "drill.sh", "flag-guard.sh", "install.sh")]
 GUARD = DR / "flag-guard.sh"
 
 
@@ -73,3 +73,37 @@ def test_frequent_backup_timer_every_15_min_and_light():
     assert "Environment=BACKUP_LIGHT=1" in service and "SuccessExitStatus=75" in service
     script = (ROOT / "deploy/backup/gsho-backup.sh").read_text()
     assert '--keep-within "$KEEP_WITHIN"' in script and 'RETENTION_STATUS="skipped"' in script
+
+
+def test_units_run_scripts_from_installed_location_not_code_tree():
+    # восстановление переключает /opt/gsho-costing на commit копии — там deploy/dr может не быть (проверка 19.11)
+    for unit in ("gsho-dr-drill.service", "gsho-dr-guard.service"):
+        text = (DR / unit).read_text()
+        assert "/usr/local/lib/gsho-dr/" in text and "/opt/gsho-costing/deploy/dr/" not in text, unit
+
+
+def test_install_copies_scripts_outside_code_tree(tmp_path):
+    lib, units, sbin = tmp_path / "lib", tmp_path / "units", tmp_path / "sbin"
+    env = {**os.environ, "DR_LIB": str(lib), "DR_UNITS": str(units), "DR_SBIN": str(sbin)}
+    subprocess.run(["bash", str(DR / "install.sh"), "--standby"], env=env, check=True, capture_output=True, text=True)
+    for name in ("dr-lib.sh", "failover.sh", "failback.sh", "drill.sh", "flag-guard.sh", "docker-compose.drill.yml"):
+        assert (lib / name).exists(), name
+    assert (units / "gsho-dr-drill.service").exists() and (sbin / "gsho-backup.sh").exists()
+    subprocess.run(["bash", str(DR / "install.sh"), "--primary"], env=env, check=True, capture_output=True, text=True)
+    assert (units / "gsho-dr-guard.timer").exists()
+
+
+def test_restore_refuses_when_scripts_run_from_code_tree(tmp_path):
+    code = tmp_path / "code"
+    (code / "deploy/dr").mkdir(parents=True)
+    shutil.copy(DR / "dr-lib.sh", code / "deploy/dr/dr-lib.sh")
+    p = subprocess.run(["bash", "-c", f'GSHO_DIR={code}; . {code}/deploy/dr/dr-lib.sh; dr_restore_latest /nonexistent'],
+                       capture_output=True, text=True)
+    assert p.returncode != 0 and "install.sh" in p.stderr
+
+
+def test_restore_rebuilds_until_build_succeeded_for_commit():
+    # 19.11: первая проверка переключила код и упала до сборки; вторая решила, что сборка не нужна
+    lib = (DR / "dr-lib.sh").read_text()
+    assert 'built-commit' in lib
+    assert lib.index('dr_compose build -q backend frontend clamav') < lib.index('echo "$commit" > "$DR_WORK/built-commit"')

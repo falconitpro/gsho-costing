@@ -13,16 +13,17 @@
 Секреты (пароль restic, ключи SA, `.env` стенда) — только на серверах и в защищённой заметке владельца; в репозиторий,
 CRM и чат не попадают.
 
+**Скрипты резерва запускаются из `/usr/local/lib/gsho-dr`, а не из `/opt/gsho-costing/deploy/dr`.** Восстановление
+переключает код на commit копии; в старом commit каталога `deploy/dr` может не быть, и скрипты пропали бы посреди работы
+(найдено первой проверкой 19.11). Ставит и обновляет их `deploy/dr/install.sh`; `dr_restore_latest` отказывается
+работать, если скрипты запущены из каталога кода.
+
 ## 1. Рабочий сервер: копии каждые 15 минут и защита
 
 ```bash
-cd /opt/gsho-costing && sudo git pull
-sudo install -m 0750 deploy/backup/gsho-backup.sh /usr/local/sbin/gsho-backup.sh
-sudo install -m 0644 deploy/backup/gsho-backup-frequent.service deploy/backup/gsho-backup-frequent.timer /etc/systemd/system/
-sudo install -m 0644 deploy/dr/gsho-dr-guard.service deploy/dr/gsho-dr-guard.timer /etc/systemd/system/
-sudo nano /etc/gsho/dr-guard.env      # DR_FLAG_URL=https://storage.yandexcloud.net/<бакет флага>/failover.json
-sudo systemctl daemon-reload
-sudo systemctl enable --now gsho-backup-frequent.timer gsho-dr-guard.timer
+# после обычного деплоя (deploy/production/update.sh), когда код содержит deploy/dr/install.sh:
+echo 'DR_FLAG_URL=https://storage.yandexcloud.net/<бакет флага>/failover.json' | sudo tee /etc/gsho/dr-guard.env
+sudo bash /opt/gsho-costing/deploy/dr/install.sh --primary
 systemctl list-timers 'gsho-*'
 ```
 
@@ -45,17 +46,16 @@ systemctl list-timers 'gsho-*'
 5. **Сертификат `crm2.dobrov.pro`:** Let's Encrypt по HTTP из Яндекса не проходит — Yandex Certificate Manager с
    DNS-проверкой (постоянная CNAME `_acme-challenge.crm2` у R01), `CM_CERT_ID` в `.env`, `gsho-cert.timer`
    (`deploy/fetch-cert.sh`). Сервисному аккаунту ВМ — роль `certificate-manager.certificates.downloader`.
-6. **Скрипты:** `sudo install -m 0644 deploy/backup/gsho-backup*.service deploy/backup/gsho-backup*.timer deploy/dr/gsho-dr-drill.service /etc/systemd/system/`,
-   `sudo install -m 0750 deploy/backup/gsho-backup.sh /usr/local/sbin/`, `sudo systemctl enable gsho-dr-drill.service`.
-   Таймеры копий на резерве **не включать** — их включает `failover.sh`.
-7. Проверка: `sudo bash deploy/dr/drill.sh` → `cat /var/lib/gsho-dr/drill-last.json` (`"ok": true`). Выключить ВМ.
+6. **Скрипты:** `sudo bash /opt/gsho-costing/deploy/dr/install.sh --standby` (сразу после `setup.sh`, пока код свежий).
+   Таймеры копий на резерве не включаются — их включает `failover.sh`.
+7. Проверка: `sudo bash /usr/local/lib/gsho-dr/drill.sh` → `cat /var/lib/gsho-dr/drill-last.json` (`"ok": true`). Выключить ВМ.
 
 ## 3. Переключение (авария)
 
 1. Мониторинг прислал письмо «crm.dobrov.pro не отвечает». Проверить статус Timeweb. Решение — владельца:
    переключаемся, если рабочий недоступен дольше 30 минут и срок восстановления не известен.
 2. Консоль Yandex Cloud → резервная ВМ → «Запустить».
-3. На ВМ: `sudo bash /opt/gsho-costing/deploy/dr/failover.sh` → «да». Скрипт ставит флаг, восстанавливает последнюю
+3. На ВМ: `sudo bash /usr/local/lib/gsho-dr/failover.sh` → «да». Скрипт ставит флаг, восстанавливает последнюю
    копию, запускает стенд, включает копии резерва и печатает IP.
 4. У R01: A-запись `crm2` → этот IP (TTL 300), если её не обновил `DR_DNS_UPDATE_CMD`.
 5. Сообщение сотрудникам — текст печатает `failover.sh` (адрес, время данных).
@@ -64,10 +64,10 @@ systemctl list-timers 'gsho-*'
 
 ## 4. Возврат на рабочий сервер (в нерабочее время, простой 10–15 минут)
 
-1. Резерв: `sudo bash deploy/dr/failback.sh --stage=standby` — останавливает приложение, делает финальную копию, печатает ID.
-2. Рабочий: `sudo bash deploy/dr/failback.sh --stage=primary --snapshot=<ID>` — восстанавливает её (нужен
+1. Резерв: `sudo bash /usr/local/lib/gsho-dr/failback.sh --stage=standby` — останавливает приложение, делает финальную копию, печатает ID.
+2. Рабочий: `sudo bash /usr/local/lib/gsho-dr/failback.sh --stage=primary --snapshot=<ID>` — восстанавливает её (нужен
    `/etc/gsho/restore-failover.env`). Пока стоит флаг, `crm` по-прежнему переадресует на `crm2`.
-3. Резерв: `sudo bash deploy/dr/failback.sh --stage=finish` — снимает флаг, останавливает стенд. Выключить ВМ.
+3. Резерв: `sudo bash /usr/local/lib/gsho-dr/failback.sh --stage=finish` — снимает флаг, останавливает стенд. Выключить ВМ.
 4. Сотрудникам: «вернулись на crm.dobrov.pro».
 
 ## 5. Еженедельная проверка

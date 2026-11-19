@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Переключение на резервный сервер crm2 (D-084, deploy/dr/README.md §3). Запускать на РЕЗЕРВНОЙ ВМ в Yandex Cloud от root:
-#   sudo bash /opt/gsho-costing/deploy/dr/failover.sh          # спросит подтверждение
-#   sudo bash /opt/gsho-costing/deploy/dr/failover.sh --yes
+#   sudo bash /usr/local/lib/gsho-dr/failover.sh          # спросит подтверждение
+#   sudo bash /usr/local/lib/gsho-dr/failover.sh --yes
+# Скрипты стоят вне каталога кода (deploy/dr/install.sh): восстановление переключает код на commit копии.
 # Порядок: флаг «работаем на резерве» → последняя копия рабочего сервера → запуск стенда на crm2 → проверка
 #          → частые копии резерва в отдельное хранилище → IP для записи crm2.
 # Решение о переключении принимает владелец. Рабочий сервер, если оживёт, сам переадресует crm → crm2 (flag-guard.sh).

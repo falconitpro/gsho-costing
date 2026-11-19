@@ -53,7 +53,11 @@ dr_wait_health() {
 }
 
 dr_restore_latest() {
-  local envf="$1" snap="${2:-}" root dir manifest commit created
+  local envf="$1" snap="${2:-}" root dir manifest commit created self
+  # Восстановление переключает код на commit копии: скрипты, запущенные из каталога кода, исчезли бы посреди работы
+  self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  case "$self/" in "$GSHO_DIR"/*) dr_die "скрипты резерва запущены из $self — сначала: sudo bash $GSHO_DIR/deploy/dr/install.sh, затем запуск из /usr/local/lib/gsho-dr" ;; esac
+  case "${DR_COMPOSE_EXTRA:-}" in "$GSHO_DIR"/*) dr_die "DR_COMPOSE_EXTRA внутри каталога кода — установите скрипты (deploy/dr/install.sh)" ;; esac
   dr_load_restic_env "$envf"
   [ -n "$snap" ] || snap="$(dr_latest_snapshot)"
   [[ "$snap" =~ ^[0-9a-f]{8,64}$ ]] || dr_die "снимок не найден в $RESTIC_REPOSITORY"
@@ -70,12 +74,20 @@ dr_restore_latest() {
   created="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("created_at") or "")' "$manifest")"
   dr_log "снимок создан $created, commit ${commit:0:12}"
 
-  # код того же commit, что и копия: схема базы совпадает с дампом
-  if [[ "$commit" =~ ^[0-9a-f]{40}$ ]] && [ "$(git -C "$GSHO_DIR" rev-parse HEAD)" != "$commit" ]; then
-    dr_log "переключаю код на ${commit:0:12} и пересобираю (5–10 минут)"
-    timeout 300 git -C "$GSHO_DIR" fetch -q origin || dr_log "git fetch не удался — пробую с тем, что есть"
-    git -C "$GSHO_DIR" -c advice.detachedHead=false checkout -q "$commit" || dr_die "commit ${commit:0:12} недоступен — обновите код вручную"
-    dr_compose build -q backend frontend clamav
+  # код того же commit, что и копия: схема базы совпадает с дампом. Метка built-commit пишется только после
+  # успешной сборки: если сборка прервалась, следующий запуск соберёт заново, даже когда код уже переключён.
+  if [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+    if [ "$(git -C "$GSHO_DIR" rev-parse HEAD)" != "$commit" ]; then
+      dr_log "переключаю код на ${commit:0:12}"
+      timeout 300 git -C "$GSHO_DIR" fetch -q origin || dr_log "git fetch не удался — пробую с тем, что есть"
+      git -C "$GSHO_DIR" -c advice.detachedHead=false checkout -q "$commit" || dr_die "commit ${commit:0:12} недоступен — обновите код вручную"
+    fi
+    if [ "$(cat "$DR_WORK/built-commit" 2>/dev/null)" != "$commit" ]; then
+      dr_log "собираю образы для ${commit:0:12} (5–15 минут)"
+      rm -f "$DR_WORK/built-commit"
+      dr_compose build -q backend frontend clamav
+      echo "$commit" > "$DR_WORK/built-commit"
+    fi
   fi
 
   dr_log "заменяю базу и файлы"

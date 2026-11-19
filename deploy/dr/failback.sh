@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Возврат с резерва crm2 на рабочий сервер (D-084, deploy/dr/README.md §4). Три шага, по порядку:
-#   1. на РЕЗЕРВНОЙ ВМ:    sudo bash deploy/dr/failback.sh --stage=standby
+#   1. на РЕЗЕРВНОЙ ВМ:    sudo bash /usr/local/lib/gsho-dr/failback.sh --stage=standby
 #        останавливает приложение резерва, делает финальную копию, печатает её ID;
-#   2. на РАБОЧЕМ сервере: sudo bash deploy/dr/failback.sh --stage=primary --snapshot=<ID>
+#   2. на РАБОЧЕМ сервере: sudo bash /usr/local/lib/gsho-dr/failback.sh --stage=primary --snapshot=<ID>
 #        восстанавливает эту копию (пока стоит флаг, рабочий сервер продолжает переадресовывать на crm2);
-#   3. на РЕЗЕРВНОЙ ВМ:    sudo bash deploy/dr/failback.sh --stage=finish
+#   3. на РЕЗЕРВНОЙ ВМ:    sudo bash /usr/local/lib/gsho-dr/failback.sh --stage=finish
 #        снимает флаг (через минуту crm.dobrov.pro снова пускает в приложение), выключает стенд резерва.
 set -Eeuo pipefail
 umask 077
@@ -28,7 +28,7 @@ case "$STAGE" in
       -p Environment=HOME=/root /usr/local/sbin/gsho-backup.sh --reason=manual 2>&1)" || { echo "$out" >&2; dr_die "финальная копия не создана"; }
     dr_compose stop backend >/dev/null
     snap="$(printf '%s\n' "$out" | sed -n 's/.*готово: снимок \([0-9a-f]*\).*/\1/p' | tail -1)"
-    echo "Финальная копия резерва: $snap. Дальше на рабочем сервере: sudo bash deploy/dr/failback.sh --stage=primary --snapshot=$snap"
+    echo "Финальная копия резерва: $snap. Дальше на рабочем сервере: sudo bash /usr/local/lib/gsho-dr/failback.sh --stage=primary --snapshot=$snap"
     ;;
   primary)
     [[ "$SNAP" =~ ^[0-9a-f]{8,64}$ ]] || dr_die "укажите --snapshot=<ID> из шага standby"

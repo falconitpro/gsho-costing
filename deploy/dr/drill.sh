@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Еженедельная проверка резерва (D-084, deploy/dr/README.md §5). На РЕЗЕРВНОЙ ВМ от root; запускается сам при старте ВМ
-# по расписанию (gsho-dr-drill.service) или вручную:  sudo bash deploy/dr/drill.sh [--poweroff]
+# по расписанию (gsho-dr-drill.service) или вручную:  sudo bash /usr/local/lib/gsho-dr/drill.sh [--poweroff]
 # Восстанавливает последнюю копию рабочего сервера в режиме APP_ENV=recovery (без почты, мессенджера и фоновых заданий),
 # проверяет /api/health и число записей, пишет отчёт /var/lib/gsho-dr/drill-last.json (без данных), останавливает стенд.
 # Флаг «работаем на резерве» НЕ ставится: рабочий сервер ничего не замечает.
