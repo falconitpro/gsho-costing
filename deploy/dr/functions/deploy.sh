@@ -22,10 +22,13 @@ SA_ID="$(yc iam service-account get "$SA_NAME" --format json 2>/dev/null | id_of
   --description 'Мониторинг CRM и проверка резерва crm2 (D-084)' --format json | id_of)"
 echo "SA $SA_NAME: $SA_ID; ВМ $VM_NAME: $VM_ID"
 
-yc resource-manager folder add-access-binding "$FOLDER_ID" --role postbox.sender --subject "serviceAccount:$SA_ID" >/dev/null 2>&1 || true
+# роли: ошибки не глушим — 19.11 привязка сразу после создания SA молча не применилась
+sleep 5
+yc resource-manager folder add-access-binding "$FOLDER_ID" --role postbox.sender --subject "serviceAccount:$SA_ID" >/dev/null
 [ -z "$VM_SA_ID" ] || yc resource-manager folder add-access-binding "$FOLDER_ID" --role postbox.sender \
-  --subject "serviceAccount:$VM_SA_ID" >/dev/null 2>&1 || true
-yc compute instance add-access-binding "$VM_NAME" --role compute.editor --service-account-id "$SA_ID" >/dev/null 2>&1 || true
+  --subject "serviceAccount:$VM_SA_ID" >/dev/null
+yc compute instance add-access-binding "$VM_NAME" --role compute.editor --service-account-id "$SA_ID" >/dev/null
+yc resource-manager folder list-access-bindings "$FOLDER_ID" | grep -q "postbox.sender.*$SA_ID" || echo "ВНИМАНИЕ: нет postbox.sender у $SA_NAME"
 
 yc storage bucket get "$STATE_BUCKET" >/dev/null 2>&1 \
   || yc storage bucket create --name "$STATE_BUCKET" --default-storage-class standard --max-size 10485760 >/dev/null

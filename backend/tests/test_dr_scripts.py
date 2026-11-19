@@ -173,3 +173,10 @@ def test_dr_env_example_is_valid_shell():
                        capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     assert p.stdout.count("@") == 3
+
+
+def test_drill_function_keeps_existing_metadata():
+    # PATCH с updateMask=metadata заменяет все метаданные: enable-oslogin и serial-port-enable должны сохраниться
+    s = (DR / "functions/drill/index.py").read_text()
+    assert "?view=FULL" in s and 'dict(inst.get("metadata") or {})' in s and ":updateMetadata" not in s
+    assert "operation.api" not in s   # статус операции SA с ролью только на ВМ не читает (403) — ждём метку на самой ВМ

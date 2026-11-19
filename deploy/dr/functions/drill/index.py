@@ -9,10 +9,10 @@ from __future__ import annotations
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 
 API = "https://compute.api.cloud.yandex.net/compute/v1/instances/"
-OPS = "https://operation.api.cloud.yandex.net/operations/"
 
 
 def call(method: str, url: str, token: str, body: dict | None = None) -> dict:
@@ -23,26 +23,41 @@ def call(method: str, url: str, token: str, body: dict | None = None) -> dict:
         return json.load(resp)
 
 
-def wait_op(op: dict, token: str, limit: int = 90) -> None:
+def wait_label(vm: str, token: str, value: str, limit: int = 90) -> None:
+    """Ждёт, пока метка появится в метаданных ВМ (статус операции через Operation API сервисному аккаунту с ролью
+    только на ВМ не виден — 403, поэтому смотрим на саму ВМ)."""
     for _ in range(limit // 3):
-        if op.get("done"):
-            if "error" in op:
-                raise RuntimeError(op["error"])
+        inst = call("GET", API + vm + "?view=FULL", token)
+        if (inst.get("metadata") or {}).get("dr-drill-until") == value:
             return
         time.sleep(3)
-        op = call("GET", OPS + op["id"], token)
-    raise TimeoutError(f"операция {op.get('id')} не завершилась")
+    raise TimeoutError("метка dr-drill-until не появилась в метаданных ВМ")
+
+
+def start(vm: str, token: str) -> None:
+    for attempt in range(10):  # пока метаданные применяются, ВМ может быть «занята»
+        try:
+            call("POST", API + vm + ":start", token, {})
+            return
+        except urllib.error.HTTPError as e:
+            if e.code not in (400, 409) or attempt == 9:
+                raise
+            time.sleep(5)
 
 
 def handler(event, context):
     token = context.token["access_token"]
     vm = os.environ["STANDBY_VM_ID"]
-    inst = call("GET", API + vm, token)
+    inst = call("GET", API + vm + "?view=FULL", token)
     if inst.get("status") != "STOPPED":
         print(json.dumps({"skipped": inst.get("status")}))
         return {"statusCode": 200, "body": f"ВМ в статусе {inst.get('status')} — проверка не запускается"}
     until = int(time.time()) + int(os.environ.get("DRILL_WINDOW_MIN", "50")) * 60
-    wait_op(call("POST", API + vm + ":updateMetadata", token, {"upsert": {"dr-drill-until": str(until)}}), token)
-    call("POST", API + vm + ":start", token, {})
+    # В REST нет updateMetadata: метаданные меняются PATCH целиком — берём текущие (OS Login, серийная консоль) и добавляем метку
+    meta = dict(inst.get("metadata") or {})
+    meta["dr-drill-until"] = str(until)
+    call("PATCH", API + vm, token, {"updateMask": "metadata", "metadata": meta})
+    wait_label(vm, token, str(until))
+    start(vm, token)
     print(json.dumps({"started": vm, "until": until}))
     return {"statusCode": 200, "body": "проверка запущена"}
