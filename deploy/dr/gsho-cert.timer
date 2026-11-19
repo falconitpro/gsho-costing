@@ -1,0 +1,10 @@
+[Unit]
+Description=GSHO DR: сертификат crm2 при запуске и раз в 12 часов (D-084)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=12h
+Unit=gsho-cert.service
+
+[Install]
+WantedBy=timers.target

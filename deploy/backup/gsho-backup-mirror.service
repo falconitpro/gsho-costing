@@ -1,0 +1,10 @@
+[Unit]
+Description=GSHO: дубль копий рабочего CRM в S3 Timeweb (D-084)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/gsho-backup-mirror.sh
+TimeoutStartSec=1h
+Nice=10

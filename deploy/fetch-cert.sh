@@ -19,8 +19,14 @@ if ! cmp -s "$TMP/fullchain.pem" deploy/certs/fullchain.pem 2>/dev/null; then
   install -m 644 "$TMP/fullchain.pem" deploy/certs/fullchain.pem
   install -m 640 "$TMP/key.pem" deploy/certs/key.pem
   echo "tls /certs/fullchain.pem /certs/key.pem" > deploy/caddy-tls/domain.caddy
-  docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile \
-    || docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --force-recreate caddy
-  echo "$(date -Is) сертификат обновлён"
+  DC=(docker compose -f docker-compose.yml -f docker-compose.prod.yml)
+  if "${DC[@]}" ps --status running --services 2>/dev/null | grep -qx caddy; then
+    "${DC[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile \
+      || "${DC[@]}" up -d --force-recreate caddy
+    echo "$(date -Is) сертификат обновлён"
+  else
+    # стенд остановлен (резерв crm2 в покое): не запускаем его ради сертификата — Caddy возьмёт файлы при запуске
+    echo "$(date -Is) сертификат обновлён, Caddy не запущен — подхватит при запуске"
+  fi
 fi
 rm -rf "$TMP"

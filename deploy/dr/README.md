@@ -6,7 +6,7 @@
 | | |
 | --- | --- |
 | Потеря данных (RPO) | до 15 минут: рабочий сервер делает копию каждые 15 минут (`gsho-backup-frequent.timer`) |
-| Время запуска (RTO) | 15–30 минут: запуск ВМ + `failover.sh` |
+| Время запуска (RTO) | 15–30 минут: запуск ВМ + `failover.sh`; DNS не меняется (статический IP, A-запись `crm2` постоянная) |
 | Кто решает переключаться | владелец (или назначенный им второй человек) |
 | Защита от расхождения данных | флаг в Object Storage → рабочий сервер переадресует `crm` → `crm2` (`flag-guard.sh`) |
 
@@ -32,10 +32,17 @@ systemctl list-timers 'gsho-*'
 
 Сбой Яндекса рабочему серверу не мешает: если флаг прочитать нельзя, `flag-guard.sh` ничего не меняет.
 
+**Дубль копий в S3 Timeweb** (бакет `berghaus-crm-prod-copy`, холодный, приватный): раз в сутки после полной копии
+`gsho-backup-mirror.timer` копирует репозиторий restic из Яндекса через `rclone copy` — только добавляет файлы, удаления
+в источнике дубль не трогают. Это тот же репозиторий с тем же паролем restic. Включение: в панели Timeweb создать
+пользователя бакета (чтение и запись), затем на рабочем `sudo apt-get install -y rclone && sudo gsho-backup-mirror.sh --setup`
+и ввести его ключи (секрет вводится скрыто). Отчёт: `/var/lib/gsho-backup/status/mirror-last.json`.
+
 ## 2. Резервная ВМ (один раз)
 
 1. **Yandex Cloud:** ВМ Ubuntu 24.04, зона `ru-central1-d`, Intel Ice Lake 2 vCPU · 20 % · 4 ГБ, диск HDD 20 ГБ,
-   динамический публичный IP, группа безопасности: входящие 22, 80, 443.
+   **статический** публичный IP, входящие 22, 80, 443. Статический — потому что у R01 TTL всей зоны 6 часов и правка
+   публикуется до 40 минут: менять A-запись при аварии нельзя, она постоянная.
 2. **Стенд в рабочем режиме:** `deploy/production/setup.sh --domain crm2.dobrov.pro --email <адрес> --yandex-mss`.
    Базу не инициализировать: данные приходят из копии.
 3. **Секреты рабочего сервера** (с сервера на сервер, не через чат): `backend/.env` целиком (`SECRET_KEY`,
@@ -44,8 +51,9 @@ systemctl list-timers 'gsho-*'
 4. **Доступ к копиям** — файлы по `deploy/dr/dr.env.example`: `/etc/gsho/restore.env` (ключ `sa-crm-prod-restore`,
    только чтение), `/etc/gsho/dr.env` (ключ флага), `/etc/gsho/backup-failover.env` (отдельный бакет копий резерва).
 5. **Сертификат `crm2.dobrov.pro`:** Let's Encrypt по HTTP из Яндекса не проходит — Yandex Certificate Manager с
-   DNS-проверкой (постоянная CNAME `_acme-challenge.crm2` у R01), `CM_CERT_ID` в `.env`, `gsho-cert.timer`
-   (`deploy/fetch-cert.sh`). Сервисному аккаунту ВМ — роль `certificate-manager.certificates.downloader`.
+   DNS-проверкой (постоянная CNAME `_acme-challenge.crm2` у R01), `CM_CERT_ID` в `.env`, `gsho-cert.timer` (ставит
+   `install.sh --standby`). Роль `certificate-manager.certificates.downloader` на сертификат — сервисному аккаунту ВМ.
+   Если стенд остановлен, `fetch-cert.sh` только кладёт файлы и не запускает CRM.
 6. **Скрипты:** `sudo bash /opt/gsho-costing/deploy/dr/install.sh --standby` (сразу после `setup.sh`, пока код свежий).
    Таймеры копий на резерве не включаются — их включает `failover.sh`.
 7. Проверка: `sudo bash /usr/local/lib/gsho-dr/drill.sh` → `cat /var/lib/gsho-dr/drill-last.json` (`"ok": true`). Выключить ВМ.
@@ -57,7 +65,7 @@ systemctl list-timers 'gsho-*'
 2. Консоль Yandex Cloud → резервная ВМ → «Запустить».
 3. На ВМ: `sudo bash /usr/local/lib/gsho-dr/failover.sh` → «да». Скрипт ставит флаг, восстанавливает последнюю
    копию, запускает стенд, включает копии резерва и печатает IP.
-4. У R01: A-запись `crm2` → этот IP (TTL 300), если её не обновил `DR_DNS_UPDATE_CMD`.
+4. DNS не трогать: A-запись `crm2` постоянно указывает на статический IP ВМ. Проверка: `nslookup crm2.dobrov.pro`.
 5. Сообщение сотрудникам — текст печатает `failover.sh` (адрес, время данных).
 
 Если рабочий сервер оживёт сам, он увидит флаг и переадресует `crm` → `crm2`: устаревшая база данные не принимает.

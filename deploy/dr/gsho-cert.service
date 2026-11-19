@@ -1,0 +1,11 @@
+[Unit]
+Description=GSHO DR: сертификат crm2 из Yandex Certificate Manager (D-084)
+Documentation=file:///usr/local/lib/gsho-dr/README.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Копия fetch-cert.sh вне каталога кода (deploy/dr/install.sh): восстановление переключает код на commit копии
+ExecStart=/bin/bash /usr/local/lib/gsho-dr/fetch-cert.sh
+TimeoutStartSec=120

@@ -24,18 +24,23 @@ git -C "$DEPLOY/.." rev-parse --short=12 HEAD > "$LIB/VERSION" 2>/dev/null || ec
 
 reload() { [ -n "${DR_LIB:-}" ] || systemctl daemon-reload; }
 if [ "$ROLE" = --standby ]; then
-  install -m 0644 "$DEPLOY/dr/gsho-dr-drill.service" "$UNITS/"
+  install -m 0750 "$DEPLOY/fetch-cert.sh" "$LIB/"
+  install -m 0644 "$DEPLOY/dr/gsho-dr-drill.service" "$DEPLOY/dr/gsho-cert.service" "$DEPLOY/dr/gsho-cert.timer" "$UNITS/"
   reload
-  [ -n "${DR_LIB:-}" ] || systemctl enable gsho-dr-drill.service >/dev/null
+  [ -n "${DR_LIB:-}" ] || systemctl enable gsho-dr-drill.service gsho-cert.timer >/dev/null
   # Таймеры копий на резерве не включаются: их включает failover.sh
   echo "резерв: скрипты в $LIB ($(cat "$LIB/VERSION")); переключение — sudo bash $LIB/failover.sh"
 else
   install -m 0644 "$DEPLOY/dr/gsho-dr-guard.service" "$DEPLOY/dr/gsho-dr-guard.timer" "$UNITS/"
+  # дубль копий в S3 Timeweb: таймер включается после `gsho-backup-mirror.sh --setup` (ключи вводит владелец)
+  install -m 0750 "$DEPLOY/backup/gsho-backup-mirror.sh" "$SBIN/"
+  install -m 0644 "$DEPLOY/backup/gsho-backup-mirror.service" "$DEPLOY/backup/gsho-backup-mirror.timer" "$UNITS/"
   # первая ручная установка 19.11 (до этого скрипта): своя копия и override — больше не нужны
   rm -f "$UNITS/gsho-dr-guard.service.d/override.conf" "$SBIN/gsho-dr-guard.sh"
   rmdir "$UNITS/gsho-dr-guard.service.d" 2>/dev/null || true
   reload
   [ -n "${DR_LIB:-}" ] || systemctl enable --now gsho-backup-frequent.timer gsho-dr-guard.timer >/dev/null
   [ -f /etc/gsho/dr-guard.env ] || echo "ВНИМАНИЕ: нет /etc/gsho/dr-guard.env (DR_FLAG_URL) — проверка флага ничего не делает"
+  if [ -z "${DR_LIB:-}" ] && [ -f /etc/gsho/backup-mirror.env ]; then systemctl enable --now gsho-backup-mirror.timer >/dev/null; fi
   echo "рабочий: скрипты в $LIB ($(cat "$LIB/VERSION")); проверка флага раз в минуту включена"
 fi
