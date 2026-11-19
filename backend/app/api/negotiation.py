@@ -49,7 +49,7 @@ def overview(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     comps = ng.competitors(db, deal)
     names = ng.names(db)
     return {"ready": True, "can_edit": deal.status in OPEN, "status": deal.status.value, "vat_pct": ng._vat(db), "reasons": ng.REASONS,
-            "variants": [{"id": vid, "name": s["name"], "currency": s["currency"], "kp_rate": s["kp_rate"], "first_rub": s["first_rub"],
+            "variants": [{"id": vid, "name": s["name"], "units": s["units"], "currency": s["currency"], "kp_rate": s["kp_rate"], "first_rub": s["first_rub"],
                           "price_rub": s["price_rub"], "client_payments": s["client_payments"], "delivery_term": s["delivery_term"]} for vid, s in st.items()],
             "decision": ng.evaluate(db, deal, ver, {}, {}), "steps": [ng.step_dict(r, names) for r in rows], "competitors": comps,
             "analytics": ng.analytics(deal, ver, st, rows, comps), "fx": _rates(db, deal),
@@ -85,7 +85,7 @@ def _compute(db: Session, deal, ver, body: StepIn) -> tuple[dict, dict, dict]:
             prices[vid] = ng.new_price(st[vid], inp, vat, rates, ng.client_rates(deal))
         except ValueError as e:
             raise HTTPException(422, str(e))
-        inputs[vid] = {k: inp.get(k) for k in ("mode", "basis", "currency", "value")}
+        inputs[vid] = {**{k: inp.get(k) for k in ("mode", "basis", "currency", "value")}, "units": st[vid]["units"] if inp.get("per_unit", True) else 1}
     terms = {}
     for vid, t in (body.terms or {}).items():
         if vid not in st:

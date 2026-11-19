@@ -52,7 +52,8 @@ def current(db: Session, deal: Deal, ver: DealVersion) -> dict:
         price = float((rev.prices or {}).get(v.id, first)) if rev else first
         terms = ((last.terms or {}).get(v.id) if last else None) or {}
         pay = terms.get("client_payments") or v.client_payments or deal.client_payments or s.get("default_client_payment_scheme") or []
-        out[v.id] = {"name": v.name, "first_rub": first, "price_rub": price, "client_payments": pay, "delivery_term": terms.get("delivery_term") or "",
+        from ..api.pricing import variant_units
+        out[v.id] = {"name": v.name, "units": variant_units(deal, v), "first_rub": first, "price_rub": price, "client_payments": pay, "delivery_term": terms.get("delivery_term") or "",
                      "currency": (v.price_currency or "RUB").upper(), "kp_rate": float(v.price_fx_rate or 1.0) if (v.price_currency or "RUB").upper() != "RUB" else 1.0}
     return out
 
@@ -124,7 +125,8 @@ def new_price(st: dict, inp: dict, vat: float, rates: dict, client: Optional[dic
     rate = _input_rate(inp.get("currency") or st["currency"], st, rates, client or {})
     if rate is None:
         raise ValueError(f"Нет курса ЦБ для {inp.get('currency')}")
-    rub = val * rate / ((1 + vat / 100.0) if basis == "gross" else 1.0)
+    n = st.get("units", 1) if inp.get("per_unit", True) else 1      # D-085: сумма — за 1 шт., в цену — × количество
+    rub = val * rate * n / ((1 + vat / 100.0) if basis == "gross" else 1.0)
     price = cur_rub - rub if mode == "amount" else rub
     if price <= 0:
         raise ValueError("Цена после снижения должна быть больше нуля")

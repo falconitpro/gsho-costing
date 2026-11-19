@@ -160,3 +160,26 @@ def test_client_rates_only_for_negotiation(client):
     assert _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))["input"]["fx"]["rates"] == calc_before
     _ok(client.put(f"/api/deals/{did}/negotiation/client-rates", headers=H(CD), json={"rates": {}}))
     assert _ok(client.get(f"/api/deals/{did}/negotiation", headers=H(CD)))["client_rates"] == {}
+
+
+def test_price_per_unit_for_qty_more_than_one(client):
+    """D-085: при количестве больше 1 цена фиксируется за 1 шт., итог — × количество; в торгах снижение на сумму — тоже за 1 шт."""
+    clients = _ok(client.get("/api/refs/clients", headers=H(MGR)))
+    factories = _ok(client.get("/api/refs/factories", headers=H(MGR)))
+    did = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "Штуки"}), 201)["id"]
+    _ok(client.post(f"/api/deals/{did}/positions", headers=H(MGR), json={"factory_id": factories[0]["id"], "model": "Q-3",
+        "machine_type": "ПДМ", "qty": 3, "unit_price": 1000000, "currency": "RUB"}), 201)
+    var = _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))["offer"]
+    _ok(client.put(f"/api/deals/{did}/deal-currency", headers=H(CD), json={"currency": "RUB"}))
+    r = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "amount", "value": 2_000_000, "currency": "RUB"}))
+    assert r["variant"]["price_rub"] == 6_000_000 and r["variant"]["price_input_units"] == 3 and r["variant"]["price_input_amount"] == 2_000_000
+    r = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "amount", "value": 6_000_000, "currency": "RUB", "per_unit": False}))
+    assert r["variant"]["price_rub"] == 6_000_000
+
+
+def test_negotiation_amount_per_unit(client):
+    from app.services.negotiation import new_price
+    st = {"price_rub": 3_000_000, "currency": "RUB", "kp_rate": 1.0, "units": 3}
+    assert new_price(st, {"mode": "amount", "basis": "net", "currency": "RUB", "value": 100_000}, 22, {}) == 2_700_000
+    assert new_price(st, {"mode": "target", "basis": "net", "currency": "RUB", "value": 900_000}, 22, {}) == 2_700_000
+    assert new_price(st, {"mode": "pct", "value": 10}, 22, {}) == 2_700_000

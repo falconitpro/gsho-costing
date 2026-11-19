@@ -687,6 +687,7 @@ class Variant(TimestampMixin, Base):
     price_vat_pct: Mapped[Optional[float]] = mapped_column(Float)              # ставка НДС на момент ввода
     price_input_amount: Mapped[Optional[float]] = mapped_column(Float)         # сумма, как её ввёл КД (с НДС или без)
     price_input_currency: Mapped[Optional[str]] = mapped_column(String(3))     # валюта ввода (D-080); цена хранится в валюте сделки
+    price_input_units: Mapped[Optional[int]] = mapped_column(Integer)          # введено за 1 шт. при этом количестве (D-085)
     service_in_kp: Mapped[bool] = mapped_column(Boolean, default=False)
     client_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     client_payments_alt: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # сравнение двух условий оплаты

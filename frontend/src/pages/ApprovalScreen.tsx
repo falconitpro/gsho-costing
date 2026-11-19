@@ -57,7 +57,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
     if (!value) return;
     setBusy(true);
     try {
-      await api.post(`/api/deals/${deal.id}/price`, { variant_id: vid, mode, value: Number(value), currency: priceCur, vat_included: mode === "amount" && withVat });
+      await api.post(`/api/deals/${deal.id}/price`, { variant_id: vid, mode, value: Number(value), currency: priceCur, vat_included: mode === "amount" && withVat, per_unit: true });
       await load(); reload(); setCur(""); setErr("");
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
@@ -65,7 +65,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
     const v = (deal.variants || []).find((x) => x.id === vid);
     if (!v || base?.price_rub == null) return;
     const keep = v.price_currency && v.price_amount != null ? { value: v.price_amount, currency: v.price_currency } : { value: base.price_rub, currency: "RUB" };
-    await api.post(`/api/deals/${deal.id}/price`, { variant_id: vid, mode: "amount", ...keep, service_in_kp: !v.service_in_kp });
+    await api.post(`/api/deals/${deal.id}/price`, { variant_id: vid, mode: "amount", ...keep, per_unit: false, service_in_kp: !v.service_in_kp });
     reload(); load();
   }
   async function act(url: string, body?: unknown) {
@@ -84,6 +84,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   // D-080: валюта сделки — по умолчанию валюта предложения поставщика; цена, введённая в другой валюте, пересчитывается в неё
   const dealCur = (calc.deal_currency?.code || offerCur).toUpperCase();
   const priceCur = cur || dealCur;   // валюта ввода суммы
+  const units = calc.units?.[variant.id] || 1;     // D-085: цена — за 1 шт.
   const curs = Array.from(new Set(["RUB", offerCur, ...Object.keys(calc.input.fx.rates || {})])).filter((c) => c === "RUB" || calc.input.fx.rates[c]);
   const inCur = (v: { price_currency?: string | null; price_amount?: number | null }) =>
     v.price_currency && v.price_currency !== "RUB" && v.price_amount != null ? `${fmtRub(v.price_amount)} ${v.price_currency}` : "";
@@ -130,15 +131,23 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
             <div>
               <div className={"margin-ind " + indicator.cls}>{fmtPct(base?.margin_pct)}</div>
               <div className="muted">маржа от выручки (базовый) · {indicator.text}</div>
-              {base?.price_rub != null && <div style={{ fontSize: 13 }}>Цена клиенту без НДС: <b>{inCur(variant) || `${fmtRub(base.price_rub)} RUB`}</b>
-                {inCur(variant) && <span className="muted"> · по курсу {variant.price_fx_rate?.toFixed(4)} ≈ {fmtRub(base.price_rub)} RUB · КП — в {variant.price_currency}</span>}
-                <div>с НДС {vatPct} %: <b>{fmtRub((variant.price_amount ?? base.price_rub) * (1 + vatPct / 100))} {variant.price_currency || "RUB"}</b>
-                  {(variant.price_currency || "RUB") !== "RUB" && <span className="muted"> ≈ {fmtRub(base.price_rub * (1 + vatPct / 100))} RUB</span>}
-                  {variant.price_input_amount != null && (variant.price_vat_included || (variant.price_input_currency && variant.price_input_currency !== variant.price_currency)) && <span className="muted"> · введено: {fmtRub(variant.price_input_amount)} {variant.price_input_currency || variant.price_currency}{variant.price_vat_included ? " с НДС" : " без НДС"}</span>}</div>
+              {base?.price_rub != null && (() => {
+                // D-085: при количестве больше одной цена фиксируется за 1 шт., итог на количество — справочно
+                const c = variant.price_currency || "RUB", amt = variant.price_amount ?? base.price_rub, k = 1 + vatPct / 100;
+                return <div style={{ fontSize: 13 }}>
+                  <div>Цена клиенту{units > 1 ? " за 1 шт." : ""} без НДС: <b>{fmtRub(amt / units)} {c}</b>{c !== "RUB" && <span className="muted"> ≈ {fmtRub(base.price_rub / units)} RUB</span>}
+                    {" "}· с НДС {vatPct} %: <b>{fmtRub(amt * k / units)} {c}</b>{c !== "RUB" && <span className="muted"> ≈ {fmtRub(base.price_rub * k / units)} RUB</span>}</div>
+                  {units > 1 && <div className="muted">за {units} шт. (справочно): без НДС {fmtRub(amt)} {c} · с НДС {fmtRub(amt * k)} {c}{c !== "RUB" ? ` ≈ ${fmtRub(base.price_rub)} RUB без НДС` : ""}</div>}
+                  {c !== "RUB" && <div className="muted">курс цены {variant.price_fx_rate?.toFixed(4)} · КП — в {c}</div>}
+                  {variant.price_input_amount != null && (variant.price_vat_included || (variant.price_input_currency && variant.price_input_currency !== variant.price_currency) || (variant.price_input_units || 1) > 1) &&
+                    <div className="muted">введено: {fmtRub(variant.price_input_amount)} {variant.price_input_currency || variant.price_currency}{variant.price_vat_included ? " с НДС" : " без НДС"}{(variant.price_input_units || 1) > 1 ? " за 1 шт." : ""}</div>}
+                </div>; })()}
+              {base?.price_rub != null && <div style={{ fontSize: 13 }}>
                 {cc && cc.code !== (variant.price_currency || "RUB") && cc.rate && <div className="muted">в валюте контракта ({cc.code}, {cc.source}): {fmtRub(base.price_rub / cc.rate)} без НДС · {fmtRub(base.price_rub * (1 + vatPct / 100) / cc.rate)} с НДС</div>}
                 {mode === "amount" && value && Number(value) > 0 && priceCur !== dealCur && (priceCur === "RUB" || calc.input.fx.rates[priceCur]) && (dealCur === "RUB" || calc.input.fx.rates[dealCur]) &&
                   <div className="muted">в валюте сделки: <b>{fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * (priceCur === "RUB" ? 1 : calc.input.fx.rates[priceCur]) / (dealCur === "RUB" ? 1 : calc.input.fx.rates[dealCur]))} {dealCur}</b> без НДС по курсу ЦБ</div>}
-                {mode === "amount" && value && Number(value) > 0 && <div className="muted">вводимая сумма: без НДС {fmtRub(withVat ? Number(value) / (1 + vatPct / 100) : Number(value))} · с НДС {fmtRub(withVat ? Number(value) : Number(value) * (1 + vatPct / 100))} {priceCur}
+                {mode === "amount" && value && Number(value) > 0 && units > 1 && <div className="muted">за {units} шт.: <b>{fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * units)} {priceCur}</b> без НДС</div>}
+                {mode === "amount" && value && Number(value) > 0 && <div className="muted">вводимая сумма{units > 1 ? " за 1 шт." : ""}: без НДС {fmtRub(withVat ? Number(value) / (1 + vatPct / 100) : Number(value))} · с НДС {fmtRub(withVat ? Number(value) : Number(value) * (1 + vatPct / 100))} {priceCur}
                   {priceCur !== "RUB" && calc.input.fx.rates[priceCur] ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * calc.input.fx.rates[priceCur])} RUB без НДС` : ""}
                   {cc && cc.code !== priceCur && cc.rate && (priceCur === "RUB" || calc.input.fx.rates[priceCur]) ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * (priceCur === "RUB" ? 1 : calc.input.fx.rates[priceCur]) / cc.rate)} ${cc.code} без НДС` : ""}</div>}</div>}
               <div className="muted">наценка {fmtPct(base?.markup_pct)} · прибыль {fmtRub(base?.profit_rub)} RUB · разрыв {fmtRub(base?.cash_gap.amount_rub)} RUB ({base?.cash_gap.days} дн)</div>
@@ -152,7 +161,8 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                 {mode === "amount" && <select value={withVat ? "gross" : "net"} onChange={(e) => setWithVat(e.target.value === "gross")} title={`НДС ${vatPct} %`}>
                   <option value="net">без НДС</option><option value="gross">с НДС {vatPct} %</option></select>}
                 <input type="number" value={value} onChange={(e) => setValue(e.target.value)}
-                  placeholder={mode === "amount" ? String((priceCur === variant.price_currency ? variant.price_amount : null) ?? (priceCur === "RUB" ? base?.price_rub ?? "" : "")) : ""} style={{ width: 160 }} />
+                  placeholder={mode === "amount" ? String(((priceCur === variant.price_currency ? variant.price_amount : null) ?? (priceCur === "RUB" ? base?.price_rub ?? "" : "")) && Math.round(Number((priceCur === variant.price_currency ? variant.price_amount : null) ?? (priceCur === "RUB" ? base?.price_rub ?? 0 : 0)) / units * 100) / 100 || "") : ""} style={{ width: 160 }} />
+                {mode === "amount" && units > 1 && <span className="muted" style={{ fontSize: 12 }}>за 1 шт. × {units}</span>}
                 {mode === "amount" && <label className="muted" style={{ fontSize: 12 }} title={`сумма в другой валюте пересчитывается в валюту сделки (${dealCur}) по курсу ЦБ на дату расчёта`}>
                   ввод в{" "}
                   <select value={priceCur} onChange={(e) => setCur(e.target.value)}>{curs.map((c) => <option key={c} value={c}>{c}{c === dealCur ? " (валюта сделки)" : ""}</option>)}</select>

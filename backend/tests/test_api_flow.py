@@ -133,12 +133,13 @@ def test_full_flow(client, tmp_path):
     # цена клиенту — по умолчанию в валюте предложения завода; можно выбрать другую валюту
     pv_ = p["variant"]
     assert pv_["price_currency"] == pos["currency"] and abs(pv_["price_amount"] * pv_["price_fx_rate"] - pv_["price_rub"]) < 1
-    p_cny = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "amount", "value": pv_["price_amount"]}))
+    p_cny = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "amount", "value": pv_["price_amount"], "per_unit": False}))
     assert abs(p_cny["variant"]["price_rub"] - pv_["price_rub"]) < 1                                       # та же сумма в валюте завода
-    p_rub = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "amount", "value": 1000000, "currency": "RUB"}))
+    assert _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))["units"][var["id"]] == 2               # D-085: цена — за 1 шт. из 2
+    p_rub = _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "amount", "value": 500000, "currency": "RUB"}))   # 500 000 за 1 шт. × 2
     # D-080: сумма в рублях пересчитывается в валюту сделки (валюту предложения поставщика); рубли — справочно
     pr = p_rub["variant"]
-    assert pr["price_rub"] == 1000000 and pr["price_currency"] == pos["currency"] and pr["price_input_currency"] == "RUB"
+    assert pr["price_rub"] == 1000000 and pr["price_currency"] == pos["currency"] and pr["price_input_currency"] == "RUB" and pr["price_input_units"] == 2
     assert abs(pr["price_amount"] * pr["price_fx_rate"] - 1000000) < 1
     # валюту сделки меняют КД / ЗГД; цена пересчитывается
     assert client.put(f"/api/deals/{did}/deal-currency", headers=H(MGR), json={"currency": "USD"}).status_code == 403
