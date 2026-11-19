@@ -724,3 +724,25 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .ng-mark2.ng-b-now { width: 5px; height: 26px; top: 29px; margin-left: -2px; }
 .ng-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: #444; margin: 0 4px 10px; }
 .ng-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+/* себестоимость: базовый сценарий, на 1 машину и за количество (D-088) */
+.cb-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
+@media (max-width: 1200px) { .cb-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.cb-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fff; display: flex; flex-direction: column; gap: 2px; border-top: 3px solid #d9d9dc; min-width: 0; }
+.cb-card span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.cb-card b { font-size: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cb-card em { font-style: normal; font-size: 12px; color: var(--muted); }
+.cb-card.cb-dark { border-top-color: #1f1f1f; } .cb-card.cb-ok { border-top-color: var(--ok); } .cb-card.cb-ok b { color: var(--ok); }
+.cb-card.cb-warn { border-top-color: #b7791f; } .cb-card.cb-warn b { color: #b7791f; } .cb-card.cb-bad { border-top-color: var(--accent); } .cb-card.cb-bad b { color: var(--accent); }
+.cb-note { font-size: 12px; margin: 0 0 6px; }
+.cb-table { width: 100%; font-size: 14px; }
+.cb-table th { font-size: 12px; }
+.cb-table td { padding: 6px 10px; }
+.cb-table .cb-group td { background: #f4f4f5; font-weight: 700; font-size: 13px; border-top: 1px solid var(--line); }
+.cb-table .cb-zero td { color: #aaa; }
+.cb-no { display: inline-block; width: 24px; color: var(--muted); font-size: 12px; }
+.cb-sharecol { width: 26%; }
+.cb-bar { position: relative; height: 16px; background: #f1f1f2; border-radius: 4px; overflow: hidden; }
+.cb-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #ffb3b3; }
+.cb-bar span { position: relative; font-size: 11px; padding-left: 6px; line-height: 16px; color: #333; }
+.cb-table .cb-total td { font-weight: 800; font-size: 15px; border-top: 2px solid #1f1f1f; background: #fff; }
+.cb-table .cb-sub td { color: #333; }

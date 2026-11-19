@@ -239,7 +239,7 @@ def add_option(deal_id: str, pos_id: str, body: LocalOptionIn, db: Session = Dep
     pos = _pos(db, deal, pos_id)
     if body.install_stage not in ("before_handover", "during_commissioning"):
         raise HTTPException(422, "Когда устанавливается: до передачи клиенту или во время ПНР")
-    o = LocalOption(deal_id=deal.id, position_id=pos.id, **body.model_dump())
+    o = LocalOption(deal_id=deal.id, position_id=pos.id, per_unit=True, **body.model_dump())   # D-089: на 1 машину
     db.add(o)
     db.flush()
     if body.tech_param_id:
@@ -266,6 +266,8 @@ def patch_option(deal_id: str, pos_id: str, opt_id: str, body: dict, db: Session
     for k, v in body.items():
         if k in allowed:
             setattr(o, k, v)
+    if any(k in body for k in ("qty", "cost", "install_cost_rub")):
+        o.per_unit = True     # D-089: изменённые количество / стоимость — на 1 машину
     if body.get("status") == "approved" or body.get("approve"):
         if not user.has(Role.CD, Role.GD, Role.PURCHASING):
             raise HTTPException(403, "Стоимость опции утверждает КД (или закупки)")

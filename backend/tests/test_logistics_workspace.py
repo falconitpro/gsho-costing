@@ -184,3 +184,14 @@ def test_logistics_amounts_per_machine(client):
     assert p["export_formalities"]["amount"] == 2000 and p["certification_rub"] == 60000
     b = calc["input"]["batches"][0]
     assert b["door_to_door"]["amount"] == 200000 and b["broker_rub"] == 100000
+
+
+def test_local_options_per_machine():
+    """D-089: доукомплектование в РФ — количество и монтаж на 1 машину (× количество позиции); прежние опции — как вводились."""
+    from types import SimpleNamespace as N
+    from app.services.deal_calc import _local_options
+    base = dict(id="o", name="Камера", qty=2, cost=100.0, currency="RUB", supplier_lead_days=10, needs_install=True,
+                install_stage="during_commissioning", install_days=1, install_cost_rub=50.0)
+    new = _local_options([N(**base, per_unit=True)], 3)[0]
+    old = _local_options([N(**base, per_unit=False)], 3)[0]
+    assert new.qty == 6 and new.install_cost_rub == 150.0 and old.qty == 2 and old.install_cost_rub == 50.0

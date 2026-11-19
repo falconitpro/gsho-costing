@@ -564,6 +564,7 @@ class LocalOption(TimestampMixin, Base):
     installer: Mapped[str] = mapped_column(String(32), default="service")    # service | contractor
     install_days: Mapped[int] = mapped_column(Integer, default=0)
     install_cost_rub: Mapped[float] = mapped_column(Float, default=0.0)
+    per_unit: Mapped[bool] = mapped_column(Boolean, default=False)          # D-089: кол-во и монтаж — на 1 машину (× количество позиции); старые — на всю позицию
     status: Mapped[str] = mapped_column(String(16), default="estimate")      # estimate | approved | ordered | received | installed
     cost_approved_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     ordered_at: Mapped[Optional[date]] = mapped_column(Date)

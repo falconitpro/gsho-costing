@@ -184,8 +184,7 @@ def evaluate(db: Session, deal: Deal, ver: DealVersion, prices: dict[str, float]
         warn = []
         if b and b.margin_pct is not None and b.margin_pct < thr:
             warn.append(f"маржа {b.margin_pct:.2f} % ниже порога {thr:g} %")
-        if p and p.margin_pct is not None and p.margin_pct < 0:
-            warn.append("в пессимистичном сценарии — убыток")
+        # D-088: в торгах решение — по базовому сценарию; пессимистичный и оптимистичный — в денежном потоке и аналитике
         out[vid]["warnings"] = warn
     return out
 

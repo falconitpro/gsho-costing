@@ -82,10 +82,11 @@ export function LocalOptionsBlock({ dealId, position, me, onChanged }: { dealId:
       {err && <div className="alert error">{err}</div>}
       {options.length > 0 && (
         <table style={{ marginTop: 6 }}>
-          <thead><tr><th>Опция</th><th className="num">Кол-во</th><th>Поставщик</th><th className="num">Стоимость</th><th className="num">Срок поставщика, дн</th><th>Установка</th><th className="num">Монтаж, дн / RUB</th><th>Статус</th>{canEdit && <th />}</tr></thead>
+          <thead><tr><th>Опция</th><th className="num">Кол-во{(position.qty || 1) > 1 ? " на 1 машину" : ""}</th><th>Поставщик</th><th className="num">Стоимость</th><th className="num">Срок поставщика, дн</th><th>Установка</th><th className="num">Монтаж, дн / RUB</th><th>Статус</th>{canEdit && <th />}</tr></thead>
           <tbody>{options.map((o) => (
             <tr key={o.id}>
-              <td>{o.name}{o.comment && <div className="muted" style={{ fontSize: 11 }}>{o.comment}</div>}</td><td className="num">{o.qty}</td><td>{o.supplier || "—"}</td>
+              <td>{o.name}{o.comment && <div className="muted" style={{ fontSize: 11 }}>{o.comment}</div>}</td><td className="num">{(o as { per_unit?: boolean }).per_unit || (position.qty || 1) === 1 ? o.qty : <span title="добавлена до 19.11.2026 — количество на всю позицию">{o.qty} <span className="muted">(на все {position.qty} шт.)</span></span>}
+                {(o as { per_unit?: boolean }).per_unit && (position.qty || 1) > 1 && <div className="muted" style={{ fontSize: 11 }}>в расчёт × {position.qty} = {o.qty * (position.qty || 1)}</div>}</td><td>{o.supplier || "—"}</td>
               <td className="num">{o.cost ? `${fmtRub(o.cost)} ${o.currency}` : <span className="badge warn">нет КП</span>}</td><td className="num">{o.supplier_lead_days}</td>
               <td>{o.needs_install ? (o.install_stage === "before_handover" ? "до передачи клиенту (+ к сроку поставки)" : "на месте во время ПНР") + ` · ${o.installer === "service" ? "сервис" : "подрядчик"}` : "не требуется"}</td>
               <td className="num">{o.install_days} / {fmtRub(o.install_cost_rub)}</td>
@@ -103,7 +104,7 @@ export function LocalOptionsBlock({ dealId, position, me, onChanged }: { dealId:
           <label className="f">Из таблицы технических характеристик (строка станет «в РФ»)
             <select value={form.tech_param_id || ""} onChange={(e) => { const r = paramRows.find((x) => x.id === e.target.value); setForm({ ...form, tech_param_id: e.target.value || null, name: form.name || r?.name_ru || "" }); }}>
               <option value="">—</option>{paramRows.map((r) => <option key={r.id} value={r.id}>{r.no}. {r.name_ru}</option>)}</select></label>
-          <label className="f">Количество<input type="number" value={form.qty} onChange={(e) => setForm({ ...form, qty: Number(e.target.value) })} /></label>
+          <label className="f">Количество{(position.qty || 1) > 1 ? ` на 1 машину (× ${position.qty})` : ""}<input type="number" value={form.qty} onChange={(e) => setForm({ ...form, qty: Number(e.target.value) })} /></label>
           <label className="f">Поставщик<input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} /></label>
           <label className="f">Стоимость за ед. / валюта<div className="row"><input type="number" value={form.cost} onChange={(e) => setForm({ ...form, cost: Number(e.target.value) })} />
             <select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}><option>RUB</option><option>CNY</option><option>USD</option><option>EUR</option></select></div></label>
