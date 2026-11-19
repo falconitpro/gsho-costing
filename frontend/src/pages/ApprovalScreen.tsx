@@ -150,7 +150,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                 {mode === "amount" && value && Number(value) > 0 && <div className="muted">вводимая сумма{units > 1 ? " за 1 шт." : ""}: без НДС {fmtRub(withVat ? Number(value) / (1 + vatPct / 100) : Number(value))} · с НДС {fmtRub(withVat ? Number(value) : Number(value) * (1 + vatPct / 100))} {priceCur}
                   {priceCur !== "RUB" && calc.input.fx.rates[priceCur] ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * calc.input.fx.rates[priceCur])} RUB без НДС` : ""}
                   {cc && cc.code !== priceCur && cc.rate && (priceCur === "RUB" || calc.input.fx.rates[priceCur]) ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * (priceCur === "RUB" ? 1 : calc.input.fx.rates[priceCur]) / cc.rate)} ${cc.code} без НДС` : ""}</div>}</div>}
-              <div className="muted">наценка {fmtPct(base?.markup_pct)} · прибыль {fmtRub(base?.profit_rub)} RUB · разрыв {fmtRub(base?.cash_gap.amount_rub)} RUB ({base?.cash_gap.days} дн)</div>
+              <div className="muted">наценка {fmtPct(base?.markup_pct)} · {units > 1 ? <>на 1 машину: себестоимость {fmtRub((base?.cost_total_rub ?? 0) / units)} RUB, прибыль {fmtRub((base?.profit_rub ?? 0) / units)} RUB · за {units} шт.: </> : null}прибыль {fmtRub(base?.profit_rub)} RUB · разрыв {fmtRub(base?.cash_gap.amount_rub)} RUB ({base?.cash_gap.days} дн)</div>
             </div>
             {isCD && ["approved", "kp_sent"].includes(deal.status) && <button className="btn secondary" onClick={() => nav(`/deals/${deal.id}/negotiation`)} title="снижение цены и изменение условий после КП фиксируются шагами торгов">Цена утверждена · изменить — в «Торгах» →</button>}
             {canPrice && (
@@ -203,22 +203,33 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
 
         {tab === "cost" && (
           <div className="card">
+            {/* D-086: себестоимость — на 1 машину, за весь объём — справочно */}
+            {units > 1 && <div className="muted" style={{ marginBottom: 6 }}>Суммы — <b>на 1 машину</b>; последний столбец — базовый сценарий за весь объём ({units} шт.), справочно. Проценты и сроки не зависят от количества.</div>}
             <table>
-              <thead><tr><th>№</th><th>Статья</th>{SCEN.map(([k, t]) => <th key={k} className="num">{t}</th>)}</tr></thead>
+              <thead><tr><th>№</th><th>Статья</th>{SCEN.map(([k, t]) => <th key={k} className="num">{t}{units > 1 ? ", на 1 шт." : ""}</th>)}
+                {units > 1 && <th className="num" style={{ fontWeight: 400 }}>Базовый, за {units} шт. (справочно)</th>}</tr></thead>
               <tbody>
-                {COST_ITEMS.map(([no, key, title]) => (
-                  <tr key={key}><td>{no}</td><td>{title}</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(scen[k]?.items_rub[key])}</td>)}</tr>
-                ))}
-                <tr className="total"><td /><td>Себестоимость, RUB</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(scen[k]?.cost_total_rub)}</td>)}</tr>
-                <tr><td /><td>в {calc.input.base_currency}</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(scen[k]?.cost_total_base_ccy)}</td>)}</tr>
-                <tr><td /><td>Цена продажи без НДС</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(scen[k]?.price_rub)}</td>)}</tr>
-                <tr><td /><td><b>Маржа от выручки</b></td>{SCEN.map(([k]) => <td key={k} className="num"><b>{fmtPct(scen[k]?.margin_pct)}</b></td>)}</tr>
-                <tr><td /><td>Наценка от себестоимости (справочно)</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtPct(scen[k]?.markup_pct)}</td>)}</tr>
-                <tr><td /><td>Прибыль, RUB</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(scen[k]?.profit_rub)}</td>)}</tr>
-                <tr><td /><td>Прибыль до стоимости денег</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(scen[k]?.profit_before_finance_rub)}</td>)}</tr>
-                <tr><td /><td>Кассовый разрыв, RUB / дней</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(scen[k]?.cash_gap.amount_rub)} / {scen[k]?.cash_gap.days}</td>)}</tr>
-                <tr><td /><td>Срок поставки от договора, дней (расчётный)</td>{SCEN.map(([k]) => <td key={k} className="num">{scen[k]?.delivery_days}</td>)}</tr>
-                <tr><td /><td>Банковская гарантия на аванс, RUB</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(scen[k]?.guarantee_cost_rub)}</td>)}</tr>
+                {(() => {
+                  const u = units, per = (v?: number | null) => (v == null ? v : v / u);
+                  const tot = (v?: number | null) => units > 1 ? <td className="num muted">{fmtRub(v)}</td> : null;
+                  const row = (title: React.ReactNode, get: (x: NonNullable<typeof base>) => number | null | undefined, cls = "", money = true) => (
+                    <tr className={cls}><td /><td>{title}</td>{SCEN.map(([k]) => <td key={k} className="num">{scen[k] ? (money ? fmtRub(per(get(scen[k]!))) : fmtPct(get(scen[k]!))) : ""}</td>)}
+                      {units > 1 && (money ? tot(base ? get(base) : null) : <td className="num muted">{base ? fmtPct(get(base)) : ""}</td>)}</tr>);
+                  return <>
+                    {COST_ITEMS.map(([no, key, title]) => (
+                      <tr key={key}><td>{no}</td><td>{title}</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(per(scen[k]?.items_rub[key]))}</td>)}{tot(base?.items_rub[key])}</tr>))}
+                    {row(<>Себестоимость{units > 1 ? " на 1 машину" : ""}, RUB</>, (x) => x.cost_total_rub, "total")}
+                    {row(<>в {calc.input.base_currency}</>, (x) => x.cost_total_base_ccy)}
+                    {row(<>Цена продажи без НДС{units > 1 ? " за 1 шт." : ""}</>, (x) => x.price_rub)}
+                    <tr><td /><td><b>Маржа от выручки</b></td>{SCEN.map(([k]) => <td key={k} className="num"><b>{fmtPct(scen[k]?.margin_pct)}</b></td>)}{units > 1 && <td className="num muted"><b>{fmtPct(base?.margin_pct)}</b></td>}</tr>
+                    {row("Наценка от себестоимости (справочно)", (x) => x.markup_pct, "", false)}
+                    {row("Прибыль, RUB", (x) => x.profit_rub)}
+                    {row("Прибыль до стоимости денег", (x) => x.profit_before_finance_rub)}
+                    <tr><td /><td>Кассовый разрыв, RUB / дней</td>{SCEN.map(([k]) => <td key={k} className="num">{fmtRub(per(scen[k]?.cash_gap.amount_rub))} / {scen[k]?.cash_gap.days}</td>)}
+                      {units > 1 && <td className="num muted">{fmtRub(base?.cash_gap.amount_rub)} / {base?.cash_gap.days}</td>}</tr>
+                    <tr><td /><td>Срок поставки от договора, дней (расчётный)</td>{SCEN.map(([k]) => <td key={k} className="num">{scen[k]?.delivery_days}</td>)}{units > 1 && <td className="num muted">{base?.delivery_days}</td>}</tr>
+                    {row("Банковская гарантия на аванс, RUB", (x) => x.guarantee_cost_rub)}
+                  </>; })()}
               </tbody>
             </table>
             {calc.production && Object.keys(calc.production).length > 0 && (
