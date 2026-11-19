@@ -746,3 +746,20 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .cb-bar span { position: relative; font-size: 11px; padding-left: 6px; line-height: 16px; color: #333; }
 .cb-table .cb-total td { font-weight: 800; font-size: 15px; border-top: 2px solid #1f1f1f; background: #fff; }
 .cb-table .cb-sub td { color: #333; }
+/* цена производителя: «что если», обратный расчёт (D-091) */
+.fp-panel { margin-top: 16px; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: #fff; }
+.fp-panel h3 { margin: 0 0 8px; font-size: 16px; }
+.fp-now { font-size: 14px; margin-bottom: 8px; }
+.fp-cols { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .fp-cols { grid-template-columns: 1fr; } }
+.fp-col { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fafafa; }
+.fp-new { font-size: 13px; margin: 4px 0 6px; }
+.fp-table { width: 100%; font-size: 13px; background: #fff; }
+.fp-table td { padding: 5px 8px; }
+.fp-table .fp-key td { background: #fff7f7; font-weight: 600; }
+.fp-good { color: var(--ok); font-weight: 600; } .fp-bad { color: var(--accent); font-weight: 600; }
+.fp-solve { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 8px; align-items: end; margin-top: 6px; }
+.fp-result { margin-top: 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+.cb-ccy { color: #555; }
+.cb-rubc { color: #8a8a8f; font-size: 12px; } .cb-rubh { opacity: .85; font-weight: 400 !important; }
+.cb-card em.cb-rub { font-size: 12px; }

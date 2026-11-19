@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { lbl, FX_SOURCE, IMAGE_KIND, IMAGE_SOURCE, OUTCOME, STATUS } from "../labels";
 import { api, fmtDate, fmtPct, fmtRub, designation } from "../api";
-import { COST_ITEMS, EVENT_TITLES, can, type CalcResponse, type Deal, type Me, type ScenarioResult } from "../types";
+import { COST_ITEMS, EVENT_TITLES, can, type CalcResponse, type Deal, type Me, type Position, type ScenarioResult } from "../types";
 import CashflowChart from "../components/CashflowChart";
 import PaymentTermsEditor from "../components/PaymentTermsEditor";
 import ProductionTermBlock from "../components/ProductionTermBlock";
@@ -150,7 +150,9 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                 {mode === "amount" && value && Number(value) > 0 && <div className="muted">вводимая сумма{units > 1 ? " за 1 шт." : ""}: без НДС {fmtRub(withVat ? Number(value) / (1 + vatPct / 100) : Number(value))} · с НДС {fmtRub(withVat ? Number(value) : Number(value) * (1 + vatPct / 100))} {priceCur}
                   {priceCur !== "RUB" && calc.input.fx.rates[priceCur] ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * calc.input.fx.rates[priceCur])} RUB без НДС` : ""}
                   {cc && cc.code !== priceCur && cc.rate && (priceCur === "RUB" || calc.input.fx.rates[priceCur]) ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * (priceCur === "RUB" ? 1 : calc.input.fx.rates[priceCur]) / cc.rate)} ${cc.code} без НДС` : ""}</div>}</div>}
-              <div className="muted">наценка {fmtPct(base?.markup_pct)} · {units > 1 ? <>на 1 машину: себестоимость {fmtRub((base?.cost_total_rub ?? 0) / units)} RUB, прибыль {fmtRub((base?.profit_rub ?? 0) / units)} RUB · за {units} шт.: </> : null}прибыль {fmtRub(base?.profit_rub)} RUB · разрыв {fmtRub(base?.cash_gap.amount_rub)} RUB ({base?.cash_gap.days} дн)</div>
+              {(() => { const hr = dealCur === "RUB" ? 1 : (variant.price_currency || "").toUpperCase() === dealCur && variant.price_fx_rate ? variant.price_fx_rate : calc.input.fx.rates[dealCur] || 0;
+                const mc = (rub?: number | null) => (rub == null ? "—" : hr && dealCur !== "RUB" ? `${fmtRub(rub / hr)} ${dealCur}` : `${fmtRub(rub)} RUB`);
+                return <div className="muted">наценка {fmtPct(base?.markup_pct)} · {units > 1 ? <>на 1 машину: себестоимость {mc((base?.cost_total_rub ?? 0) / units)}, прибыль {mc((base?.profit_rub ?? 0) / units)} · за {units} шт.: </> : null}прибыль {mc(base?.profit_rub)} · разрыв {mc(base?.cash_gap.amount_rub)} ({base?.cash_gap.days} дн){dealCur !== "RUB" && hr ? <span style={{ fontSize: 11 }}> · в рублях: прибыль {fmtRub(base?.profit_rub)} ₽</span> : null}</div>; })()}
             </div>
             {isCD && ["approved", "kp_sent"].includes(deal.status) && <button className="btn secondary" onClick={() => nav(`/deals/${deal.id}/negotiation`)} title="снижение цены и изменение условий после КП фиксируются шагами торгов">Цена утверждена · изменить — в «Торгах» →</button>}
             {canPrice && (
@@ -203,7 +205,14 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
 
         {tab === "cost" && (
           <div className="card">
-            {base && <CostBreakdown base={base} units={units} baseCcy={calc.input.base_currency} threshold={calc.input.thresholds?.margin_threshold_pct} />}
+            {base && (() => {
+              const dRate = dealCur === "RUB" ? 1 : (variant.price_currency || "").toUpperCase() === dealCur && variant.price_fx_rate ? variant.price_fx_rate : calc.input.fx.rates[dealCur] || 0;
+              return <>
+                <CostBreakdown base={base} units={units} baseCcy={calc.input.base_currency} threshold={calc.input.thresholds?.margin_threshold_pct} dealCur={dealCur} dealRate={dRate} />
+                {isCD && <FactoryPricePanel dealId={deal.id} status={deal.status} variantId={variant.id} positions={(deal.positions || []).filter((p) => !variant.position_ids?.length || variant.position_ids.includes(p.id))}
+                  units={units} dealCur={dealCur} dealRate={dRate} threshold={calc.input.thresholds?.margin_threshold_pct} currentPriceUnit={base.price_rub != null && dRate ? base.price_rub / units / dRate : null}
+                  onApplied={() => { reload(); load(); }} />}
+              </>; })()}
             {calc.production && Object.keys(calc.production).length > 0 && (
               <ProductionTermBlock dealId={deal.id} production={calc.production} canEdit={!!calc.can_edit_production}
                 events={Object.fromEntries(terms.map((t) => [t.position_id, t.events]))} onSaved={() => { reload(); load(); }} />
@@ -414,46 +423,148 @@ const COST_GROUPS: [string, string[]][] = [
   ["Финансы, сервис и гарантия", ["finance", "service", "warranty_reserve"]],
   ["Накладные, доукомплектование, комиссии", ["overhead", "local_completion", "external_commission", "manager_commission", "cd_commission"]],
 ];
-function CostBreakdown({ base, units, baseCcy, threshold }: { base: ScenarioResult; units: number; baseCcy: string; threshold?: number }) {
+function CostBreakdown({ base, units, baseCcy, threshold, dealCur = "RUB", dealRate = 1 }: { base: ScenarioResult; units: number; baseCcy: string; threshold?: number; dealCur?: string; dealRate?: number }) {
+  // D-090: все расходы — и в валюте контракта (валюте сделки) по курсу цены / ЦБ
+  const fc = dealCur !== "RUB" && dealRate > 0, cv = (rub: number) => fmtRub(rub / (dealRate || 1));
   const [showZero, setShowZero] = useState(false);
   const u = Math.max(1, units), many = u > 1;
   const title = Object.fromEntries(COST_ITEMS.map(([no, k, t]) => [k, { no, t }]));
   const total = base.cost_total_rub || 0;
   const zeroCount = COST_ITEMS.filter(([, k]) => !base.items_rub[k]).length;
   const m = base.margin_pct ?? null, low = m != null && threshold != null && m < threshold;
+  // D-092: главная цифра — в валюте сделки, мелко — справочно в рублях
+  const main = (rub: number) => (fc ? `${cv(rub)} ${dealCur}` : `${fmtRub(rub)} ₽`);
   const card = (t: string, v: number | null | undefined, sub?: string, cls = "") => (
-    <div className={"cb-card " + cls}><span>{t}</span><b>{v == null ? "—" : `${fmtRub(v / u)} ₽`}</b>{many && v != null && <em>за {u} шт.: {fmtRub(v)} ₽</em>}{sub && <em>{sub}</em>}</div>);
+    <div className={"cb-card " + cls}><span>{t}</span><b>{v == null ? "—" : main(v / u)}</b>{fc && v != null && <em className="cb-rub">≈ {fmtRub(v / u)} ₽</em>}
+      {many && v != null && <em>за {u} шт.: {main(v)}{fc ? ` (≈ ${fmtRub(v)} ₽)` : ""}</em>}{sub && <em>{sub}</em>}</div>);
   return (
     <div className="cb">
       <div className="cb-cards">
-        {card(many ? "Себестоимость 1 машины" : "Себестоимость", total, `${fmtRub((base.cost_total_base_ccy || 0) / u)} ${baseCcy}${many ? " на 1 шт." : ""}`, "cb-dark")}
+        {card(many ? "Себестоимость 1 машины" : "Себестоимость", total, undefined, "cb-dark")}
         {card(many ? "Цена 1 машины без НДС" : "Цена без НДС", base.price_rub)}
         <div className={"cb-card " + (m == null ? "" : m < 0 ? "cb-bad" : low ? "cb-warn" : "cb-ok")}><span>Маржа от выручки</span><b>{fmtPct(m)}</b>
           <em>наценка {fmtPct(base.markup_pct)}{threshold != null ? ` · порог ${threshold} %` : ""}</em></div>
-        {card(many ? "Прибыль с 1 машины" : "Прибыль", base.profit_rub, `до стоимости денег ${fmtRub((base.profit_before_finance_rub || 0) / u)} ₽`)}
+        {card(many ? "Прибыль с 1 машины" : "Прибыль", base.profit_rub, `до стоимости денег ${main((base.profit_before_finance_rub || 0) / u)}`)}
         {card(many ? "Кассовый разрыв на 1 машину" : "Кассовый разрыв", base.cash_gap.amount_rub, `${base.cash_gap.days} дн. · поставка ${base.delivery_days} дн. от договора`)}
       </div>
-      <div className="cb-note muted">Базовый сценарий{many ? <> · суммы <b>на 1 машину</b>, справа — за весь объём ({u} шт.)</> : ""} · пессимистичный и оптимистичный — на вкладке «Денежный поток»</div>
+      <div className="cb-note muted">{fc ? <>Валюта контракта — {dealCur}, курс {dealRate.toFixed(4).replace(".", ",")} ₽ · </> : null}Базовый сценарий{many ? <> · суммы <b>на 1 машину</b>, справа — за весь объём ({u} шт.)</> : ""} · пессимистичный и оптимистичный — на вкладке «Денежный поток»</div>
       <table className="cb-table">
-        <thead><tr><th>Статья</th><th className="num">{many ? "На 1 машину, ₽" : "Сумма, ₽"}</th><th className="cb-sharecol">Доля в себестоимости</th>{many && <th className="num">За {u} шт., ₽</th>}</tr></thead>
+        <thead><tr><th>Статья</th>{fc && <th className="num">{many ? `На 1 машину, ${dealCur}` : dealCur}</th>}<th className={"num" + (fc ? " cb-rubh" : "")}>{many ? "На 1 машину, ₽" : "Сумма, ₽"}{fc ? " (справочно)" : ""}</th><th className="cb-sharecol">Доля в себестоимости</th>
+          {many && fc && <th className="num">За {u} шт., {dealCur}</th>}{many && <th className={"num" + (fc ? " cb-rubh" : "")}>За {u} шт., ₽</th>}</tr></thead>
         <tbody>
           {COST_GROUPS.map(([g, keys]) => {
             const rows = keys.filter((k) => showZero || base.items_rub[k]);
             const sum = keys.reduce((a, k) => a + (base.items_rub[k] || 0), 0);
             if (!rows.length) return null;
             return [
-              <tr key={g} className="cb-group"><td>{g}</td><td className="num">{fmtRub(sum / u)}</td><td>{total ? `${(sum / total * 100).toFixed(1).replace(".", ",")} %` : ""}</td>{many && <td className="num">{fmtRub(sum)}</td>}</tr>,
+              <tr key={g} className="cb-group"><td>{g}</td>{fc && <td className="num">{cv(sum / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub(sum / u)}</td><td>{total ? `${(sum / total * 100).toFixed(1).replace(".", ",")} %` : ""}</td>{many && fc && <td className="num">{cv(sum)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(sum)}</td>}</tr>,
               ...rows.map((k) => { const v = base.items_rub[k] || 0, sh = total ? v / total * 100 : 0; return (
-                <tr key={k} className={v ? "" : "cb-zero"}><td><span className="cb-no">{title[k]?.no}</span>{title[k]?.t || k}</td><td className="num">{fmtRub(v / u)}</td>
+                <tr key={k} className={v ? "" : "cb-zero"}><td><span className="cb-no">{title[k]?.no}</span>{title[k]?.t || k}</td>{fc && <td className="num">{cv(v / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub(v / u)}</td>
                   <td><div className="cb-bar"><i style={{ width: `${Math.min(100, sh)}%` }} /><span>{sh ? `${sh.toFixed(1).replace(".", ",")} %` : ""}</span></div></td>
-                  {many && <td className="num muted">{fmtRub(v)}</td>}</tr>); }),
+                  {many && fc && <td className="num">{cv(v)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(v)}</td>}</tr>); }),
             ]; })}
-          <tr className="cb-total"><td>Себестоимость{many ? " 1 машины" : ""}</td><td className="num">{fmtRub(total / u)}</td><td>100 %</td>{many && <td className="num">{fmtRub(total)}</td>}</tr>
-          <tr className="cb-sub"><td>Цена продажи без НДС</td><td className="num">{fmtRub((base.price_rub || 0) / u)}</td><td /> {many && <td className="num">{fmtRub(base.price_rub)}</td>}</tr>
-          <tr className="cb-sub"><td>Прибыль</td><td className="num">{fmtRub((base.profit_rub || 0) / u)}</td><td>{fmtPct(m)} маржи</td>{many && <td className="num">{fmtRub(base.profit_rub)}</td>}</tr>
-          {!!base.guarantee_cost_rub && <tr className="cb-sub"><td>Банковская гарантия на аванс</td><td className="num">{fmtRub(base.guarantee_cost_rub / u)}</td><td />{many && <td className="num">{fmtRub(base.guarantee_cost_rub)}</td>}</tr>}
+          <tr className="cb-total"><td>Себестоимость{many ? " 1 машины" : ""}</td>{fc && <td className="num">{cv(total / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub(total / u)}</td><td>100 %</td>{many && fc && <td className="num">{cv(total)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(total)}</td>}</tr>
+          <tr className="cb-sub"><td>Цена продажи без НДС</td>{fc && <td className="num">{cv((base.price_rub || 0) / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub((base.price_rub || 0) / u)}</td><td />{many && fc && <td className="num">{cv(base.price_rub || 0)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(base.price_rub)}</td>}</tr>
+          <tr className="cb-sub"><td>Прибыль</td>{fc && <td className="num">{cv((base.profit_rub || 0) / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub((base.profit_rub || 0) / u)}</td><td>{fmtPct(m)} маржи</td>{many && fc && <td className="num">{cv(base.profit_rub || 0)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(base.profit_rub)}</td>}</tr>
+          {!!base.guarantee_cost_rub && <tr className="cb-sub"><td>Банковская гарантия на аванс</td>{fc && <td className="num">{cv(base.guarantee_cost_rub / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub(base.guarantee_cost_rub / u)}</td><td />{many && fc && <td className="num">{cv(base.guarantee_cost_rub)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(base.guarantee_cost_rub)}</td>}</tr>}
         </tbody>
       </table>
       {zeroCount > 0 && <button className="btn ghost" style={{ marginTop: 6 }} onClick={() => setShowZero(!showZero)}>{showZero ? "Скрыть нулевые статьи" : `Показать нулевые статьи (${zeroCount})`}</button>}
+    </div>);
+}
+
+type FpSum = { cost_total_rub: number; price_rub: number | null; margin_pct: number | null; markup_pct: number | null; profit_rub: number | null; cash_gap_rub: number; cash_gap_days: number;
+  factory_price_rub: number; customs_rub: number; finance_rub: number };
+/** Цена производителя (D-091): «что если» — скидка или новая цена с наглядным пересчётом маржи; запрос производителю (задача менеджеру);
+ *  применение подтверждённой цены; обратный расчёт — какая цена производителя нужна при заданной марже и цене продажи. */
+function FactoryPricePanel({ dealId, status, variantId, positions, units, dealCur, dealRate, threshold, currentPriceUnit, onApplied }: {
+  dealId: string; status: string; variantId: string; positions: Position[]; units: number; dealCur: string; dealRate: number; threshold?: number;
+  currentPriceUnit: number | null; onApplied: () => void }) {
+  const [pid, setPid] = useState(positions[0]?.id || "");
+  const pos = positions.find((p) => p.id === pid) || positions[0];
+  const [mode, setMode] = useState<"discount_pct" | "price">("discount_pct");
+  const [val, setVal] = useState("");
+  const [res, setRes] = useState<{ before: FpSum; after: FpSum; new_prices: Record<string, number> } | null>(null);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+  const [comment, setComment] = useState("");
+  const [tm, setTm] = useState(String(threshold ?? 10));
+  const [sp, setSp] = useState(currentPriceUnit ? String(Math.round(currentPriceUnit * 100) / 100) : "");
+  const [solved, setSolved] = useState<{ unit_price: number; currency: string; discount_pct: number | null; after: FpSum } | null>(null);
+  const canApply = ["calc_ready", "cd_approval", "rework"].includes(status);
+  const num = (x: string) => Number(x.replace(",", ".").replace(/\s/g, ""));
+  useEffect(() => { setSp(currentPriceUnit ? String(Math.round(currentPriceUnit * 100) / 100) : ""); }, [currentPriceUnit]);
+  useEffect(() => {
+    if (!pos || !val.trim() || !(num(val) > 0 || mode === "discount_pct")) { setRes(null); return; }
+    const t = window.setTimeout(() => api.post<typeof res>(`/api/deals/${dealId}/factory-price/what-if`, { variant_id: variantId, changes: { [pos.id]: { mode, value: num(val) } } })
+      .then((r) => { setRes(r); setErr(""); }).catch((e) => { setRes(null); setErr((e as Error).message); }), 400);
+    return () => window.clearTimeout(t);
+  }, [val, mode, pid]);
+  if (!pos) return null;
+  const newUnit = res?.new_prices[pos.id];
+  const u = Math.max(1, units);
+  const fc = dealCur !== "RUB" && dealRate > 0;
+  const rub1 = (v: number | null | undefined) => (v == null ? "—" : `${fmtRub(v / u)} ₽`);
+  const cur1 = (v: number | null | undefined) => (v == null || !fc ? "" : `${fmtRub(v / u / dealRate)} ${dealCur}`);
+  const delta = (a?: number | null, b?: number | null, money = true, isCost = false) => {
+    if (a == null || b == null) return null; const d = b - a; if (Math.abs(d) < 0.005) return <span className="muted">—</span>;
+    return <span className={(isCost ? d < 0 : d > 0) ? "fp-good" : "fp-bad"}>{d > 0 ? "+" : "−"}{money ? (fc ? `${fmtRub(Math.abs(d) / u / dealRate)} ${dealCur}` : fmtRub(Math.abs(d) / u) + " ₽") : Math.abs(d).toFixed(2).replace(".", ",") + " п.п."}</span>;
+  };
+  const rows: [string, (x: FpSum) => number | null | undefined, boolean, boolean][] = [
+    ["Цена производителя в себестоимости", (x) => x.factory_price_rub, true, true], ["Таможенные платежи", (x) => x.customs_rub, true, true],
+    ["Стоимость денег", (x) => x.finance_rub, true, true], ["Себестоимость", (x) => x.cost_total_rub, true, true],
+    ["Прибыль", (x) => x.profit_rub, true, false], ["Маржа от выручки", (x) => x.margin_pct, false, false], ["Наценка", (x) => x.markup_pct, false, false]];
+  const request = () => api.post(`/api/deals/${dealId}/factory-price/request`, { position_id: pos.id, mode, value: num(val), comment })
+    .then(() => { setMsg("Запрос оформлен: менеджеру сделки поставлена задача запросить у производителя, запись — в ленте."); setErr(""); }).catch((e) => setErr((e as Error).message));
+  const apply = () => newUnit && api.post(`/api/deals/${dealId}/factory-price/apply`, { position_id: pos.id, unit_price: newUnit, comment })
+    .then(() => { setMsg(`Новая цена производителя ${fmtRub(newUnit)} ${pos.currency} за 1 шт. применена в расчёте.`); setVal(""); setComment(""); setErr(""); onApplied(); }).catch((e) => setErr((e as Error).message));
+  const solve = () => api.post<typeof solved>(`/api/deals/${dealId}/factory-price/solve`, { variant_id: variantId, position_id: pos.id, target_margin_pct: num(tm), sale_price_unit: sp.trim() ? num(sp) : null, sale_currency: dealCur })
+    .then((r) => { setSolved(r); setErr(""); }).catch((e) => { setSolved(null); setErr((e as Error).message); });
+  return (
+    <div className="fp-panel">
+      <h3>Цена производителя: скидка, новая цена, нужная цена</h3>
+      {positions.length > 1 && <label className="pf-field" style={{ maxWidth: 420 }}><span className="pf-label">Позиция</span>
+        <select value={pos.id} onChange={(e) => { setPid(e.target.value); setVal(""); setSolved(null); }}>{positions.map((p) => <option key={p.id} value={p.id}>{p.machine_type} {p.model} × {p.qty}</option>)}</select></label>}
+      <div className="fp-now">Сейчас: <b>{fmtRub(pos.unit_price)} {pos.currency}</b> за 1 шт.{(pos.qty || 1) > 1 ? ` · за ${pos.qty} шт. ${fmtRub(pos.unit_price * pos.qty)} ${pos.currency}` : ""}</div>
+      {err && <div className="alert error">{err}</div>}
+      {msg && <div className="alert ok">{msg}</div>}
+      <div className="fp-cols">
+        <div className="fp-col">
+          <b>Что если производитель даст</b>
+          <div className="row" style={{ gap: 6, alignItems: "center", margin: "6px 0" }}>
+            <div className="ng-seg">{([["discount_pct", "скидку, %"], ["price", `новую цену, ${pos.currency}`]] as const).map(([k, t]) => <button key={k} className={mode === k ? "active" : ""} onClick={() => { setMode(k); setVal(""); }}>{t}</button>)}</div>
+            <input inputMode="decimal" value={val} placeholder={mode === "discount_pct" ? "напр. 5" : "за 1 шт."} style={{ width: 140, height: 34, fontWeight: 600 }} onChange={(e) => setVal(e.target.value)} />
+          </div>
+          {res && newUnit != null && <>
+            <div className="fp-new">Новая цена производителя: <b>{fmtRub(newUnit)} {pos.currency}</b> за 1 шт. ({(((newUnit - pos.unit_price) / (pos.unit_price || 1)) * 100).toFixed(2).replace(".", ",")} %) · цена продажи — прежняя</div>
+            <table className="fp-table"><thead><tr><th>{u > 1 ? "на 1 машину" : ""}</th><th className="num">Сейчас</th><th className="num">С новой ценой</th><th className="num">Изменение</th></tr></thead>
+              <tbody>{rows.map(([t, g, money, isCost]) => (
+                <tr key={t} className={t === "Маржа от выручки" ? "fp-key" : ""}><td>{t}</td>
+                  <td className="num">{money ? (fc ? cur1(g(res.before)) : rub1(g(res.before))) : fmtPct(g(res.before))}{money && fc && <div className="cb-rubc">≈ {rub1(g(res.before))}</div>}</td>
+                  <td className="num"><b>{money ? (fc ? cur1(g(res.after)) : rub1(g(res.after))) : fmtPct(g(res.after))}</b>{money && fc && <div className="cb-rubc">≈ {rub1(g(res.after))}</div>}</td>
+                  <td className="num">{delta(g(res.before), g(res.after), money, isCost)}</td></tr>))}</tbody></table>
+            {threshold != null && res.after.margin_pct != null && <div className={res.after.margin_pct >= threshold ? "alert ok" : "alert warn"} style={{ marginTop: 6 }}>
+              Маржа {fmtPct(res.after.margin_pct)} {res.after.margin_pct >= threshold ? "не ниже" : "ниже"} порога {threshold} %</div>}
+            <input placeholder="комментарий / основание (для применения — обязательно: письмо, ответ производителя)" value={comment} onChange={(e) => setComment(e.target.value)} style={{ width: "100%", marginTop: 6 }} />
+            <div className="row" style={{ gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+              <button className="btn secondary" onClick={request}>Запросить у производителя</button>
+              <button className="btn" disabled={!canApply || !comment.trim()} title={canApply ? "" : "после утверждения — через «Вернуть на доработку»"} onClick={apply}>Применить в расчёте</button>
+            </div>
+          </>}
+        </div>
+        <div className="fp-col">
+          <b>Какая цена производителя нужна</b>
+          <div className="fp-solve">
+            <label className="pf-field"><span className="pf-label">Маржа, %</span><input inputMode="decimal" value={tm} onChange={(e) => setTm(e.target.value)} /></label>
+            <label className="pf-field"><span className="pf-label">Цена продажи без НДС за 1 шт., {dealCur}</span><input inputMode="decimal" value={sp} onChange={(e) => setSp(e.target.value)} /></label>
+            <button className="btn" onClick={solve}>Рассчитать</button>
+          </div>
+          {solved && <div className="fp-result">
+            <div>Нужна цена производителя: <b>{fmtRub(solved.unit_price)} {solved.currency}</b> за 1 шт.</div>
+            <div className="muted">{solved.discount_pct != null ? (solved.discount_pct >= 0 ? `скидка ${solved.discount_pct.toFixed(2).replace(".", ",")} % от текущей` : `можно на ${Math.abs(solved.discount_pct).toFixed(2).replace(".", ",")} % дороже текущей`) : ""} · маржа {fmtPct(solved.after.margin_pct)}, прибыль {fc ? `${cur1(solved.after.profit_rub)} (≈ ${rub1(solved.after.profit_rub)})` : rub1(solved.after.profit_rub)}{u > 1 ? " с 1 машины" : ""}</div>
+            <button className="btn ghost" style={{ marginTop: 6 }} onClick={() => { setMode("price"); setVal(String(solved.unit_price)); }}>Подставить в «что если»</button>
+          </div>}
+        </div>
+      </div>
     </div>);
 }

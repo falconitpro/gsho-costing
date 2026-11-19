@@ -183,3 +183,38 @@ def test_negotiation_amount_per_unit(client):
     assert new_price(st, {"mode": "amount", "basis": "net", "currency": "RUB", "value": 100_000}, 22, {}) == 2_700_000
     assert new_price(st, {"mode": "target", "basis": "net", "currency": "RUB", "value": 900_000}, 22, {}) == 2_700_000
     assert new_price(st, {"mode": "pct", "value": 10}, 22, {}) == 2_700_000
+
+
+def _priced(client):
+    """Сделка с назначенной ценой, до утверждения (расчёт готов)."""
+    clients = _ok(client.get("/api/refs/clients", headers=H(MGR)))
+    factories = _ok(client.get("/api/refs/factories", headers=H(MGR)))
+    did = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": clients[0]["id"], "site": "Завод"}), 201)["id"]
+    pos = _ok(client.post(f"/api/deals/{did}/positions", headers=H(MGR), json={"factory_id": factories[0]["id"], "model": "FP-1",
+              "machine_type": "ПДМ", "qty": 2, "unit_price": 1000000, "currency": "CNY"}), 201)
+    var = _ok(client.get(f"/api/deals/{did}", headers=H(MGR)))["offer"]
+    _ok(client.post(f"/api/deals/{did}/send-to-calc", headers=H(MGR)))
+    _ok(client.post(f"/api/deals/{did}/logistics/batches", headers=H(LOG), json={"items": {"door_to_door": {"amount": 100000, "currency": "CNY"}, "broker_rub": 100000,
+        "comments": {"door_to_door": "x", "broker_rub": "x"}}, "position_ids": [pos["id"]]}), 201)
+    _ok(client.put(f"/api/deals/{did}/logistics/positions/{pos['id']}", headers=H(LOG), json={"hs_code": "8429519000", "util_applies": False}))
+    _ok(client.post(f"/api/deals/{did}/logistics/complete", headers=H(LOG)))
+    _ok(client.post(f"/api/deals/{did}/price", headers=H(CD), json={"variant_id": var["id"], "mode": "margin", "value": 15}))
+    return did, var["id"], pos
+
+
+def test_factory_price_what_if_solve_request_apply(client):
+    did, vid, pos = _priced(client)
+    assert client.post(f"/api/deals/{did}/factory-price/what-if", headers=H(MGR), json={"variant_id": vid, "changes": {}}).status_code == 403
+    w = _ok(client.post(f"/api/deals/{did}/factory-price/what-if", headers=H(CD), json={"variant_id": vid, "changes": {pos["id"]: {"mode": "discount_pct", "value": 5}}}))
+    assert w["new_prices"][pos["id"]] == 950000
+    assert w["after"]["margin_pct"] > w["before"]["margin_pct"] and w["after"]["cost_total_rub"] < w["before"]["cost_total_rub"]
+    assert w["after"]["price_rub"] == w["before"]["price_rub"]                       # цена продажи не меняется
+    s = _ok(client.post(f"/api/deals/{did}/factory-price/solve", headers=H(CD), json={"variant_id": vid, "position_id": pos["id"], "target_margin_pct": 20}))
+    assert s["unit_price"] < 1000000 and abs(s["after"]["margin_pct"] - 20) < 0.05 and s["discount_pct"] > 0
+    r = _ok(client.post(f"/api/deals/{did}/factory-price/request", headers=H(CD), json={"position_id": pos["id"], "mode": "price", "value": s["unit_price"], "comment": "к пятнице"}), 201)
+    tasks = _ok(client.get("/api/tasks/my", headers=H(MGR)))
+    assert any(t["id"] == r["task_id"] and "Запросить у производителя" in t["title"] for t in tasks)
+    assert client.post(f"/api/deals/{did}/factory-price/apply", headers=H(CD), json={"position_id": pos["id"], "unit_price": 900000}).status_code == 422
+    out = _ok(client.post(f"/api/deals/{did}/factory-price/apply", headers=H(CD), json={"position_id": pos["id"], "unit_price": 900000, "comment": "письмо завода 19.11"}))
+    assert out["unit_price"] == 900000 and out["before"] == 1000000
+    assert next(p for p in _ok(client.get(f"/api/deals/{did}", headers=H(CD)))["positions"] if p["id"] == pos["id"])["unit_price"] == 900000
