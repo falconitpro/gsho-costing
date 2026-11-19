@@ -1,4 +1,4 @@
-import { Crumbs } from "../components/Levels";
+import { Crumbs, EntryGrid, useFetched, useUiMode, type Entry } from "../components/Levels";
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
@@ -46,20 +46,38 @@ export default function SupplyPage({ me }: { me: Me }) {
   const TABS: [T, string, boolean][] = [["po", "Заказы поставщикам", poReader], ["batches", "Партии", poReader], ["stock", "Склад", poReader], ["claims", "Гарантия", fleetReader], ["reports", "Отчёты", fleetReader]];
   const visible = TABS.filter((t) => t[2]);
   const asked = new URLSearchParams(loc.search).get("tab") as T;
-  const tab: T | undefined = visible.some(([k]) => k === asked) ? asked : visible[0]?.[0];
+  // «Новый вид»: /supply без ?tab= — обзор: ключевые счётчики и входы в подразделы; «прежний вид» — сразу первая вкладка
+  const [uiMode] = useUiMode();
+  const overview = uiMode !== "classic" && !asked && visible.length > 0;
+  const tab: T | undefined = overview ? undefined : visible.some(([k]) => k === asked) ? asked : visible[0]?.[0];
+  const ov = useFetched({ po: poReader ? "/api/parts/po?open_only=true" : null, batches: poReader ? "/api/parts/batches" : null, recv: poReader ? "/api/parts/stock/receivable" : null,
+    dev: poReader ? "/api/parts/stock/deviations?open_only=true" : null, claims: fleetReader ? "/api/parts/claims?open_only=true" : null }, overview);
+  const n = (k: string) => (Array.isArray(ov[k]) ? (ov[k] as unknown[]).length : null);
+  const HINTS: Record<T, string> = { po: "заказы поставщикам, кандидаты в заказ, документы", batches: "партии поставки, состав, расходы", stock: "приёмка, остатки, движения, инвентаризации, пополнение",
+    claims: "гарантийные случаи и претензии поставщикам", reports: "отчёты по закупкам, складу и парку машин" };
+  const entryOf = ([k, t]: [T, string, boolean]): Entry => {
+    const stats: NonNullable<Entry["stats"]> = [];
+    if (k === "po" && n("po") != null) stats.push({ value: n("po")!, label: "открытых заказов" });
+    if (k === "batches" && n("batches") != null) stats.push({ value: n("batches")!, label: "партий" });
+    if (k === "stock" && n("recv") != null) stats.push({ value: n("recv")!, label: "ждут приёмки", tone: n("recv") ? "warn" : "" });
+    if (k === "stock" && n("dev") != null) stats.push({ value: n("dev")!, label: "открытых расхождений", tone: n("dev") ? "bad" : "" });
+    if (k === "claims" && n("claims") != null) stats.push({ value: n("claims")!, label: "открытых случаев", tone: n("claims") ? "warn" : "" });
+    return { key: k, title: t, to: `/supply?tab=${k}`, hint: HINTS[k], stats };
+  };
   return (
     <>
-      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Снабжение и склад", to: "/supply" }, { label: visible.find(([k]) => k === tab)?.[1] }]} />
+      <Crumbs items={overview ? [{ label: "Рабочее место", to: "/" }, { label: "Снабжение и склад" }] : [{ label: "Рабочее место", to: "/" }, { label: "Снабжение и склад", to: "/supply" }, { label: visible.find(([k]) => k === tab)?.[1] }]} />
       <div className="page-head"><h1>Снабжение и склад</h1>
-        <div className="tabs" style={{ margin: 0 }}>{visible.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => nav(`/supply?tab=${k}`)}>{t}</button>)}</div>
+        <div className="tabs" style={{ margin: 0 }}>{uiMode !== "classic" && visible.length > 0 && <button className={overview ? "active" : ""} onClick={() => nav("/supply")}>Обзор</button>}{visible.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => nav(`/supply?tab=${k}`)}>{t}</button>)}</div>
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Заявки клиентов на запчасти — в <Link to="/deals?type=parts">Сделках</Link>, каталог запчастей и справочники — в <Link to="/catalog?s=parts">Каталоге</Link>, парк машин — в карточке клиента.</div>
+      {overview && <EntryGrid entries={visible.map(entryOf)} />}
       {tab === "po" && <PartsPurchase me={me} />}
       {tab === "batches" && <PartsBatches />}
       {tab === "stock" && <PartsWarehouse />}
       {tab === "claims" && <PartsClaims me={me} />}
       {tab === "reports" && <PartsReports />}
-      {!tab && <div className="card muted">Нет доступа к разделу.</div>}
+      {!tab && !overview && <div className="card muted">Нет доступа к разделу.</div>}
     </>
   );
 }

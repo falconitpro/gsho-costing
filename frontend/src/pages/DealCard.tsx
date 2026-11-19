@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Crumbs } from "../components/Levels";
+import { Crumbs, EntryGrid, useUiMode, type Entry } from "../components/Levels";
 import { toneOf } from "../colors";
 import ChecksPanel from "../components/ChecksPanel";
 import { NowLine, POST_WIN_STATUSES, SaleSummary, StageStrip, dealPhase } from "../components/DealHeader";
@@ -26,14 +26,20 @@ import { ModelDocsBlock, ZipBlock } from "../components/PositionExtras";
 import AcceptanceTab from "../components/AcceptanceTab";
 import { payText } from "../components/PaymentTermsEditor";
 
-type Tab = "acceptance" | "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "documents" | "legal" | "catalog" | "feed" | "versions";
+type Tab = "overview" | "acceptance" | "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "documents" | "legal" | "catalog" | "feed" | "versions";
 const POST_WIN = ["contract", "execution", "closed"];
 type Phase = "sale" | "contract";
 const SALE_TABS: Tab[] = ["main", "positions", "offers", "logistics", "service", "pricing", "catalog"];
 const CONTRACT_TABS: Tab[] = ["execution", "acceptance", "planfact", "documents", "legal"];
 const TAB_TITLES: Record<Tab, string> = { main: "Шапка и условия", positions: "Позиции и характеристики", offers: "Заводы и ответы", logistics: "Логистика и таможня",
   service: "Сервис", pricing: "Расчёт и утверждение", catalog: "В каталог", execution: "Контракт, этапы и даты", acceptance: "Приёмка машин",
-  planfact: "Платежи и план/факт", documents: "Документы", legal: "Юридические документы", feed: "Лента", versions: "Версии и файлы" };
+  planfact: "Платежи и план/факт", documents: "Документы", legal: "Юридические документы", feed: "Лента", versions: "Версии и файлы", overview: "Обзор" };
+// что внутри раздела — видно на обзоре сразу, не во всплывающей подсказке
+const TAB_HINTS: Partial<Record<Tab, string>> = { main: "клиент, контакт, валюта, сервис, альтернативы, условия оплаты", positions: "техника, количество, сроки производства, технические характеристики, фото, опции, ЗИП",
+  offers: "ответы заводов, цены, выбор предложения", logistics: "маршрут, перевозка, таможня, утилизационный сбор", service: "расчёт сервиса до наработки",
+  pricing: "себестоимость, цена, условия оплаты, визы, КП и торги", catalog: "перенос моделей и характеристик сделки в каталог", execution: "реквизиты контрактов, сканы, этапы, ключевые сроки",
+  acceptance: "готовность, предварительная и окончательная приёмка", planfact: "график платежей, поступления, отклонения", documents: "файлы клиента, проверка юриста, пакеты документов",
+  legal: "договоры, спецификации, доверенности по сделке", feed: "переписка, события и комментарии по сделке", versions: "версии расчёта, Excel, КП" };
 
 export default function DealCard({ me }: { me: Me }) {
   const { id } = useParams();
@@ -71,20 +77,30 @@ export default function DealCard({ me }: { me: Me }) {
   const [sp, setSp] = useSearchParams();
   const urlTab = sp.get("tab") as Tab | null;
   const tabOk = (t: string | null): t is Tab => !!t && ([...SALE_TABS, ...CONTRACT_TABS, "feed", "versions"] as string[]).includes(t) && (t !== "pricing" || isMgmt);
+  // «Новый вид»: /deals/:id без ?tab= — обзор сделки (крупные входы в рабочие разделы); «прежний вид» — сразу вкладка по статусу
+  const [uiMode] = useUiMode();
+  const classic = uiMode === "classic";
   useEffect(() => {     // адрес → вкладка (назад / вперёд / ссылка на ту же сделку)
-    if (!deal || !tabOk(urlTab) || urlTab === tab) return;
-    if (urlTab === "feed" || urlTab === "versions") setTabState(urlTab); else setTab(urlTab);
+    if (!deal) return;
+    if (tabOk(urlTab)) { if (urlTab !== tab) { if (urlTab === "feed" || urlTab === "versions") setTabState(urlTab); else setTab(urlTab); } return; }
+    if (!classic && !urlTab && tab !== "overview") setTabState("overview");     // «Назад» из раздела — к обзору
   }, [urlTab]);
   useEffect(() => {     // вкладка → адрес; первый выбор по статусу не плодит лишнюю запись в истории
-    if (!deal || urlTab === tab) return;
-    const n = new URLSearchParams(sp); n.set("tab", tab);
-    setSp(n, { replace: !tabOk(urlTab) });
+    if (!deal) return;
+    const n = new URLSearchParams(sp);
+    if (tab === "overview") { if (sp.has("tab")) { n.delete("tab"); setSp(n, { replace: !tabOk(urlTab) }); } return; }
+    if (urlTab === tab) return;
+    n.set("tab", tab);
+    setSp(n, { replace: classic && !tabOk(urlTab) });
   }, [tab, !!deal]);
+  useEffect(() => {     // переключили на «прежний вид», стоя на обзоре, — открыть вкладку по статусу, как раньше
+    if (deal && classic && tab === "overview") setTabState(dealPhase(deal) === "sale" ? "main" : "execution");
+  }, [classic, !!deal]);
 
   const load = () => api.get<Deal>(`/api/deals/${id}`).then((d) => {
     setDeal(d); setWishes(d.client_payment_wishes || "");
     if (!deal) {   // первое открытие — фаза по статусу; ?tab=… из ссылок («Финансы», задачи, уведомления) открывает нужную вкладку
-      const p = dealPhase(d); setPhaseState(p); setTabState(p === "sale" ? "main" : "execution");
+      const p = dealPhase(d); setPhaseState(p); setTabState(classic ? (p === "sale" ? "main" : "execution") : "overview");
       if (wantTab && ([...SALE_TABS, ...CONTRACT_TABS, "feed", "versions"] as string[]).includes(wantTab) && (wantTab !== "pricing" || isMgmt)) setTab(wantTab);
     }
   }).catch((e) => setErr(e.message));
@@ -157,11 +173,30 @@ export default function DealCard({ me }: { me: Me }) {
   };
 
   const phaseStart: Tab = phase === "sale" ? "main" : "execution";
+  // доступные разделы сделки — один список и для строки вкладок, и для обзора (условия показа прежние)
+  const saleTabs = ([["main", true], ["positions", true], ["offers", true], ["logistics", has("logistician", "cd", "fd", "gd")], ["service", !!deal.service_flag && has("service_head", "cd", "fd", "gd")],
+    ["pricing", isMgmt], ["catalog", ["kp_sent", ...POST_WIN_STATUSES, "lost"].includes(deal.status) && (isOwner || has("cd"))]] as [Tab, boolean][]).filter((x) => x[1]).map((x) => x[0]);
+  const contractTabs = ([["execution", true], ["acceptance", ["contract", "execution", "closed"].includes(deal.status) && has("manager", "service_head", "cd", "gd", "fd", "logistician")],
+    ["planfact", true], ["documents", can(me, "legal_docs")], ["legal", can(me, "legal_docs")]] as [Tab, boolean][]).filter((x) => x[1]).map((x) => x[0]);
+  const historyTabs = ([["feed", true], ["versions", true], ["documents", !POST_WIN_STATUSES.includes(deal.status) && can(me, "legal_docs")]] as [Tab, boolean][]).filter((x) => x[1]).map((x) => x[0]);
+  const missing = (t: Tab) => (["draft", "rework"].includes(deal.status) ? (deal.check_items || []).filter((x) => x.tab === t) : []);
+  const entryOf = (t: Tab): Entry => {
+    const miss = missing(t);
+    const stats: NonNullable<Entry["stats"]> = [];
+    if (t === "positions") stats.push({ value: (deal.positions || []).length, label: "позиций" }, { value: (deal.positions || []).reduce((a, p) => a + (Number(p.qty) || 0), 0), label: "машин" });
+    if (t === "offers" && deal.has_alternatives) stats.push({ value: (deal.variants || []).length, label: "предложений в КП" });
+    if (t === "pricing") stats.push({ value: deal.current_version_no, label: "версия расчёта" });
+    if (t === "execution" && deal.contract_number) stats.push({ value: deal.contract_number, label: "контракт с клиентом" });
+    if (t === "execution" && deal.factory_contract_number) stats.push({ value: deal.factory_contract_number, label: "контракт с заводом" });
+    return { key: t, title: TAB_TITLES[t], to: `/deals/${deal.id}?tab=${t}`, hint: TAB_HINTS[t], stats,
+      attention: miss.length ? `не заполнено: ${miss.reduce((a, x) => a + x.fields.length + x.tech.length, 0)}` : undefined };
+  };
   return (
     <>
-      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Сделки", to: "/deals" }, { label: deal.number, to: `/deals/${deal.id}?tab=${phaseStart}` },
-        ...(POST_WIN_STATUSES.includes(deal.status) ? [{ label: phase === "sale" ? "Продажа" : "Контракт и исполнение", to: `/deals/${deal.id}?tab=${phaseStart}` }] : []),
-        { label: TAB_TITLES[tab] }]} />
+      <Crumbs items={tab === "overview" ? [{ label: "Рабочее место", to: "/" }, { label: "Сделки", to: "/deals" }, { label: deal.number }]
+        : [{ label: "Рабочее место", to: "/" }, { label: "Сделки", to: "/deals" }, { label: deal.number, to: classic ? `/deals/${deal.id}?tab=${phaseStart}` : `/deals/${deal.id}` },
+          ...(POST_WIN_STATUSES.includes(deal.status) && tab !== "feed" && tab !== "versions" ? [{ label: phase === "sale" ? "Продажа" : "Контракт и исполнение", to: `/deals/${deal.id}?tab=${phaseStart}` }] : []),
+          { label: TAB_TITLES[tab] }]} />
       <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <div className="row" style={{ gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -241,23 +276,18 @@ export default function DealCard({ me }: { me: Me }) {
           {phase === "sale" && <span className="muted" style={{ fontSize: 12 }}>фаза продажи закрыта — данные только для чтения</span>}
         </div>)}
       <div className="tabs">
-        {phase === "sale" && <>
-          <button className={tab === "main" ? "active" : ""} onClick={() => setTab("main")}>Шапка и условия</button>
-          <button className={tab === "positions" ? "active" : ""} onClick={() => setTab("positions")}>Позиции и характеристики</button>
-          <button className={tab === "offers" ? "active" : ""} onClick={() => setTab("offers")}>Заводы и ответы</button>
-          {has("logistician", "cd", "fd", "gd") && <button className={tab === "logistics" ? "active" : ""} onClick={() => setTab("logistics")}>Логистика и таможня</button>}
-          {deal.service_flag && has("service_head", "cd", "fd", "gd") && <button className={tab === "service" ? "active" : ""} onClick={() => setTab("service")}>Сервис</button>}
-          {isMgmt && <button className={tab === "pricing" ? "active" : ""} onClick={() => setTab("pricing")}>Расчёт и утверждение</button>}
-          {["kp_sent", ...POST_WIN_STATUSES, "lost"].includes(deal.status) && (isOwner || has("cd")) && <button className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>В каталог</button>}
-        </>}
-        {phase === "contract" && <>
-          <button className={tab === "execution" ? "active" : ""} onClick={() => setTab("execution")}>Контракт, этапы и даты</button>
-          {["contract", "execution", "closed"].includes(deal.status) && has("manager", "service_head", "cd", "gd", "fd", "logistician") && <button className={tab === "acceptance" ? "active" : ""} onClick={() => setTab("acceptance")}>Приёмка машин</button>}
-          <button className={tab === "planfact" ? "active" : ""} onClick={() => setTab("planfact")}>Платежи и план/факт</button>
-          {can(me, "legal_docs") && <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>Документы</button>}
-          {can(me, "legal_docs") && <button className={tab === "legal" ? "active" : ""} onClick={() => setTab("legal")}>Юридические документы</button>}
-        </>}
+        {!classic && <button className={tab === "overview" ? "active" : ""} onClick={() => setTabState("overview")}>Обзор</button>}
+        {(phase === "sale" ? saleTabs : contractTabs).map((t) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{TAB_TITLES[t]}</button>)}
       </div>
+      {tab === "overview" && (
+        <>
+          {POST_WIN_STATUSES.includes(deal.status) && <h2 style={{ margin: "4px 0 8px" }}>Контракт и исполнение</h2>}
+          {POST_WIN_STATUSES.includes(deal.status) && <EntryGrid entries={contractTabs.map(entryOf)} />}
+          <h2 style={{ margin: "4px 0 8px" }}>Продажа{POST_WIN_STATUSES.includes(deal.status) && <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}> · фаза закрыта, данные только для чтения</span>}</h2>
+          <EntryGrid entries={saleTabs.map(entryOf)} />
+          <h2 style={{ margin: "4px 0 8px" }}>История и файлы</h2>
+          <EntryGrid entries={historyTabs.map(entryOf)} />
+        </>)}
 
       {tab === "main" && (
         <div className="grid cols-2">

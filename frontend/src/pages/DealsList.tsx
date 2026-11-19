@@ -1,4 +1,4 @@
-import { Crumbs } from "../components/Levels";
+import { Crumbs, useUiMode } from "../components/Levels";
 import { useEffect, useMemo, useState } from "react";
 import { PRIORITY_COLOR, toneOf } from "../colors";
 import { lbl, PRIORITY } from "../labels";
@@ -159,6 +159,10 @@ export default function DealsList({ me }: { me: Me }) {
   const urlBlock = sp.get("block") as Block | null;   // с рабочего места: ?block=won|work|archive
   const [storedBlock] = useState<Block>(() => load<Block>("gsho.dealsBlock", "work"));
   const block: Block = urlBlock && ["work", "won", "lost", "archive"].includes(urlBlock) ? urlBlock : storedBlock;
+  // «Новый вид»: в реестре — ключевые колонки; «Все колонки» открывает полный набор (выбор запоминается). «Прежний вид» — всегда полный набор.
+  const [uiMode] = useUiMode();
+  const [wantAll, setWantAll] = useState<boolean>(() => load<boolean>("gsho.dealsAllCols", false));
+  const allCols = uiMode === "classic" || wantAll;
   const setBlock = (b: Block) => { save("gsho.dealsBlock", b); setF({ ...f, statuses: [] }); const n = new URLSearchParams(sp); n.set("block", b); setSp(n); };
   const urlType = new URLSearchParams(window.location.search).get("type") as DealType | null;
   const [f, setFState] = useState<Filters>(() => ({ ...EMPTY_F, type: "gsho", ...load<Partial<Filters>>("gsho.dealsFilters", {}), ...(urlType === "gsho" || urlType === "parts" ? { type: urlType } : {}) }));
@@ -358,34 +362,42 @@ export default function DealsList({ me }: { me: Me }) {
             onClick={() => { const n = { key: k as SortKey, dir: (k === "date" ? -1 : 1) as 1 | -1 }; setSort(n); save("gsho.dealsSort2", n); }}>{t}</button>))}
         </div>
       </div>}
+      {uiMode !== "classic" && <div className="row" style={{ gap: 8, margin: "0 0 8px", alignItems: "center", flexWrap: "wrap" }}>
+        <span className="muted">Колонки:</span>
+        <div className="seg" role="group" aria-label="Набор колонок">
+          <button type="button" className={!allCols ? "on" : ""} aria-pressed={!allCols} onClick={() => { setWantAll(false); save("gsho.dealsAllCols", false); }}>Основные</button>
+          <button type="button" className={allCols ? "on" : ""} aria-pressed={allCols} onClick={() => { setWantAll(true); save("gsho.dealsAllCols", true); }}>Все колонки</button>
+        </div>
+        {!allCols && <span className="muted" style={{ fontSize: 12 }}>скрыты: {block === "won" ? `количество, контракт, ${fin ? "сумма, " : ""}менеджер` : `количество, менеджер, ${fin && block !== "work" ? "сумма, " : ""}версия`}</span>}
+      </div>}
       <div className="card" style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ minWidth: 900 }}>
+        <table style={{ minWidth: allCols ? 900 : 720 }}>
           {block === "won" ? (
-            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th>{th("machines", "Кол-во", 70)}<th>Контракт</th>{fin && th("price", "Сумма")}
-              {th("progress", "Исполнение", 130)}{th("next", "Ближайший этап")}{th("status", "Статус")}{th("manager", "Менеджер")}</tr></thead>
+            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th>{allCols && th("machines", "Кол-во", 70)}{allCols && <th>Контракт</th>}{allCols && fin && th("price", "Сумма")}
+              {th("progress", "Исполнение", 130)}{th("next", "Ближайший этап")}{th("status", "Статус")}{allCols && th("manager", "Менеджер")}</tr></thead>
           ) : (
-            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th>{th("machines", "Кол-во", 70)}{th("kp_due", "Срок КП", 120)}{th("priority", "Приоритет", 100)}
-              {block === "work" && th("task", "Мне сделать / срок", 190)}{th("status", "Статус")}{th("manager", "Менеджер")}{fin && block !== "work" && th("price", "Сумма")}<th>Версия</th></tr></thead>)}
+            <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th>{allCols && th("machines", "Кол-во", 70)}{th("kp_due", "Срок КП", 120)}{th("priority", "Приоритет", 100)}
+              {block === "work" && th("task", "Мне сделать / срок", 190)}{th("status", "Статус")}{allCols && th("manager", "Менеджер")}{allCols && fin && block !== "work" && th("price", "Сумма")}{allCols && <th>Версия</th>}</tr></thead>)}
           <tbody>
             {grouped(sorted).map((d) => {
               const late = kpOverdue(d) || (d.exec?.overdue || 0) > 0;
               const rowStyle = { ...(d.parent_number ? { background: "#fafafa" } : {}), ...(late ? { boxShadow: "inset 3px 0 0 var(--accent)" } : {}) };
               return block === "won" ? (
                 <tr key={d.id} style={rowStyle}>
-                  {numCell(d)}{clientCell(d)}{eqCell(d)}{qtyCell(d)}
-                  <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{d.kind === "parts" ? <span className="muted">по заказу клиента</span> : d.contract_number ? <>клиент № {d.contract_number}{d.contract_signed_at && <span className="muted"> от {fmtDate(d.contract_signed_at)}</span>}</> : <span className="muted">не подписан</span>}
-                    {d.kind !== "parts" && <div>{d.factory_contract_number ? <>завод № {d.factory_contract_number}{d.factory_contract_signed_at && <span className="muted"> от {fmtDate(d.factory_contract_signed_at)}</span>}</> : <span className="muted">завод — нет</span>}</div>}</td>
-                  {fin && <td>{money(d)}</td>}
+                  {numCell(d)}{clientCell(d)}{eqCell(d)}{allCols && qtyCell(d)}
+                  {allCols && <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>{d.kind === "parts" ? <span className="muted">по заказу клиента</span> : d.contract_number ? <>клиент № {d.contract_number}{d.contract_signed_at && <span className="muted"> от {fmtDate(d.contract_signed_at)}</span>}</> : <span className="muted">не подписан</span>}
+                    {d.kind !== "parts" && <div>{d.factory_contract_number ? <>завод № {d.factory_contract_number}{d.factory_contract_signed_at && <span className="muted"> от {fmtDate(d.factory_contract_signed_at)}</span>}</> : <span className="muted">завод — нет</span>}</div>}</td>}
+                  {allCols && fin && <td>{money(d)}</td>}
                   <td><Progress e={d.exec} />{d.exec?.delay_days ? <div style={{ fontSize: 11, color: d.exec.delay_days > 0 ? "var(--accent)" : "var(--muted)" }}>{d.exec.delay_days > 0 ? `+${d.exec.delay_days}` : d.exec.delay_days} дн. к плану</div> : null}</td>
                   <td style={{ fontSize: 13, minWidth: 160 }}>{d.exec?.next ? <>{d.exec.next.title}<div style={{ fontSize: 12, color: (daysTo(d.exec.next.on) ?? 1) < 0 ? "var(--accent)" : "var(--muted)" }}>
                     {fmtDate(d.exec.next.on)}{(daysTo(d.exec.next.on) ?? 1) < 0 ? ` · просрочен ${-(daysTo(d.exec.next.on) || 0)} дн.` : ""}</div></> : <span className="muted">—</span>}</td>
-                  <td><StatusBadge d={d} /></td><td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>
+                  <td><StatusBadge d={d} /></td>{allCols && <td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>}
                 </tr>) : (
                 <tr key={d.id} style={rowStyle}>
-                  {numCell(d)}{clientCell(d)}{eqCell(d)}{qtyCell(d)}<td><KpDue d={d} /></td><td><Prio p={d.priority} /></td>
+                  {numCell(d)}{clientCell(d)}{eqCell(d)}{allCols && qtyCell(d)}<td><KpDue d={d} /></td><td><Prio p={d.priority} /></td>
                   {block === "work" && <td><MyTasks t={d.my_tasks} /></td>}
-                  <td><StatusBadge d={d} /></td><td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>{fin && block !== "work" && <td>{money(d)}</td>}
-                  <td className="muted">{d.kind === "parts" ? "" : d.current_version_no || ""}</td>
+                  <td><StatusBadge d={d} /></td>{allCols && <td style={{ whiteSpace: "nowrap" }}>{d.manager_name}</td>}{allCols && fin && block !== "work" && <td>{money(d)}</td>}
+                  {allCols && <td className="muted">{d.kind === "parts" ? "" : d.current_version_no || ""}</td>}
                 </tr>);
             })}
             {sorted.length === 0 && <tr><td colSpan={10} className="muted" style={{ padding: 16 }}>{inBlock.length ? "Нет сделок по выбранным фильтрам" : block === "archive" ? "В архиве сделок нет" : f.type === "parts" ? "Заявок на запчасти нет — нажмите «Новая заявка на запчасти»" : "Сделок нет"}</td></tr>}
