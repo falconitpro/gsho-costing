@@ -180,3 +180,12 @@ def test_drill_function_keeps_existing_metadata():
     s = (DR / "functions/drill/index.py").read_text()
     assert "?view=FULL" in s and 'dict(inst.get("metadata") or {})' in s and ":updateMetadata" not in s
     assert "operation.api" not in s   # статус операции SA с ролью только на ВМ не читает (403) — ждём метку на самой ВМ
+
+
+def test_monitor_test_mail_only_on_explicit_flag():
+    m = _monitor()
+    assert m.is_test_mail({"test_mail": True})
+    assert not m.is_test_mail({"messages": [{"event_metadata": {"event_type": "yandex.cloud.events.serverless.triggers.TimerMessage"}}]})
+    assert not m.is_test_mail({"test_mail": "yes"}) and not m.is_test_mail(None) and not m.is_test_mail("x")
+    subject, body = m.test_mail_text(0.0)
+    assert subject.startswith("CRM: ") and "crm2.dobrov.pro" in body

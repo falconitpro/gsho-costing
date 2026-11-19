@@ -55,3 +55,4 @@ trigger() {  # trigger <имя> <cron> <функция>
 trigger crm-monitor-5min '*/5 * ? * * *' crm-monitor
 trigger crm2-drill-weekly '30 0 ? * SUN *' crm2-drill   # 00:30 UTC = 03:30 МСК, воскресенье
 echo "ГОТОВО. Проверка: yc serverless function invoke --name crm-monitor"
+echo "Пробное письмо: yc serverless function invoke --name crm-monitor -d '{\"test_mail\": true}'"
