@@ -186,9 +186,26 @@ def mail_text(kind: str, key: str, text: str, since: float, now: float) -> tuple
     return f"CRM: {TITLES[key]}", "\n".join(lines) + "\n"
 
 
+def is_test_mail(event) -> bool:
+    """Ручной вызов `yc serverless function invoke --name crm-monitor -d '{"test_mail": true}'` — пробное письмо
+    тем же путём, что и тревоги. Таймер присылает {"messages": [...]} — это обычный прогон."""
+    return isinstance(event, dict) and event.get("test_mail") is True
+
+
+def test_mail_text(now: float) -> tuple[str, str]:
+    return ("CRM: пробное письмо мониторинга",
+            "Это пробное письмо. Оповещения мониторинга CRM и резервного сервера crm2.dobrov.pro настроены.\n"
+            "Письма придут, если crm перестанет отвечать, пропадут свежие копии, резервный сервер забудут выключить\n"
+            "или CRM переключат на резерв. По воскресеньям в 03:30 МСК — итог проверки резерва.\n"
+            f"Отправлено: {fmt(now)}. Отвечать не нужно.\n")
+
+
 def handler(event, context):
     token = context.token["access_token"]
     now = time.time()
+    if is_test_mail(event):
+        send_mail(token, *test_mail_text(now))  # ошибка Postbox — пусть видна в ответе вызова
+        return {"statusCode": 200, "body": "пробное письмо отправлено"}
     current: dict = {}
     for key, fn in (("health", check_health), ("backup", lambda: check_backup(token, now))):
         try:
