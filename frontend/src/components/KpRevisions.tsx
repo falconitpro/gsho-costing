@@ -1,12 +1,21 @@
 import { useEffect, useState } from "react";
-import { api, fmtDate, fmtRub } from "../api";
+import { api, fmtDate, fmtCur, fmtRub } from "../api";
 
 type Adj = { kind: "discount" | "markup"; mode: "pct" | "amount"; value: string; label: string };
 type Extra = { name: string; price_rub: string; included: boolean };
 type VarCh = { adjustments: Adj[]; extras: Extra[]; configuration: string; service_in_kp: boolean | null };
 type Variant = { id: string; name: string; price_rub: number; service_flag: boolean; service_in_kp: boolean; configuration: string };
+type VLine = { id: string; name: string; units: number; total: number | null; unit: number | null; total_rub: number; unit_rub: number };
 type Row = { id: string | null; no: number; at: string | null; author: string; description: string; price_rub: number | null; price_before_rub: number | null;
-  margin_pct: number | null; has_file: boolean; sent_at: string | null };
+  margin_pct: number | null; has_file: boolean; sent_at: string | null;
+  variants?: VLine[]; units?: number | null; price?: number | null; price_before?: number | null; unit_price?: number | null; unit_price_rub?: number | null };
+
+/** Сумма в валюте сделки, рубли — мелко справочно (D-095). */
+function Money({ v, rub, cur, bold = false }: { v: number | null | undefined; rub: number | null | undefined; cur: string; bold?: boolean }) {
+  const fc = cur !== "RUB";
+  const main = fc ? (v == null ? "—" : `${fmtCur(v)} ${cur}`) : (rub == null ? "—" : `${fmtRub(rub)} ₽`);
+  return <>{bold ? <b>{main}</b> : main}{fc && rub != null && <div className="muted" style={{ fontSize: 11 }}>≈ {fmtRub(rub)} ₽</div>}</>;
+}
 type Totals = Record<string, { name: string; base: number; extras: [string, number | null][]; adjustments: [string, number][]; total: number; cost: number | null; margin_pct: number | null }>;
 
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${v.toFixed(2).replace(".", ",")} %`);
@@ -17,6 +26,7 @@ export default function KpRevisions({ dealId, status, onDone, readonly = false, 
   const [variants, setVariants] = useState<Variant[]>([]);
   const [canEdit, setCanEdit] = useState(false);
   const [thr, setThr] = useState(3);
+  const [cur, setCur] = useState("RUB");
   const [open, setOpen] = useState(false);
   const [ch, setCh] = useState<Record<string, VarCh>>({});
   const [desc, setDesc] = useState("");
@@ -24,11 +34,14 @@ export default function KpRevisions({ dealId, status, onDone, readonly = false, 
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const ready = ["approved", "kp_sent", "contract", "execution", "closed"].includes(status);
-  const load = () => api.get<{ rows: Row[]; variants: Variant[]; can_edit: boolean; threshold_pct: number }>(`/api/deals/${dealId}/kp/revisions`).then((r) => {
-    setRows(r.rows); setVariants(r.variants); setCanEdit(r.can_edit); setThr(r.threshold_pct ?? 3);
+  const load = () => api.get<{ rows: Row[]; variants: Variant[]; can_edit: boolean; threshold_pct: number; currency?: string }>(`/api/deals/${dealId}/kp/revisions`).then((r) => {
+    setRows(r.rows); setCur((r.currency || "RUB").toUpperCase()); setVariants(r.variants); setCanEdit(r.can_edit); setThr(r.threshold_pct ?? 3);
   }).catch(() => undefined);
   useEffect(() => { if (ready) load(); }, [dealId, status]);
   if (!ready) return null;
+  const first = rows[0];
+  const multi = (first?.variants?.length || 0) > 1;
+  const units = multi ? 1 : (first?.units || first?.variants?.[0]?.units || 1);
 
   const start = () => {
     setCh(Object.fromEntries(variants.map((v) => [v.id, { adjustments: [], extras: [], configuration: v.configuration, service_in_kp: v.service_flag ? v.service_in_kp : null }])));
@@ -47,7 +60,7 @@ export default function KpRevisions({ dealId, status, onDone, readonly = false, 
     setBusy(true);
     try {
       const r = await api.post<{ no: number; price_rub: number }>(`/api/deals/${dealId}/kp/revisions`, { changes: payload(), description: desc });
-      setMsg(`Сформирована редакция КП №${r.no}: ${fmtRub(r.price_rub)} RUB без НДС`); setOpen(false); load(); onDone();
+      setMsg(`Сформирована редакция КП №${r.no}`); setOpen(false); load(); onDone();
     } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
   }
   const upd = (vid: string, p: Partial<VarCh>) => { setCh({ ...ch, [vid]: { ...ch[vid], ...p } }); setTotals(null); };
@@ -61,13 +74,23 @@ export default function KpRevisions({ dealId, status, onDone, readonly = false, 
       </div>
       {msg && <div className="alert info">{msg}</div>}
       <table>
-        <thead><tr><th>№</th><th>Дата</th><th>Автор</th><th className="num">Цена без НДС, RUB</th><th className="num">Изменение</th>{!readonly && <th className="num">Маржа</th>}<th>Описание изменений</th><th>Файлы</th></tr></thead>
+        <thead><tr><th>№</th><th>Дата</th><th>Автор</th><th className="num">За 1 шт. без НДС, {cur}</th><th className="num">{units > 1 ? `За ${units} шт.` : "Итого"} без НДС, {cur}</th><th className="num">Изменение</th>{!readonly && <th className="num">Маржа</th>}<th>Описание изменений</th><th>Файлы</th></tr></thead>
         <tbody>{rows.map((r) => (
           <tr key={r.no} style={{ background: r.no === rows[rows.length - 1]?.no ? "#f4f4f4" : undefined }}>
             <td>{r.no === 0 ? "исходное" : `ред. ${r.no}`}{r.no === rows[rows.length - 1]?.no && <div className="badge accent">актуальное</div>}</td>
             <td>{fmtDate(r.at)}{r.sent_at && <div className="badge ok">отправлено {fmtDate(r.sent_at)}</div>}</td><td>{r.author}</td>
-            <td className="num"><b>{fmtRub(r.price_rub)}</b></td>
-            <td className="num">{r.price_before_rub != null && r.price_rub != null ? <span className={r.price_rub < r.price_before_rub ? "badge warn" : "badge ok"}>{r.price_rub >= r.price_before_rub ? "+" : "−"}{fmtRub(Math.abs(r.price_rub - r.price_before_rub))}</span> : "—"}</td>
+            {multi ? <>
+              <td className="num">{(r.variants || []).map((x) => <div key={x.id} style={{ marginBottom: 4 }}><span className="muted" style={{ fontSize: 11 }}>{x.name}</span><br /><Money v={x.unit} rub={x.unit_rub} cur={cur} bold /></div>)}</td>
+              <td className="num">{(r.variants || []).map((x) => <div key={x.id} style={{ marginBottom: 4 }}><span className="muted" style={{ fontSize: 11 }}>{x.name}{x.units > 1 ? ` · ${x.units} шт.` : ""}</span><br /><Money v={x.total} rub={x.total_rub} cur={cur} /></div>)}</td>
+            </> : <>
+              <td className="num"><Money v={r.unit_price ?? r.price} rub={r.unit_price_rub ?? r.price_rub} cur={cur} bold /></td>
+              <td className="num"><Money v={r.price} rub={r.price_rub} cur={cur} /></td>
+            </>}
+            <td className="num">{r.price_before_rub != null && r.price_rub != null ? (() => {
+              const d = r.price_rub - r.price_before_rub, dc = r.price != null && r.price_before != null ? r.price - r.price_before : null, n = !multi && units > 1 ? units : 1;
+              return <><span className={d < 0 ? "badge warn" : "badge ok"}>{d >= 0 ? "+" : "−"}{cur !== "RUB" && dc != null ? `${fmtCur(Math.abs(dc / n))} ${cur}` : `${fmtRub(Math.abs(d / n))} ₽`}{n > 1 ? " за шт." : ""}</span>
+                {r.price_before_rub ? <div className="muted" style={{ fontSize: 11 }}>{d >= 0 ? "+" : "−"}{Math.abs(d / r.price_before_rub * 100).toFixed(1).replace(".", ",")} %{cur !== "RUB" ? ` · ≈ ${fmtRub(Math.abs(d / n))} ₽` : ""}</div> : null}</>;
+            })() : "—"}</td>
             {!readonly && <td className="num"><span className={r.margin_pct != null && r.margin_pct < thr ? "badge bad" : ""}>{pct(r.margin_pct)}</span></td>}
             <td style={{ fontSize: 12 }}>{r.description}</td>
             <td>{r.has_file && <>
