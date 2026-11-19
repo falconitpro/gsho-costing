@@ -21,7 +21,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   const [withVat, setWithVat] = useState(false);   // сумма вводится с НДС (D-066)
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [tab, setTab] = useState<"cost" | "terms" | "cashflow" | "fx" | "history" | "kp">("cost");
+  const [tab, setTab] = useState<"cost" | "money" | "kp">("cost");   // D-098: три подвкладки вместо семи
   const [rework, setRework] = useState({ block: "logistics", reason: "" });
   const [visaComment, setVisaComment] = useState("");
   const [insistComment, setInsistComment] = useState("");
@@ -97,7 +97,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   return (
     <div className="grid" style={{ gridTemplateColumns: "260px minmax(0, 1fr)" }}>
       <div>
-        <div className="card">
+        {(deal.variants || []).length > 1 && <div className="card">
           <h2 style={{ marginTop: 0 }}>{deal.has_alternatives ? "Предложения (альтернативы в КП)" : "Предложение"}</h2>
           {(deal.variants || []).map((v) => {
             const b = calc.result.variants[v.id]?.base;
@@ -108,7 +108,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
               </div>
             );
           })}
-        </div>
+        </div>}
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Курс ЦБ на {fmtDate(calc.input.fx.as_of)}</h2>
           {Object.entries(calc.input.fx.rates).filter(([c]) => c !== "RUB").map(([c, r]) => <div key={c}>{c}: <b>{r.toFixed(4)}</b></div>)}
@@ -126,11 +126,34 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
       </div>
 
       <div>
+        {(() => {
+          // D-098: панель решения — главное по сделке и одно главное действие; закреплена при прокрутке
+          const dR = dealCur === "RUB" ? 1 : (variant.price_currency || "").toUpperCase() === dealCur && variant.price_fx_rate ? variant.price_fx_rate : calc.input.fx.rates[dealCur] || 0;
+          const inC = (rub?: number | null) => (rub == null ? "—" : dealCur !== "RUB" && dR ? `${fmtRub(rub / dR)} ${dealCur}` : `${fmtRub(rub)} ₽`);   // на панели — без копеек, точные цифры — в таблице
+          const rubRef = (rub?: number | null) => (rub != null && dealCur !== "RUB" ? <small>≈ {fmtRub(rub)} ₽</small> : null);
+          const per = (v?: number | null) => (v == null ? null : v / units);
+          const canSubmit = isCD && ["calc_ready", "cd_approval", "rework"].includes(deal.status);
+          const onVisa = (isFD && deal.status === "fd_visa") || (isGD && deal.status === "gd_visa");
+          const toActions = () => document.getElementById("approval-actions")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          return (
+            <div className="dp">
+              <div className={"dp-m " + indicator.cls}><b>{fmtPct(base?.margin_pct)}</b><span>маржа · {indicator.text}</span></div>
+              <div className="dp-k"><span>Цена{units > 1 ? " за 1 шт." : ""} без НДС</span><b>{inC(per(base?.price_rub))}</b>{rubRef(per(base?.price_rub))}</div>
+              <div className="dp-k"><span>Себестоимость{units > 1 ? " 1 машины" : ""}</span><b>{inC(per(base?.cost_total_rub))}</b>{rubRef(per(base?.cost_total_rub))}</div>
+              <div className="dp-k"><span>Прибыль{units > 1 ? " с 1 машины" : ""}</span><b>{inC(per(base?.profit_rub))}</b><small>{units > 1 ? `за ${units} шт.: ${inC(base?.profit_rub)}` : rubRef(base?.profit_rub)}</small></div>
+              <div className="dp-k"><span>Кассовый разрыв{units > 1 ? " на 1 машину" : ""}</span><b>{inC(per(base?.cash_gap.amount_rub))}</b><small>{base?.cash_gap.days ?? 0} дн.{units > 1 ? ` · за ${units} шт.: ${inC(base?.cash_gap.amount_rub)}` : ""}</small></div>
+              <div className="dp-act">
+                {canSubmit && <button className="btn" disabled={busy || cdChecks.length > 0 || base?.price_rub == null} title={cdChecks.length ? cdChecks.join("\n") : base?.price_rub == null ? "сначала назначьте цену" : ""}
+                  onClick={() => act(`/api/deals/${deal.id}/submit`)}>Утвердить / отправить на визу</button>}
+                {onVisa && <button className="btn" onClick={toActions}>К визе ↓</button>}
+                {isCD && ["approved", "kp_sent"].includes(deal.status) && <button className="btn" onClick={() => nav(`/deals/${deal.id}/negotiation`)} title="снижение цены и изменение условий после КП — шагами торгов">Торги →</button>}
+                {!canSubmit && !onVisa && !(isCD && ["approved", "kp_sent"].includes(deal.status)) && <span className="muted" style={{ fontSize: 12 }}>{lbl(STATUS, deal.status)}</span>}
+              </div>
+            </div>);
+        })()}
         <div className="card">
           <div className="row" style={{ justifyContent: "space-between" }}>
             <div>
-              <div className={"margin-ind " + indicator.cls}>{fmtPct(base?.margin_pct)}</div>
-              <div className="muted">маржа от выручки (базовый) · {indicator.text}</div>
               {base?.price_rub != null && (() => {
                 // D-085: при количестве больше одной цена фиксируется за 1 шт., итог на количество — справочно
                 const neg = calc.negotiated?.[variant.id];
@@ -142,12 +165,14 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                     {" "}— {fmtRub(neg.price_rub / fxr / units)} {c}{units > 1 ? " за 1 шт." : ""} без НДС; первая цена КП — {fmtRub((neg.first_rub ?? 0) / fxr / units)} {c}
                     {" "}({(((neg.price_rub - (neg.first_rub ?? neg.price_rub)) / (neg.first_rub || 1)) * 100).toFixed(2).replace(".", ",")} %).{neg.client_payments ? " Условия оплаты — из торгов." : ""}</div>}
                   {neg?.price_rub == null && neg?.client_payments && <div className="alert info" style={{ margin: "0 0 6px" }}>Условия оплаты — из торгов (шаг {neg.step_no}).</div>}
+                  <details className="dp-more"><summary>Цена подробно: с НДС {vatPct} %{units > 1 ? `, за ${units} шт.` : ""}, курс, введённая сумма</summary>
                   <div>Цена клиенту{units > 1 ? " за 1 шт." : ""} без НДС: <b>{fmtRub(amt / units)} {c}</b>{c !== "RUB" && <span className="muted"> ≈ {fmtRub(base.price_rub / units)} RUB</span>}
                     {" "}· с НДС {vatPct} %: <b>{fmtRub(amt * k / units)} {c}</b>{c !== "RUB" && <span className="muted"> ≈ {fmtRub(base.price_rub * k / units)} RUB</span>}</div>
                   {units > 1 && <div className="muted">за {units} шт. (справочно): без НДС {fmtRub(amt)} {c} · с НДС {fmtRub(amt * k)} {c}{c !== "RUB" ? ` ≈ ${fmtRub(base.price_rub)} RUB без НДС` : ""}</div>}
                   {c !== "RUB" && <div className="muted">курс цены {variant.price_fx_rate?.toFixed(4)} · КП — в {c}</div>}
                   {variant.price_input_amount != null && (variant.price_vat_included || (variant.price_input_currency && variant.price_input_currency !== variant.price_currency) || (variant.price_input_units || 1) > 1) &&
                     <div className="muted">введено: {fmtRub(variant.price_input_amount)} {variant.price_input_currency || variant.price_currency}{variant.price_vat_included ? " с НДС" : " без НДС"}{(variant.price_input_units || 1) > 1 ? " за 1 шт." : ""}</div>}
+                  </details>
                 </div>; })()}
               {base?.price_rub != null && <div style={{ fontSize: 13 }}>
                 {cc && cc.code !== (variant.price_currency || "RUB") && cc.rate && <div className="muted">в валюте контракта ({cc.code}, {cc.source}): {fmtRub(base.price_rub / cc.rate)} без НДС · {fmtRub(base.price_rub * (1 + vatPct / 100) / cc.rate)} с НДС</div>}
@@ -159,9 +184,9 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                   {cc && cc.code !== priceCur && cc.rate && (priceCur === "RUB" || calc.input.fx.rates[priceCur]) ? ` ≈ ${fmtRub((withVat ? Number(value) / (1 + vatPct / 100) : Number(value)) * (priceCur === "RUB" ? 1 : calc.input.fx.rates[priceCur]) / cc.rate)} ${cc.code} без НДС` : ""}</div>}</div>}
               {(() => { const hr = dealCur === "RUB" ? 1 : (variant.price_currency || "").toUpperCase() === dealCur && variant.price_fx_rate ? variant.price_fx_rate : calc.input.fx.rates[dealCur] || 0;
                 const mc = (rub?: number | null) => (rub == null ? "—" : hr && dealCur !== "RUB" ? `${fmtRub(rub / hr)} ${dealCur}` : `${fmtRub(rub)} RUB`);
-                return <div className="muted">наценка {fmtPct(base?.markup_pct)} · {units > 1 ? <>на 1 машину: себестоимость {mc((base?.cost_total_rub ?? 0) / units)}, прибыль {mc((base?.profit_rub ?? 0) / units)} · за {units} шт.: </> : null}прибыль {mc(base?.profit_rub)} · разрыв {mc(base?.cash_gap.amount_rub)} ({base?.cash_gap.days} дн){dealCur !== "RUB" && hr ? <span style={{ fontSize: 11 }}> · в рублях: прибыль {fmtRub(base?.profit_rub)} ₽</span> : null}</div>; })()}
+                return base?.price_rub != null ? <div className="muted" style={{ fontSize: 12 }}>наценка {fmtPct(base?.markup_pct)}{units > 1 ? <> · себестоимость 1 машины {mc((base?.cost_total_rub ?? 0) / units)} · за {units} шт.: прибыль {mc(base?.profit_rub)}</> : null}</div> : <div className="muted">Цена не назначена — задайте её справа: сумма, наценка или целевая маржа.</div>; })()}
             </div>
-            {isCD && ["approved", "kp_sent"].includes(deal.status) && <button className="btn secondary" onClick={() => nav(`/deals/${deal.id}/negotiation`)} title="снижение цены и изменение условий после КП фиксируются шагами торгов">Цена утверждена · изменить — в «Торгах» →</button>}
+            {isCD && ["approved", "kp_sent"].includes(deal.status) && <span className="muted" style={{ fontSize: 12, maxWidth: 260 }}>Цена утверждена. Снижение цены и новые условия — в «Торгах» (кнопка на панели вверху).</span>}
             {canPrice && (
               <div className="row">
                 <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
@@ -176,7 +201,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                   ввод в{" "}
                   <select value={priceCur} onChange={(e) => setCur(e.target.value)}>{curs.map((c) => <option key={c} value={c}>{c}{c === dealCur ? " (валюта сделки)" : ""}</option>)}</select>
                 </label>}
-                <button className="btn" onClick={setPrice} disabled={busy}>Назначить цену</button>
+                <button className={base?.price_rub != null ? "btn secondary" : "btn"} onClick={setPrice} disabled={busy}>{base?.price_rub != null ? "Изменить цену" : "Назначить цену"}</button>
               </div>
             )}
           </div>
@@ -201,21 +226,16 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
         </div>
 
         <div className="tabs tabs-compact">
-          <button className={tab === "cost" ? "active" : ""} onClick={() => setTab("cost")}>Себестоимость</button>
-          {canTerms && calc.payment_terms && <button className={tab === "terms" ? "active" : ""} onClick={() => setTab("terms")}>Условия оплаты<br />и сроки</button>}
-          <button className={tab === "cashflow" ? "active" : ""} onClick={() => setTab("cashflow")}>Денежный<br />поток</button>
-          {can(me, "kp_images_select", 2) && <button className={tab === "kp" ? "active" : ""} onClick={() => setTab("kp")}>Подача КП</button>}
-          <button className={tab === "fx" ? "active" : ""} onClick={() => setTab("fx")}>Курсы<br />и прогноз</button>
-          <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>Комментарии<br />и история</button>
-          {isCD && <button className="tab-go" onClick={() => nav(`/deals/${deal.id}/negotiation`)} title="отдельная страница торгов">Торги →</button>}
+          <button className={tab === "cost" ? "active" : ""} onClick={() => setTab("cost")}>Себестоимость и курсы</button>
+          <button className={tab === "money" ? "active" : ""} onClick={() => setTab("money")}>Условия и деньги</button>
+          <button className={tab === "kp" ? "active" : ""} onClick={() => setTab("kp")}>КП и история</button>
         </div>
-
         {tab === "cost" && (
           <div className="card">
             {base && (() => {
               const dRate = dealCur === "RUB" ? 1 : (variant.price_currency || "").toUpperCase() === dealCur && variant.price_fx_rate ? variant.price_fx_rate : calc.input.fx.rates[dealCur] || 0;
               return <>
-                <CostBreakdown base={base} units={units} baseCcy={calc.input.base_currency} threshold={calc.input.thresholds?.margin_threshold_pct} dealCur={dealCur} dealRate={dRate} />
+                <CostBreakdown cards={false} base={base} units={units} baseCcy={calc.input.base_currency} threshold={calc.input.thresholds?.margin_threshold_pct} dealCur={dealCur} dealRate={dRate} />
                 {isCD && <FactoryPricePanel dealId={deal.id} status={deal.status} variantId={variant.id} positions={(deal.positions || []).filter((p) => !variant.position_ids?.length || variant.position_ids.includes(p.id))}
                   units={units} dealCur={dealCur} dealRate={dRate} threshold={calc.input.thresholds?.margin_threshold_pct} currentPriceUnit={base.price_rub != null && dRate ? base.price_rub / units / dRate : null}
                   onApplied={() => { reload(); load(); }} />}
@@ -241,15 +261,15 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
             )}
           </div>
         )}
-        {tab === "terms" && calc.payment_terms && <PaymentTermsEditor deal={deal} calc={calc} onSaved={() => { reload(); load(); }} />}
-        {tab === "kp" && <KpSettings deal={deal} calc={calc} reload={() => { reload(); load(); }} />}
-        {tab === "cashflow" && (
+        {tab === "money" && canTerms && calc.payment_terms && <PaymentTermsEditor deal={deal} calc={calc} onSaved={() => { reload(); load(); }} />}
+        {tab === "kp" && can(me, "kp_images_select", 2) && <KpSettings deal={deal} calc={calc} reload={() => { reload(); load(); }} />}
+        {tab === "money" && (
           <div className="card">
             {SCEN.map(([k, t]) => (<div key={k}><h2>{t}: {gapText(scen[k])}</h2><CashflowChart points={scen[k].cashflow} /></div>))}
             <div className="muted">Финансовые расходы (базовый): {Object.entries(base?.finance_breakdown || {}).map(([k, v]) => `${k} ${fmtRub(v)}`).join(" · ")}</div>
           </div>
         )}
-        {tab === "fx" && (() => {
+        {tab === "cost" && (() => {
           const ITEM: Record<string, string> = { domestic_logistics: "внутрикитайская логистика", export_formalities: "экспортные формальности КНР", freight: "доставка до границы РФ",
             door_to_door: "доставка от границы до клиента", ins: "страхование", service: "сервис", "таможенная стоимость": "таможенная стоимость (пошлина, НДС)", _base: "пересчёт в базовую валюту" };
           const label = (ref: string) => {
@@ -267,8 +287,9 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
           const f4 = (v: number | null | undefined) => (v == null ? "—" : v.toFixed(4).replace(".", ","));
           const anyNoHist = rows.some(noHist);
           return (
-            <div className="card" style={{ overflowX: "auto" }}>
-              <div className="muted" style={{ marginBottom: 6 }}>Курс ЦБ на {fmtDate(calc.input.fx.as_of)}: {Object.entries(calc.input.fx.rates).filter(([k]) => k !== "RUB").map(([k, v]) => `${k} ${f4(v)}`).join(" · ")}
+            <details className="card dp-fx" style={{ overflowX: "auto" }}>
+              <summary><b>Курсы и прогноз по платежам</b> <span className="muted">· {rows.length} платежей · сценарии курса для денежного потока</span></summary>
+              <div className="muted" style={{ margin: "8px 0 6px" }}>Курс ЦБ на {fmtDate(calc.input.fx.as_of)}: {Object.entries(calc.input.fx.rates).filter(([k]) => k !== "RUB").map(([k, v]) => `${k} ${f4(v)}`).join(" · ")}
                 {calc.input.fx.note && <> · {calc.input.fx.note}</>}</div>
               {anyNoHist && <div className="alert warn">Истории курсов ЦБ пока нет — тренд и сезонность не учитываются, прогноз строится по форварду{rows.some((c) => c.comp_g_expert != null) ? " и экспертным точкам" : ""}. История за 5 лет загрузится автоматически в течение часа.</div>}
               <table>
@@ -285,10 +306,10 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                     <td className="num">{f4(c.rate_by_scenario.pessimistic)} <span className="muted">({c.dk_pct.pessimistic != null ? `${c.dk_pct.pessimistic > 0 ? "+" : ""}${c.dk_pct.pessimistic} %` : ""})</span></td>
                     <td className="num">{f4(c.rate_by_scenario.optimistic)} <span className="muted">({c.dk_pct.optimistic != null ? `${c.dk_pct.optimistic > 0 ? "+" : ""}${c.dk_pct.optimistic} %` : ""})</span></td></tr>))}</tbody>
               </table>
-            </div>);
+            </details>);
         })()}
         
-        {tab === "history" && (
+        {tab === "kp" && (
           <div className="grid cols-2">
             <div className="card"><h2 style={{ marginTop: 0 }}>Комментарии логиста и менеджера</h2>
               {calc.comments.length === 0 && <div className="muted">Нет комментариев к отклонениям</div>}
@@ -308,12 +329,12 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
         )}
 
         {(isCD || isFD) && (
-          <div className="card">
+          <div className="card" id="approval-actions">
             <h2 style={{ marginTop: 0 }}>Действия</h2>
             {isCD && (
               <div className="row" style={{ marginBottom: 8 }}>
                 {deal.service_flag && <button className="btn secondary" onClick={toggleService} disabled={busy || base?.price_rub == null}>{variant.service_in_kp ? "Скрыть строку сервиса в КП" : "Показать сервис отдельной строкой в КП"}</button>}
-                <button className="btn" disabled={busy || !["calc_ready", "cd_approval", "rework"].includes(deal.status) || cdChecks.length > 0} title={cdChecks.join("\n")} onClick={() => act(`/api/deals/${deal.id}/submit`)}>Утвердить / отправить на визу</button>
+                {["calc_ready", "cd_approval", "rework"].includes(deal.status) && <span className="muted" style={{ fontSize: 12 }}>Утвердить или отправить на визу — кнопкой на панели вверху.</span>}
               </div>
             )}
             {isCD && deal.status === "rework" && calc.fd_declined && (
@@ -435,7 +456,7 @@ const COST_GROUPS: [string, string[]][] = [
   ["Финансы, сервис и гарантия", ["finance", "service", "warranty_reserve"]],
   ["Накладные, доукомплектование, комиссии", ["overhead", "local_completion", "external_commission", "manager_commission", "cd_commission"]],
 ];
-function CostBreakdown({ base, units, baseCcy, threshold, dealCur = "RUB", dealRate = 1 }: { base: ScenarioResult; units: number; baseCcy: string; threshold?: number; dealCur?: string; dealRate?: number }) {
+function CostBreakdown({ base, units, baseCcy, threshold, dealCur = "RUB", dealRate = 1, cards = true }: { base: ScenarioResult; units: number; baseCcy: string; threshold?: number; dealCur?: string; dealRate?: number; cards?: boolean }) {
   // D-090: все расходы — и в валюте контракта (валюте сделки) по курсу цены / ЦБ
   const fc = dealCur !== "RUB" && dealRate > 0, cv = (rub: number) => fmtRub(rub / (dealRate || 1));
   const [showZero, setShowZero] = useState(false);
@@ -451,14 +472,14 @@ function CostBreakdown({ base, units, baseCcy, threshold, dealCur = "RUB", dealR
       {many && v != null && <em>за {u} шт.: {main(v)}{fc ? ` (≈ ${fmtRub(v)} ₽)` : ""}</em>}{sub && <em>{sub}</em>}</div>);
   return (
     <div className="cb">
-      <div className="cb-cards">
+      {cards && <div className="cb-cards">
         {card(many ? "Себестоимость 1 машины" : "Себестоимость", total, undefined, "cb-dark")}
         {card(many ? "Цена 1 машины без НДС" : "Цена без НДС", base.price_rub)}
         <div className={"cb-card " + (m == null ? "" : m < 0 ? "cb-bad" : low ? "cb-warn" : "cb-ok")}><span>Маржа от выручки</span><b>{fmtPct(m)}</b>
           <em>наценка {fmtPct(base.markup_pct)}{threshold != null ? ` · порог ${threshold} %` : ""}</em></div>
         {card(many ? "Прибыль с 1 машины" : "Прибыль", base.profit_rub, `до стоимости денег ${main((base.profit_before_finance_rub || 0) / u)}`)}
         {card(many ? "Кассовый разрыв на 1 машину" : "Кассовый разрыв", base.cash_gap.amount_rub, `${base.cash_gap.days} дн. · поставка ${base.delivery_days} дн. от договора`)}
-      </div>
+      </div>}
       <div className="cb-note muted">{fc ? <>Валюта контракта — {dealCur}, курс {dealRate.toFixed(4).replace(".", ",")} ₽ · </> : null}Базовый сценарий{many ? <> · суммы <b>на 1 машину</b>, справа — за весь объём ({u} шт.)</> : ""} · пессимистичный и оптимистичный — на вкладке «Денежный поток»</div>
       <table className="cb-table">
         <thead><tr><th>Статья</th>{fc && <th className="num">{many ? `На 1 машину, ${dealCur}` : dealCur}</th>}<th className={"num" + (fc ? " cb-rubh" : "")}>{many ? "На 1 машину, ₽" : "Сумма, ₽"}{fc ? " (справочно)" : ""}</th><th className="cb-sharecol">Доля в себестоимости</th>
