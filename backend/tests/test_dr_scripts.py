@@ -1,0 +1,75 @@
+"""Резервный сервер crm2 (deploy/dr, D-084): синтаксис скриптов и логика flag-guard.sh без сети и Docker."""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+DR = ROOT / "deploy/dr"
+SCRIPTS = [DR / n for n in ("dr-lib.sh", "failover.sh", "failback.sh", "drill.sh", "flag-guard.sh")]
+GUARD = DR / "flag-guard.sh"
+
+
+def test_dr_scripts_bash_n():
+    for f in SCRIPTS:
+        subprocess.run(["bash", "-n", str(f)], check=True)
+
+
+@pytest.mark.skipif(not shutil.which("shellcheck"), reason="shellcheck не установлен")
+def test_dr_scripts_shellcheck():
+    p = subprocess.run(["shellcheck", "-x", "-f", "gcc", *map(str, SCRIPTS)], capture_output=True, text=True,
+                       cwd=ROOT, env={**os.environ, "LC_ALL": "C.UTF-8"})
+    assert p.returncode == 0, p.stdout + p.stderr
+
+
+def _guard(tmp_path, flag: dict | None | str):
+    flag_file = tmp_path / "failover.json"
+    if isinstance(flag, dict):
+        flag_file.write_text(json.dumps(flag))
+    elif isinstance(flag, str):
+        flag_file.write_text(flag)
+    elif flag_file.exists():
+        flag_file.unlink()
+    reloads = tmp_path / "reloads"
+    env = {**os.environ, "DR_FLAG_URL": str(flag_file), "DR_SNIPPET": str(tmp_path / "zz-dr-redirect.caddy"),
+           "DR_CADDY_RELOAD_CMD": f"echo reload >> {reloads}"}
+    subprocess.run(["bash", str(GUARD)], env=env, check=True, capture_output=True, text=True)
+    snippet = tmp_path / "zz-dr-redirect.caddy"
+    return (snippet.read_text() if snippet.exists() else None), (len(reloads.read_text().split()) if reloads.exists() else 0)
+
+
+def test_guard_redirects_while_flag_active_and_clears_after(tmp_path):
+    text, n = _guard(tmp_path, {"active": True, "target": "https://crm2.dobrov.pro"})
+    assert "redir https://crm2.dobrov.pro{uri} 302" in text and n == 1
+    text, n = _guard(tmp_path, {"active": True, "target": "https://crm2.dobrov.pro"})   # без изменений — без reload
+    assert text and n == 1
+    text, n = _guard(tmp_path, None)                                                    # флага нет → обычная работа
+    assert text is None and n == 2
+
+
+def test_guard_ignores_garbage_and_unsafe_target(tmp_path):
+    assert _guard(tmp_path, "not json") == (None, 0)
+    assert _guard(tmp_path, {"active": True, "target": "https://evil.example/x?y"}) == (None, 0)
+    assert _guard(tmp_path, {"active": True, "target": "http://crm2.dobrov.pro"}) == (None, 0)
+
+
+def test_guard_keeps_state_when_flag_unreachable(tmp_path):
+    _guard(tmp_path, {"active": True, "target": "https://crm2.dobrov.pro"})
+    env = {**os.environ, "DR_FLAG_URL": "https://127.0.0.1:9/failover.json", "DR_SNIPPET": str(tmp_path / "zz-dr-redirect.caddy"),
+           "DR_CADDY_RELOAD_CMD": "true"}
+    subprocess.run(["bash", str(GUARD)], env=env, check=True, capture_output=True)
+    assert (tmp_path / "zz-dr-redirect.caddy").exists()   # нет ответа — переадресация остаётся
+
+
+def test_frequent_backup_timer_every_15_min_and_light():
+    timer = (ROOT / "deploy/backup/gsho-backup-frequent.timer").read_text()
+    service = (ROOT / "deploy/backup/gsho-backup-frequent.service").read_text()
+    assert "OnCalendar=*:0/15" in timer
+    assert "Environment=BACKUP_LIGHT=1" in service and "SuccessExitStatus=75" in service
+    script = (ROOT / "deploy/backup/gsho-backup.sh").read_text()
+    assert '--keep-within "$KEEP_WITHIN"' in script and 'RETENTION_STATUS="skipped"' in script

@@ -1,0 +1,23 @@
+[Unit]
+Description=Frequent (every 15 min) encrypted GSHO CRM backup to Yandex Object Storage — без check/prune (D-084)
+Documentation=file:///opt/gsho-costing/deploy/dr/README.md
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/gsho/backup.env
+Environment=BACKUP_LIGHT=1
+# reason=daily: в CRM частые копии видны как обычные; проверка целостности и очистка — в ежедневной (gsho-backup.timer)
+ExecStart=/usr/local/sbin/gsho-backup.sh --reason=daily
+# 75 — идёт другой запуск (например, ежедневная копия); частая копия просто пропускается
+SuccessExitStatus=75
+TimeoutStartSec=20min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal

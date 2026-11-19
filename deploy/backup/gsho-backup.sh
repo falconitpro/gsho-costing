@@ -37,6 +37,8 @@ KEEP_MONTHLY="${BACKUP_KEEP_MONTHLY:-12}"
 DEEP_CHECK_WEEKDAY="${BACKUP_DEEP_CHECK_WEEKDAY:-7}"   # 1..7 (пн..вс): в этот день restic check читает 5% данных
 HISTORY_KEEP="${BACKUP_HISTORY_KEEP:-120}"
 HOST_TAG="${BACKUP_HOST_TAG:-gsho-prod}"
+KEEP_WITHIN="${BACKUP_KEEP_WITHIN:-2d}"            # все снимки за последние 2 суток (частые копии раз в 15 минут, D-084)
+LIGHT="${BACKUP_LIGHT:-0}"                         # 1 — частая копия: без restic check и forget/prune (их делает ежедневная)
 export TZ="${BACKUP_TIMEZONE:-Europe/Moscow}"
 
 RUN_KEY="$(cat /proc/sys/kernel/random/uuid)"
@@ -205,17 +207,21 @@ rm -rf --one-file-system "$STAGE"; STAGE=""
 
 # ---------- 7. проверка целостности ----------
 STEP="check_failed"
-if [ "$(date +%u)" = "$DEEP_CHECK_WEEKDAY" ]; then
+if [ "$LIGHT" = "1" ]; then
+  CHECK_STATUS="skipped"   # частая копия: снимок проверен выше (snapshots), полная проверка — в ежедневной
+elif [ "$(date +%u)" = "$DEEP_CHECK_WEEKDAY" ]; then
   restic check --read-data-subset=5% > /dev/null
 else
   restic check > /dev/null
 fi
-CHECK_STATUS="ok"; CHECKED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [ "$LIGHT" != "1" ]; then CHECK_STATUS="ok"; CHECKED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; fi
 
-# ---------- 8. хранение: 90 ежедневных и 12 ежемесячных ----------
+# ---------- 8. хранение: все за 2 суток, 90 ежедневных и 12 ежемесячных ----------
 # Ошибка prune не отменяет созданный снимок, но не скрывается: retention_status=failed и уведомление в CRM (03 §11).
 trap - ERR
-if restic forget --host "$HOST_TAG" --tag gsho --group-by host --keep-daily "$KEEP_DAILY" --keep-monthly "$KEEP_MONTHLY" --prune > /dev/null; then
+if [ "$LIGHT" = "1" ]; then
+  RETENTION_STATUS="skipped"
+elif restic forget --host "$HOST_TAG" --tag gsho --group-by host --keep-within "$KEEP_WITHIN" --keep-daily "$KEEP_DAILY" --keep-monthly "$KEEP_MONTHLY" --prune > /dev/null; then
   RETENTION_STATUS="ok"
 else
   RETENTION_STATUS="failed"; ERROR_CODE="retention_failed"; ERROR_SUMMARY="forget --prune завершился с ошибкой"

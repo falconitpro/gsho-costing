@@ -1,0 +1,12 @@
+[Unit]
+Description=Encrypted GSHO CRM backup every 15 minutes (RPO 15 min for the standby on crm2, D-084)
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=false
+RandomizedDelaySec=0
+AccuracySec=1min
+Unit=gsho-backup-frequent.service
+
+[Install]
+WantedBy=timers.target
