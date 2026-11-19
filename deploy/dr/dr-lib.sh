@@ -53,7 +53,11 @@ dr_wait_health() {
 }
 
 dr_restore_latest() {
-  local envf="$1" snap="${2:-}" root dir manifest commit created
+  local envf="$1" snap="${2:-}" root dir manifest commit created self
+  # Восстановление переключает код на commit копии: скрипты, запущенные из каталога кода, исчезли бы посреди работы
+  self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  case "$self/" in "$GSHO_DIR"/*) dr_die "скрипты резерва запущены из $self — сначала: sudo bash $GSHO_DIR/deploy/dr/install.sh, затем запуск из /usr/local/lib/gsho-dr" ;; esac
+  case "${DR_COMPOSE_EXTRA:-}" in "$GSHO_DIR"/*) dr_die "DR_COMPOSE_EXTRA внутри каталога кода — установите скрипты (deploy/dr/install.sh)" ;; esac
   dr_load_restic_env "$envf"
   [ -n "$snap" ] || snap="$(dr_latest_snapshot)"
   [[ "$snap" =~ ^[0-9a-f]{8,64}$ ]] || dr_die "снимок не найден в $RESTIC_REPOSITORY"
