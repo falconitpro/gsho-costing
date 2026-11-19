@@ -11,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 DR = ROOT / "deploy/dr"
-SCRIPTS = [DR / n for n in ("dr-lib.sh", "failover.sh", "failback.sh", "drill.sh", "flag-guard.sh", "install.sh")] + [ROOT / "deploy/backup/gsho-backup-mirror.sh"]
+SCRIPTS = [DR / n for n in ("dr-lib.sh", "failover.sh", "failback.sh", "drill.sh", "flag-guard.sh", "install.sh")] + [ROOT / "deploy/backup/gsho-backup-mirror.sh", DR / "functions/deploy.sh"]
 GUARD = DR / "flag-guard.sh"
 
 
@@ -124,3 +124,59 @@ def test_mirror_only_adds_and_skips_locks():
     assert "rclone copy" in s and "rclone sync" not in s
     assert "--exclude 'locks/**'" in s
     assert "read -r -s" in s   # секрет вводится скрыто
+
+
+def _monitor():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("dr_monitor", DR / "functions/monitor/index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_monitor_mails_on_problem_reminds_and_resolves():
+    m = _monitor()
+    cfg = {"remind": {"health": 60}, "delay": {"standby": 180}}
+    st, mails = m.decide({}, {"health": "down"}, 1000.0, cfg)
+    assert [x[0] for x in mails] == ["problem"] and st["health"]["notified"] == 1000.0
+    st, mails = m.decide(st, {"health": "down"}, 1000.0 + 30 * 60, cfg)        # через 30 мин — тишина
+    assert mails == []
+    st, mails = m.decide(st, {"health": "down"}, 1000.0 + 61 * 60, cfg)        # через час — напоминание
+    assert [x[0] for x in mails] == ["problem"]
+    st, mails = m.decide(st, {}, 1000.0 + 62 * 60, cfg)                         # прошло — «восстановлено»
+    assert [x[0] for x in mails] == ["resolved"] and st == {}
+
+
+def test_monitor_standby_waits_before_alert():
+    m = _monitor()
+    cfg = {"remind": {"standby": 1440}, "delay": {"standby": 180}}
+    st, mails = m.decide({}, {"standby": "on"}, 0.0, cfg)
+    assert mails == [] and st["standby"]["notified"] == 0                        # проверка резерва идёт ≤ 45 мин
+    st, mails = m.decide(st, {}, 3600.0, cfg)
+    assert mails == [] and st == {}                                             # ВМ выключилась — писать не о чем
+    st, mails = m.decide({}, {"standby": "on"}, 0.0, cfg)
+    st, mails = m.decide(st, {"standby": "on"}, 181 * 60.0, cfg)
+    assert [x[0] for x in mails] == ["problem"]
+
+
+def test_dr_scripts_notify_by_postbox_without_secrets():
+    lib = (DR / "dr-lib.sh").read_text()
+    assert "postbox.cloud.yandex.net" in lib and "X-YaCloud-SubjectToken" in lib
+    assert 'dr_notify "CRM резерв' in (DR / "drill.sh").read_text()
+    assert "dr_notify" in (DR / "failover.sh").read_text()
+
+
+def test_dr_env_example_is_valid_shell():
+    # /etc/gsho/dr.env читается через `set -a; . файл`: строка с «;» без кавычек ломала failover и drill (19.11)
+    lines = [ln for ln in (DR / "dr.env.example").read_text().splitlines() if ln.startswith("DR_NOTIFY_")]
+    p = subprocess.run(["bash", "-euc", "set -a; eval \"$1\"; printf %s \"$DR_NOTIFY_TO\"", "_", "\n".join(lines)],
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    assert p.stdout.count("@") == 3
+
+
+def test_drill_function_keeps_existing_metadata():
+    # PATCH с updateMask=metadata заменяет все метаданные: enable-oslogin и serial-port-enable должны сохраниться
+    s = (DR / "functions/drill/index.py").read_text()
+    assert "?view=FULL" in s and 'dict(inst.get("metadata") or {})' in s and ":updateMetadata" not in s
+    assert "operation.api" not in s   # статус операции SA с ролью только на ВМ не читает (403) — ждём метку на самой ВМ

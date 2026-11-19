@@ -36,6 +36,14 @@ json.dump({"finished_at": datetime.datetime.now(datetime.timezone.utc).strftime(
            "seconds": int(secs), "exit_code": int(rc)}, open(path, "w"), ensure_ascii=False)
 PY
   dr_compose down >/dev/null 2>&1 || true
+  if [ "$OK" = true ]; then
+    dr_notify "CRM резерв: еженедельная проверка пройдена" "Копия рабочего CRM от ${DR_SNAPSHOT_CREATED:-?} (UTC) восстановлена на crm2-standby.
+Пользователей: $USERS, сделок: $DEALS. Время: $(( $(date +%s) - t0 )) с. Резервный сервер выключается."
+  else
+    dr_notify "CRM резерв: еженедельная проверка НЕ ПРОЙДЕНА" "Восстановление копии на crm2-standby завершилось ошибкой (код $rc).
+Отчёт: /var/lib/gsho-dr/drill-last.json на резервном сервере, журнал: journalctl -u gsho-dr-drill.
+Резерв может не сработать при аварии — нужно разобраться в ближайшие дни."
+  fi
   if [ -n "$POWEROFF" ]; then shutdown -h +1 "проверка резерва завершена"; fi
 }
 trap finish EXIT
