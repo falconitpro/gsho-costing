@@ -1029,3 +1029,189 @@ def kp_revision_file(deal_id: str, rev_id: str, format: str = "docx", db: Sessio
     if rev is None or rev.deal_id != deal.id:
         raise HTTPException(404)
     return _revision_file(db, deal, rev, format)
+
+
+# ------------------------------------------------------------------ цена производителя: «что если», обратный расчёт, запрос (D-091)
+FP_EDIT_STATUSES = (DealStatus.CALC_READY, DealStatus.CD_APPROVAL, DealStatus.REWORK)
+
+
+class FpChange(BaseModel):
+    mode: str = "price"            # price — новая цена за 1 шт. в валюте завода; discount_pct — скидка от текущей
+    value: float
+
+
+class FpWhatIfIn(BaseModel):
+    variant_id: str
+    changes: dict[str, FpChange]   # position_id → изменение
+
+
+def _fp_new_price(p: Position, ch: FpChange) -> float:
+    if ch.mode == "discount_pct":
+        if not -100 < ch.value < 100:
+            raise HTTPException(422, "Скидка — от −100 до 100 %")
+        return round(float(p.unit_price or 0) * (1 - ch.value / 100.0), 2)
+    if ch.mode != "price" or ch.value <= 0:
+        raise HTTPException(422, "Новая цена производителя должна быть больше нуля")
+    return round(float(ch.value), 2)
+
+
+def _base_summary(res, vid: str) -> dict:
+    b = (res.variants.get(vid) or {}).get("base")
+    if b is None:
+        return {}
+    return {"cost_total_rub": round(b.cost_total_rub, 2), "price_rub": b.price_rub, "margin_pct": b.margin_pct, "markup_pct": b.markup_pct,
+            "profit_rub": b.profit_rub, "cash_gap_rub": round(b.cash_gap.amount_rub, 2), "cash_gap_days": b.cash_gap.days,
+            "factory_price_rub": round((b.items_rub or {}).get("factory_price", 0.0), 2), "finance_rub": round((b.items_rub or {}).get("finance", 0.0), 2),
+            "customs_rub": round(sum((b.items_rub or {}).get(k, 0.0) for k in ("customs_duty", "import_vat", "broker_util")), 2)}
+
+
+def _variant_poss(deal: Deal, v: Variant) -> list[Position]:
+    return [p for p in deal.positions if not v.position_ids or p.id in v.position_ids]
+
+
+@router.post("/factory-price/what-if")
+def factory_price_what_if(deal_id: str, body: FpWhatIfIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Что будет с себестоимостью и маржой, если производитель даст скидку или новую цену (цена продажи — прежняя)."""
+    deal = get_deal_or_404(db, deal_id, user)
+    if not user.has(Role.CD, Role.GD, Role.FD):
+        raise HTTPException(403)
+    v = next((x for x in deal.variants if x.id == body.variant_id), None)
+    if v is None:
+        raise HTTPException(404, "Предложение не найдено")
+    poss = {p.id: p for p in _variant_poss(deal, v)}
+    inp = build_calc_input(db, deal)
+    before = _base_summary(calc_deal(inp), v.id)
+    new_prices = {}
+    for pid, ch in body.changes.items():
+        if pid not in poss:
+            raise HTTPException(422, "Позиция не входит в предложение")
+        new_prices[pid] = _fp_new_price(poss[pid], ch)
+    for ip in inp.positions:
+        if ip.id in new_prices:
+            ip.unit_price = new_prices[ip.id]
+    after = _base_summary(calc_deal(inp), v.id)
+    return {"before": before, "after": after, "new_prices": new_prices,
+            "positions": {pid: {"unit_price": poss[pid].unit_price, "currency": poss[pid].currency, "qty": poss[pid].qty} for pid in poss}}
+
+
+class FpSolveIn(BaseModel):
+    variant_id: str
+    position_id: str
+    target_margin_pct: float
+    sale_price_unit: Optional[float] = None    # цена продажи без НДС за 1 шт. в валюте сделки; пусто — текущая
+    sale_currency: Optional[str] = None
+
+
+@router.post("/factory-price/solve")
+def factory_price_solve(deal_id: str, body: FpSolveIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Какая цена производителя нужна, чтобы при заданной цене продажи получить заданную маржу (базовый сценарий)."""
+    deal = get_deal_or_404(db, deal_id, user)
+    if not user.has(Role.CD, Role.GD, Role.FD):
+        raise HTTPException(403)
+    v = next((x for x in deal.variants if x.id == body.variant_id), None)
+    if v is None:
+        raise HTTPException(404, "Предложение не найдено")
+    pos = next((p for p in _variant_poss(deal, v) if p.id == body.position_id), None)
+    if pos is None:
+        raise HTTPException(422, "Позиция не входит в предложение")
+    if not -50 < body.target_margin_pct < 90:
+        raise HTTPException(422, "Маржа — от −50 до 90 %")
+    inp = build_calc_input(db, deal)
+    iv = next(x for x in inp.variants if x.id == v.id)
+    if body.sale_price_unit:
+        cur = (body.sale_currency or deal_currency(deal, v)).upper()
+        rate = 1.0 if cur == "RUB" else (v.price_fx_rate if cur == (v.price_currency or "").upper() and v.price_fx_rate else (inp.fx.rates or {}).get(cur))
+        if not rate:
+            raise HTTPException(422, f"Нет курса для {cur}")
+        iv.price_rub = round(body.sale_price_unit * rate * variant_units(deal, v), 2)
+    if not iv.price_rub:
+        raise HTTPException(422, "Сначала задайте цену продажи")
+    ip = next(x for x in inp.positions if x.id == pos.id)
+
+    def margin_at(price: float) -> float:
+        ip.unit_price = price
+        b = calc_deal(inp).variants[v.id]["base"]
+        return b.margin_pct if b.margin_pct is not None else -1e9
+
+    lo, hi = 0.0, max(float(pos.unit_price or 1) * 3, 1.0)
+    if margin_at(lo) < body.target_margin_pct:
+        raise HTTPException(422, "Даже при нулевой цене производителя маржа ниже заданной — снизьте маржу или поднимите цену продажи")
+    while margin_at(hi) > body.target_margin_pct and hi < 1e12:
+        hi *= 2
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if margin_at(mid) > body.target_margin_pct:
+            lo = mid
+        else:
+            hi = mid
+    need = round(lo, 2)
+    margin_at(need)
+    after = _base_summary(calc_deal(inp), v.id)
+    cur_price = float(pos.unit_price or 0)
+    return {"unit_price": need, "currency": pos.currency, "current_unit_price": cur_price,
+            "discount_pct": round((1 - need / cur_price) * 100, 2) if cur_price else None, "sale_price_rub": iv.price_rub, "after": after}
+
+
+class FpRequestIn(BaseModel):
+    position_id: str
+    mode: str = "price"
+    value: float
+    comment: str = ""
+
+
+@router.post("/factory-price/request", status_code=201)
+def factory_price_request(deal_id: str, body: FpRequestIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Запрос производителю: скидка или новая цена — задача менеджеру сделки (связь с заводом), запись в ленте."""
+    from ..models import Task
+    from ..services.deal_service import notify_new_task
+    deal = get_deal_or_404(db, deal_id, user)
+    if not user.has(Role.CD, Role.GD):
+        raise HTTPException(403, "Запрос производителю формирует КД или ЗГД")
+    pos = next((p for p in deal.positions if p.id == body.position_id), None)
+    if pos is None:
+        raise HTTPException(404)
+    want = _fp_new_price(pos, FpChange(mode=body.mode, value=body.value))
+    what = (f"скидку {body.value:g} %" if body.mode == "discount_pct" else "новую цену") + f" — {want:,.2f} {pos.currency} за 1 шт. (сейчас {float(pos.unit_price or 0):,.2f})"
+    title = f"Запросить у производителя {what.replace(',', ' ')}: {pos.machine_type or ''} {pos.designation or pos.model or ''}".strip()
+    t = Task(deal_id=deal.id, role=Role.MANAGER.value, assignee_id=deal.manager_id, title=title[:500] + (f". {body.comment.strip()}" if body.comment.strip() else ""),
+             block="factory_price_request", due=date.today())
+    db.add(t)
+    db.flush()
+    db.add(FeedEntry(deal_id=deal.id, kind="system", subject="Запрос производителю: скидка / новая цена", body=title + (f"\n{body.comment.strip()}" if body.comment.strip() else "")))
+    audit(db, user.id, deal.id, "position", pos.id, "factory_price_request", after={"mode": body.mode, "value": body.value, "unit_price": want})
+    notify_new_task(db, t)
+    db.commit()
+    return {"task_id": t.id, "unit_price": want}
+
+
+class FpApplyIn(BaseModel):
+    position_id: str
+    unit_price: float
+    comment: str = ""
+
+
+@router.post("/factory-price/apply")
+def factory_price_apply(deal_id: str, body: FpApplyIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Подтверждённая цена производителя — в расчёт (КД / ЗГД до утверждения); прежняя цена — в истории цен завода."""
+    deal = get_deal_or_404(db, deal_id, user)
+    if not user.has(Role.CD, Role.GD):
+        raise HTTPException(403, "Цену производителя в расчёте меняют КД или ЗГД")
+    if deal.status not in FP_EDIT_STATUSES:
+        raise HTTPException(409, "Цену производителя меняют до утверждения; после — через «Вернуть на доработку»")
+    pos = next((p for p in deal.positions if p.id == body.position_id), None)
+    if pos is None:
+        raise HTTPException(404)
+    if body.unit_price <= 0:
+        raise HTTPException(422, "Цена должна быть больше нуля")
+    if not body.comment.strip():
+        raise HTTPException(422, "Укажите основание: ответ производителя, письмо, договорённость")
+    before = float(pos.unit_price or 0)
+    pos.unit_price = round(body.unit_price, 2)
+    if pos.factory_id:
+        db.add(FactoryPriceHistory(factory_id=pos.factory_id, model=pos.model or pos.designation or "", unit_price=pos.unit_price, currency=pos.currency or "CNY",
+                                   on=date.today(), deal_id=deal.id, source="offer"))
+    db.add(FeedEntry(deal_id=deal.id, kind="system", subject="Цена производителя изменена в расчёте",
+                     body=f"{pos.machine_type or ''} {pos.designation or ''}: {before:,.2f} → {pos.unit_price:,.2f} {pos.currency} за 1 шт. {body.comment.strip()}".replace(",", " ")))
+    audit(db, user.id, deal.id, "position", pos.id, "factory_price_applied", {"unit_price": before}, {"unit_price": pos.unit_price}, body.comment.strip())
+    db.commit()
+    return {"unit_price": pos.unit_price, "before": before}
