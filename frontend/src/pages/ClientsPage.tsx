@@ -85,6 +85,9 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
   const [showNew, setShowNew] = useState(new URLSearchParams(window.location.search).get("new") === "1");   // с рабочего места: сразу открыть форму
   const load = () => api.get<Client[]>(`/api/refs/clients?stats=1${showArchived ? "&include_archived=1" : ""}`).then(setClients);
   useEffect(() => { load(); }, [showArchived]);
+  // прямая ссылка на карточку клиента (из сделки и других разделов): /legal?tab=counterparties&type=clients&client=<id>
+  const linkedClient = new URLSearchParams(window.location.search).get("client");
+  useEffect(() => { if (linkedClient) api.get<Card>(`/api/refs/clients/${linkedClient}`).then(setCard).catch((e) => setErr((e as Error).message)); }, [linkedClient]);
   async function create() {
     try { const c = await api.post<Client>("/api/refs/clients", form); setForm(EMPTY_FORM); setFound(null); setLookupMsg(""); setErr(""); load(); api.get<Card>(`/api/refs/clients/${c.id}`).then(setCard); }
     catch (e) { setErr((e as Error).message); }

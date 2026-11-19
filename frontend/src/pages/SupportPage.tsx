@@ -1,3 +1,4 @@
+import { Crumbs } from "../components/Levels";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, getLastError } from "../api";
@@ -154,6 +155,7 @@ export function SupportList() {
   const TABS: [string, string][] = [["active", "Активные"], ["waiting", "Ждут меня"], ["resolved", "Решённые"], ["all", "Все"]];
   return (
     <div className="card">
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Поддержка" }]} />
       <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <h1 style={{ margin: 0 }}>Поддержка</h1>
         <div className="row" style={{ gap: 8 }}>
@@ -226,6 +228,7 @@ export function TicketView({ id, admin = false, onBack }: { id: string; admin?: 
   const statusActs = t.actions.filter((a) => a in ACTION_TITLES && (!t.mine || admin || ["reopen", "close"].includes(a)));
   return (
     <div className="card">
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Поддержка", to: "/support" }, ...(admin ? [{ label: "Очередь", to: "/support/admin" }] : []), { label: t.number }]} />
       <button className="btn ghost" onClick={onBack}>← {admin ? "Очередь" : "Мои обращения"}</button>
       {created && <div className="alert ok">Обращение {created} создано. Ответ появится здесь и в уведомлениях CRM.</div>}
       <div className="sup-head">

@@ -16,7 +16,7 @@ export function CounterpartiesBlock({ me }: { me: Me }) {
   const [kind, setKind] = useState<Kind>(() => { if (fromUrl === "clients" || fromUrl === "suppliers") return fromUrl; try { return (localStorage.getItem("counterparties_kind") as Kind) || "clients"; } catch { return "clients"; } });
   useEffect(() => { if (fromUrl && fromUrl !== kind && (fromUrl === "clients" || fromUrl === "suppliers")) setKind(fromUrl); }, [fromUrl]);
   useEffect(() => { try { localStorage.setItem("counterparties_kind", kind); } catch { /* приватный режим */ } }, [kind]);
-  const pick = (k: Kind) => { setKind(k); const q = new URLSearchParams(loc.search); q.set("tab", "counterparties"); q.set("type", k); nav(`/legal?${q.toString()}`, { replace: true }); };
+  const pick = (k: Kind) => { setKind(k); const q = new URLSearchParams(loc.search); q.set("tab", "counterparties"); q.set("type", k); q.delete("client"); nav(`/legal?${q.toString()}`); };
   return (
     <>
       <div className="row" style={{ gap: 2, borderBottom: "1px solid var(--line)", marginBottom: 10 }}>

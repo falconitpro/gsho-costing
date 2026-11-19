@@ -1,3 +1,4 @@
+import { Crumbs } from "../components/Levels";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtMoney, newKey } from "../api";
@@ -82,6 +83,7 @@ export default function FinancePage({ me }: { me: Me }) {
   if (!allowed) return <div className="card muted">Раздел «Финансы» доступен при праве «Раздел «Финансы»» (по умолчанию — ФД и ЗГД; другим сотрудникам его выдаёт администратор в настройках доступа).</div>;
   return (
     <>
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Финансы", to: "/finance" }, { label: tabs.find(([k]) => k === tab)?.[1] }]} />
       <div className="page-head">
         <h1>Финансы</h1>
         <span className="muted">по состоянию на {fmtDate(meta?.today)}</span>

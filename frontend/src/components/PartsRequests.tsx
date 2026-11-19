@@ -1,3 +1,4 @@
+import { Crumbs } from "./Levels";
 import PartsRequestCreate from "./PartsRequestCreate";
 import NewSupplierInline from "./NewSupplierInline";
 import { MeContext } from "../App";
@@ -481,6 +482,7 @@ export function PartsRequestView({ me, id }: { me: Me; id: string }) {
   }
   return (
     <>
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Сделки", to: "/deals" }, { label: "Запчасти", to: "/deals?type=parts" }, { label: `Заявка ${cur?.number || ""}` }]} />
       <div className="page-head"><Link to="/deals?type=parts" className="muted">← Сделки</Link><h1 style={{ margin: 0 }}>Заявка на запчасти {cur?.number || ""}</h1>
         {cur && (has("cd", "gd") || (has("manager", "purchasing") && (cur as Req & { manager_id?: string }).manager_id === me.id)) && !cur.kps?.length && (
           <button className="btn ghost push" style={{ color: "var(--bad)" }} title="заявка заведена по ошибке — удалить; снимок останется в журнале"

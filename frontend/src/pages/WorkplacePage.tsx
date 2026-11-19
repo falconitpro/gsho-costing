@@ -1,13 +1,29 @@
 import DownloadRequests from "../components/DownloadRequests";
 import BriefingBlock, { type Briefing } from "../components/BriefingBlock";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { ActionMenu, Crumbs, EntryGrid, UiModeSwitch, useQueryParam, useUiMode, type Entry } from "../components/Levels";
 import { api } from "../api";
 import type { Me } from "../types";
 
 // Рабочее место — главная страница под роль. Каркас «командный центр»: показатели → «главное сейчас» → три колонки
 // (сегодня и задачи · сделки, согласования, деньги · внимание, уведомления, сроки, команда). Набор блоков — по роли,
 // сотрудник скрывает и переставляет блоки, ЗГД закрепляет обязательные для роли.
+//
+// «Матрёшка» (уровни в адресе): «/» — крупные входы (Сделки и Задачи — главные, остальные направления — спокойные блоки),
+// «/?w=<направление>» — все блоки этого направления в прежнем виде, «/?w=all» — полный прежний «командный центр».
+// Видимость и порядок блоков из «Настроить блоки» управляют и входами, и вторым уровнем: скрытый блок не даёт данных во вход.
+
+/** Направления первого уровня → блоки рабочего места, которые раскрываются на втором уровне. */
+export const WP_GROUPS: { key: string; title: string; blocks: string[] }[] = [
+  { key: "deals", title: "Сделки", blocks: ["deals", "approvals", "funnel", "team"] },
+  { key: "tasks", title: "Задачи", blocks: ["todo", "tasks", "today", "deadlines"] },
+  { key: "attention", title: "Внимание и уведомления", blocks: ["focus", "attention", "briefing", "notifications"] },
+  { key: "money", title: "Деньги", blocks: ["money"] },
+  { key: "legal", title: "Юридический блок", blocks: ["legal"] },
+  { key: "quick", title: "Быстрые действия", blocks: ["quick"] },
+];
+const groupOf = (b: string) => WP_GROUPS.find((g) => g.blocks.includes(b))?.key || "all";
 
 type Ev = { on: string; time: string; title: string; sub: string; tone: string; url: string; kind: string };
 type TaskRow = { id: string; title: string; due: string; days_left: number; overdue: boolean; deal_id: string; deal_number: string; client_name: string; priority: string; as_deputy: boolean };
@@ -79,11 +95,19 @@ const money = (v: number) => Math.abs(v) >= 1e6 ? `${(v / 1e6).toLocaleString("r
 export default function WorkplacePage({ me }: { me: Me }) {
   void me;
   const nav = useNavigate();
+  const loc = useLocation();
+  const [w] = useQueryParam("w");                       // уровень: null — входы, "all" — все блоки, иначе — направление
+  const [uiMode] = useUiMode();
+  const classic = uiMode === "classic";                 // «прежний вид»: все включённые блоки сразу, как в основной версии
+  const group = !classic && w && w !== "all" ? WP_GROUPS.find((g) => g.key === w) || null : null;
+  const level: "entries" | "group" | "all" = classic || w === "all" ? "all" : group ? "group" : "entries";
   const [d, setD] = useState<Data | null>(null);
   const [err, setErr] = useState("");
   const load = () => api.get<Data>("/api/workplace").then(setD).catch((e) => setErr((e as Error).message));
   useEffect(() => { load(); }, []);
-  const visible = useMemo(() => d ? d.layout.order.filter((b) => !d.layout.hidden.includes(b)) : [], [d]);
+  const visibleAll = useMemo(() => d ? d.layout.order.filter((b) => !d.layout.hidden.includes(b)) : [], [d]);
+  // второй уровень показывает только блоки выбранного направления (в пользовательском порядке)
+  const visible = useMemo(() => level === "group" ? visibleAll.filter((b) => group!.blocks.includes(b)) : visibleAll, [visibleAll, level, group]);
   const [measured, setMeasured] = useState<Record<string, number>>({});
   const rootRef = useRef<HTMLDivElement | null>(null);
   const cols = useMemo(() => d ? arrange(d, visible, measured) : [[], []], [d, visible, measured]);
@@ -95,6 +119,13 @@ export default function WorkplacePage({ me }: { me: Me }) {
     const changed = Object.keys(m).some((k) => Math.abs((measured[k] ?? -1) - m[k]) > 4);
     if (changed) setMeasured(m);
   }, [d, visible]);
+  // переход с показателя «#блок» или по ссылке …#блок: прокрутить к блоку и подсветить его
+  useEffect(() => {
+    if (!d || level === "entries" || !loc.hash) return;
+    const el = rootRef.current?.querySelector<HTMLElement>(`[data-block="${loc.hash.slice(1)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" }); el.classList.add("wp-flash"); setTimeout(() => el.classList.remove("wp-flash"), 1600);
+  }, [d, level, loc.hash, cols]);
   if (err) return <div className="alert error">{err}</div>;
   if (!d) return <div className="muted" style={{ padding: 24 }}>Загрузка рабочего места…</div>;
   const done = (t: TaskRow) => api.post(`/api/tasks/${t.id}/done`, { comment: "с рабочего места" }).then(load).catch((e) => setErr((e as Error).message));
@@ -240,25 +271,146 @@ export default function WorkplacePage({ me }: { me: Me }) {
     }
   };
 
+  const kpiRow = visibleAll.includes("kpis") && (
+    <section className="wp-kpis">{d.kpis.map((k) => (
+      <button key={k.title} type="button" className={`wp-kpi ${k.url ? "link" : ""}`} title={k.url ? "открыть" : undefined}
+        onClick={() => { if (!k.url) return; if (k.url.startsWith("#")) {
+          const b = k.url.slice(1);
+          const el = rootRef.current?.querySelector<HTMLElement>(`[data-block="${b}"]`);
+          if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); el.classList.add("wp-flash"); setTimeout(() => el.classList.remove("wp-flash"), 1600); }
+          else if (!classic) nav(`/?w=${groupOf(b)}#${b}`);          // на уровне входов блока нет — открыть его направление
+        } else nav(k.url); }}>
+        <small>{k.title}</small><b style={{ color: TONE_FG[k.tone] && k.tone ? TONE_FG[k.tone] : "inherit" }}>{k.value}</b><span className="muted">{k.sub}</span></button>))}</section>);
+  const quickRest = visibleAll.includes("quick") ? d.quick.slice(1) : [];
+  const head = (
+    <header className="wp-top">
+      <div><h1>{d.user.greeting}, {d.user.first_name || d.user.name}</h1><div className="muted" style={{ fontSize: 13 }}>{d.date.text} · {d.user.role_title} · {d.today.events.length} событий сегодня{d.tasks_overdue ? ` · ${d.tasks_overdue} задач просрочено` : ""}</div></div>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <UiModeSwitch />
+        <button className="btn ghost" onClick={() => nav("/support?new=1&from=/")} title="Обращение в поддержку внутри CRM">Сообщить о проблеме</button>
+        {level === "entries" && <ActionMenu label="Быстрые действия" items={quickRest} onPick={(u) => nav(u)} />}
+        {d.quick[0] && <button className="btn add" onClick={() => nav(d.quick[0].url)}>{d.quick[0].title}</button>}
+      </div>
+    </header>);
+  // переключатель направлений второго уровня: из любого направления — в соседнее, в полный вид и назад к входам
+  const groupsShown = WP_GROUPS.filter((g) => g.blocks.some((b) => visibleAll.includes(b)));
+  const views = (
+    <div className="lv-views" role="navigation" aria-label="Направления рабочего места">
+      <Link to="/">Входы</Link>
+      {groupsShown.map((g) => <Link key={g.key} to={`/?w=${g.key}`} className={w === g.key ? "cur" : ""} aria-current={w === g.key ? "page" : undefined}>{g.title}</Link>)}
+      <Link to="/?w=all" className={w === "all" ? "cur" : ""} aria-current={w === "all" ? "page" : undefined}>Все блоки</Link>
+      <Link to="/settings?s=workplace">Настроить блоки</Link>
+    </div>);
+
+  if (level !== "entries") {
+    return (
+      <div className="wp" ref={rootRef}>
+        {!classic && <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: level === "all" ? "Все блоки" : group!.title }]} />}
+        {head}
+        {!classic && views}
+        {me.roles.some((r) => r.code === "gd") && level === "all" && <DownloadRequests />}
+        {level === "all" && kpiRow}
+        {level === "group" && visible.length === 0 && <div className="card muted">Блоки этого направления скрыты в настройках рабочего места или недоступны для роли. <Link to="/settings?s=workplace">Настроить блоки</Link></div>}
+        <section className="wp-cols">
+          <div className="wp-col">{cols[0].map(block)}</div>
+          <div className="wp-col">{cols[1].map(block)}</div>
+        </section>
+      </div>);
+  }
+
+  // ---------------- уровень входов
+  const on = (b: string) => visibleAll.includes(b);
+  const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
+  const perm = (g: string) => (me.perms?.[g] ?? 0) >= 1;
+  const entries: Entry[] = [];
+  const mainEntries: Entry[] = [];
+  {   // «Сделки» и «Задачи» — главные входы у всех (как пункты меню); счётчики — только из видимых блоков
+    const dl = on("deals") ? d.deals : [];
+    const first = dl.find((r) => r.tone === "bad") || dl[0];
+    const inWork = d.funnel.filter((f) => f.code !== "won" && f.code !== "lost").reduce((a, f) => a + f.count, 0);
+    mainEntries.push({ key: "deals", title: "Сделки", to: "/deals", big: true,
+      stats: [
+        ...(on("deals") ? [{ value: dl.length, label: "требуют действия", tone: (dl.some((r) => r.tone === "bad") ? "bad" : "") as "bad" | "", to: "/?w=deals#deals" }] : []),
+        ...(on("approvals") ? [{ value: d.approvals.length, label: "ждут моего решения", tone: (d.approvals.length ? "warn" : "") as "warn" | "", to: "/?w=deals#approvals" }] : []),
+        ...(on("funnel") ? [{ value: inWork, label: "в воронке квартала", to: "/?w=deals#funnel" }] : []),
+        ...(on("team") && d.team.some((t) => t.overdue) ? [{ value: d.team.reduce((a, t) => a + t.overdue, 0), label: "просрочено в команде", tone: "bad" as const, to: "/?w=deals#team" }] : []),
+      ],
+      hint: ["deals", "approvals", "funnel", "team"].some(on) ? undefined : "реестр сделок и заявок на запчасти, карточки, расчёты и исполнение",
+      top: on("approvals") && d.approvals[0] ? { label: <b>{d.approvals[0].title}</b>, sub: `ждёт решения · ${d.approvals[0].sub}`, to: d.approvals[0].url, tone: "warn" }
+        : first ? { label: <b>{first.number} · {first.client_name}</b>, sub: first.action || first.status_title, to: first.url || `/deals/${first.id}`, tone: first.tone } : null,
+      links: [{ label: "Все данные направления", to: "/?w=deals" }, { label: "Реестр сделок", to: "/deals" }] });
+  }
+  {
+    const todo = on("todo") ? d.todo || [] : [];
+    const td0 = todo[0];
+    const t0 = on("tasks") ? (d.tasks.find((t) => t.overdue) || d.tasks[0]) : undefined;
+    const dl0 = on("deadlines") ? d.upcoming[0] : undefined;
+    mainEntries.push({ key: "tasks", title: "Задачи", to: "/tasks", big: true,
+      hint: ["todo", "tasks", "today", "deadlines"].some(on) ? undefined : "задачи и поручения по сделкам, сроки",
+      stats: [
+        ...(on("todo") ? [{ value: todo.length, label: "что сделать", to: "/?w=tasks#todo" }, ...(todo.some((x) => x.overdue) ? [{ value: todo.filter((x) => x.overdue).length, label: "просрочено", tone: "bad" as const, to: "/?w=tasks#todo" }] : [])] : []),
+        ...(on("tasks") ? [{ value: d.tasks_total, label: "открыто", to: "/tasks" }, { value: d.tasks_overdue, label: "просрочено", tone: (d.tasks_overdue ? "bad" : "") as "bad" | "", to: "/tasks" }] : []),
+        ...(on("today") ? [{ value: d.today.events.length, label: "событий сегодня", to: "/?w=tasks#today" }] : []),
+        ...(on("deadlines") ? [{ value: d.upcoming.length, label: "сроков за 2 недели", to: "/?w=tasks#deadlines" }] : []),
+      ],
+      top: td0 ? { label: <b>{td0.title}</b>, sub: `${td0.when} · ${td0.sub}`, to: td0.url, tone: td0.tone }
+        : t0 ? { label: <b>{t0.title}</b>, sub: `${t0.overdue ? `просрочено ${-t0.days_left} дн.` : t0.days_left === 0 ? "сегодня" : t0.days_left === 1 ? "завтра" : dShort(t0.due)} · ${t0.deal_number} ${t0.client_name}`, to: `/deals/${t0.deal_id}`, tone: t0.overdue ? "bad" : "" }
+        : dl0 ? { label: <b>{dl0.title}</b>, sub: `${dShort(dl0.on)} · ${dl0.sub}`, to: dl0.url, tone: dl0.tone } : null,
+      links: [{ label: "Все данные направления", to: "/?w=tasks" }, { label: "Мои задачи", to: "/tasks" }] });
+  }
+  if (on("attention") || on("notifications") || on("briefing") || on("focus")) {
+    const unread = d.notifications.filter((n) => !n.read).length;
+    const att0 = on("attention") ? d.attention[0] : undefined;
+    entries.push({ key: "attention", title: "Внимание и уведомления", to: "/?w=attention",
+      attention: on("attention") && d.attention.length ? `${d.attention.length} требует вмешательства` : undefined,
+      stats: [
+        ...(on("briefing") && d.briefing ? [{ value: d.briefing.items.length, label: "приоритетов дня", to: "/?w=attention#briefing" }] : []),
+        ...(on("notifications") ? [{ value: unread, label: "новых уведомлений", tone: (unread ? "warn" : "") as "warn" | "", to: "/?w=attention#notifications" }] : []),
+      ],
+      top: att0 ? { label: <b>{att0.title}</b>, sub: att0.sub, to: att0.url, tone: "bad" } : null,
+      links: [{ label: "Сводка дня, внимание и уведомления", to: "/?w=attention" }] });
+  }
+  if (on("money") && d.money) {
+    entries.push({ key: "money", title: "Деньги", to: perm("finance_section") ? "/finance" : (d.money.url || "/summary?kind=money"),
+      stats: [
+        { value: d.money.receivable_count ? `${money(d.money.receivable_sum)} ₽` : "нет", label: `дебиторка просрочена${d.money.receivable_count ? ` · ${d.money.receivable_count}` : ""}`, tone: d.money.receivable_count ? "bad" : "" },
+        { value: d.money.min_cum == null ? "не подтв." : `${money(d.money.min_cum)} ₽`, label: d.money.min_cum == null ? "остаток счетов" : `минимум остатка · ${d.money.min_week}`, tone: d.money.min_cum == null ? "warn" : d.money.min_cum < 0 ? "bad" : "" },
+      ],
+      links: [{ label: "Денежный поток, 8 недель", to: "/?w=money" }, { label: "Подробно", to: d.money.url || "/summary?kind=money" }] });
+  }
+  if (on("legal") && d.legal) {
+    const L = d.legal;
+    entries.push({ key: "legal", title: "Юридический блок", to: "/legal",
+      stats: [
+        { value: L.contracts_visas, label: "ждут вашей визы", tone: L.contracts_visas ? "warn" : "", to: "/legal?tab=contracts" },
+        { value: L.contracts_no_scan, label: "договоров без скана", tone: L.contracts_no_scan ? "bad" : "", to: "/legal?tab=contracts" },
+        { value: L.claims_open ?? 0, label: "претензий в работе", to: "/legal?tab=claims" },
+        ...(L.claims_answer_overdue ? [{ value: L.claims_answer_overdue, label: "истёк срок ответа", tone: "bad" as const, to: "/legal?tab=claims" }] : []),
+      ],
+      links: [{ label: "Все юридические показатели", to: "/?w=legal" }] });
+  }
+  // остальные направления по ролям — те же правила видимости, что и в меню
+  if (has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager")) entries.push({ key: "summary", title: "Сводка", to: "/summary", hint: "сводные реестры и графики по сделкам — виды по вашей роли" });
+  entries.push({ key: "catalog", title: "Каталог", to: "/catalog", hint: "оборудование ГШО, запчасти, комплекты ТО, склады, ТН ВЭД, маршруты" });
+  if (has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head")) entries.push({ key: "supply", title: "Снабжение и склад", to: "/supply", hint: "заказы поставщикам, партии, склад, гарантия, отчёты" });
+  if (perm("finance_section") && !entries.some((e) => e.key === "money")) entries.push({ key: "finance", title: "Финансы", to: "/finance", hint: "обзор, платёжный календарь, дебиторка и кредиторка, ликвидность" });
+
+  // вход без видимых данных (блоки направления скрыты в настройках) — с пояснением, что внутри
+  const HINTS: Record<string, string> = { deals: "реестр сделок и заявок на запчасти, карточки, расчёты и исполнение", tasks: "задачи и поручения по сделкам, сроки" };
+  mainEntries.forEach((e) => { if (!e.stats?.length && !e.top) e.hint = HINTS[e.key]; });
   return (
     <div className="wp" ref={rootRef}>
-      <header className="wp-top">
-        <div><h1>{d.user.greeting}, {d.user.first_name || d.user.name}</h1><div className="muted" style={{ fontSize: 13 }}>{d.date.text} · {d.user.role_title} · {d.today.events.length} событий сегодня{d.tasks_overdue ? ` · ${d.tasks_overdue} задач просрочено` : ""}</div></div>
-        <div className="row" style={{ gap: 8 }}>
-          <button className="btn ghost" onClick={() => nav("/support?new=1&from=/")} title="Обращение в поддержку внутри CRM">Сообщить о проблеме</button>
-          {d.quick[0] && <button className="btn add" onClick={() => nav(d.quick[0].url)}>{d.quick[0].title}</button>}
-        </div>
-      </header>
+      {head}
       {me.roles.some((r) => r.code === "gd") && <DownloadRequests />}
-      {visible.includes("kpis") && (
-        <section className="wp-kpis">{d.kpis.map((k) => (
-          <button key={k.title} type="button" className={`wp-kpi ${k.url ? "link" : ""}`} title={k.url ? "открыть" : undefined}
-            onClick={() => { if (!k.url) return; if (k.url.startsWith("#")) { const el = rootRef.current?.querySelector<HTMLElement>(`[data-block="${k.url.slice(1)}"]`); el?.scrollIntoView({ behavior: "smooth", block: "start" }); el?.classList.add("wp-flash"); setTimeout(() => el?.classList.remove("wp-flash"), 1600); } else nav(k.url); }}>
-            <small>{k.title}</small><b style={{ color: TONE_FG[k.tone] && k.tone ? TONE_FG[k.tone] : "inherit" }}>{k.value}</b><span className="muted">{k.sub}</span></button>))}</section>)}
-      <section className="wp-cols">
-        <div className="wp-col">{cols[0].map(block)}</div>
-        <div className="wp-col">{cols[1].map(block)}</div>
-      </section>
+      {kpiRow}
+      {on("focus") && d.focus && (
+        <div className="lv-alert" style={{ borderLeftColor: TONE_DOT[d.focus.tone] || "var(--accent)" }}>
+          <div style={{ minWidth: 0 }}><div className="wp-h" style={{ color: "var(--accent)" }}>Главное сейчас</div><div className="t">{d.focus.title}</div><div className="muted" style={{ fontSize: 13 }}>{d.focus.text}</div></div>
+          <button className="btn" onClick={() => nav(d.focus!.url)}>{d.focus.action}</button>
+        </div>)}
+      {mainEntries.length > 0 && <EntryGrid className="main" entries={mainEntries} />}
+      <EntryGrid entries={entries} />
+      <div className="lv-views"><Link to="/?w=all">Все блоки рабочего места в полном виде</Link><Link to="/settings?s=workplace">Настроить блоки</Link></div>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { Crumbs } from "../components/Levels";
 import { useEffect, useState } from "react";
 import { toneOf } from "../colors";
 import { lbl, PRIORITY, ROLE } from "../labels";
@@ -20,6 +21,7 @@ export default function BoardPage() {
   const nGsho = gsho.reduce((n, k) => n + (cols[k]?.deals.length || 0), 0);
   return (
     <>
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Доска сделок" }]} />
       <div className="page-head"><h1>Доска сделок</h1>
         <div className="tabs" style={{ margin: 0 }}>{([["", "Все"], ["gsho", `ГШО · ${nGsho}`], ["parts", `Запчасти · ${nParts}`]] as const).map(([k, t]) => <button key={k} className={type === k ? "active" : ""} onClick={() => pick(k)}>{t}</button>)}</div>
       </div>

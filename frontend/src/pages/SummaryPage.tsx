@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { Crumbs } from "../components/Levels";
+
 import { api, fmtDate, fmtRub } from "../api";
 import type { Me } from "../types";
 
@@ -26,18 +28,23 @@ export default function SummaryPage({ me }: { me: Me }) {
     has("purchasing", "cd", "gd", "service_head", "fd") && "purchasing",
   ].filter(Boolean)) as Kind[];
   const pref = load<Kind>("gsho.summaryKind", has("logistician") ? "shipments" : has("fd") ? "money" : has("service_head") ? "service" : has("purchasing") ? "purchasing" : kinds[0]);
-  const urlKind = new URLSearchParams(window.location.search).get("kind") as Kind | null;   // с рабочего места
-  const [kind, setKindState] = useState<Kind>(urlKind && kinds.includes(urlKind) ? urlKind : kinds.includes(pref) ? pref : kinds[0]);
-  const setKind = (k: Kind) => { setKindState(k); try { localStorage.setItem("gsho.summaryKind", JSON.stringify(k)); } catch { /* нет хранилища */ } };
-  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  // вид сводки — в адресе (?kind=…): «Назад» возвращает прежний вид, ссылка открывает нужный; без параметра — запомненный выбор
+  const [sp, setSp] = useSearchParams();
+  const urlKind = sp.get("kind") as Kind | null;
+  const kind: Kind = urlKind && kinds.includes(urlKind) ? urlKind : kinds.includes(pref) ? pref : kinds[0];
+  const setKind = (k: Kind) => { try { localStorage.setItem("gsho.summaryKind", JSON.stringify(k)); } catch { /* нет хранилища */ } const n = new URLSearchParams(sp); n.set("kind", k); setSp(n); };
+  // данные привязаны к виду: при переключении вида прежние данные не попадают в чужой экран (раньше «Сервис» падал на данных «Отгрузок»)
+  const [loaded, setLoaded] = useState<{ kind: Kind; data: Record<string, unknown> } | null>(null);
+  const data = loaded && loaded.kind === kind ? loaded.data : null;
   const [err, setErr] = useState("");
-  useEffect(() => { setData(null); setErr(""); if (kind) api.get<Record<string, unknown>>(`/api/summary/${kind}`).then(setData).catch((e) => setErr((e as Error).message)); }, [kind]);
+  useEffect(() => { setErr(""); if (kind) api.get<Record<string, unknown>>(`/api/summary/${kind}`).then((d) => setLoaded({ kind, data: d })).catch((e) => setErr((e as Error).message)); }, [kind]);
   if (!kinds.length) return <div className="card muted">Сводные экраны для вашей роли не предусмотрены.</div>;
   // D-130: у кого открыт раздел «Финансы» — «Деньги» там; остальным (КД с финансовой аналитикой) — сводка на общем сервисе
   if (kind === "money" && (me.perms?.finance_section ?? 0) >= 1) return <Navigate to="/finance?tab=overview" replace />;
   const t = (data?.totals || {}) as Record<string, number>;
   return (
     <>
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Сводка", to: "/summary" }, { label: TITLES[kind] }]} />
       <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <h1 style={{ margin: 0 }}>Сводка · {TITLES[kind]}</h1>
         {kinds.length > 1 && <div className="tabs" style={{ margin: 0 }}>{kinds.map((k) => <button key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>{TITLES[k]}</button>)}</div>}

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { Crumbs } from "../components/Levels";
 import { toneOf } from "../colors";
 import ChecksPanel from "../components/ChecksPanel";
 import { NowLine, POST_WIN_STATUSES, SaleSummary, StageStrip, dealPhase } from "../components/DealHeader";
 import { lbl, FEED_KIND } from "../labels";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
 import { DELIVERY_START, PRODUCTION_START, STATUS_TITLES, TERM_UNITS, can, type Deal, type Me, type Position } from "../types";
 import ApprovalScreen from "./ApprovalScreen";
@@ -30,6 +31,9 @@ const POST_WIN = ["contract", "execution", "closed"];
 type Phase = "sale" | "contract";
 const SALE_TABS: Tab[] = ["main", "positions", "offers", "logistics", "service", "pricing", "catalog"];
 const CONTRACT_TABS: Tab[] = ["execution", "acceptance", "planfact", "documents", "legal"];
+const TAB_TITLES: Record<Tab, string> = { main: "Шапка и условия", positions: "Позиции и характеристики", offers: "Заводы и ответы", logistics: "Логистика и таможня",
+  service: "Сервис", pricing: "Расчёт и утверждение", catalog: "В каталог", execution: "Контракт, этапы и даты", acceptance: "Приёмка машин",
+  planfact: "Платежи и план/факт", documents: "Документы", legal: "Юридические документы", feed: "Лента", versions: "Версии и файлы" };
 
 export default function DealCard({ me }: { me: Me }) {
   const { id } = useParams();
@@ -63,6 +67,19 @@ export default function DealCard({ me }: { me: Me }) {
   const [candSel, setCandSel] = useState<Record<string, boolean>>({});
   const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
   const isMgmt = has("cd", "fd", "gd");
+  // «Матрёшка»: открытая вкладка — в адресе (?tab=…). «Назад» браузера возвращает прежнюю вкладку, обновление — остаётся на ней.
+  const [sp, setSp] = useSearchParams();
+  const urlTab = sp.get("tab") as Tab | null;
+  const tabOk = (t: string | null): t is Tab => !!t && ([...SALE_TABS, ...CONTRACT_TABS, "feed", "versions"] as string[]).includes(t) && (t !== "pricing" || isMgmt);
+  useEffect(() => {     // адрес → вкладка (назад / вперёд / ссылка на ту же сделку)
+    if (!deal || !tabOk(urlTab) || urlTab === tab) return;
+    if (urlTab === "feed" || urlTab === "versions") setTabState(urlTab); else setTab(urlTab);
+  }, [urlTab]);
+  useEffect(() => {     // вкладка → адрес; первый выбор по статусу не плодит лишнюю запись в истории
+    if (!deal || urlTab === tab) return;
+    const n = new URLSearchParams(sp); n.set("tab", tab);
+    setSp(n, { replace: !tabOk(urlTab) });
+  }, [tab, !!deal]);
 
   const load = () => api.get<Deal>(`/api/deals/${id}`).then((d) => {
     setDeal(d); setWishes(d.client_payment_wishes || "");
@@ -139,8 +156,12 @@ export default function DealCard({ me }: { me: Me }) {
     return `${prod} ${PRODUCTION_START[t.start_event || "factory_contract"]}${t.fixed ? " · зафиксирован КД / ЗГД" : ""}`;
   };
 
+  const phaseStart: Tab = phase === "sale" ? "main" : "execution";
   return (
     <>
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Сделки", to: "/deals" }, { label: deal.number, to: `/deals/${deal.id}?tab=${phaseStart}` },
+        ...(POST_WIN_STATUSES.includes(deal.status) ? [{ label: phase === "sale" ? "Продажа" : "Контракт и исполнение", to: `/deals/${deal.id}?tab=${phaseStart}` }] : []),
+        { label: TAB_TITLES[tab] }]} />
       <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <div className="row" style={{ gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -174,6 +195,17 @@ export default function DealCard({ me }: { me: Me }) {
             {phase === "sale" && can(me, "legal_docs") && <a href="#" style={{ fontSize: 12, fontWeight: tab === "documents" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("documents"); }}>Документы</a>}
           </div>
         </div>
+      </div>
+      {/* межмодульные переходы — явно в объекте сделки (клиент, финансы, договоры), с учётом прав */}
+      <div className="lv-views" style={{ margin: "6px 0 0" }} aria-label="Связанные разделы">
+        <span className="muted">Связано:</span>
+        {deal.client_id && <Link to={`/legal?tab=counterparties&type=clients&client=${deal.client_id}`}>клиент {deal.client_name}</Link>}
+        {can(me, "finance_section") && <Link to={`/finance?tab=calendar&deal_id=${deal.id}`}>финансы по сделке</Link>}
+        {can(me, "legal_docs") && (POST_WIN_STATUSES.includes(deal.status)
+          ? <Link to={`/deals/${deal.id}?tab=legal`}>договоры и юридические документы</Link>
+          : <Link to={`/deals/${deal.id}?tab=documents`}>документы клиента и юридические</Link>)}
+        <Link to="/legal?tab=contracts">реестр договоров</Link>
+        <Link to="/tasks">мои задачи</Link>
       </div>
       <div style={{ display: "grid", gap: 8, margin: "8px 0" }}>
         <StageStrip deal={deal} now={deal.now} />
