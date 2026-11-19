@@ -2,6 +2,8 @@
     python3 docs/operations/qa_assistant_ui.py
 Менеджер: первое открытие (пояснение), быстрый вопрос «Что требует моего решения?» → ответ из «Ваших приоритетов» и переход
 по источнику; справка; общий режим выключен честно; история и удаление диалога; Esc сохраняет черновик; ширины 1440–390."""
+import re
+
 from playwright.sync_api import expect, sync_playwright
 
 U, API, SHOTS = "http://127.0.0.1:5173", "http://127.0.0.1:8000", "docs/operations/screens"
@@ -17,7 +19,7 @@ with sync_playwright() as pw:
     p.on("pageerror", lambda e: issues.append(str(e)))
     p.on("response", lambda r: r.status >= 500 and "/api/" in r.url and issues.append(f"{r.status} {r.url}"))
     p.goto(U + "/")
-    p.get_by_role("button", name="Помощник", exact=True).click()
+    p.locator(".hm-help .hm-trigger").click(); p.get_by_role("menuitem", name=re.compile("^Помощник")).click()   # D-096: меню «?»
     dr = p.get_by_role("dialog", name="Помощник CRM")
     expect(dr.get_by_text("Не вводите пароли")).to_be_visible()
     expect(dr.get_by_text("без внешней модели")).to_be_visible()
@@ -47,7 +49,7 @@ with sync_playwright() as pw:
     dr.get_by_label("Вопрос помощнику").fill("черновик вопроса")
     p.keyboard.press("Escape")
     expect(dr).to_be_hidden()
-    p.get_by_role("button", name="Помощник", exact=True).click()
+    p.locator(".hm-help .hm-trigger").click(); p.get_by_role("menuitem", name=re.compile("^Помощник")).click()   # D-096: меню «?»
     expect(dr.get_by_label("Вопрос помощнику")).to_have_value("черновик вопроса")
     # история и удаление
     dr.get_by_role("button", name="История").click()

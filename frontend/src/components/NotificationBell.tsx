@@ -27,8 +27,8 @@ export default function NotificationBell() {
   const when = (iso: string | null) => (iso ? `${fmtDate(iso)} ${iso.slice(11, 16)}` : "");
   return (
     <div ref={box} style={{ position: "relative" }}>
-      <button className="btn ghost" onClick={() => setOpen(!open)} title="Уведомления" aria-label={`Уведомления, непрочитанных: ${unread}`}
-        style={{ position: "relative", padding: "4px 8px", fontSize: 18, lineHeight: 1 }}>
+      <button className="hm-trigger" onClick={() => setOpen(!open)} title="Уведомления" aria-label={`Уведомления, непрочитанных: ${unread}`}
+        style={{ fontSize: 16, lineHeight: 1 }}>
         🔔{unread > 0 && <span style={{ position: "absolute", top: -4, right: -2, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 9, background: "var(--accent)", color: "#fff",
           fontSize: 11, fontWeight: 700, lineHeight: "18px", textAlign: "center" }}>{unread > 99 ? "99+" : unread}</span>}
       </button>

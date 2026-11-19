@@ -2,6 +2,8 @@
     python3 docs/operations/qa_support_ui.py
 Менеджер создаёт обращение с файлом и строкой, похожей на скрипт → ЗГД (поддержка) назначает, отвечает, запрашивает данные →
 менеджер видит отметку на кнопке, отвечает, специалист решает → менеджер закрывает. Ширины 1440/768/390."""
+import re
+
 from playwright.sync_api import expect, sync_playwright
 
 U, API, SHOTS = "http://127.0.0.1:5173", "http://127.0.0.1:8000", "docs/operations/screens"
@@ -20,7 +22,7 @@ with sync_playwright() as pw:
     p.on("response", lambda r: r.status >= 500 and "/api/" in r.url and issues.append(f"{r.status} {r.url}"))
     who(MGR)
     p.goto(U + "/deals")
-    p.get_by_role("button", name="Поддержка").click()
+    p.locator(".hm-help .hm-trigger").click(); p.get_by_role("menuitem", name=re.compile("^Поддержка")).click()   # D-096: меню «?»
     p.get_by_role("heading", name="Поддержка").wait_for()
     p.get_by_role("button", name="Новое обращение").click()
     dlg = p.get_by_role("dialog", name="Новое обращение")
@@ -61,7 +63,7 @@ with sync_playwright() as pw:
     who(MGR)
     p.goto(U + "/deals")
     expect(p.locator(".sup-badge")).to_be_visible()
-    p.get_by_role("button", name="Поддержка").click()
+    p.locator(".hm-help .hm-trigger").click(); p.get_by_role("menuitem", name=re.compile("^Поддержка")).click()   # D-096: меню «?»
     p.get_by_role("tab", name="Ждут меня").click()
     p.locator(".sup-desktop tbody tr", has=p.get_by_text(number)).click()
     p.get_by_label("Ваш ответ").fill("Сделка 2026-0012, Chrome 140")

@@ -17,22 +17,23 @@
 * { box-sizing: border-box; }
 body { margin: 0; font-family: var(--font); color: var(--ink); background: var(--bg); font-size: 14px; }
 a { color: inherit; }
-header.top { display: flex; flex-direction: column; gap: 4px; padding: 8px 16px 0; background: #fff; border-bottom: 3px solid var(--accent); position: sticky; top: 0; z-index: 5; }
-header.top .top-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; }
+header.top { display: flex; flex-direction: column; gap: 0; padding: 6px 16px; background: #fff; border-bottom: 3px solid var(--accent); position: sticky; top: 0; z-index: 5; }
+header.top .top-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 48px; }
 header.top .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font-weight: 700; white-space: nowrap; border: 0; }
 header.top .brand img { height: 40px; width: auto; display: block; }
 header.top .brand span { font-size: 13px; color: var(--muted); }
-header.top nav { display: flex; gap: 2px; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; }
+header.top nav { display: flex; gap: 2px; flex-wrap: nowrap; overflow-x: auto; flex: 1 1 auto; min-width: 0; scrollbar-width: none; }
+header.top nav::-webkit-scrollbar { display: none; }
 header.top nav a { text-decoration: none; padding: 8px 10px; border-radius: 6px; white-space: nowrap; line-height: 1; border: 0; }
 header.top nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 header.top nav a:hover { background: #f3f3f3; }
 /* учётная запись — в правом верхнем углу */
-header.top .account { display: flex; align-items: center; gap: 14px; margin-left: auto; min-width: 0; }
+header.top .account { display: flex; align-items: center; gap: 10px; margin-left: auto; min-width: 0; flex: 0 0 auto; }
 /* информационный блок у логотипа: дата и время, курсы ЦБ РФ с датой курса — спокойный, без рамок, всегда на виду */
-header.top .infobar { display: flex; align-items: center; gap: 16px; margin-left: 18px; padding-left: 18px; border-left: 1px solid var(--line); height: 36px; color: var(--muted); font-size: 12px; line-height: 1.25; white-space: nowrap; cursor: default; font-variant-numeric: tabular-nums; }
+header.top .infobar { display: flex; align-items: center; gap: 16px; padding-right: 12px; border-right: 1px solid var(--line); height: 32px; color: var(--muted); font-size: 12px; line-height: 1.25; white-space: nowrap; cursor: default; font-variant-numeric: tabular-nums; }
 header.top .infobar-clock { display: flex; flex-direction: column; justify-content: center; }
 header.top .infobar-time { color: var(--ink); font-size: 15px; font-weight: 700; letter-spacing: 0.02em; }
-header.top .infobar-fx { display: flex; align-items: baseline; gap: 14px; padding-left: 16px; border-left: 1px solid var(--line); }
+header.top .infobar-fx { display: flex; align-items: baseline; gap: 12px; }
 header.top .infobar-rate { display: inline-flex; align-items: baseline; gap: 4px; }
 header.top .infobar-rate .cur { font-size: 11px; color: var(--muted); }
 header.top .infobar-rate b { color: var(--ink); font-weight: 600; font-size: 13px; }
@@ -40,11 +41,12 @@ header.top .infobar-rate small { font-size: 10px; letter-spacing: -0.02em; }
 header.top .infobar-rate small.up { color: var(--ok); }
 header.top .infobar-rate small.down { color: var(--bad); }
 header.top .infobar-src { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.85; }
-@media (max-width: 1100px) { header.top .infobar-src { display: none; } header.top .infobar-fx { gap: 10px; } }
+@media (max-width: 1500px) { header.top .infobar-src { display: none; } header.top .infobar-fx { gap: 10px; } }
+@media (max-width: 1280px) { header.top .infobar { display: none; } }
 @media (max-width: 900px) { header.top .infobar-fx { display: none; } }
 @media (max-width: 700px) { header.top .infobar { display: none; } }
 header.top .dev-switch { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
-header.top .dev-switch select { max-width: 230px; padding: 5px 8px; font-size: 13px; border-radius: 16px; background: #fafafa; }
+header.top .dev-switch select { max-width: 170px; padding: 5px 8px; font-size: 13px; border-radius: 16px; background: #fafafa; }
 header.top .me { display: flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; border: 1px solid var(--line); border-radius: 22px; background: #fff; min-width: 0; max-width: 300px; }
 header.top .me .avatar { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; letter-spacing: .5px; }
 header.top .me .who { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
@@ -75,12 +77,16 @@ h2 { font-size: 16px; margin: 18px 0 8px; }
 @media (max-width: 900px) { .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; } }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-th { background: var(--accent); color: #fff; font-weight: 600; font-size: 12px; }
+/* шапки таблиц — нейтральные: красный только у бренда, главной кнопки и ошибок (D-096) */
+th { background: #f3f4f6; color: #374151; font-weight: 600; font-size: 12px; border-bottom: 1px solid #d9dce1; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
 .btn { background: var(--accent); color: #fff; border: 0; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; font-family: inherit; }
 .btn.secondary { background: #fff; color: var(--ink); border: 1px solid var(--ink); }
-.btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.btn.ghost { background: #fff; color: var(--ink); border: 1px solid #cfd3d9; }
+.btn.ghost:hover:not(:disabled) { border-color: var(--ink); background: #f7f7f8; }
+.btn.secondary:hover:not(:disabled) { background: #f3f4f6; }
+.btn:not(.secondary):not(.ghost):not(.add):hover:not(:disabled) { background: #e62a2a; }
 /* шапка страницы: заголовок и главная кнопка на одной линии, по центру по высоте; поиск и фильтры — справа */
 .page-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 0 0 14px; min-height: 38px; }
 .page-head h1 { margin: 0; line-height: 1.2; }
@@ -90,8 +96,10 @@ tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
 .section-head h2 { margin: 0; }
 /* кнопки добавления — того же вида, что основные (как «Отправить на расчёт»), со знаком «+» */
 .btn.add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;
-  background: transparent; color: var(--accent); border: 1px solid var(--accent); }   /* как «Дублировать заявку» */
-.btn.add:hover:not(:disabled) { background: var(--accent-soft); }
+  background: #fff; color: var(--ink); border: 1px solid #cfd3d9; }
+.btn.add:hover:not(:disabled) { border-color: var(--ink); background: #f7f7f8; }
+.btn.add.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.add.primary:hover:not(:disabled) { background: #e62a2a; border-color: #e62a2a; }
 .btn.add::before { content: "+"; font-size: 16px; line-height: 1; font-weight: 700; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; line-height: 1.2; text-decoration: none; box-sizing: border-box; vertical-align: middle; }
 .row > .btn, .row > a.btn { flex: 0 0 auto; }
@@ -100,7 +108,8 @@ tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
 /* поля в строках не выходят за границы карточки */
 .row > select, .row > input { max-width: 100%; min-width: 0; }
 .card { min-width: 0; }
-.btn:disabled { opacity: .45; cursor: not-allowed; }
+/* недоступная кнопка — серая, а не бледно-красная (не читается как ошибка) */
+.btn:disabled, .btn.ghost:disabled, .btn.add:disabled, .btn.secondary:disabled { background: #eceef1; color: #9aa0a8; border: 1px solid #e1e4e8; opacity: 1; cursor: not-allowed; box-shadow: none; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 input, select, textarea { font-family: inherit; font-size: 14px; padding: 7px 9px; border: 1px solid #bbb; border-radius: 6px; }
 label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
@@ -125,9 +134,9 @@ label.f { display: flex; flex-direction: column; gap: 4px; font-size: 12px; colo
 .tabs.tabs-compact button { display: flex; align-items: center; justify-content: center; text-align: center; white-space: normal; min-height: 50px; padding: 6px 10px;
   font-size: 14px; font-weight: 600; line-height: 1.25; color: #1f1f1f; background: #fff; border: 1px solid #d9d9dc; border-radius: 9px;
   box-shadow: 0 1px 2px rgba(0,0,0,.06); cursor: pointer; transition: background .15s, border-color .15s, color .15s, box-shadow .15s; }
-.tabs.tabs-compact button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.tabs.tabs-compact button:hover { border-color: #9aa0a8; background: #fafafa; }
 .tabs.tabs-compact button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.tabs.tabs-compact button.active { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 700; box-shadow: 0 3px 10px rgba(255,49,49,.28); }
+.tabs.tabs-compact button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; box-shadow: inset 0 0 0 1px var(--accent); }
 @media (max-width: 900px) { .tabs.tabs-compact { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); } }
 .alert { padding: 10px 12px; border-radius: 6px; margin: 8px 0; }
 .alert.error { background: var(--bad-bg); color: var(--bad); border-left: 4px solid var(--bad); }
@@ -623,7 +632,7 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .ng-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; align-self: flex-start; }
 .ng-seg button { border: 0; background: #fff; padding: 6px 14px; cursor: pointer; border-right: 1px solid var(--line); font-weight: 600; }
 .ng-seg button:last-child { border-right: 0; }
-.ng-seg button.active { background: var(--accent); color: #fff; }
+.ng-seg button.active { background: var(--ink); color: #fff; }
 .ng-inrow { display: flex; gap: 6px; align-items: center; }
 .ng-inrow input { width: 150px; height: 36px; font-size: 16px; font-weight: 600; }
 .ng-inrow select { height: 36px; }
@@ -742,7 +751,7 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .cb-no { display: inline-block; width: 24px; color: var(--muted); font-size: 12px; }
 .cb-sharecol { width: 26%; }
 .cb-bar { position: relative; height: 16px; background: #f1f1f2; border-radius: 4px; overflow: hidden; }
-.cb-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #ffb3b3; }
+.cb-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #cdd2d9; }
 .cb-bar span { position: relative; font-size: 11px; padding-left: 6px; line-height: 16px; color: #333; }
 .cb-table .cb-total td { font-weight: 800; font-size: 15px; border-top: 2px solid #1f1f1f; background: #fff; }
 .cb-table .cb-sub td { color: #333; }
@@ -763,3 +772,24 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .cb-ccy { color: #555; }
 .cb-rubc { color: #8a8a8f; font-size: 12px; } .cb-rubh { opacity: .85; font-weight: 400 !important; }
 .cb-card em.cb-rub { font-size: 12px; }
+
+/* шапка в один ряд (D-096): «?» — помощник и поддержка, аватар — имя, роли и «Выйти» */
+.hm { position: relative; }
+.hm-trigger { display: inline-flex; align-items: center; justify-content: center; height: 34px; min-width: 34px; padding: 0; border: 1px solid var(--line); border-radius: 17px; background: #fff; cursor: pointer; font-family: inherit; color: var(--ink); position: relative; }
+.hm-trigger:hover { border-color: #9aa0a8; }
+.hm-help .hm-q { font-weight: 700; font-size: 15px; }
+.hm-dot { position: absolute; top: -5px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; }
+.hm-user .hm-trigger { border: 0; background: none; }
+.hm-user .avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--ink); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; letter-spacing: .5px; }
+.hm-menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 240px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 6px; z-index: 30; display: flex; flex-direction: column; }
+.hm-menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 14px; color: var(--ink); }
+.hm-menu button:hover { background: #f3f4f6; }
+.hm-menu button small, .hm-who small { font-size: 12px; color: var(--muted); }
+.hm-who { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+/* переключатель вариантов (порядок сортировки и т. п.) — не выглядит как действие */
+.seg { display: inline-flex; border: 1px solid #cfd3d9; border-radius: 8px; overflow: hidden; background: #fff; }
+.seg button { background: none; border: 0; border-right: 1px solid #e1e4e8; padding: 5px 12px; font-family: inherit; font-size: 13px; cursor: pointer; color: var(--ink); }
+.seg button:last-child { border-right: 0; }
+.seg button:hover { background: #f7f7f8; }
+.seg button.on { background: var(--ink); color: #fff; font-weight: 600; }
+@media (max-width: 1700px) { header.top .dev-switch > span { display: none; } }

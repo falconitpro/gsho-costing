@@ -240,7 +240,7 @@ export default function DealsList({ me }: { me: Me }) {
         </div>
         <div className="push row" style={{ gap: 8 }}>
           {f.type === "parts" ? (partsCreator && <button className="btn add" onClick={() => { setNewKind("parts"); setShowNew(!(showNew && newKind === "parts")); }}>Новая заявка на запчасти</button>)
-            : f.type === "gsho" ? (isManager && <button className="btn add" onClick={() => { setNewKind("gsho"); setShowNew(!(showNew && newKind === "gsho")); }}>Новая сделка ГШО</button>)
+            : f.type === "gsho" ? (isManager && <button className="btn add primary" onClick={() => { setNewKind("gsho"); setShowNew(!(showNew && newKind === "gsho")); }}>Новая сделка ГШО</button>)
             : (isManager || partsCreator) && <button className="btn add" onClick={() => setShowNew(!showNew)}>Новая сделка</button>}
         </div>
       </div>
@@ -347,9 +347,11 @@ export default function DealsList({ me }: { me: Me }) {
       </div>
       {block === "work" && <div className="row" style={{ gap: 6, margin: "0 0 8px", alignItems: "center", flexWrap: "wrap" }}>
         <span className="muted">Порядок:</span>
+        <div className="seg" role="group" aria-label="Порядок">
         {([["task", "по сроку моих задач"], ["prio_task", "по приоритету и сроку"], ["kp_due", "по сроку КП"], ["date", "по дате заявки"]] as const).map(([k, t]) => (
-          <button key={k} className={"btn " + (sort.key === k ? "" : "ghost")} style={{ padding: "3px 10px" }}
+          <button key={k} type="button" className={sort.key === k ? "on" : ""} aria-pressed={sort.key === k}
             onClick={() => { const n = { key: k as SortKey, dir: (k === "date" ? -1 : 1) as 1 | -1 }; setSort(n); save("gsho.dealsSort2", n); }}>{t}</button>))}
+        </div>
       </div>}
       <div className="card" style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ minWidth: 900 }}>

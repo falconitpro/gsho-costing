@@ -37,7 +37,7 @@ with sync_playwright() as pw:
             fields.nth(n - 2).fill(NEW)
             fields.nth(n - 1).fill(NEW)
             p.get_by_role("button", name="Сменить пароль").click()
-        expect(p.get_by_role("button", name="Помощник", exact=True)).to_be_visible(timeout=15000)
+        expect(p.locator(".hm-help .hm-trigger")).to_be_visible(timeout=15000)   # D-096: «Помощник» и «Поддержка» — в меню «?»
         expect(p.get_by_text("Войти как")).to_have_count(0)
         p.wait_for_load_state("networkidle")
         if p.evaluate("document.documentElement.scrollWidth > window.innerWidth + 1"):
