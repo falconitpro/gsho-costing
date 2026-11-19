@@ -43,7 +43,7 @@ export default function OutcomePanel({ deal, me, onDone }: { deal: Deal; me: Me;
   }
 
   return (
-    <div className="card" style={{ borderColor: "var(--accent)" }}>
+    <div className="card">
       <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
         <div>
           <h2 style={{ margin: 0 }}>Результат сделки</h2>

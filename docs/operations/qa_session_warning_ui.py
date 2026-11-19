@@ -39,7 +39,7 @@ with sync_playwright() as pw:
         dlg.get_by_role("button", name="Продолжить работу").click()
         expect(dlg).to_have_count(0)
         # выход, логин запомнен, курсор сразу в пароле
-        p.get_by_role("button", name="Выйти").click()
+        p.locator(".hm-user .hm-trigger").click(); p.get_by_role("menuitem", name="Выйти").click()   # D-096: «Выйти» — в меню аватара
         p.get_by_role("button", name="Войти в систему").wait_for()
         expect(p.get_by_label("Логин", exact=True)).to_have_value(EMAIL)
         expect(p.locator("input[name=password]")).to_be_focused()
@@ -48,7 +48,7 @@ with sync_playwright() as pw:
         p.locator("input[name=password]").fill(PW)
         p.get_by_role("button", name="Войти в систему").click()
         p.get_by_role("link", name="Рабочее место").wait_for()
-        p.get_by_role("button", name="Выйти").click()
+        p.locator(".hm-user .hm-trigger").click(); p.get_by_role("menuitem", name="Выйти").click()   # D-096: «Выйти» — в меню аватара
         p.get_by_role("button", name="Войти в систему").wait_for()
         expect(p.get_by_label("Логин", exact=True)).to_have_value("")
         c.close()

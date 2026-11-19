@@ -1,6 +1,7 @@
 import FilePreviewHost from "./components/FilePreview";
 import AssistantDrawer from "./components/AssistantDrawer";
-import { SupportAdmin, SupportButton, SupportList, SupportTicketRoute } from "./pages/SupportPage";
+import { SupportAdmin, SupportList, SupportTicketRoute } from "./pages/SupportPage";
+import { HelpMenu, UserMenu } from "./components/HeaderMenus";
 import { useEffect, useState } from "react";
 import FloatingScrollbar from "./components/FloatingScrollbar";
 import NotificationBell from "./components/NotificationBell";
@@ -122,8 +123,22 @@ export default function App() {
           <NavLink to="/" className="brand">
             <img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" />
           </NavLink>
-          <InfoBar />
+          {me && (
+            <nav>
+              <NavLink to="/" end>Рабочее место</NavLink>
+              <NavLink to="/deals">Сделки</NavLink>
+              <NavLink to="/tasks">Мои задачи</NavLink>
+              {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
+              {has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager") && <NavLink to="/summary">Сводка</NavLink>}
+              {perm("finance_section") && <NavLink to="/finance">Финансы</NavLink>}
+              <NavLink to="/legal">Юридический блок</NavLink>
+              <NavLink to="/catalog">Каталог</NavLink>
+              {has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head") && <NavLink to="/supply">Снабжение и склад</NavLink>}
+              <NavLink to="/settings">Настройки</NavLink>
+            </nav>
+          )}
           <div className="account">
+            {me && has("cd", "fd", "gd") && <InfoBar />}
             {devUsers.length > 0 && (
               <label className="dev-switch" title="тестовый стенд: посмотреть систему под другой учётной записью">
                 <span>Войти как</span>
@@ -134,32 +149,11 @@ export default function App() {
                 </select>
               </label>
             )}
-            {me && perm("assistant_use") && <button className="btn ghost ai-btn" onClick={() => setAiOpen(!aiOpen)} aria-expanded={aiOpen} title="Помощник CRM">Помощник</button>}
-            {me && <SupportButton />}
             {me && <NotificationBell />}
-            {me && (
-              <div className="me" title={`${me.display_name} — ${me.roles.map((r) => r.title).join(", ")}`}>
-                <span className="avatar">{me.display_name.replace(/\(.*\)/, "").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()}</span>
-                <span className="who"><b>{me.display_name.replace(/\s*\(.*\)\s*$/, "")}</b><small>{me.roles.map((r) => r.title).join(", ")}</small></span>
-              </div>)}
-            {me && <button className="btn ghost" style={{ padding: "4px 10px" }} onClick={logout} title="Выйти из системы">Выйти</button>}
+            {me && <HelpMenu canAssistant={perm("assistant_use")} onAssistant={() => setAiOpen(true)} />}
+            {me && <UserMenu me={me} onLogout={logout} />}
           </div>
         </div>
-        {me && (
-          <nav>
-            <NavLink to="/" end>Рабочее место</NavLink>
-            <NavLink to="/deals">Сделки</NavLink>
-            <NavLink to="/tasks">Мои задачи</NavLink>
-            {has("cd", "fd", "gd", "observer") && <NavLink to="/board">Доска</NavLink>}
-            {has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager") && <NavLink to="/summary">Сводка</NavLink>}
-            {perm("finance_section") && <NavLink to="/finance">Финансы</NavLink>}
-            <NavLink to="/legal">Юридический блок</NavLink>
-
-            <NavLink to="/catalog">Каталог</NavLink>
-            {has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head") && <NavLink to="/supply">Снабжение и склад</NavLink>}
-            <NavLink to="/settings">Настройки</NavLink>
-          </nav>
-        )}
       </header>
       <FloatingScrollbar />
       <StepUpDialog />
