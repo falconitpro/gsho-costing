@@ -74,12 +74,20 @@ dr_restore_latest() {
   created="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("created_at") or "")' "$manifest")"
   dr_log "снимок создан $created, commit ${commit:0:12}"
 
-  # код того же commit, что и копия: схема базы совпадает с дампом
-  if [[ "$commit" =~ ^[0-9a-f]{40}$ ]] && [ "$(git -C "$GSHO_DIR" rev-parse HEAD)" != "$commit" ]; then
-    dr_log "переключаю код на ${commit:0:12} и пересобираю (5–10 минут)"
-    timeout 300 git -C "$GSHO_DIR" fetch -q origin || dr_log "git fetch не удался — пробую с тем, что есть"
-    git -C "$GSHO_DIR" -c advice.detachedHead=false checkout -q "$commit" || dr_die "commit ${commit:0:12} недоступен — обновите код вручную"
-    dr_compose build -q backend frontend clamav
+  # код того же commit, что и копия: схема базы совпадает с дампом. Метка built-commit пишется только после
+  # успешной сборки: если сборка прервалась, следующий запуск соберёт заново, даже когда код уже переключён.
+  if [[ "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+    if [ "$(git -C "$GSHO_DIR" rev-parse HEAD)" != "$commit" ]; then
+      dr_log "переключаю код на ${commit:0:12}"
+      timeout 300 git -C "$GSHO_DIR" fetch -q origin || dr_log "git fetch не удался — пробую с тем, что есть"
+      git -C "$GSHO_DIR" -c advice.detachedHead=false checkout -q "$commit" || dr_die "commit ${commit:0:12} недоступен — обновите код вручную"
+    fi
+    if [ "$(cat "$DR_WORK/built-commit" 2>/dev/null)" != "$commit" ]; then
+      dr_log "собираю образы для ${commit:0:12} (5–15 минут)"
+      rm -f "$DR_WORK/built-commit"
+      dr_compose build -q backend frontend clamav
+      echo "$commit" > "$DR_WORK/built-commit"
+    fi
   fi
 
   dr_log "заменяю базу и файлы"

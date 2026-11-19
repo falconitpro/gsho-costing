@@ -100,3 +100,10 @@ def test_restore_refuses_when_scripts_run_from_code_tree(tmp_path):
     p = subprocess.run(["bash", "-c", f'GSHO_DIR={code}; . {code}/deploy/dr/dr-lib.sh; dr_restore_latest /nonexistent'],
                        capture_output=True, text=True)
     assert p.returncode != 0 and "install.sh" in p.stderr
+
+
+def test_restore_rebuilds_until_build_succeeded_for_commit():
+    # 19.11: первая проверка переключила код и упала до сборки; вторая решила, что сборка не нужна
+    lib = (DR / "dr-lib.sh").read_text()
+    assert 'built-commit' in lib
+    assert lib.index('dr_compose build -q backend frontend clamav') < lib.index('echo "$commit" > "$DR_WORK/built-commit"')
