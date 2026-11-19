@@ -1,5 +1,5 @@
 [Unit]
-Description=GSHO DR: еженедельная проверка резерва, если ВМ включило расписание (D-082)
+Description=GSHO DR: еженедельная проверка резерва, если ВМ включило расписание (D-083)
 Documentation=file:///opt/gsho-costing/deploy/dr/README.md
 After=network-online.target docker.service
 Wants=network-online.target

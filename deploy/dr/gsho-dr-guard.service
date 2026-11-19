@@ -1,5 +1,5 @@
 [Unit]
-Description=GSHO DR: переадресация crm → crm2, пока идёт работа на резервном сервере (D-082)
+Description=GSHO DR: переадресация crm → crm2, пока идёт работа на резервном сервере (D-083)
 Documentation=file:///opt/gsho-costing/deploy/dr/README.md
 After=network-online.target docker.service
 Wants=network-online.target

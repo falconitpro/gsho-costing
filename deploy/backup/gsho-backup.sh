@@ -37,7 +37,7 @@ KEEP_MONTHLY="${BACKUP_KEEP_MONTHLY:-12}"
 DEEP_CHECK_WEEKDAY="${BACKUP_DEEP_CHECK_WEEKDAY:-7}"   # 1..7 (пн..вс): в этот день restic check читает 5% данных
 HISTORY_KEEP="${BACKUP_HISTORY_KEEP:-120}"
 HOST_TAG="${BACKUP_HOST_TAG:-gsho-prod}"
-KEEP_WITHIN="${BACKUP_KEEP_WITHIN:-2d}"            # все снимки за последние 2 суток (частые копии раз в 15 минут, D-082)
+KEEP_WITHIN="${BACKUP_KEEP_WITHIN:-2d}"            # все снимки за последние 2 суток (частые копии раз в 15 минут, D-083)
 LIGHT="${BACKUP_LIGHT:-0}"                         # 1 — частая копия: без restic check и forget/prune (их делает ежедневная)
 export TZ="${BACKUP_TIMEZONE:-Europe/Moscow}"
 

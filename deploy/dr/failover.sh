@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Переключение на резервный сервер crm2 (D-082, deploy/dr/README.md §3). Запускать на РЕЗЕРВНОЙ ВМ в Yandex Cloud от root:
+# Переключение на резервный сервер crm2 (D-083, deploy/dr/README.md §3). Запускать на РЕЗЕРВНОЙ ВМ в Yandex Cloud от root:
 #   sudo bash /opt/gsho-costing/deploy/dr/failover.sh          # спросит подтверждение
 #   sudo bash /opt/gsho-costing/deploy/dr/failover.sh --yes
 # Порядок: флаг «работаем на резерве» → последняя копия рабочего сервера → запуск стенда на crm2 → проверка

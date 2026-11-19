@@ -1,5 +1,5 @@
 [Unit]
-Description=Frequent (every 15 min) encrypted GSHO CRM backup to Yandex Object Storage — без check/prune (D-082)
+Description=Frequent (every 15 min) encrypted GSHO CRM backup to Yandex Object Storage — без check/prune (D-083)
 Documentation=file:///opt/gsho-costing/deploy/dr/README.md
 Wants=network-online.target
 After=network-online.target docker.service

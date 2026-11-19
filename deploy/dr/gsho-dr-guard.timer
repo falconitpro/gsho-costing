@@ -1,5 +1,5 @@
 [Unit]
-Description=GSHO DR: проверка флага резерва раз в минуту (D-082)
+Description=GSHO DR: проверка флага резерва раз в минуту (D-083)
 
 [Timer]
 OnBootSec=20s

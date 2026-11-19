@@ -1,4 +1,4 @@
-"""Резервный сервер crm2 (deploy/dr, D-082): синтаксис скриптов и логика flag-guard.sh без сети и Docker."""
+"""Резервный сервер crm2 (deploy/dr, D-083): синтаксис скриптов и логика flag-guard.sh без сети и Docker."""
 from __future__ import annotations
 
 import json

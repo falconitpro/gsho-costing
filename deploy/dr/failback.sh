@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Возврат с резерва crm2 на рабочий сервер (D-082, deploy/dr/README.md §4). Три шага, по порядку:
+# Возврат с резерва crm2 на рабочий сервер (D-083, deploy/dr/README.md §4). Три шага, по порядку:
 #   1. на РЕЗЕРВНОЙ ВМ:    sudo bash deploy/dr/failback.sh --stage=standby
 #        останавливает приложение резерва, делает финальную копию, печатает её ID;
 #   2. на РАБОЧЕМ сервере: sudo bash deploy/dr/failback.sh --stage=primary --snapshot=<ID>
