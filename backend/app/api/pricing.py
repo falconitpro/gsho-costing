@@ -639,7 +639,9 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion, changes: Optional[
             model_factory="; ".join(_kp_model(p, company, db, factories) + ("" if company else f" / {factories[p.factory_id].name if p.factory_id in factories else ''}") for p in poss),
             qty=qty, configuration=("; ".join(o.get("name", "") for p in poss for o in (p.options or [])) or "базовая") + (f"; доукомплектование в РФ: {', '.join(local_opts)}" if local_opts else ""),
             basis=poss[0].basis if poss else "", delivery_days=base["delivery_days"], delivery_term_text="; ".join(terms) if terms else f"{base['delivery_days']} дн.",
-            unit_price_rub=v.price_rub / max(qty, 1), total_rub=v.price_rub, vat_pct=float(s.get("sales_vat_pct") or 22.0),
+            unit_price_rub=v.price_rub / max(qty, 1), total_rub=v.price_rub,
+            qty_text="; ".join(f"{_kp_model(p, company, db, factories)} — {p.qty or 1} шт." for p in poss) if len(poss) > 1 else "",
+            per_set=len(poss) > 1 and qty > 1, vat_pct=float(s.get("sales_vat_pct") or 22.0),
             payment_terms="; ".join(_pay_text(l) for l in pay),
             warranty="; ".join(f"{p.warranty_months or '—'} мес. / {p.warranty_hours or '—'} м·ч" for p in poss),
             service_line=("включено в цену" if v.service_in_kp else None) if deal.service_flag else None,
@@ -701,9 +703,12 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion, changes: Optional[
     from datetime import timedelta
     forbidden = [factories[p.factory_id].name for p in deal.positions if p.factory_id in factories] + \
                 [factories[p.factory_id].name_zh for p in deal.positions if p.factory_id in factories and factories[p.factory_id].name_zh] if company else []
+    # D-119: в КП — имя менеджера и его телефон / почта (раньше печатался внутренний идентификатор)
+    _mgr = db.get(User, deal.manager_id) if deal.manager_id else None
+    _mgr_contact = ", ".join(x for x in ((_mgr.contacts or {}).get("mobile") if _mgr else None, _mgr.email if _mgr else None) if x)
     data = KpData(
         kp_no=f"КП-{deal.number[2:]}" + (f"/{revision_no}" if revision_no else ""), kp_date=today.strftime("%d.%m.%Y"), valid_until=(today + timedelta(days=s["kp_validity_days"])).strftime("%d.%m.%Y"),
-        client=deal.client.name, site=deal.site, manager=deal.manager_id, manager_contact="", intro_text=s.get("kp_intro_text") or
+        client=deal.client.name, site=deal.site, manager=_mgr.display_name if _mgr else "", manager_contact=_mgr_contact, intro_text=s.get("kp_intro_text") or
         "Уважаемые коллеги! Благодарим за запрос и направляем коммерческое предложение на поставку горношахтного оборудования.",
         variants=variants, tech_specs=tech, service_block=service_block, delivery_terms=delivery_terms,
         payment_and_warranty="Условия оплаты и гарантии — согласно таблице предложения.", fx_clause_pct=s["kp_fx_clause_pct"],

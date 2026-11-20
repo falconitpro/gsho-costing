@@ -108,6 +108,8 @@ jobs:
           for i in $(seq 1 60); do curl -sf localhost:8000/api/auth/providers >/dev/null && curl -sf localhost:5173/ >/dev/null && break; sleep 2; done
       - name: проверка интерфейса по ролям
         run: python3 scripts/e2e/ui_smoke.py http://localhost:5173 http://localhost:8000 "$(command -v google-chrome || command -v chromium)"
+      - name: сквозные сценарии — цифры на экране и в КП (D-119)
+        run: python3 scripts/e2e/scenarios.py http://localhost:5173 http://localhost:8000 "$(command -v google-chrome || command -v chromium)"
       - name: журнал backend при ошибке
         if: failure()
         run: tail -100 /tmp/backend.log

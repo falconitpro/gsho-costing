@@ -82,3 +82,18 @@ def test_kp_in_currency(tmp_path):
     text = "\n".join(x.text for x in doc.paragraphs)
     assert "Итого, CNY без НДС" in cells and "Цена за единицу, CNY без НДС" in cells and not any("RUB" in c for c in cells)
     assert "Цены указаны в CNY" in text and "±5 %" not in text
+
+
+def test_kp_mixed_models_price_per_set_and_contact(tmp_path):
+    """D-119: разные модели в одном предложении — количество по моделям и цена за комплект (не средняя «за единицу»);
+    контактное лицо — имя менеджера и контакты, без пустой запятой."""
+    d = _data()
+    v = d.variants[0]
+    v.qty, v.qty_text, v.per_set, v.unit_price_rub, v.total_rub = 4, "XDR80T — 3 шт.; XDE90 — 1 шт.", True, 30_000_000, 120_000_000
+    d.manager_contact = ""
+    doc = Document(build_kp(d, str(tmp_path / "kp_set.docx")))
+    rows = {r.cells[0].text: r.cells[1].text for t in doc.tables for r in t.rows if len(r.cells) > 1}
+    assert rows["Количество"] == "XDR80T — 3 шт.; XDE90 — 1 шт."
+    assert rows["Цена за единицу, RUB без НДС"] == "за комплект: 120 000 000"
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "Контактное лицо: Иванов И.И.\n" in text + "\n" and "Иванов И.И.," not in text
