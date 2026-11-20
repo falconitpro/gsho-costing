@@ -69,8 +69,44 @@ jobs:
         with: { node-version: "20" }
       - run: cd frontend && npm install && npm run build
 
+  ui:
+    # D-106: интерфейс по ролям в браузере — разделы меню и вкладки сделки без ошибок страницы, 5xx и 403
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: gsho, POSTGRES_PASSWORD: gsho, POSTGRES_DB: gsho }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U gsho" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://gsho:gsho@localhost:5432/gsho
+      APP_ENV: dev
+      AUTH_PROVIDER: dev
+      STORAGE_PROVIDER: local
+      STORAGE_LOCAL_ROOT: /tmp/gsho-storage
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: pip install -r backend/requirements.txt playwright
+      - run: cd frontend && npm install
+      - name: backend и frontend
+        run: |
+          cd backend && python -m scripts.seed
+          nohup uvicorn app.main:app --port 8000 > /tmp/backend.log 2>&1 &
+          cd ../frontend && nohup npx vite --port 5173 > /tmp/frontend.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:8000/api/auth/providers >/dev/null && curl -sf localhost:5173/ >/dev/null && break; sleep 2; done
+      - name: проверка интерфейса по ролям
+        run: python3 scripts/e2e/ui_smoke.py http://localhost:5173 http://localhost:8000 "$(command -v google-chrome || command -v chromium)"
+      - name: журнал backend при ошибке
+        if: failure()
+        run: tail -100 /tmp/backend.log
+
   deploy:
-    needs: [backend, frontend]
+    needs: [backend, frontend, ui]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: test
