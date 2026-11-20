@@ -1,3 +1,4 @@
+import { useAllColumns } from "./Levels";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
@@ -52,6 +53,8 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
   const [open, setOpen] = useState<string | null>(dealId ? null : qs.get("open"));
   const [creating, setCreating] = useState(!dealId && qs.get("new") === "1");
   const [msg, setMsg] = useState("");
+  // реестр договоров: в «Новом виде» — ключевые колонки, полный набор по кнопке «Все колонки»
+  const [allC, colsEl] = useAllColumns("gsho.contractsAllCols", [...(compact ? [] : ["компания группы"]), "сумма"]);
   const load = () => {
     const p = new URLSearchParams({ ...f, ...(dealId ? { deal_id: dealId } : {}) });
     api.get<Registry>(`/api/legal/contracts?${p}`).then(setReg).catch((e) => setMsg((e as Error).message));
@@ -81,9 +84,10 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
         </div>
       </div>
       {msg && <div className="alert error" style={{ marginTop: 8 }}>{msg}</div>}
+      {colsEl}
       <div style={{ overflowX: "auto" }}>
         <table className="table" style={{ marginTop: 8, fontSize: 13 }}>
-          <thead><tr><th>Номер</th><th>Вид</th><th>Контрагент</th>{!compact && <th>Компания</th>}<th className="num">Сумма</th><th>Условия оплаты</th><th>Подписан</th><th>Статус</th></tr></thead>
+          <thead><tr><th>Номер</th><th>Вид</th><th>Контрагент</th>{allC && !compact && <th>Компания</th>}{allC && <th className="num">Сумма</th>}<th>Условия оплаты</th><th>Подписан</th><th>Статус</th></tr></thead>
           <tbody>
             {reg.items.length === 0 && <tr><td colSpan={8} className="muted">Договоров нет — нажмите «+ Договор». Проекты договоров сделки появляются и при формировании юридического пакета.</td></tr>}
             {reg.items.map((r) => (
@@ -91,8 +95,8 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
                 <td style={{ whiteSpace: "nowrap" }}><b>{r.number || "—"}</b>{r.cp_number && <div className="muted" style={{ fontSize: 11 }}>у контрагента: {r.cp_number}</div>}{r.deal_number && <div className="muted" style={{ fontSize: 11 }}>сделка {r.deal_number}</div>}</td>
                 <td>{r.kind_title}<div className="muted" style={{ fontSize: 11 }}>{r.direction === "income" ? "доходный" : r.direction === "expense" ? "расходный" : "без оплаты"}</div></td>
                 <td>{r.cp_name || "—"}<div className="muted" style={{ fontSize: 11 }}>{r.subject}</div></td>
-                {!compact && <td className="muted">{r.own_entity_name}</td>}
-                <td className="num" style={{ whiteSpace: "nowrap" }}>{money(r.amount, r.currency)}</td>
+                {allC && !compact && <td className="muted">{r.own_entity_name}</td>}
+                {allC && <td className="num" style={{ whiteSpace: "nowrap" }}>{money(r.amount, r.currency)}</td>}
                 <td style={{ fontSize: 12, maxWidth: 280 }}>{r.terms_text || (r.direction === "none" ? <span className="muted">—</span> : <span style={{ color: "var(--bad)" }}>не заданы</span>)}</td>
                 <td style={{ whiteSpace: "nowrap" }}>{d(r.signed_on)}{r.locked && !r.has_scan && <div style={{ fontSize: 11, color: "var(--bad)" }}>нет скана</div>}{r.exec?.overdue ? <div style={{ fontSize: 11, color: "var(--bad)" }}>просрочка: {r.exec.overdue}</div> : null}{r.sign_method === "edo" && <div className="muted" style={{ fontSize: 11 }}>ЭДО</div>}</td>
                 <td><span className={`badge ${STATUS_CLASS[r.status] || ""}`}>{r.status_title}</span>{r.package && <div className="muted" style={{ fontSize: 11 }}>пакет v{r.package.version_no}: {r.package.status_title}</div>}{r.pending?.length > 0 && <div className="muted" style={{ fontSize: 11 }}>ждёт: {r.pending.join(", ")}</div>}{r.days_to_expiry != null && r.status === "active" && r.days_to_expiry <= 30 && <div style={{ fontSize: 11, color: "var(--warn)" }}>до {d(r.valid_to)}</div>}</td>

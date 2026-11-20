@@ -1,3 +1,4 @@
+import { useAllColumns } from "./Levels";
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
 
@@ -297,6 +298,8 @@ function Balances() {
   const [sort, setSort] = useState("article");
   const [d, setD] = useState<Bal | null>(null);
   const [limit, setLimit] = useState(100);
+  // остатки: в «Новом виде» — артикул, наименование, свободно (и минимум); разбивка по складам, резерв, в пути, единица, стоимость — по кнопке «Все колонки»
+  const [allC, colsEl] = useAllColumns("gsho.stockAllCols", ["единица", "по складам, всего, резерв, в пути", ...(d?.costs ? ["стоимость по закупке"] : [])]);
   const params = () => new URLSearchParams({ q, warehouse_id: wh, only_positive: String(pos), below_min: String(low), group, sort });
   useEffect(() => {
     const t = setTimeout(() => api.get<Bal>(`/api/parts/stock/balances?${params()}&limit=${limit}`).then(setD).catch(() => setD(null)), 250);
@@ -343,28 +346,29 @@ function Balances() {
           <label className="row" style={{ gap: 4 }}><input type="checkbox" checked={pos} onChange={(e) => setPos(e.target.checked)} /> только с остатком</label>
           <label className="row" style={{ gap: 4 }}><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)} /> ниже минимума</label>
         </div>
+        {colsEl}
         <div style={{ overflowX: "auto" }}>
           <table className="bal-table">
             <thead>
-              <tr><th rowSpan={single ? 1 : 2}>Артикул</th><th rowSpan={single ? 1 : 2}>Наименование</th><th rowSpan={single ? 1 : 2}>Ед.</th>
-                {single ? <><th className="num">Всего</th><th className="num">Резерв</th><th className="num">Свободно</th><th className="num">В пути</th><th className="num">Мин.</th></>
-                  : <>{cols.map((w) => <th key={w.id} className="num bal-wh">{w.name}</th>)}<th className="num bal-total">Итого свободно</th></>}
-                {d.costs && <th className="num" rowSpan={single ? 1 : 2}>По закупке</th>}</tr>
-              {!single && <tr>{cols.map((w) => <th key={w.id} className="num bal-sub">свободно / всего</th>)}<th className="num bal-sub">резерв</th></tr>}
+              <tr><th rowSpan={single || !allC ? 1 : 2}>Артикул</th><th rowSpan={single || !allC ? 1 : 2}>Наименование</th>{allC && <th rowSpan={single ? 1 : 2}>Ед.</th>}
+                {single ? <>{allC && <th className="num">Всего</th>}{allC && <th className="num">Резерв</th>}<th className="num">Свободно</th>{allC && <th className="num">В пути</th>}<th className="num">Мин.</th></>
+                  : <>{allC && cols.map((w) => <th key={w.id} className="num bal-wh">{w.name}</th>)}<th className="num bal-total">Итого свободно</th></>}
+                {allC && d.costs && <th className="num" rowSpan={single ? 1 : 2}>По закупке</th>}</tr>
+              {!single && allC && <tr>{cols.map((w) => <th key={w.id} className="num bal-sub">свободно / всего</th>)}<th className="num bal-sub">резерв</th></tr>}
             </thead>
             <tbody>{d.rows.map((r) => (
               <tr key={r.part_id} className={r.below_min ? "bal-low" : ""}>
                 <td style={{ whiteSpace: "nowrap" }}><b>{r.article}</b>{r.oem_number && <div className="muted" style={{ fontSize: 11 }}>OEM {r.oem_number}</div>}</td>
                 <td>{r.name_ru}<div className="muted" style={{ fontSize: 11 }}>{[r.manufacturer, r.part_group].filter(Boolean).join(" · ")}</div></td>
-                <td className="muted" style={{ fontSize: 12 }}>{r.unit}</td>
+                {allC && <td className="muted" style={{ fontSize: 12 }}>{r.unit}</td>}
                 {single ? (() => { const c = r.cells[cols[0].id]; return <>
-                  <td className="num">{n0(c?.qty)}</td><td className="num">{c?.reserved ? n0(c.reserved) : "—"}</td>
+                  {allC && <td className="num">{n0(c?.qty)}</td>}{allC && <td className="num">{c?.reserved ? n0(c.reserved) : "—"}</td>}
                   <td className="num"><b style={{ color: c?.below_min ? "var(--bad)" : undefined }}>{n0(c?.available)}</b></td>
-                  <td className="num">{c?.in_transit ? n0(c.in_transit) : "—"}</td><td className="num">{c?.min_qty ? n0(c.min_qty) : "—"}</td></>; })()
-                  : <>{cols.map((w) => { const c = r.cells[w.id]; return <td key={w.id} className="num bal-wh" title={c ? `всего ${c.qty}, резерв ${c.reserved}${c.min_qty ? `, минимум ${c.min_qty}` : ""}` : ""}>
+                  {allC && <td className="num">{c?.in_transit ? n0(c.in_transit) : "—"}</td>}<td className="num">{c?.min_qty ? n0(c.min_qty) : "—"}</td></>; })()
+                  : <>{allC && cols.map((w) => { const c = r.cells[w.id]; return <td key={w.id} className="num bal-wh" title={c ? `всего ${c.qty}, резерв ${c.reserved}${c.min_qty ? `, минимум ${c.min_qty}` : ""}` : ""}>
                     {c && (c.qty || c.reserved) ? <><b style={{ color: c.below_min ? "var(--bad)" : undefined }}>{n0(c.available)}</b>{c.qty !== c.available && <span className="muted"> / {n0(c.qty)}</span>}</> : <span className="muted">—</span>}</td>; })}
                     <td className="num bal-total"><b>{n0(r.available)}</b>{r.reserved ? <div className="muted" style={{ fontSize: 11 }}>резерв {n0(r.reserved)}</div> : null}</td></>}
-                {d.costs && <td className="num" style={{ fontSize: 12 }}>{rub0(r.value_rub)}</td>}
+                {allC && d.costs && <td className="num" style={{ fontSize: 12 }}>{rub0(r.value_rub)}</td>}
               </tr>))}
               {d.rows.length === 0 && <tr><td colSpan={cols.length + 6} className="muted">Ничего не найдено</td></tr>}</tbody>
           </table>

@@ -153,3 +153,25 @@ export function useFetched(urls: Record<string, string | null>, enabled = true):
   }, [sig]);
   return data;
 }
+
+/**
+ * «Основные / Все колонки» для реестра. В «Новом виде» реестр показывает ключевые колонки, полный набор — по кнопке
+ * (выбор запоминается в браузере, ключ `storageKey`). В «Прежнем виде» — всегда все колонки, переключателя нет.
+ * Данные и запросы не меняются: скрытые колонки просто не рисуются.
+ */
+export function useAllColumns(storageKey: string, hidden: string[]): [boolean, ReactNode] {
+  const [mode] = useUiMode();
+  const [want, setWant] = useState<boolean>(() => { try { return JSON.parse(localStorage.getItem(storageKey) || "false") === true; } catch { return false; } });
+  const all = mode === "classic" || want || hidden.length === 0;
+  const set = (v: boolean) => { setWant(v); try { localStorage.setItem(storageKey, JSON.stringify(v)); } catch { /* хранилище недоступно */ } };
+  const el = mode === "classic" || hidden.length === 0 ? null : (
+    <div className="row" style={{ gap: 8, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
+      <span className="muted">Колонки:</span>
+      <div className="seg" role="group" aria-label="Набор колонок">
+        <button type="button" className={!all ? "on" : ""} aria-pressed={!all} onClick={() => set(false)}>Основные</button>
+        <button type="button" className={all ? "on" : ""} aria-pressed={all} onClick={() => set(true)}>Все колонки</button>
+      </div>
+      {!all && <span className="muted" style={{ fontSize: 12 }}>скрыты: {hidden.join(", ")}</span>}
+    </div>);
+  return [all, el];
+}

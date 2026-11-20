@@ -11,7 +11,9 @@ const PARTS_TONE: Record<string, string> = { parts_request: "draft", parts_calc:
 
 export default function BoardPage() {
   const [cols, setCols] = useState<Record<string, Col>>({});
-  useEffect(() => { api.get<Record<string, Col>>("/api/board").then(setCols); }, []);
+  const [err, setErr] = useState("");
+  // прямой адрес /board у роли без доступа: вместо необработанной ошибки — пояснение и переход к реестру (права не меняются)
+  useEffect(() => { api.get<Record<string, Col>>("/api/board").then(setCols).catch((e) => setErr((e as Error).message || "Нет доступа")); }, []);
   const gsho = ["draft", "logistics_calc", "service_calc", "calc_ready", "cd_approval", "fd_visa", "gd_visa", "rework", "approved", "kp_sent", "won", "contract", "execution", "closed", "lost", "cancelled"];
   const partsCols = ["parts_request", "parts_calc", "parts_kp", "parts_execution"];
   const [type, setType] = useState<"" | "gsho" | "parts">(() => { try { return (localStorage.getItem("gsho.boardType") as "gsho") || ""; } catch { return ""; } });
@@ -19,6 +21,16 @@ export default function BoardPage() {
   const order = type === "gsho" ? gsho : type === "parts" ? partsCols : [...gsho, ...partsCols];
   const nParts = partsCols.reduce((n, k) => n + (cols[k]?.deals.length || 0), 0);
   const nGsho = gsho.reduce((n, k) => n + (cols[k]?.deals.length || 0), 0);
+  if (err) return (
+    <>
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Доска сделок" }]} />
+      <div className="page-head"><h1>Доска сделок</h1></div>
+      <div className="card">
+        <p style={{ marginTop: 0 }}>Доска сделок доступна КД, ФД, ЗГД и наблюдателю. Ваши сделки и заявки — в реестре.</p>
+        <div className="row" style={{ gap: 8 }}><Link className="btn" to="/deals">Открыть реестр сделок</Link><Link className="btn ghost" to="/">На рабочее место</Link></div>
+        <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Ответ сервера: {err}</p>
+      </div>
+    </>);
   return (
     <>
       <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Доска сделок" }]} />

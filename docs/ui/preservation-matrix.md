@@ -16,7 +16,7 @@
 
 | Компонент | Изменён относительно базовой версии | Новое место / способ открытия |
 |---|---|---|
-| `pages/FinancePage.tsx` | +2 / −0 строк | прежнее; добавлен путь |
+| `pages/FinancePage.tsx` | +34 / −2 строк | прежнее; добавлен путь |
 | `pages/FinanceQuestionPage.tsx` | нет, совпадает побайтно | прежнее |
 | `components/FinanceDebt.tsx` | нет, совпадает побайтно | прежнее |
 | `components/FinanceEconomy.tsx` | нет, совпадает побайтно | прежнее |
@@ -91,7 +91,7 @@
 | Компонент | Изменён относительно базовой версии | Новое место / способ открытия |
 |---|---|---|
 | `pages/LegalPage.tsx` | +26 / −2 строк | прежнее; добавлены путь и обзор `/legal` (новый вид) |
-| `components/ContractsBlock.tsx` | нет, совпадает побайтно | прежнее |
+| `components/ContractsBlock.tsx` | +7 / −3 строк | прежнее |
 | `components/ContractScans.tsx` | нет, совпадает побайтно | прежнее |
 | `components/ClaimsBlock.tsx` | нет, совпадает побайтно | прежнее |
 | `components/PoaBlock.tsx` | нет, совпадает побайтно | прежнее |
@@ -101,7 +101,7 @@
 | `components/LegalProfileBlock.tsx` | нет, совпадает побайтно | прежнее |
 | `components/LegalSaleWizard.tsx` | нет, совпадает побайтно | прежнее |
 | `pages/CounterpartiesPage.tsx` | +1 / −1 строк | прежнее; переключение — с историей |
-| `pages/ClientsPage.tsx` | +3 / −0 строк | прежнее; добавлена прямая ссылка `&client=<id>` |
+| `pages/ClientsPage.tsx` | +17 / −8 строк | прежнее; добавлена прямая ссылка `&client=<id>` |
 | `pages/FactoriesPage.tsx` | нет, совпадает побайтно | прежнее |
 | `components/ClientRequisites.tsx` | нет, совпадает побайтно | прежнее |
 | `components/NewSupplierInline.tsx` | нет, совпадает побайтно | прежнее |
@@ -207,12 +207,12 @@
 
 | Компонент | Изменён относительно базовой версии | Новое место / способ открытия |
 |---|---|---|
-| `pages/PartsSetupPage.tsx` | +23 / −3 строк | прежнее; добавлены путь и обзор `/supply` (новый вид) |
+| `pages/PartsSetupPage.tsx` | +24 / −4 строк | прежнее; добавлены путь и обзор `/supply` (новый вид) |
 | `components/PartsPurchase.tsx` | нет, совпадает побайтно | прежнее |
 | `components/PartsBatches.tsx` | нет, совпадает побайтно | прежнее |
-| `components/PartsWarehouse.tsx` | нет, совпадает побайтно | прежнее |
+| `components/PartsWarehouse.tsx` | +14 / −10 строк | прежнее |
 | `components/PartsClaims.tsx` | нет, совпадает побайтно | прежнее |
-| `components/PartsReports.tsx` | нет, совпадает побайтно | прежнее |
+| `components/PartsReports.tsx` | +16 / −6 строк | прежнее |
 | `components/PartsFleet.tsx` | нет, совпадает побайтно | прежнее |
 | `components/PartsCatalog.tsx` | нет, совпадает побайтно | прежнее |
 | `components/PartsRequests.tsx` | +2 / −0 строк | прежнее; добавлен путь |
@@ -225,6 +225,7 @@
 - **Кнопки** (10): Компания; Обзор; Посчитать; Сохранить; Сохранить маршрут; Сохранить черновик; Ступень; изменить; отмена; удалить
 - **Запросы API** (15): GET /api/parts/entities; GET /api/parts/markup-policies; GET /api/parts/meta; GET /api/parts/routes; GET /api/refs/factories; POST /api/parts/entities; POST /api/parts/markup-policies; POST /api/parts/markup-policies/simulate; POST /api/parts/markup-policies/{…}/approve; POST /api/parts/markup-policies/{…}/reject; POST /api/parts/markup-policies/{…}/submit; POST /api/parts/routes; PUT /api/parts/entities/{…}; PUT /api/parts/markup-policies/{…}; PUT /api/parts/routes/{…}
 - **Параметры адреса** (1): tab
+- **Права** (1): finance_analytics
 
 ### `components/PartsPurchase.tsx`
 
