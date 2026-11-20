@@ -1,4 +1,4 @@
-import { Crumbs } from "../components/Levels";
+import { Crumbs, EntryGrid, useUiMode } from "../components/Levels";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
@@ -35,7 +35,12 @@ export default function CatalogHub({ me }: { me: Me }) {
   ];
   const visible = SECS.filter((x) => x[2]);
   const asked = qs.get("s") as Sec;
-  const sec: Sec = visible.some(([k]) => k === asked) ? asked : "equipment";
+  // «Новый вид»: /catalog без ?s= — обзор: поиск и входы в разделы; ссылка на объект (?model=, ?part=) открывает раздел сразу
+  const [uiMode] = useUiMode();
+  const overview = uiMode !== "classic" && !asked && !qs.get("model") && !qs.get("part");
+  const sec: Sec | "" = overview ? "" : visible.some(([k]) => k === asked) ? asked : "equipment";
+  const HINTS: Record<Sec, string> = { equipment: "модели и исполнения ГШО, характеристики, цены, документы", parts: "артикулы, OEM и кросс-номера, остатки, цены", kits: "комплекты технического обслуживания по моделям",
+    other: "техника других производителей для заявок на запчасти", warehouses: "склады компании", hs: "коды ТН ВЭД, ставки пошлин и НДС", entities: "компании группы для цепочек поставки", routes: "маршруты поставки и их параметры" };
   const go = (s: Sec, extra = "") => nav(`/catalog?s=${s}${extra}`);   // смена раздела — новая запись истории («Назад» возвращает прежний)
   const [q, setQ] = useState("");
   const [found, setFound] = useState<Found | null>(null);
@@ -49,7 +54,7 @@ export default function CatalogHub({ me }: { me: Me }) {
 
   return (
     <>
-      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Каталог", to: "/catalog" }, { label: visible.find(([k]) => k === sec)?.[1], to: (qs.get("model") || qs.get("part")) ? `/catalog?s=${sec}` : undefined }, ...((qs.get("model") || qs.get("part")) ? [{ label: "объект" }] : [])]} />
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Каталог", to: overview ? undefined : "/catalog" }, { label: visible.find(([k]) => k === sec)?.[1], to: (qs.get("model") || qs.get("part")) ? `/catalog?s=${sec}` : undefined }, ...((qs.get("model") || qs.get("part")) ? [{ label: "объект" }] : [])]} />
       <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 12, marginBottom: 6 }}>
         <h1 style={{ margin: 0 }}>Каталог</h1>
         <div style={{ position: "relative", maxWidth: "100%" }}>
@@ -67,10 +72,13 @@ export default function CatalogHub({ me }: { me: Me }) {
         </div>
       </div>
       <div className="row" style={{ gap: 2, borderBottom: "1px solid var(--line)", marginBottom: 12, flexWrap: "wrap" }}>
+        {uiMode !== "classic" && <button onClick={() => nav("/catalog")} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
+          fontWeight: overview ? 700 : 500, color: overview ? "var(--ink)" : "var(--muted)", borderBottom: overview ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>Обзор</button>}
         {visible.map(([k, t]) => (
           <button key={k} onClick={() => go(k)} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 12px", fontSize: 14, fontFamily: "inherit",
             fontWeight: sec === k ? 700 : 500, color: sec === k ? "var(--ink)" : "var(--muted)", borderBottom: sec === k ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>{t}</button>))}
       </div>
+      {overview && <EntryGrid entries={visible.map(([k, t]) => ({ key: k, title: t, to: `/catalog?s=${k}`, hint: HINTS[k] }))} />}
       {sec === "equipment" && <CatalogPage me={me} embedded openModelId={qs.get("model") || undefined} />}
       {sec === "parts" && <PartsCatalog me={me} openId={qs.get("part") || undefined} />}
       {sec === "kits" && <KitsBlock me={me} />}

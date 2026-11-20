@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { api } from "../api";
 
 // «Матрёшка»: общие элементы уровней навигации. Уровень выражается в адресе (query-параметры), поэтому обновление
 // страницы, «Назад» браузера и прямые ссылки возвращают на тот же уровень. Бизнес-данных здесь нет — только представление.
@@ -133,4 +134,22 @@ export function UiModeSwitch() {
       {([["new", "Новый вид"], ["classic", "Прежний вид"]] as const).map(([k, t]) => (
         <button key={k} type="button" className={mode === k ? "on" : ""} aria-pressed={mode === k} onClick={() => setMode(k)}>{t}</button>))}
     </div>);
+}
+
+/**
+ * Данные для счётчиков обзора: те же существующие запросы, что делают сами подразделы. Ошибка или отказ в доступе —
+ * счётчика просто нет (вход остаётся), права проверяет сервер. `urls[key] = null` — запрос не делается.
+ */
+export function useFetched(urls: Record<string, string | null>, enabled = true): Record<string, unknown> {
+  const [data, setData] = useState<Record<string, unknown>>({});
+  const sig = enabled ? JSON.stringify(urls) : "";
+  useEffect(() => {
+    if (!sig) return;
+    let alive = true;
+    Object.entries(JSON.parse(sig) as Record<string, string | null>).forEach(([k, u]) => {
+      if (u) api.get<unknown>(u).then((r) => { if (alive) setData((d) => ({ ...d, [k]: r })); }).catch(() => undefined);
+    });
+    return () => { alive = false; };
+  }, [sig]);
+  return data;
 }

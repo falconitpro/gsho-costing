@@ -9,7 +9,7 @@ import PoaBlock from "../components/PoaBlock";
 import ContractsBlock from "../components/ContractsBlock";
 import ClaimsBlock from "../components/ClaimsBlock";
 import { CounterpartiesBlock } from "./CounterpartiesPage";
-import { Crumbs } from "../components/Levels";
+import { Crumbs, EntryGrid, useFetched, useUiMode, type Entry } from "../components/Levels";
 
 // Юридический блок: договоры, претензии, контрагенты (клиенты и поставщики) с закреплёнными реквизитами БЕРГ-ХАУС
 // (компании группы с юридическими и банковскими профилями — D-067), доверенности, шаблоны и правила.
@@ -27,7 +27,26 @@ export default function LegalPage({ me }: { me: Me }) {
   const nav = useNavigate();
   const raw = new URLSearchParams(loc.search).get("tab");
   const asked = (raw === "own" ? "counterparties" : raw) as Tab;   // старая вкладка «Карточка БЕРГ-ХАУС» — теперь вверху «Контрагентов»
-  const tab: Tab = tabs.some(([k]) => k === asked) ? asked : tabs[0][0];
+  // «Новый вид»: /legal без ?tab= — обзор: основные юридические статусы и входы в подразделы; «прежний вид» — сразу первая вкладка
+  const [uiMode] = useUiMode();
+  const overview = uiMode !== "classic" && !raw;
+  const tab: Tab | "" = overview ? "" : tabs.some(([k]) => k === asked) ? asked : tabs[0][0];
+  const can = (k: Tab) => tabs.some(([x]) => x === k);
+  const ov = useFetched({ contracts: can("contracts") ? "/api/legal/contracts" : null, claims: can("claims") ? "/api/legal/claims" : null, poa: can("poa") ? "/api/legal/poa?entity_id=&status=&q=" : null }, overview);
+  const sum = (k: string) => ((ov[k] as { summary?: Record<string, number> } | undefined)?.summary) || null;
+  const HINTS: Record<Tab, string> = { contracts: "реестр договоров, согласование, подписание, обязательства и неустойки", claims: "входящие и исходящие претензии, сроки ответа",
+    counterparties: "клиенты и поставщики, реквизиты БЕРГ-ХАУС и компаний группы", poa: "доверенности компаний группы, сроки и сканы", templates: "шаблоны договоров и примеры документов", rules: "правила проверки и настройки ИИ" };
+  const entryOf = ([k, t]: [Tab, string, boolean]): Entry => {
+    const c = sum("contracts"), cl = sum("claims"), p = sum("poa");
+    const stats: NonNullable<Entry["stats"]> = [];
+    if (k === "contracts" && c) stats.push({ value: c.active ?? 0, label: "действующих" }, { value: c.overdue ?? 0, label: "с просрочкой", tone: c.overdue ? "bad" : "" }, { value: c.no_scan ?? 0, label: "без скана", tone: c.no_scan ? "bad" : "" }, { value: c.expiring ?? 0, label: "истекают", tone: c.expiring ? "warn" : "" });
+    if (k === "claims" && cl) stats.push({ value: cl.open ?? 0, label: "в работе" }, { value: cl.signing ?? 0, label: "на подписи", tone: cl.signing ? "warn" : "" }, { value: cl.answer_overdue ?? 0, label: "истёк срок ответа", tone: cl.answer_overdue ? "bad" : "" });
+    if (k === "poa" && p) stats.push({ value: p.active ?? 0, label: "действующих" }, { value: p.expiring ?? 0, label: "истекают", tone: p.expiring ? "warn" : "" });
+    if (k === "counterparties" && own) stats.push({ value: own.items.length, label: "компаний группы" });
+    const att = k === "contracts" && c?.overdue ? `${c.overdue} с просрочкой` : k === "claims" && cl?.answer_overdue ? `${cl.answer_overdue}: истёк срок ответа` : undefined;
+    return { key: k, title: t, to: `/legal?tab=${k}`, hint: HINTS[k], stats, attention: att,
+      links: k === "counterparties" ? [{ label: "Клиенты", to: "/legal?tab=counterparties&type=clients" }, { label: "Поставщики", to: "/legal?tab=counterparties&type=suppliers" }, ...(full ? [{ label: "Наши реквизиты", to: "/legal?tab=own" }] : [])] : undefined };
+  };
   const [ownOpen, setOwnOpen] = useState(() => { try { return localStorage.getItem("legal_own_open") === "1" || raw === "own"; } catch { return raw === "own"; } });
   const toggleOwn = () => { const v = !ownOpen; setOwnOpen(v); try { localStorage.setItem("legal_own_open", v ? "1" : "0"); } catch { /* приватный режим */ } };
   const [own, setOwn] = useState<{ items: Own[]; can_edit: boolean } | null>(null);
@@ -37,16 +56,19 @@ export default function LegalPage({ me }: { me: Me }) {
   const ownCard = own ? <OwnCompanies own={own} cur={cur} setCur={setCur} /> : null;
   return (
     <>
-      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Юридический блок", to: `/legal?tab=${tabs[0][0]}` }, { label: tabs.find(([k]) => k === tab)?.[1] }]} />
+      <Crumbs items={overview ? [{ label: "Рабочее место", to: "/" }, { label: "Юридический блок" }] : [{ label: "Рабочее место", to: "/" }, { label: "Юридический блок", to: uiMode === "classic" ? `/legal?tab=${tabs[0][0]}` : "/legal" }, { label: tabs.find(([k]) => k === tab)?.[1] }]} />
       <div className="row" style={{ alignItems: "baseline", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
         <h1 style={{ margin: 0 }}>Юридический блок</h1>
         <div className="row" style={{ gap: 2, borderBottom: "1px solid var(--line)" }}>
+          {uiMode !== "classic" && <button onClick={() => nav("/legal")} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
+            fontWeight: overview ? 700 : 500, color: overview ? "var(--ink)" : "var(--muted)", borderBottom: overview ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>Обзор</button>}
           {tabs.map(([k, t, ready]) => (
             <button key={k} disabled={!ready} title={ready ? "" : "появится на следующих этапах"} onClick={() => nav(`/legal?tab=${k}`)} style={{ border: 0, background: "transparent", cursor: ready ? "pointer" : "default", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
               fontWeight: tab === k ? 700 : 500, color: !ready ? "#b9c0c9" : tab === k ? "var(--ink)" : "var(--muted)", borderBottom: tab === k ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>{t}</button>))}
         </div>
       </div>
       {msg && <div className="alert error">{msg}</div>}
+      {overview && <EntryGrid entries={tabs.map(entryOf)} />}
       {tab === "contracts" && <ContractsBlock />}
       {tab === "claims" && <ClaimsBlock />}
       {tab === "poa" && <PoaBlock />}

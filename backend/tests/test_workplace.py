@@ -81,7 +81,9 @@ def test_workplace_todo_feed_drafts_and_default_layout():
         db = SessionLocal()
         # раскладка до D-097 сбрасывается на новую по умолчанию
         db.execute(text("update users set prefs = jsonb_build_object('workplace', jsonb_build_object('order', '[]'::jsonb, 'hidden', '[]'::jsonb)) where id = :u"), {"u": mgr_id})
-        old = datetime.now(timezone.utc) - timedelta(days=10)
+        # 10 дней по московской дате (сервер считает «сегодня» по Москве): полдень UTC, чтобы тест не зависел от часа запуска
+        msk_today = (datetime.now(timezone.utc) + timedelta(hours=3)).date()
+        old = datetime.combine(msk_today - timedelta(days=10), datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=12)
         db.execute(text("update deals set status = 'DRAFT', updated_at = :t where id = :d"), {"t": old, "d": did})
         db.commit()
         db.close()

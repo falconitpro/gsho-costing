@@ -20,6 +20,8 @@ from .common import get_deal_or_404
 
 router = APIRouter(prefix="/api/deals/{deal_id}/service", tags=["service"])
 SERVICE = require_roles(Role.SERVICE_HEAD, Role.GD)
+# просмотр исходных данных расчёта сервиса — ещё КД и ФД (вкладка «Сервис» им видна; решение владельца 20.11.2026). Расчёт и завершение — по-прежнему SERVICE.
+SERVICE_READ = require_roles(Role.SERVICE_HEAD, Role.GD, Role.CD, Role.FD)
 
 
 class ServiceCalcIn(BaseModel):
@@ -37,7 +39,7 @@ class ServiceCalcIn(BaseModel):
 
 
 @router.get("/positions/{pos_id}/defaults")
-def defaults(deal_id: str, pos_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(SERVICE)):
+def defaults(deal_id: str, pos_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(SERVICE_READ)):
     """Исходные данные: регламенты из каталога модели, интенсивность по типу, лист ЗИП, нормативы региона."""
     deal = get_deal_or_404(db, deal_id, user)
     pos = db.get(Position, pos_id)
