@@ -151,6 +151,15 @@ async def _daily_jobs() -> None:
                 _ai.purge(db, settings)
         except Exception as e:   # pragma: no cover
             log.warning("assistant purge failed: %s", e)
+        if not _first_done:
+            try:   # D-104: разово после старта — цена утверждённой версии по изменению условий контракта → в предложение
+                from .services.contract_price import repair_existing
+                with SessionLocal() as db:
+                    fixed = repair_existing(db)
+                if fixed:
+                    log.info("contract price repair: %s offers", fixed)
+            except Exception as e:   # pragma: no cover
+                log.warning("contract price repair failed: %s", e)
         asyncio.create_task(_scanner_check(0 if _first_done else SCANNER_START_GRACE_S))   # D-068: после старта — через 10 мин
         _first_done = True
         try:   # резервные копии: перенос статуса с хоста, «нет копии дольше 26 ч», уведомления в системе (docs/operations/03 §5)

@@ -115,7 +115,9 @@ def negotiated(db: Session, deal: Deal) -> dict[str, dict]:
     """Актуальная цена после торгов (D-093): последняя редакция КП утверждённой версии — цена оборудования без услуг,
     добавленных в КП, и условия оплаты последнего шага торгов. Пока торгов не было — пусто (цена версии)."""
     from ..models import KpRevision, NegotiationStep
-    if not deal.approved_version_id or deal.status.value not in ("approved", "kp_sent", "won", "contract", "execution", "closed"):
+    from .contract_price import revisions_apply
+    if not deal.approved_version_id or deal.status.value not in ("approved", "kp_sent", "won", "contract", "execution", "closed") \
+            or not revisions_apply(deal):     # D-104: после изменения условий контракта цена уже в предложении
         return {}
     rev = db.scalar(select(KpRevision).where(KpRevision.deal_id == deal.id, KpRevision.version_id == deal.approved_version_id)
                     .order_by(KpRevision.no.desc()).limit(1))
@@ -146,7 +148,8 @@ def actual_offer(deal: Deal, v, db: Session | None = None) -> dict:
     out = {"price_rub": v.price_rub, "price_amount": v.price_amount, "currency": (v.price_currency or "RUB").upper(),
            "client_payments": v.client_payments or deal.client_payments, "negotiated": False}
     db = db or object_session(deal)
-    if db is None or v is None or v.price_rub is None or not deal.approved_version_id:
+    from .contract_price import revisions_apply
+    if db is None or v is None or v.price_rub is None or not deal.approved_version_id or not revisions_apply(deal):
         return out
     rev = db.scalar(select(KpRevision).where(KpRevision.deal_id == deal.id, KpRevision.version_id == deal.approved_version_id)
                     .order_by(KpRevision.no.desc()).limit(1))
