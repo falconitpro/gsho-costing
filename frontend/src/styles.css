@@ -924,3 +924,8 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .dh-box { background: #fff; border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; overflow: hidden; }
 .dh-strip { padding: 8px 12px; }
 .dh-now { padding: 7px 12px; border-top: 1px solid var(--line); border-left: 4px solid var(--accent); }
+.note-xs { font-size: 11px; color: var(--muted); }   /* D-120: короткая пометка под суммой */
+.vat-cf { margin-top: 12px; }   /* D-121: НДС в денежном потоке */
+.vat-cf h2 { margin: 0 0 4px; }
+.vat-cf .vat-sum td { font-weight: 600; border-top: 1px solid var(--line); }
+.vat-unit { min-width: 128px; }   /* D-122: «RUB с НДС / без НДС» у логиста */

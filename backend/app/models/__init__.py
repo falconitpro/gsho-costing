@@ -467,7 +467,7 @@ class Deal(TimestampMixin, Base):
     execution_started: Mapped[bool] = mapped_column(Boolean, default=False)         # контракт подписан, исполнение начато (повторная виза возвращает в исполнение)
 
     client = relationship("Client")
-    positions = relationship("Position", back_populates="deal", cascade="all, delete-orphan")
+    positions = relationship("Position", back_populates="deal", cascade="all, delete-orphan", order_by="Position.created_at")   # D-120: порядок позиций — как вводили (КП, карточка)
     chain_approval: Mapped[dict] = mapped_column(JSONType, default=dict)   # виза ФД/ЗГД на внутреннюю цепочку до КП (D-166): {sig, by, by_name, at, chain}
     variants = relationship("Variant", back_populates="deal", cascade="all, delete-orphan")
     batches = relationship("Batch", back_populates="deal", cascade="all, delete-orphan")
@@ -648,6 +648,7 @@ class ExecutionStage(TimestampMixin, Base):
     amount: Mapped[Optional[float]] = mapped_column(Float)
     currency: Mapped[str] = mapped_column(String(3), default="RUB")
     actual_amount: Mapped[Optional[float]] = mapped_column(Float)
+    amount_rub_net: Mapped[Optional[float]] = mapped_column(Money)            # D-120: платежи клиента — справочно ₽ без НДС (как в расчёте)
     responsible_roles: Mapped[list[str]] = mapped_column(JSONType, default=list)
     event: Mapped[str] = mapped_column(String(32), default="")                # событие расчёта, которое закрывает этап
     done_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))

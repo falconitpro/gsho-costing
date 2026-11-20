@@ -57,6 +57,7 @@ class PositionLogisticsIn(BaseModel):
     util_base_rate_rub: Optional[float] = None    # базовая ставка, ₽
     util_coefficient: Optional[float] = None      # коэффициент по виду техники и коду ТН ВЭД
     certification_rub: float = 0.0
+    vat_included: dict[str, bool] = Field(default_factory=dict)   # D-122: {"certification_rub": true} — сумма введена с НДС
     certifications: list[str] = Field(default_factory=list)
     volume_m3: Optional[float] = None
     comments: dict[str, str] = Field(default_factory=dict)   # статья → комментарий к отклонению
@@ -117,10 +118,15 @@ def _check_batch_items(db: Session, deal: Deal, b: Batch, items: dict) -> dict:
     thr = settings_service.get(db, "logistics_deviation_pct")
     checks = {}
     comments = items.get("comments", {})
+    from ..services import logistics_vat as lv
+    vat_pct = float(settings_service.get(db, "sales_vat_pct") or 22.0)
+    items["vat_included"] = {k: bool(v) for k, v in (items.get("vat_included") or {}).items() if k in lv.BATCH_ITEMS}
     for key in ("intl_freight", "broker_rub", "rf_delivery_rub"):
         val = items.get(key)
         amount = val.get("amount") if isinstance(val, dict) else val
         cur = (val.get("currency") or "") if isinstance(val, dict) else "RUB"
+        if amount and key in lv.BATCH_ITEMS:          # история — суммы без НДС (D-122)
+            amount = round(lv.split(amount, lv.included(items, key), vat_pct)[0], 2)
         if amount:
             chk = history_check(amount, _history(db, key, b.route, region=deal.region, currency=cur), thr)
             chk["value"] = amount
@@ -270,9 +276,12 @@ def update_position_logistics(deal_id: str, pos_id: str, body: PositionLogistics
             if c["needs_comment"] and not c["comment"]:
                 raise HTTPException(422, {"message": f"{ {'domestic_logistics': 'Внутрикитайская логистика', 'export_formalities': 'Экспортные формальности КНР'}[key]}: отклонение от истории выше {thr} % — нужен комментарий", "check": c})
             checks[key] = c
+    from ..services import logistics_vat as lv
+    data["vat_included"] = {k: bool(v) for k, v in (body.vat_included or {}).items() if k in lv.POSITION_ITEMS}
     if body.certification_rub:
-        c = history_check(body.certification_rub, _history(db, "certification_rub", machine_type=pos.machine_type, currency="RUB"), thr)
-        c["value"], c["comment"] = body.certification_rub, body.comments.get("certification_rub", "")
+        cert_net = round(lv.split(body.certification_rub, lv.included(data, "certification_rub"), float(settings_service.get(db, "sales_vat_pct") or 22.0))[0], 2)
+        c = history_check(cert_net, _history(db, "certification_rub", machine_type=pos.machine_type, currency="RUB"), thr)
+        c["value"], c["comment"] = cert_net, body.comments.get("certification_rub", "")
         if c["needs_comment"] and not c["comment"]:
             raise HTTPException(422, {"message": "Сертификация: отклонение выше порога — нужен комментарий", "check": c})
         checks["certification_rub"] = c

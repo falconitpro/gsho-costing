@@ -102,7 +102,8 @@ export interface ScenarioResult {
   variant_id: string; scenario: string; items_rub: Record<string, number>; cost_total_rub: number; cost_total_base_ccy: number;
   price_rub: number | null; margin_pct: number | null; markup_pct: number | null; profit_rub: number | null; profit_before_finance_rub: number | null;
   cash_gap: CashGap; cashflow: CashflowPoint[]; finance_breakdown: Record<string, number>; delivery_days: number; sensitivity?: Sensitivity | null;
-  payment_dates?: { no: number; event: string; on: string; amount_rub: number; via: string; default: boolean }[]; guarantee_cost_rub?: number;
+  payment_dates?: { no: number; event: string; on: string; amount_rub: number; via: string; default: boolean }[];
+  vat?: { pct: number; from_client_rub: number; input_rub?: number; import_deducted: boolean; import: { on: string; amount_rub: number }[]; budget: { quarter: string; amount_rub: number; dates: string[] }[] }; guarantee_cost_rub?: number;
   defaults_used?: Record<string, boolean>;
   positions?: { position_id: string; items_rub: Record<string, number>; items_fx?: Record<string, { amount: number; currency: string }> }[];
 }
@@ -137,7 +138,7 @@ export interface Task { id: string; deal_id: string; deal_number: string; title:
   days_left?: number; client_name?: string; site?: string; equipment?: string; hint?: string; tab?: string; can_close?: boolean; kind?: string; url?: string }
 
 export interface Stage {
-  id: string; code: string; title: string; planned_on: string | null; actual_on: string | null; amount?: number | null; currency: string; actual_amount?: number | null;
+  id: string; code: string; title: string; planned_on: string | null; actual_on: string | null; amount?: number | null; currency: string; actual_amount?: number | null; amount_rub_net?: number | null; with_vat?: boolean; ref_rate?: number | null;
   responsible_roles: string[]; kind: string; finance?: { status: string; transaction_id: string; url: string }; position_id: string | null; position: string | null; batch_id: string | null; batch: string | null; note: string; done: boolean; overdue: boolean; can_set: boolean;
   baseline_on?: string | null; refined_on?: string | null; refined_note?: string; deviation_days?: number | null;
   factory_date?: boolean; history?: { kind: string; kind_title: string; on: string | null; note: string; by_name: string; at: string }[];

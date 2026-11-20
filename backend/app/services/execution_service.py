@@ -118,6 +118,9 @@ ADVANCE_EVENTS = {"contract", "client_prepayment", "lc_opened"}
 TITLES = {k: v["title"] for k, v in STAGE_DEFS.items()}
 
 
+CLIENT_PAY = ("client_advance", "client_final")
+
+
 def won_variant(deal: Deal):
     if deal.won_variant_id:
         v = next((v for v in deal.variants if v.id == deal.won_variant_id), None)
@@ -195,14 +198,46 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
     if deal.factory_contract_signed_at and not st_f.actual_on:
         st_f.actual_on = deal.factory_contract_signed_at
     client_lines = base.payment_dates
+    # D-120: клиент платит с НДС в валюте договора; график расчёта — в рублях без НДС. Курс — курс цены, если договор в валюте цены,
+    # иначе курс ЦБ на дату расчёта. Этап с введённым фактом не пересчитывается (факт записан в его валюте).
+    from ..api.competitors import contract_currency
+    c_ccy = contract_currency(db, deal)[0]
+    vat_k = 1 + float(settings_service.get(db, "sales_vat_pct") or 22.0) / 100.0
+    if c_ccy == "RUB":
+        c_rate = 1.0
+    elif (v.price_currency or "").upper() == c_ccy and v.price_fx_rate:
+        c_rate = float(v.price_fx_rate)
+    else:
+        c_rate = float((inp.fx.rates or {}).get(c_ccy) or 0) or None
+
+    from ..calc.costing import _FxCache
+    from ..calc.types import ScenarioName
+    fxc = _FxCache(inp)
+
+    def client_stage(code: str, planned: Optional[date], lines: list[dict]):
+        net = round(sum(l["amount_rub"] for l in lines), 2)
+        key = (code, None, None, None)
+        st0 = by_key.get(key)
+        fixed = st0 is not None and st0.actual_amount is not None
+        if c_rate and not fixed:
+            gross = round(net * vat_k / c_rate, 2)
+            st = upsert(code, planned, amount=gross, currency=c_ccy)
+            # справочно: ₽ без НДС по прогнозу курса ЦБ на плановую дату оплаты (базовый сценарий)
+            k = fxc.rate(c_ccy, planned, ScenarioName.BASE, "_stage") if c_ccy != "RUB" and planned else 1.0
+            st.amount_rub_net = round(gross / vat_k * k, 2)
+        else:
+            st = upsert(code, planned, amount=None if fixed else net)
+            st.amount_rub_net = net
+        return st
+
     adv = [l for l in client_lines if l["event"] in ADVANCE_EVENTS]
     if adv:
-        upsert("client_advance", min(_d(l["on"]) for l in adv), amount=round(sum(l["amount_rub"] for l in adv), 2))
+        client_stage("client_advance", min(_d(l["on"]) for l in adv), adv)
     if any(l.get("via") == "lc" for l in client_lines):
         upsert("lc_opened", ev_deal.get("lc_opened"))
     final = [l for l in client_lines if l["event"] not in ADVANCE_EVENTS]
     if final:
-        upsert("client_final", max(_d(l["on"]) for l in final), amount=round(sum(l["amount_rub"] for l in final), 2))
+        client_stage("client_final", max(_d(l["on"]) for l in final), final)
     # уровень позиции
     for pc in base.positions:
         p = positions.get(pc.position_id)
@@ -268,10 +303,17 @@ def stage_rows(db: Session, deal: Deal) -> list[dict]:
     bat = {b.id: b for b in deal.batches}
     from ..models import User
     names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    vat_k = 1 + float(settings_service.get(db, "sales_vat_pct") or 22.0) / 100.0
     out = []
     for s in sorted(rows, key=lambda s: ((s.actual_on or s.planned_on or date.max), s.sort)):
         out.append({"id": s.id, "code": s.code, "title": s.title, "planned_on": s.planned_on, "actual_on": s.actual_on, "amount": s.amount,
-                    "currency": s.currency, "actual_amount": s.actual_amount, "responsible_roles": s.responsible_roles, "kind": STAGE_DEFS[s.code]["kind"],
+                    "currency": s.currency, "actual_amount": s.actual_amount, "amount_rub_net": s.amount_rub_net,
+                    # D-120: сумма платежа клиента — с НДС в валюте договора (этапы с фактом до D-120 — в ₽ без НДС)
+                    "with_vat": s.code in CLIENT_PAY and s.amount_rub_net is not None and s.amount is not None
+                    and (s.currency != "RUB" or abs(float(s.amount) - float(s.amount_rub_net)) > 0.01),
+                    "ref_rate": round(float(s.amount_rub_net) * vat_k / float(s.amount), 4) if s.code in CLIENT_PAY and s.currency != "RUB"
+                    and s.amount and s.amount_rub_net is not None else None,
+                    "responsible_roles": s.responsible_roles, "kind": STAGE_DEFS[s.code]["kind"],
                     "position_id": s.position_id, "position": pos[s.position_id].designation if s.position_id in pos else None,
                     "batch_id": s.batch_id, "batch": bat[s.batch_id].name if s.batch_id in bat else None, "local_option_id": s.local_option_id,
                     "note": s.note, "done": s.actual_on is not None, "overdue": s.actual_on is None and s.planned_on is not None and s.planned_on < date.today(),

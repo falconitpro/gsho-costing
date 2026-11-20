@@ -190,8 +190,8 @@ class FinanceSettings(BaseModel):
     transfer_fee_mode: str = "fixed"         # fixed | pct | both — фиксированная сумма, процент или и то и другое
     guarantee_rate_pct: float = 3.0          # % годовых от суммы гарантии (явные гарантии в строках графика)
     advance_guarantee: AdvanceGuarantee = Field(default_factory=AdvanceGuarantee)   # БГ на аванс (задача 1)
-    vat_offset_days: int = 90                # срок до зачёта ввозного НДС
-    import_vat_in_cost: bool = False         # включать ли сумму ввозного НДС в статью 7 (иначе — только стоимость денег до зачёта через ст. 11)
+    vat_offset_days: int = 90                # не используется с D-121 (вычет — в квартале ввоза, платежи НДС — 28-го числа)
+    import_vat_in_cost: bool = False         # включать ли сумму ввозного НДС в статью 7 (иначе — вычет в квартале ввоза; стоимость денег — через ст. 11)
     cashflow_bucket_days: int = 7            # недельные корзины
     local_options_order_reserve_days: int = 14   # запас при заказе опций РФ (задача 6)
 
@@ -263,6 +263,7 @@ class PositionInput(BaseModel):
     vat_pct: float = 22.0
     util_fee_rub: float = 0.0
     certification_rub: float = 0.0
+    certification_vat_rub: float = 0.0       # D-122: входящий НДС по сертификации (если введена с НДС) — к вычету
     # Для распределения общих статей партии
     weight_kg: float = 0.0
     volume_m3: float = 0.0
@@ -287,6 +288,8 @@ class BatchInput(BaseModel):
     insurance_amount: Money = Field(default_factory=lambda: Money(amount=0, currency="CNY"))
     broker_rub: float = 0.0
     rf_delivery_rub: float = 0.0
+    broker_vat_rub: float = 0.0              # D-122: входящий НДС брокера / доставки по РФ (суммы выше — без НДС)
+    rf_delivery_vat_rub: float = 0.0
     door_to_door: Optional[Money] = None      # единая стоимость доставки завод → клиент (вместо перевозки до границы и доставки по РФ)
     door_to_door_border_pct: float = 10.0     # доля до границы РФ (остальное — от границы до клиента)
     allocation: AllocationMethod = AllocationMethod.COST
@@ -453,6 +456,7 @@ class VariantScenarioResult(BaseModel):
     positions: list[PositionCost]
     sensitivity: Optional[Sensitivity] = None
     payment_dates: list[dict] = Field(default_factory=list)   # график клиента: no, event, on, amount_rub, via
+    vat: dict = Field(default_factory=dict)                  # D-121: НДС в денежном потоке — от клиента, при ввозе, платежи в бюджет по кварталам
     guarantee_cost_rub: float = 0.0
     defaults_used: dict[str, bool] = Field(default_factory=dict)   # client_payments / factory_payments по типовой схеме
 

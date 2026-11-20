@@ -226,12 +226,15 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
                   <td>{s.done ? <b>{fmtDate(s.actual_on)}</b> : s.overdue ? <span className="badge bad">просрочен</span> : <span className="muted">—</span>}
                     {s.finance && <div style={{ marginTop: 2 }}><Link to={s.finance.url} className={`badge ${FIN_MARK[s.finance.status]?.[1] ?? ""}`} style={{ textDecoration: "none", fontSize: 11 }}>{FIN_MARK[s.finance.status]?.[0] ?? s.finance.status}</Link></div>}</td>
                   <td className="num"><Dev d={s.deviation_days} /></td>
-                  {can(me, "cost") && <td className="num">{s.amount != null ? `${fmtRub(s.amount)} ${s.currency}` : ""}{s.actual_amount != null && <div className="muted">факт {fmtRub(s.actual_amount)}</div>}</td>}
+                  {can(me, "cost") && <td className="num">{s.amount != null ? `${fmtRub(s.amount)} ${s.currency}` : ""}
+                    {s.with_vat && <div className="note-xs">с НДС · ≈ {fmtRub(s.amount_rub_net)} ₽ без НДС{s.ref_rate ? ` по курсу ${s.ref_rate.toFixed(4).replace(".", ",")} на ${fmtDate(s.planned_on)}` : ""}</div>}
+                    {!s.with_vat && s.amount_rub_net != null && <div className="note-xs">без НДС</div>}
+                    {s.actual_amount != null && <div className="muted">факт {fmtRub(s.actual_amount)} {s.currency}</div>}</td>}
                   <td className="muted">{s.responsible_roles.map((r) => ROLE_T[r] || r).join(", ")}</td>
                   <td>{s.code === "factory_acceptance" ? <span className="muted" style={{ fontSize: 11 }}>факт — по решению приёмки всех машин (вкладка «Приёмка на заводе»)</span> : s.can_set && deal.status !== "closed" ? (
                     <div className="row">
                       <input type="date" value={a.actual_on} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, actual_on: e.target.value } })} />
-                      {(s.kind === "payment_in" || s.kind === "payment_out") && <input type="number" placeholder="сумма" value={a.actual_amount} style={{ width: 120 }} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, actual_amount: e.target.value } })} />}
+                      {(s.kind === "payment_in" || s.kind === "payment_out") && <input type="number" placeholder={`сумма, ${s.currency}${s.with_vat ? " с НДС" : ""}`} title={`Сумма, ${s.currency}${s.with_vat ? " с НДС" : ""}`} value={a.actual_amount} style={{ width: 120 }} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, actual_amount: e.target.value } })} />}
                       <input placeholder="примечание" value={a.note} style={{ width: 120 }} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, note: e.target.value } })} />
                       <button className="btn ghost" style={{ padding: "3px 8px" }} onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/stages/${s.id}/actual`, { actual_on: a.actual_on || null, actual_amount: a.actual_amount ? Number(a.actual_amount) : null, note: a.note }))}>{s.done ? "изменить" : "отметить"}</button>
                     </div>) : null}</td>
