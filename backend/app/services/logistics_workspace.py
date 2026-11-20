@@ -305,9 +305,9 @@ td,th{{border:0.5pt solid #999;padding:3pt;vertical-align:top}} th{{background:#
     w.close()
 
 
-def record_request(deal: Deal, data: dict, user_id: str, sent_to: list[str], files: dict[str, str]) -> dict:
+def record_request(deal: Deal, data: dict, user_id: str, sent_to: list[str], files: dict[str, str], req_id: str = "") -> dict:
     info = dict(deal.logistics_info or {})
-    req = {"id": uuid.uuid4().hex[:12], "no": data["no"], "at": _now(), "by": user_id, "answer_by": data["answer_by"], "sent_to": sent_to, "files": files,
+    req = {"id": req_id or uuid.uuid4().hex[:12], "no": data["no"], "at": _now(), "by": user_id, "answer_by": data["answer_by"], "sent_to": sent_to, "files": files,
            "services": data.get("service_codes") or []}
     info["requests"] = [*(info.get("requests") or []), req]
     deal.logistics_info = info

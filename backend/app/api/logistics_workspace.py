@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 
 import os
 import shutil
@@ -20,6 +21,7 @@ from ..core.roles import Role
 from ..db import get_db
 from ..models import Attachment, Client, Deal, FeedEntry
 from ..services import logistics_workspace as lw
+from ..services import quote_links as ql
 from ..services.deal_service import audit, ensure_folders, notify
 from .common import get_deal_or_404
 
@@ -168,27 +170,35 @@ def send_request(deal_id: str, body: SendIn, db: Session = Depends(get_db), user
                 (lw.to_pdf if fmt == "pdf" else lw.to_xlsx)(data, p)
                 files.append(p)
             text = (body.message.strip() or "Добрый день! Просим рассчитать стоимость и сроки доставки по запросу во вложении.").replace("\n", "<br/>")
-            adapters.mail().send(_mail(emails, data, text, files))
+            req_id = uuid.uuid4().hex[:12]
+            links = ql.create(db, deal, {"id": req_id, "no": data["no"], "answer_by": data["answer_by"]}, emails, user.id)
+            for ln in links:        # D-107: каждому получателю — своё письмо со своей ссылкой для ответа
+                adapters.mail().send(_mail([ln["email"]], data, text, files, ln["url"]))
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(502, f"Почта не отправила письмо: {e}")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
-    req = lw.record_request(deal, data, user.id, emails, {"manual": body.manual})
+    if body.manual:
+        req_id = uuid.uuid4().hex[:12]
+        links = ql.create(db, deal, {"id": req_id, "no": data["no"], "answer_by": data["answer_by"]}, emails, user.id)
+    req = lw.record_request(deal, data, user.id, emails, {"manual": body.manual}, req_id=req_id)
     db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"Запрос на расчёт доставки {data['no']}" + (" (отправлен вручную)" if body.manual else ""),
                      body=", ".join(emails), user_id=user.id))
-    audit(db, user.id, deal.id, "deal", deal.id, "logistics_request", after=req)
+    audit(db, user.id, deal.id, "deal", deal.id, "logistics_request", after=req)    # без ссылок: в базе — только их хэши
     db.commit()
-    return req
+    return {**req, "links": links}       # D-107: ссылки для ответа видит только отправивший — в своём письме, если отправлял вручную
 
 
-def _mail(emails: list[str], data: dict, text: str, files: list[str]):
+def _mail(emails: list[str], data: dict, text: str, files: list[str], link: str = ""):
     import html
     from ..adapters.mail import OutgoingMail
     return OutgoingMail(to=emails, subject=f"Запрос на расчёт доставки № {data['no']} — ООО «БЕРГ-ХАУС»",
                         body_html=f"<p>{html.escape(text)}</p><p>Просим рассчитать: {html.escape('; '.join(data['services']))}.</p>"
-                                  f"<p>Ответ просим до {data['answer_by']}.</p>", attachments=files)
+                                  f"<p>Ответ просим до {data['answer_by']}.</p>"
+                                  + (f'<p>Ответить можно по ссылке, без регистрации: <a href="{html.escape(link)}">{html.escape(link)}</a></p>' if link else ""),
+                        attachments=files)
 
 
 @router.post("/quotes", status_code=201)
