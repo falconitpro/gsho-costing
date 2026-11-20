@@ -68,7 +68,7 @@ DEFAULTS: dict[str, Any] = {
     "gd_deal_limit_rub": None,
     "price_deviation_pct": 10.0,
     "logistics_deviation_pct": 15.0,
-    "fd_visa_escalation_days": 2,
+    "fd_visa_escalation_days": 1,
     "plan_fact_deviation_pct": 10.0,
     "sla_days": {"logistics": 1, "service": 2, "cd": 1, "fd": 1, "gd": 1, "manager_rework": 1},
     "legal_ai": {"provider": "yandexgpt", "model": ""},

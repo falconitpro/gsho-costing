@@ -104,6 +104,7 @@ export interface ScenarioResult {
   cash_gap: CashGap; cashflow: CashflowPoint[]; finance_breakdown: Record<string, number>; delivery_days: number; sensitivity?: Sensitivity | null;
   payment_dates?: { no: number; event: string; on: string; amount_rub: number; via: string; default: boolean }[]; guarantee_cost_rub?: number;
   defaults_used?: Record<string, boolean>;
+  positions?: { position_id: string; items_rub: Record<string, number>; items_fx?: Record<string, { amount: number; currency: string }> }[];
 }
 export interface FxComponent {
   payment_ref: string; currency: string; on: string; t_days: number; k_cbr: number; comp_a_forward: number; comp_b_trend: number; comp_c_season: number;

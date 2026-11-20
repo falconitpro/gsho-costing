@@ -108,33 +108,13 @@ export function ActionMenu({ label, items, onPick }: { label: string; items: { t
     </div>);
 }
 
-// ---------- сравнение вариантов интерфейса: «новый вид» (входы-«матрёшка») и «прежний вид» (как в основной версии)
+// ---------- вариант интерфейса: с 21.11.2026 — только «новый вид» (D-115, решение владельца). Переключатель убран;
+// полные виды остаются по ссылкам на самих экранах («все блоки в полном виде», «все шаги на одной странице», «Все колонки»).
 export type UiMode = "new" | "classic";
-const UI_KEY = "gsho.uiMode";
-const UI_EVENT = "gsho:ui-mode";
-const readUiMode = (): UiMode => { try { return localStorage.getItem(UI_KEY) === "classic" ? "classic" : "new"; } catch { return "new"; } };
-
-/** Выбранный вариант интерфейса. Хранится в браузере (localStorage), действует сразу во всех открытых разделах и вкладках. */
-export function useUiMode(): [UiMode, (m: UiMode) => void] {
-  const [mode, setMode] = useState<UiMode>(readUiMode);
-  useEffect(() => {
-    const sync = () => setMode(readUiMode());
-    window.addEventListener(UI_EVENT, sync); window.addEventListener("storage", sync);
-    return () => { window.removeEventListener(UI_EVENT, sync); window.removeEventListener("storage", sync); };
-  }, []);
-  const set = (m: UiMode) => { try { localStorage.setItem(UI_KEY, m); } catch { /* приватный режим: выбор действует до обновления страницы */ } setMode(m); window.dispatchEvent(new Event(UI_EVENT)); };
-  return [mode, set];
-}
-
-/** Переключатель «Новый вид / Прежний вид» — для сравнения вариантов на одном стенде. */
-export function UiModeSwitch() {
-  const [mode, setMode] = useUiMode();
-  return (
-    <div className="seg" role="group" aria-label="Вариант интерфейса">
-      {([["new", "Новый вид"], ["classic", "Прежний вид"]] as const).map(([k, t]) => (
-        <button key={k} type="button" className={mode === k ? "on" : ""} aria-pressed={mode === k} onClick={() => setMode(k)}>{t}</button>))}
-    </div>);
-}
+try { localStorage.removeItem("gsho.uiMode"); } catch { /* приватный режим */ }
+const UI_NEW: [UiMode, (m: UiMode) => void] = ["new", () => undefined];
+export function useUiMode(): [UiMode, (m: UiMode) => void] { return UI_NEW; }
+export function UiModeSwitch() { return null; }
 
 /**
  * Данные для счётчиков обзора: те же существующие запросы, что делают сами подразделы. Ошибка или отказ в доступе —

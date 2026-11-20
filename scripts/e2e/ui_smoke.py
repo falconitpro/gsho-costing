@@ -105,7 +105,7 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(executable_path=CHROME, args=["--no-sandbox"]) if CHROME else await p.chromium.launch()
         for user, title in ROLES:
-            for mode in ("new", "classic"):
+            for mode in ("new",):   # D-115: с 21.11.2026 — один вид интерфейса
                 await check_role(browser, user, title, mode, did)
         await browser.close()
     print(f"проверено экранов: {visited}, ошибок: {len(fails)}")
