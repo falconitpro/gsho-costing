@@ -28,6 +28,9 @@ class FxHistory:
         pts = sorted((d, r) for d, r in points if r and r > 0)
         self.dates = [d for d, _ in pts]
         self.rates = [r for _, r in pts]
+        # история неизменна после создания — тренд, сезонность и волатильность считаются один раз на параметры
+        # (в одном расчёте прогноз курса вызывается десятки раз с теми же as_of и глубиной; аудит 19.11.2026)
+        self._memo: dict[tuple, object] = {}
 
     def __len__(self) -> int:
         return len(self.dates)
@@ -50,6 +53,12 @@ class FxHistory:
 
     # --- компонент Б: годовой тренд -------------------------------------------------
     def annual_trend(self, as_of: date, years: int) -> Optional[float]:
+        key = ("trend", as_of, years)
+        if key not in self._memo:
+            self._memo[key] = self._annual_trend(as_of, years)
+        return self._memo[key]  # type: ignore[return-value]
+
+    def _annual_trend(self, as_of: date, years: int) -> Optional[float]:
         start = date(as_of.year - years, as_of.month, min(as_of.day, 28))
         r0 = self.rate_on(start)
         r1 = self.rate_on(as_of)
@@ -70,6 +79,12 @@ class FxHistory:
 
         Коэффициент года y для месяца m = среднее курса в m / среднее курса за скользящий год.
         """
+        key = ("season", as_of, years)
+        if key not in self._memo:
+            self._memo[key] = self._seasonality(as_of, years)
+        return dict(self._memo[key])  # type: ignore[call-overload]
+
+    def _seasonality(self, as_of: date, years: int) -> dict[int, tuple[float, float, float]]:
         start = date(as_of.year - years, 1, 1)
         pts = self.window(start, as_of)
         by_month: dict[tuple[int, int], list[float]] = defaultdict(list)
@@ -95,6 +110,12 @@ class FxHistory:
     # --- волатильность на горизонте T -------------------------------------------------
     def horizon_volatility_pct(self, as_of: date, years: int, t_days: int) -> Optional[float]:
         """Стандартное отклонение относительного изменения курса за T дней, в %."""
+        key = ("vol", as_of, years, max(t_days, 1))
+        if key not in self._memo:
+            self._memo[key] = self._horizon_volatility_pct(as_of, years, t_days)
+        return self._memo[key]  # type: ignore[return-value]
+
+    def _horizon_volatility_pct(self, as_of: date, years: int, t_days: int) -> Optional[float]:
         t_days = max(t_days, 1)
         start = date(as_of.year - years, as_of.month, min(as_of.day, 28))
         pts = self.window(start, as_of)
