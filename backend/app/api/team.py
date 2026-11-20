@@ -199,7 +199,7 @@ def decide_pending(user_id: str, body: DecisionIn, db: Session = Depends(get_db)
     u.pending_changes = {**(u.pending_changes or {}), "fields": pend} if pend else {}
     audit(db, user.id, None, "user", u.id, "contacts_approve" if body.approve else "contacts_reject", after={"fields": keys, "comment": body.comment})
     try:
-        notify(db, None, u.id, "user_change", None, f"Изменения карточки ({', '.join(FIELD_TITLES.get(k, k) for k in keys)}) {'подтверждены' if body.approve else 'отклонены'}" + (f": {body.comment}" if body.comment else ""))
+        notify(db, None, u.id, "user_change_decision", None, f"Изменения карточки ({', '.join(FIELD_TITLES.get(k, k) for k in keys)}) {'подтверждены' if body.approve else 'отклонены'}" + (f": {body.comment}" if body.comment else ""))
     except Exception:  # noqa: BLE001
         pass
     db.commit()

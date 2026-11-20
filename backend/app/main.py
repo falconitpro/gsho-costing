@@ -104,6 +104,13 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("overdue check failed: %s", e)
+        try:   # D-101: уведомления о выполненных задачах — прочитаны (в том числе накопленные до этого правила)
+            from .services.notification_kinds import close_done_task_notices
+            with SessionLocal() as db:
+                if close_done_task_notices(db):
+                    db.commit()
+        except Exception as e:   # pragma: no cover
+            log.warning("notification cleanup failed: %s", e)
         try:   # черновики сделок без движения: напоминание через 3 дня, предупреждение на 30-й, архив через сутки после него
             from .services.draft_watch import check as check_drafts
             with SessionLocal() as db:

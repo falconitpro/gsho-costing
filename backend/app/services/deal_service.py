@@ -55,8 +55,14 @@ def _assignee(db: Session, deal: Deal, spec: TaskSpec) -> str | None:
     return None
 
 
+from . import notification_kinds as _nk  # noqa: E402,F401 — регистрирует закрытие уведомлений при выполнении задачи (D-101)
+
+
 def apply_transition(db: Session, deal: Deal, tr: TransitionResult, user_id: str | None) -> None:
     before = deal.status.value
+    if tr.status != deal.status:   # D-101: этап сменился — уведомления прежнего этапа (виза, расчёт готов, доработка) больше не ждут действия
+        from .notification_kinds import close_stage_notices
+        close_stage_notices(db, deal.id)
     deal.status = tr.status
     audit(db, user_id, deal.id, "deal", deal.id, "status", {"status": before}, {"status": tr.status.value}, tr.audit)
     if deal.approved_version_id:   # «Финансы»: прогноз утверждённого расчёта — по статусу сделки, в той же транзакции (D-126)
@@ -175,7 +181,8 @@ def check_overdue_tasks(db: Session, today: date | None = None) -> int:
         who = next((u.display_name for u in users if u.id == t.assignee_id), "") or role_title(t.role)
         for u in users:   # руководству — КД и ЗГД
             if ({"cd", "gd"} & set(u.roles or [])) and u.id != t.assignee_id:
-                notify(db, deal, u.id, "task_overdue", None, f"{text} — исполнитель: {who}")
+                # копия руководству — «для сведения» (D-101): действие за исполнителем, руководство видит просрочки в «Требует вмешательства»
+                notify(db, deal, u.id, "task_overdue_team", None, f"{text} — исполнитель: {who}")
         t.overdue_notified = True
         n += 1
     return n

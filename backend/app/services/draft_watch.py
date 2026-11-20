@@ -119,6 +119,8 @@ def check(db: Session, now: datetime | None = None) -> dict[str, int]:
 def _archive(db: Session, deal: Deal, age: int, now: datetime) -> None:
     reason = f"автоматически: черновик {age} дн. без движения"
     deal.archived_at, deal.archived_by, deal.archive_reason = now, None, reason
+    from .notification_kinds import close_stage_notices
+    close_stage_notices(db, deal.id)
     closed = 0
     for t in db.scalars(select(Task).where(Task.deal_id == deal.id, Task.done_at.is_(None))).all():
         t.done_at = now

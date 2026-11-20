@@ -4,6 +4,7 @@ import { STATUS_TITLES, type Batch, type Deal, type Me } from "../types";
 import LogistRequests, { LogistAddresses, LogistFields, FieldsChooser, type Workspace, type Quote } from "../components/LogistWorkspace";
 import SpecTable from "../components/SpecTable";
 import { UndoButton, useUndoHistory } from "../undo";
+import { useQueryParam, useUiMode } from "../components/Levels";
 
 type Money = { amount: number; currency: string };
 type PosForm = { domestic_logistics: Money; export_formalities: Money; hs_code: string; duty_pct: string; vat_pct: string; hs_manual_comment: string; hs_description: string; util_fee_rub: number; certification_rub: number; volume_m3: string; comments: Record<string, string>;
@@ -178,6 +179,23 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const [dirtyPos, setDirtyPos] = useState<string[]>([]);   // позиции с несохранёнными изменениями
   const upd = (pid: string, patch: Partial<PosForm>) => { setForms({ ...forms, [pid]: { ...forms[pid], ...patch } }); setDirtyPos((d) => (d.includes(pid) ? d : [...d, pid])); };
 
+  // Аудит 19.11.2026: «Новый вид» — мастер в три шага (в адресе ?lstep=1..3): 1 — адреса и маршрут, 2 — перевозка (партии и логистические
+  // компании), 3 — таможня и сборы по позициям. Шаги не размонтируются, а скрываются: введённое, но не сохранённое не теряется.
+  // «Все шаги на одной странице» и «Прежний вид» — как раньше.
+  const [uiMode] = useUiMode();
+  const [lstep, setLstep] = useQueryParam("lstep");
+  const wizard = uiMode !== "classic" && lstep !== "all";
+  const step = wizard ? (["1", "2", "3"].includes(lstep || "") ? Number(lstep) : 1) : 0;
+  const show = (n: number) => !wizard || step === n;
+  const stepDone = [!!ws?.addresses.delivery_address, batches.length > 0 && ws?.compare.chosen_status === "approved", positions.length > 0 && positions.every(savedHs)];
+  const STEPS = ["Адреса и маршрут", "Перевозка: партии и логистические компании", "Таможня и сборы по позициям"];
+  const go = (n: number) => { setLstep(String(n)); window.scrollTo({ top: 0 }); };
+  const stepNav = wizard && (
+    <div className="row" style={{ justifyContent: "space-between", margin: "4px 0 16px", gap: 8, flexWrap: "wrap" }}>
+      {step > 1 ? <button className="btn ghost" onClick={() => go(step - 1)}>← {STEPS[step - 2]}</button> : <span />}
+      {step < 3 ? <button className="btn secondary" onClick={() => go(step + 1)}>Далее: {STEPS[step]} →</button>
+        : canEdit && !deal.logistics_done ? <button className="btn" onClick={() => complete()}>Отправить далее на расчёт</button> : <span />}
+    </div>);
   return (
     <>
       {lockReason && <div className="alert warn" role="status" style={{ marginBottom: 10 }}><b>Блок логистики только для просмотра.</b> {lockReason}</div>}
@@ -188,15 +206,24 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
           <span>Статус: <span className="badge accent">{STATUS_TITLES[deal.status] || deal.status}</span> · логистика: {deal.logistics_done ? <span className="badge ok">рассчитана, передана далее</span> : <span className="badge warn">в работе</span>}</span>
           {canEdit && !deal.logistics_done && <button className="btn" onClick={() => complete()}>Отправить далее на расчёт</button>}
         </div>
-        <div className="lb-steps">
+        {wizard && <div className="lb-wiz" role="tablist" aria-label="Шаги логистики">
+          {STEPS.map((t, i) => (
+            <button key={t} type="button" role="tab" aria-selected={step === i + 1} className={`${step === i + 1 ? "on" : ""} ${stepDone[i] ? "done" : ""}`} onClick={() => go(i + 1)}>
+              <span className="n">{stepDone[i] ? "✓" : i + 1}</span>{t}</button>))}
+          <span className="lb-links muted" style={{ fontSize: 12, alignSelf: "center" }}>
+            <a href="#" onClick={(e) => { e.preventDefault(); setLstep("all"); }}>все шаги на одной странице</a> · <a href="?tab=positions">все характеристики позиций</a> · <a href="?tab=offers">ответы заводов</a></span>
+        </div>}
+        {!wizard && uiMode !== "classic" && <div style={{ marginTop: 6 }}><a href="#" className="muted" style={{ fontSize: 12 }} onClick={(e) => { e.preventDefault(); setLstep("1"); }}>по шагам</a></div>}
+        {!wizard && <div className="lb-steps">
           <a href="#lb-adr" className={ws?.addresses.delivery_address ? "done" : ""}>Адреса</a>
           <a href="#lb-batches" className={batches.length ? "done" : ""}>Партии: {batches.length || "нет"}</a>
           <a href="#lb-pos" className={positions.every(savedHs) ? "done" : ""}>Позиции, ТН ВЭД: {positions.filter(savedHs).length} из {positions.length}</a>
           <a href="#lb-req" className={ws?.compare.chosen_status === "approved" ? "done" : ""}>Логистические компании: {ws?.compare.rows.length ? `ответов ${ws.compare.rows.length}` : "запросов " + (ws?.requests.length || 0)}{ws?.compare.chosen ? ` · выбрано: ${ws.compare.chosen}` : ""}</a>
           <span className="lb-links muted">· <a href="?tab=positions">все характеристики позиций</a> · <a href="?tab=offers">ответы заводов</a></span>
-        </div>
+        </div>}
       </div>
-      {ws && <div id="lb-adr"><LogistAddresses dealId={deal.id} ws={ws} reload={loadWs} /></div>}
+      <div hidden={!show(1)}>{ws && <div id="lb-adr"><LogistAddresses dealId={deal.id} ws={ws} reload={loadWs} /></div>}{show(1) && stepNav}</div>
+      <div hidden={!show(2)}>
       <div className="card" id="lb-batches">
         <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}><h2 style={{ margin: 0 }}>Доставка: партии <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}>· суммы на 1 машину</span></h2>
           {canEdit && !showBatchForm && <button className="btn secondary" onClick={() => { resetBatchForm(); setShowBatchForm(true); }}>+ Новая партия</button>}</div>
@@ -260,7 +287,10 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
           </>
         )}
       </div>
-
+      {wizard && ws && <div id="lb-req"><LogistRequests dealId={deal.id} ws={ws} reload={loadWs} onApplyChosen={canEdit ? applyChosen : undefined} /></div>}
+      {show(2) && stepNav}
+      </div>
+      <div hidden={!show(3)}>
       {positions.map((p) => {
         const f = forms[p.id];
         if (!f) return null;
@@ -340,8 +370,10 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
           </div>
         );
       })}
-      {ws && <div id="lb-req"><LogistRequests dealId={deal.id} ws={ws} reload={loadWs} onApplyChosen={canEdit ? applyChosen : undefined} /></div>}
-      {canEdit && <div className="row"><button className="btn" onClick={() => complete()}>Отправить далее на расчёт</button><span className="muted">несохранённые данные партии и позиций сохранятся; позиции без партии войдут в первую партию</span></div>}
+      {show(3) && stepNav}
+      </div>
+      {!wizard && ws && <div id="lb-req"><LogistRequests dealId={deal.id} ws={ws} reload={loadWs} onApplyChosen={canEdit ? applyChosen : undefined} /></div>}
+      {canEdit && !wizard && <div className="row"><button className="btn" onClick={() => complete()}>Отправить далее на расчёт</button><span className="muted">несохранённые данные партии и позиций сохранятся; позиции без партии войдут в первую партию</span></div>}
     </>
   );
 }
