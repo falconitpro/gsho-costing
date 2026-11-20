@@ -51,7 +51,7 @@ def test_legacy_records_converted_without_changing_calc(client):
     p1 = _ok(client.post(f"/api/deals/{did}/positions", headers=H(MGR), json={"factory_id": factories[0]["id"], "model": "PU-3",
              "machine_type": "ПДМ", "qty": 3, "unit_price": 1000000, "currency": "CNY"}), 201)
     p2 = _ok(client.post(f"/api/deals/{did}/positions", headers=H(MGR), json={"factory_id": factories[0]["id"], "model": "PU-2",
-             "machine_type": "Самосвал", "qty": 2, "unit_price": 800000, "currency": "CNY"}), 201)
+             "machine_type": "Самосвал", "qty": 2, "unit_price": 1000000, "currency": "CNY"}), 201)
     with SessionLocal() as db:
         b = Batch(deal_id=did, route="Китай — РФ", transport_units=2,
                   items={"intl_freight": {"amount": 90000, "currency": "CNY"}, "insurance_pct": 0.3, "broker_rub": "150 000",
