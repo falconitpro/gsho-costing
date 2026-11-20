@@ -17,7 +17,7 @@ from .types import CashGap, CashflowPoint, FinanceSettings
 class Flow:
     on: date
     amount_rub: float          # + приток, − отток
-    kind: str                  # client | factory | logistics | customs | vat_refund | service | other
+    kind: str                  # client | client_vat | factory | logistics | customs | vat | service | other
     ref: str = ""
     fx_amount: float = 0.0     # сумма в валюте (для комиссии за конвертацию), 0 для RUB
     currency: str = "RUB"

@@ -227,7 +227,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
                     {s.finance && <div style={{ marginTop: 2 }}><Link to={s.finance.url} className={`badge ${FIN_MARK[s.finance.status]?.[1] ?? ""}`} style={{ textDecoration: "none", fontSize: 11 }}>{FIN_MARK[s.finance.status]?.[0] ?? s.finance.status}</Link></div>}</td>
                   <td className="num"><Dev d={s.deviation_days} /></td>
                   {can(me, "cost") && <td className="num">{s.amount != null ? `${fmtRub(s.amount)} ${s.currency}` : ""}
-                    {s.with_vat && <div className="note-xs">с НДС · ≈ {fmtRub(s.amount_rub_net)} ₽ без НДС</div>}
+                    {s.with_vat && <div className="note-xs">с НДС · ≈ {fmtRub(s.amount_rub_net)} ₽ без НДС{s.ref_rate ? ` по курсу ${s.ref_rate.toFixed(4).replace(".", ",")} на ${fmtDate(s.planned_on)}` : ""}</div>}
                     {!s.with_vat && s.amount_rub_net != null && <div className="note-xs">без НДС</div>}
                     {s.actual_amount != null && <div className="muted">факт {fmtRub(s.actual_amount)} {s.currency}</div>}</td>}
                   <td className="muted">{s.responsible_roles.map((r) => ROLE_T[r] || r).join(", ")}</td>

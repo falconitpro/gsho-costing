@@ -190,8 +190,8 @@ class FinanceSettings(BaseModel):
     transfer_fee_mode: str = "fixed"         # fixed | pct | both — фиксированная сумма, процент или и то и другое
     guarantee_rate_pct: float = 3.0          # % годовых от суммы гарантии (явные гарантии в строках графика)
     advance_guarantee: AdvanceGuarantee = Field(default_factory=AdvanceGuarantee)   # БГ на аванс (задача 1)
-    vat_offset_days: int = 90                # срок до зачёта ввозного НДС
-    import_vat_in_cost: bool = False         # включать ли сумму ввозного НДС в статью 7 (иначе — только стоимость денег до зачёта через ст. 11)
+    vat_offset_days: int = 90                # не используется с D-121 (вычет — в квартале ввоза, платежи НДС — 28-го числа)
+    import_vat_in_cost: bool = False         # включать ли сумму ввозного НДС в статью 7 (иначе — вычет в квартале ввоза; стоимость денег — через ст. 11)
     cashflow_bucket_days: int = 7            # недельные корзины
     local_options_order_reserve_days: int = 14   # запас при заказе опций РФ (задача 6)
 
@@ -453,6 +453,7 @@ class VariantScenarioResult(BaseModel):
     positions: list[PositionCost]
     sensitivity: Optional[Sensitivity] = None
     payment_dates: list[dict] = Field(default_factory=list)   # график клиента: no, event, on, amount_rub, via
+    vat: dict = Field(default_factory=dict)                  # D-121: НДС в денежном потоке — от клиента, при ввозе, платежи в бюджет по кварталам
     guarantee_cost_rub: float = 0.0
     defaults_used: dict[str, bool] = Field(default_factory=dict)   # client_payments / factory_payments по типовой схеме
 

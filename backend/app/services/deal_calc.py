@@ -198,7 +198,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
     finance = FinanceSettings(
         financing_rate_pct=s["financing_rate_pct"], deposit_rate_pct=s["deposit_rate_pct"], conversion_fee_pct=s["conversion_fee_pct"],
         transfer_fee_rub=float(tf.get("fixed_rub") or 0), transfer_fee_pct=float(tf.get("pct") or 0), transfer_fee_mode=tf.get("mode") or "fixed",
-        guarantee_rate_pct=s["guarantee_rate_pct"], vat_offset_days=s["vat_offset_days"],
+        guarantee_rate_pct=s["guarantee_rate_pct"],
         import_vat_in_cost=s["import_vat_in_cost"], advance_guarantee=AdvanceGuarantee(**{k: v for k, v in ag.items() if k in AdvanceGuarantee.model_fields}),
         local_options_order_reserve_days=int(s.get("local_options_order_reserve_days") or 14),
     )
@@ -291,7 +291,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
         factory_contract_date=deal.factory_contract_signed_at, factory_contract_lag_days=int(s.get("factory_contract_lag_days") or 10),
         lc_opening_days=int(s.get("lc_opening_days") or 14), delivery_reserve_pct=float(s.get("delivery_reserve_pct") or 10.0),
         deal_actual_events=deal_actual, rf_holidays=[d for d in (_date(x) for x in (s.get("rf_holidays") or [])) if d],
-        base_currency=deal.base_currency, fx=fx, fx_history=history, fx_settings=fx_settings, finance=finance,
+        base_currency=deal.base_currency, client_vat_pct=float(s.get("sales_vat_pct") or 22.0), fx=fx, fx_history=history, fx_settings=fx_settings, finance=finance,
         overhead_scale=[OverheadStep(**o) for o in s["overhead_scale"]], thresholds=thresholds, scenarios=scenarios,
         positions=positions, batches=batches, variants=variants, commissioning_days=s["commissioning_days"],
         runtime_hours_per_month=s["hours_per_month_by_type"].get("default", 400),

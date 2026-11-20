@@ -276,6 +276,22 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
           <div className="card">
             {SCEN.map(([k, t]) => (<div key={k}><h2>{t}: {gapText(scen[k])}</h2><CashflowChart points={scen[k].cashflow} /></div>))}
             <div className="muted">Финансовые расходы (базовый): {Object.entries(base?.finance_breakdown || {}).map(([k, v]) => `${k} ${fmtRub(v)}`).join(" · ")}</div>
+            {base?.vat?.budget && (() => {   // D-121: НДС в денежном потоке
+              const v = base.vat!;
+              const imp = (v.import || []).reduce((a, x) => a + x.amount_rub, 0);
+              const qName = (q: string) => `${Math.floor((Number(q.slice(5, 7)) - 1) / 3) + 1} кв. ${q.slice(0, 4)}`;
+              return (<div className="vat-cf">
+                <h2>НДС в денежном потоке (базовый)</h2>
+                <table><tbody>
+                  <tr><td>НДС {v.pct} % в оплатах клиента</td><td className="num">+{fmtRub(v.from_client_rub)} ₽</td><td className="muted">приходит вместе с каждой оплатой</td></tr>
+                  {(v.import || []).map((x, i) => <tr key={"i" + i}><td>Ввозной НДС (база: таможенная стоимость с доставкой до границы РФ + пошлина)</td><td className="num">−{fmtRub(x.amount_rub)} ₽</td><td className="muted">на дату ДТ {fmtDate(x.on)}{v.import_deducted ? " · к вычету в квартале ввоза" : " · расход, к вычету не принимается"}</td></tr>)}
+                  {v.budget.map((q) => <tr key={q.quarter}><td>В бюджет за {qName(q.quarter)}{q.amount_rub < 0 ? " (вычет больше начисленного)" : ""}</td>
+                    <td className="num">{q.amount_rub < 0 ? "+" : "−"}{fmtRub(Math.abs(q.amount_rub))} ₽</td><td className="muted">по 1/3: {q.dates.map((d) => fmtDate(d)).join(", ")}</td></tr>)}
+                  <tr className="vat-sum"><td>Остаток после расчётов с бюджетом</td><td className="num">{fmtRub(v.from_client_rub - imp - v.budget.reduce((a, q) => a + q.amount_rub, 0))} ₽</td>
+                    <td className="muted">0 — НДС для компании нейтрален и влияет только на кассовый разрыв и стоимость денег. НДС с аванса — с даты оплаты, с остатка цены — на дату поставки; итог квартала — 28-го числа трёх следующих месяцев</td></tr>
+                </tbody></table>
+              </div>);
+            })()}
           </div>
         )}
         {tab === "cost" && (() => {

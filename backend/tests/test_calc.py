@@ -131,7 +131,63 @@ def test_full_prepayment_reduces_cash_gap_but_adds_guarantee_cost():
     assert v2.cash_gap.amount_rub > v1.cash_gap.amount_rub      # разрыв меньше (ближе к нулю)
     # БГ на аванс (задача 1): есть у обоих вариантов (30 % и 100 % предоплаты), у 100 % — больше
     assert v2.finance_breakdown["guarantees"] > v1.finance_breakdown["guarantees"] > 0
-    assert v2.finance_breakdown["money_cost"] < v1.finance_breakdown["money_cost"]   # стоимость денег ниже при полной предоплате
+    # D-121: стоимость денег при 100 % предоплате уже не обязательно ниже — НДС с аванса платится в бюджет в следующем квартале,
+    # а ввозной НДС к вычету появляется позже (см. test_vat_settlement_*)
+
+
+def _flows(inp):
+    from app.calc import costing
+    cap, orig = [], costing.build_cashflow
+    costing.build_cashflow = lambda f, fin, g=0.0: (cap.append(list(f)), orig(f, fin, g))[1]
+    try:
+        res = calc_deal(inp)
+    finally:
+        costing.build_cashflow = orig
+    return res, cap
+
+
+def test_vat_settlement_quarterly_from_client_payments_minus_import_vat():
+    """D-121: клиент платит с НДС; НДС к уплате — с каждой оплаты до поставки и с остатка цены на дату поставки;
+    ввозной НДС — к вычету в квартале ввоза; итог квартала — тремя долями 28-го числа следующих трёх месяцев."""
+    from datetime import date as _d
+    p = 95_000_000
+    inp = sample_deal(price_a=p)
+    inp.variants = inp.variants[:1]
+    res, cap = _flows(inp)
+    flows = cap[0]          # первый вызов — базовый сценарий варианта V1
+    base = res.variants["V1"]["base"]
+    client = sum(f.amount_rub for f in flows if f.kind == "client")
+    cvat = sum(f.amount_rub for f in flows if f.kind == "client_vat")
+    assert cvat == pytest.approx(client * 0.22, rel=1e-9)
+    imp = -sum(f.amount_rub for f in flows if f.kind == "customs" and f.ref.endswith("/vat"))
+    budget = -sum(f.amount_rub for f in flows if f.kind == "vat")
+    assert imp > 0 and budget == pytest.approx(p * 0.22 - imp, rel=1e-9)        # всего в бюджет: НДС с цены минус ввозной
+    vat_days = {f.on for f in flows if f.kind == "vat"}
+    assert vat_days and all(d.day >= 28 or d.day <= 3 for d in vat_days)          # 28-е или следующий рабочий день
+    adv = next(l for l in base.payment_dates if l["event"] == "contract")
+    qm = (adv["on"].month - 1) // 3 * 3          # первый месяц квартала аванса, с нуля
+    from app.calc.costing import _vat_quarter_payments
+    q_next = _vat_quarter_payments(_d(adv["on"].year, qm + 1, 1))
+    assert all(d in vat_days for d in q_next)            # НДС с аванса — в трёх месяцах следующего квартала
+    assert not any(f.kind == "vat_refund" for f in flows)
+
+
+def test_vat_payment_dates_shift_from_weekend():
+    from datetime import date as _d
+    from app.calc.costing import _vat_quarter_payments
+    # 4 кв. 2026: 28.01.2027 (чт), 28.02.2027 (вс → 01.03), 28.03.2027 (вс → 29.03)
+    assert _vat_quarter_payments(_d(2026, 10, 1)) == [_d(2027, 1, 28), _d(2027, 3, 1), _d(2027, 3, 29)]
+
+
+def test_vat_in_cost_no_deduction():
+    p = 95_000_000
+    inp = sample_deal(price_a=p)
+    inp.variants = inp.variants[:1]
+    inp.finance.import_vat_in_cost = True
+    res, cap = _flows(inp)
+    budget = -sum(f.amount_rub for f in cap[0] if f.kind == "vat")
+    assert budget == pytest.approx(p * 0.22, rel=1e-9)                          # вычета нет — НДС с цены целиком
+    assert res.variants["V1"]["base"].items_rub["import_vat"] > 0
 
 
 def test_overhead_override_requires_gd_visa():

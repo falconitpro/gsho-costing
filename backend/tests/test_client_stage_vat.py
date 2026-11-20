@@ -12,7 +12,8 @@ def test_client_stages_gross_in_contract_currency(client):
     pay = [s for s in st if s["code"] in ("client_advance", "client_final")]
     assert len(pay) == 2 and all(s["currency"] == v["price_currency"] and s["with_vat"] for s in pay)
     assert abs(sum(s["amount"] for s in pay) - v["price_amount"] * 1.22) < 1
-    assert abs(sum(s["amount_rub_net"] for s in pay) - v["price_rub"]) < 1
+    for s in pay:   # справочно ₽ без НДС — по прогнозу курса на плановую дату оплаты
+        assert s["ref_rate"] > 0 and abs(s["amount_rub_net"] - s["amount"] / 1.22 * s["ref_rate"]) < s["amount"] * 1e-4 + 1
     # без права видеть деньги — сумм нет
     assert all("amount_rub_net" not in s for s in _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H("logist@example.com")))["stages"])
     # факт вносится в валюте этапа (с НДС) и после этого этап не пересчитывается

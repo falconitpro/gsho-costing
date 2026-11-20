@@ -207,6 +207,12 @@ async def s1_single(browser):
     check_true(scn, "утверждено", terms_and_submit(did, pos) == "approved")
     m = money(did, var["id"])
     check(scn, "сервер: цена в валюте × курс = цена в рублях", m["price"] * m["fx"], m["price_rub"])
+    # D-121: НДС в денежном потоке — от клиента 22 % от цены, в бюджет = НДС с цены − ввозной, каждый платёж 28-го числа
+    vat = api(CD, "GET", f"/api/deals/{did}/calc")["result"]["variants"][var["id"]]["base"]["vat"]
+    imp = sum(x["amount_rub"] for x in vat["import"])
+    check(scn, "НДС от клиента = 22 % от цены", vat["from_client_rub"], m["price_rub"] * m["vat"] / 100, tol=2)
+    check(scn, "НДС в бюджет = НДС с цены − ввозной", sum(q["amount_rub"] for q in vat["budget"]), vat["from_client_rub"] - imp, tol=2)
+    check_true(scn, "платежи НДС — 28-го числа или следующий рабочий день", all(d[8:10] >= "28" or d[8:10] <= "03" for q in vat["budget"] for d in q["dates"]))
     check_kp(scn, did, m)
     check_screen(scn, await screen(browser, did), m)
 
@@ -290,7 +296,8 @@ async def s5_bargain_contract(browser):
         check_true(scn, "платежи клиента — в валюте договора, с НДС", all(s["currency"] == m["cur"] and s.get("with_vat") for s in pay_in),
                    json.dumps([(s["code"], s["currency"], s.get("with_vat")) for s in pay_in], ensure_ascii=False))
         check(scn, f"платежи клиента = цена после торгов с НДС, {m['cur']}", sum(s["amount"] for s in pay_in), m["price"] * (1 + m["vat"] / 100), tol=2)
-        check(scn, "справочно ₽ без НДС = цена после торгов", sum(s["amount_rub_net"] for s in pay_in), m["price_rub"], tol=2)
+        for s_ in pay_in:   # справочно: ₽ без НДС = сумма без НДС × прогноз курса на плановую дату оплаты
+            check(scn, f"{s_['code']}: справочно ₽ без НДС по курсу на дату оплаты", s_["amount_rub_net"], s_["amount"] / (1 + m["vat"] / 100) * s_["ref_rate"], tol=s_["amount"] * 0.0001 + 2)
         rows, _ = kp_rows(did)
         gross_key = next((k for k in rows if k.startswith(f"Итого, {m['cur']} с НДС")), "")
         check(scn, "платежи клиента = «Итого с НДС» в КП", sum(s["amount"] for s in pay_in), num(rows.get(gross_key, "")), tol=2)

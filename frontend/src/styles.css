@@ -925,3 +925,6 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .dh-strip { padding: 8px 12px; }
 .dh-now { padding: 7px 12px; border-top: 1px solid var(--line); border-left: 4px solid var(--accent); }
 .note-xs { font-size: 11px; color: var(--muted); }   /* D-120: короткая пометка под суммой */
+.vat-cf { margin-top: 12px; }   /* D-121: НДС в денежном потоке */
+.vat-cf h2 { margin: 0 0 4px; }
+.vat-cf .vat-sum td { font-weight: 600; border-top: 1px solid var(--line); }
