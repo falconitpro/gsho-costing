@@ -4,7 +4,7 @@ import { api, ApiError } from "../api";
 type Rcpt = { name: string; position: string; email: string };
 
 /** КП в карточке сделки: «Сформировать КП», «Выгрузить КП» (Word / PDF), «Отправить клиенту» (письмо из системы, отметка «КП отправлено»). */
-export default function KpActions({ dealId, status, canAct, onDone }: { dealId: string; status: string; canAct: boolean; onDone: () => void }) {
+export default function KpActions({ dealId, status, canAct, canMark = canAct, onDone }: { dealId: string; status: string; canAct: boolean; canMark?: boolean; onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const [rcpts, setRcpts] = useState<Rcpt[]>([]);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -39,6 +39,13 @@ export default function KpActions({ dealId, status, canAct, onDone }: { dealId: 
     finally { setBusy(false); }
   }
 
+  async function markSent() {
+    const to = [...sel, ...extra.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean)];
+    setBusy(true);
+    try { await api.post(`/api/deals/${dealId}/kp-sent`, { recipients: to, sent_via: "outlook" }); setMsg(`Отмечено: КП отправлено (${to.join(", ")})`); setOpen(false); onDone(); }
+    catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  }
+
   return (
     <>
       <div className="row" style={{ flexWrap: "wrap" }}>
@@ -46,24 +53,26 @@ export default function KpActions({ dealId, status, canAct, onDone }: { dealId: 
         <a className="btn ghost" href={`/api/deals/${dealId}/kp/file?format=docx`}>Выгрузить КП: Word</a>
         <a className="btn ghost" href={`/api/deals/${dealId}/kp/file?format=pdf`}>PDF</a>
         {canAct && status === "approved" && mailOn && <button className="btn" disabled={busy} onClick={openSend}>Отправить клиенту</button>}
-        {canAct && status === "approved" && !mailOn && <span className="muted" style={{ fontSize: 12 }}>выгрузите КП, отправьте из своей почты и нажмите «Отметить: КП отправлено вручную»</span>}
+        {canMark && status === "approved" && !mailOn && <button className="btn" disabled={busy} onClick={() => openSend()} title="КП отправлено своей почтой — отметить в сделке">Отправил клиенту — отметить</button>}
       </div>
       {msg && <div className="alert info" style={{ marginTop: 6 }}>{msg}</div>}
       {open && (
         <div className="card" style={{ marginTop: 8, borderColor: "var(--accent)" }}>
-          <h2 style={{ marginTop: 0 }}>Отправить КП клиенту</h2>
+          <h2 style={{ marginTop: 0 }}>{mailOn ? "Отправить КП клиенту" : "КП отправлено клиенту"}</h2>
+          {!mailOn && <div className="muted" style={{ marginBottom: 4 }}>Почта на сервере не подключена: отметьте, кому вы отправили КП своей почтой, — статус, лента, задачи и история цен обновятся так же, как при отправке из системы.</div>}
           <div className="muted" style={{ marginBottom: 4 }}>Получатели — контакты клиента; можно добавить адреса вручную через запятую.</div>
           {rcpts.length === 0 && <div className="alert warn">В карточке клиента нет контактов с e-mail — добавьте адрес вручную.</div>}
           {rcpts.map((r) => (
             <label key={r.email} className="row"><input type="checkbox" checked={sel.has(r.email)} onChange={(e) => { const n = new Set(sel); if (e.target.checked) n.add(r.email); else n.delete(r.email); setSel(n); }} />
               {r.name || r.email}{r.position && <span className="muted">, {r.position}</span>} <span className="muted">&lt;{r.email}&gt;</span></label>))}
-          <label className="f" style={{ marginTop: 6 }}>Ещё адреса<input value={extra} placeholder="name@company.ru, …" onChange={(e) => setExtra(e.target.value)} /></label>
-          <label className="f">Тема<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
-          <label className="f">Текст письма<textarea rows={6} style={{ width: "100%" }} value={body} onChange={(e) => setBody(e.target.value)} /></label>
-          <label className="row">Вложение
-            <select value={format} onChange={(e) => setFormat(e.target.value)}><option value="pdf">КП в PDF</option><option value="docx">КП в Word</option><option value="both">Word и PDF</option></select></label>
+          <label className="f" style={{ marginTop: 6 }}>{mailOn ? "Ещё адреса" : "Другие адреса"}<input value={extra} placeholder="name@company.ru, …" onChange={(e) => setExtra(e.target.value)} /></label>
+          {mailOn && <>
+            <label className="f">Тема<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
+            <label className="f">Текст письма<textarea rows={6} style={{ width: "100%" }} value={body} onChange={(e) => setBody(e.target.value)} /></label>
+            <label className="row">Вложение
+              <select value={format} onChange={(e) => setFormat(e.target.value)}><option value="pdf">КП в PDF</option><option value="docx">КП в Word</option><option value="both">Word и PDF</option></select></label></>}
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn" disabled={busy || (sel.size === 0 && !extra.trim())} onClick={send}>Отправить и отметить «КП отправлено»</button>
+            <button className="btn" disabled={busy || (sel.size === 0 && !extra.trim())} onClick={mailOn ? send : markSent}>{mailOn ? "Отправить и отметить «КП отправлено»" : "Отметить «КП отправлено»"}</button>
             <button className="btn ghost" onClick={() => setOpen(false)}>Отмена</button>
           </div>
         </div>)}

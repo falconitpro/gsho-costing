@@ -1,11 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import PublicQuotePage from "./pages/PublicQuotePage";
 import "./styles.css";
 import "./login.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    {/* D-107: ответ логистической компании по ссылке — без входа и без оболочки CRM */}
+    {window.location.pathname.startsWith("/q/") ? <PublicQuotePage token={decodeURIComponent(window.location.pathname.slice(3))} /> : <App />}
   </React.StrictMode>,
 );
