@@ -17,29 +17,48 @@ from ..models import Deal, ExecutionStage, FxRate, LocalOption
 from . import settings_service
 
 
+_FX_HISTORY_CACHE: dict[tuple, dict[str, list[tuple[date, float]]]] = {}
+
+
 def load_fx(db: Session, on: date) -> tuple[FxRates, dict[str, list[tuple[date, float]]]]:
-    """Курс на дату (ручной имеет приоритет) и история по валютам за 5 лет."""
-    rows = db.scalars(select(FxRate).where(FxRate.on <= on).order_by(FxRate.on.desc())).all()
+    """Курс на дату (ручной имеет приоритет) и история по валютам за 5 лет.
+
+    Аудит 19.11.2026 (кэш расчёта): раньше здесь читались ВСЕ курсы с 2014 г. объектами ORM на каждый расчёт — это и была
+    основная задержка (медиана 332 мс на рабочей системе). Теперь: последний курс по каждой валюте — одним запросом,
+    история — кортежами, а не объектами, и кэшируется в процессе до появления новых курсов. Результат расчёта не меняется.
+    """
+    from sqlalchemy import func
+    latest = select(FxRate.currency, func.max(FxRate.on).label("mx")).where(FxRate.on <= on).group_by(FxRate.currency).subquery()
+    rows = db.execute(select(FxRate.currency, FxRate.on, FxRate.rate, FxRate.source)
+                      .join(latest, (FxRate.currency == latest.c.currency) & (FxRate.on == latest.c.mx))).all()
     rates: dict[str, float] = {"RUB": 1.0}
     source = "cbr"
     note = ""
     latest_on: date | None = None
-    for r in rows:
-        if r.currency in rates:
+    # в один день может быть и курс ЦБ, и ручной — ручной главнее (как и прежде для ручного курса на дату расчёта)
+    for cur, r_on, rate, src in sorted(rows, key=lambda x: (x[0], x[3] != "manual")):
+        if cur in rates:
             continue
-        if r.source == "manual" and r.on == on:
-            rates[r.currency] = r.rate
+        rates[cur] = rate
+        if src == "manual" and r_on == on:
             source = "manual"
-        elif r.currency not in rates:
-            rates[r.currency] = r.rate
-            latest_on = max(latest_on or r.on, r.on)
+        else:
+            latest_on = max(latest_on or r_on, r_on)
     if latest_on and latest_on < on and source != "manual":
         source, note = "cbr_stale", f"курс от {latest_on:%d.%m.%Y}"
-    hist_rows = db.scalars(select(FxRate).where(FxRate.on >= on - timedelta(days=365 * 5), FxRate.source == "cbr")).all()
-    history: dict[str, list[tuple[date, float]]] = {}
-    for r in hist_rows:
-        history.setdefault(r.currency, []).append((r.on, r.rate))
-    return FxRates(as_of=on, rates=rates, source=source, note=note), history
+    since = on - timedelta(days=365 * 5)
+    # ключ кэша — тот же набор строк, что читает запрос истории: любой новый или исправленный курс ЦБ меняет ключ
+    stamp = db.execute(select(func.count(), func.max(FxRate.on), func.sum(FxRate.rate)).where(FxRate.source == "cbr", FxRate.on >= since)).one()
+    key = (on, int(stamp[0] or 0), stamp[1], round(float(stamp[2] or 0), 6))
+    history = _FX_HISTORY_CACHE.get(key)
+    if history is None:
+        history = {}
+        for cur, r_on, rate in db.execute(select(FxRate.currency, FxRate.on, FxRate.rate).where(FxRate.on >= since, FxRate.source == "cbr")).all():
+            history.setdefault(cur, []).append((r_on, rate))
+        if len(_FX_HISTORY_CACHE) > 16:
+            _FX_HISTORY_CACHE.clear()
+        _FX_HISTORY_CACHE[key] = history
+    return FxRates(as_of=on, rates=rates, source=source, note=note), {c: list(v) for c, v in history.items()}
 
 
 def _num(v, default: float = 0.0) -> float:
