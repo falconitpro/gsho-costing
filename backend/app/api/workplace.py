@@ -73,9 +73,14 @@ def _fmt_money(v: Optional[float]) -> str:
 
 
 def _price(d: Deal) -> Optional[float]:
+    """Действующая цена сделки (D-103): после торгов и редакций КП — итог последней редакции, иначе цена КД."""
+    from ..services.deal_calc import actual_offer
     from ..services.execution_service import won_variant
     v = won_variant(d) if d.variants else None
-    return float(v.price_rub) if v is not None and v.price_rub is not None else None
+    if v is None or v.price_rub is None:
+        return None
+    p = actual_offer(d, v)
+    return float(p["price_rub"]) if p.get("price_rub") is not None else None
 
 
 def _deals(db: Session, user: CurrentUser) -> list[Deal]:

@@ -24,6 +24,7 @@ import LegalDocsTab from "../components/LegalDocsTab";
 import { ImagesBlock, LocalOptionsBlock, OffersBlock, RelatedDeals } from "../components/ImagesLocalOptions";
 import { ModelDocsBlock, ZipBlock } from "../components/PositionExtras";
 import AcceptanceTab from "../components/AcceptanceTab";
+import CurrentOfferPanel from "../components/CurrentOfferPanel";
 import { payText } from "../components/PaymentTermsEditor";
 
 type Tab = "overview" | "acceptance" | "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "documents" | "legal" | "catalog" | "feed" | "versions";
@@ -283,6 +284,7 @@ export default function DealCard({ me }: { me: Me }) {
         <>
           {POST_WIN_STATUSES.includes(deal.status) && <h2 style={{ margin: "4px 0 8px" }}>Контракт и исполнение</h2>}
           {POST_WIN_STATUSES.includes(deal.status) && <EntryGrid entries={contractTabs.map(entryOf)} />}
+          {can(me, "price") && <CurrentOfferPanel dealId={deal.id} onOpen={saleTabs.includes("pricing") ? () => setTab("pricing") : undefined} />}
           <h2 style={{ margin: "4px 0 8px" }}>Продажа{POST_WIN_STATUSES.includes(deal.status) && <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}> · фаза закрыта, данные только для чтения</span>}</h2>
           <EntryGrid entries={saleTabs.map(entryOf)} />
           <h2 style={{ margin: "4px 0 8px" }}>История и файлы</h2>
