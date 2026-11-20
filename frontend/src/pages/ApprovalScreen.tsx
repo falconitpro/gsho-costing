@@ -480,6 +480,19 @@ function CostBreakdown({ base, units, baseCcy, threshold, dealCur = "RUB", dealR
   const u = Math.max(1, units), many = u > 1;
   const title = Object.fromEntries(COST_ITEMS.map(([no, k, t]) => [k, { no, t }]));
   const total = base.cost_total_rub || 0;
+  // D-115: статьи, введённые в валюте сделки (цена завода, логистика, фрахт…), показываются как введены — по курсу сделки;
+  // надбавка прогноза курса на даты оплаты — отдельной строкой «Курсовая разница». Итог себестоимости не меняется.
+  const native: Record<string, number> = {};
+  if (fc) for (const [, k] of COST_ITEMS) {
+    const rub = base.items_rub[k] || 0; if (!rub) continue;
+    const ms = (base.positions || []).map((pc) => ({ m: pc.items_fx?.[k], r: pc.items_rub?.[k] || 0 })).filter((x) => x.r);
+    if (!ms.length || ms.some((x) => !x.m || (x.m.currency || "").toUpperCase() !== dealCur)) continue;
+    if (Math.abs(ms.reduce((t, x) => t + x.r, 0) - rub) > 1) continue;                  // в статье есть не только суммы позиций
+    const amt = ms.reduce((t, x) => t + (x.m!.amount || 0), 0), atRate = amt * dealRate;
+    if (amt > 0 && Math.abs(rub - atRate) / rub < 0.3) native[k] = atRate;
+  }
+  const it = (k: string) => native[k] ?? (base.items_rub[k] || 0);
+  const fxDiff = Object.keys(native).reduce((t, k) => t + (base.items_rub[k] || 0) - native[k], 0);
   const zeroCount = COST_ITEMS.filter(([, k]) => !base.items_rub[k]).length;
   const m = base.margin_pct ?? null, low = m != null && threshold != null && m < threshold;
   // D-092: главная цифра — в валюте сделки, мелко — справочно в рублях
@@ -504,15 +517,20 @@ function CostBreakdown({ base, units, baseCcy, threshold, dealCur = "RUB", dealR
         <tbody>
           {COST_GROUPS.map(([g, keys]) => {
             const rows = keys.filter((k) => showZero || base.items_rub[k]);
-            const sum = keys.reduce((a, k) => a + (base.items_rub[k] || 0), 0);
+            const sum = keys.reduce((a, k) => a + it(k), 0);
             if (!rows.length) return null;
             return [
               <tr key={g} className="cb-group"><td>{g}</td>{fc && <td className="num">{cv(sum / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub(sum / u)}</td><td>{total ? `${(sum / total * 100).toFixed(1).replace(".", ",")} %` : ""}</td>{many && fc && <td className="num">{cv(sum)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(sum)}</td>}</tr>,
-              ...rows.map((k) => { const v = base.items_rub[k] || 0, sh = total ? v / total * 100 : 0; return (
+              ...rows.map((k) => { const v = it(k), sh = total ? v / total * 100 : 0; return (
                 <tr key={k} className={v ? "" : "cb-zero"}><td><span className="cb-no">{title[k]?.no}</span>{title[k]?.t || k}</td>{fc && <td className="num">{cv(v / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub(v / u)}</td>
                   <td><div className="cb-bar"><i style={{ width: `${Math.min(100, sh)}%` }} /><span>{sh ? `${sh.toFixed(1).replace(".", ",")} %` : ""}</span></div></td>
                   {many && fc && <td className="num">{cv(v)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(v)}</td>}</tr>); }),
             ]; })}
+          {Math.abs(fxDiff) >= 1 && (() => { const sh = total ? fxDiff / total * 100 : 0; return (
+            <tr className="cb-group cb-fxdiff" title="Платежи в валюте считаются по прогнозному курсу на дату каждого платежа; строки выше — по курсу сделки. Разница — здесь.">
+              <td>Курсовая разница по прогнозу <span className="muted" style={{ fontWeight: 400 }}>· рост курса к датам оплаты</span></td>
+              {fc && <td className="num">{cv(fxDiff / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub(fxDiff / u)}</td>
+              <td>{`${sh.toFixed(1).replace(".", ",")} %`}</td>{many && fc && <td className="num">{cv(fxDiff)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(fxDiff)}</td>}</tr>); })()}
           <tr className="cb-total"><td>Себестоимость{many ? " 1 машины" : ""}</td>{fc && <td className="num">{cv(total / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub(total / u)}</td><td>100 %</td>{many && fc && <td className="num">{cv(total)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(total)}</td>}</tr>
           <tr className="cb-sub"><td>Цена продажи без НДС</td>{fc && <td className="num">{cv((base.price_rub || 0) / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub((base.price_rub || 0) / u)}</td><td />{many && fc && <td className="num">{cv(base.price_rub || 0)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(base.price_rub)}</td>}</tr>
           <tr className="cb-sub"><td>Прибыль</td>{fc && <td className="num">{cv((base.profit_rub || 0) / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub((base.profit_rub || 0) / u)}</td><td>{fmtPct(m)} маржи</td>{many && fc && <td className="num">{cv(base.profit_rub || 0)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(base.profit_rub)}</td>}</tr>

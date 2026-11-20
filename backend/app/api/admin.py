@@ -522,6 +522,13 @@ def access_matrix(db: Session = Depends(get_db), user: CurrentUser = Depends(_ac
     return data
 
 
+@router.get("/access/actions")
+def access_actions(user: CurrentUser = Depends(_access_admin)):
+    """Кто что может делать (D-115): правила на действия, собранные из кода сервера, и ступени визирования."""
+    from ..services import action_rules
+    return action_rules.collect()
+
+
 @router.get("/access/history")
 def access_history(limit: int = 200, db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
     """Журнал изменений прав (D-114): матрица и исключения — кто, когда, что было и что стало."""

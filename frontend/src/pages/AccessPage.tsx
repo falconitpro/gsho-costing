@@ -12,7 +12,9 @@ type Matrix = {
 /** Задача 11: уровни доступа как данные — матрица «роль × группа полей», исключения для сотрудников, предпросмотр. Меняют администратор и ЗГД. */
 export default function AccessPage({ me, embedded = false }: { me: Me; embedded?: boolean }) {
   const [m, setM] = useState<Matrix | null>(null);
-  const [tab, setTab] = useState<"roles" | "overrides" | "preview" | "history">("roles");
+  const [tab, setTab] = useState<"roles" | "overrides" | "preview" | "history" | "actions">("roles");
+  const [acts, setActs] = useState<{ sections: { title: string; rules: string[]; silent: number }[]; ladder: { step: string; role: string; when: string }[]; total: number } | null>(null);
+  const [actQ, setActQ] = useState("");
   const [hist, setHist] = useState<{ at: string | null; by: string; what: string; change: string; comment: string }[] | null>(null);
   const [ov, setOv] = useState({ user_id: "", group: "", level: 1, valid_to: "", comment: "" });
   const [preview, setPreview] = useState<{ who: string; perms: { group: string; title: string; level: number; level_title: string }[]; denied_fields: string[] } | null>(null);
@@ -35,7 +37,26 @@ export default function AccessPage({ me, embedded = false }: { me: Me; embedded?
         <button className={tab === "overrides" ? "active" : ""} onClick={() => setTab("overrides")}>Исключения для сотрудников ({m.overrides.length})</button>
         <button className={tab === "preview" ? "active" : ""} onClick={() => setTab("preview")}>Предпросмотр «как видит»</button>
         <button className={tab === "history" ? "active" : ""} onClick={() => { setTab("history"); api.get<{ rows: NonNullable<typeof hist> }>("/api/admin/access/history").then((r) => setHist(r.rows)).catch((e) => setMsg(e.message)); }}>Журнал изменений</button>
+        <button className={tab === "actions" ? "active" : ""} onClick={() => { setTab("actions"); if (!acts) api.get<NonNullable<typeof acts>>("/api/admin/access/actions").then(setActs).catch((e) => setMsg(e.message)); }}>Кто что может делать</button>
       </div>
+      {tab === "actions" && (
+        <div className="card">
+          {!acts ? <div className="muted">Загрузка…</div> : <>
+            <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>Права на действия заданы в коде и здесь не меняются (решение владельца 20.11.2026). Список собран из кода сервера автоматически — {acts.total} правил,
+              поэтому всегда совпадает с тем, как система работает. Что каждая роль видит — на вкладке «По ролям».</div>
+            <h3 style={{ margin: "0 0 6px" }}>Утверждение расчёта: ступени</h3>
+            <table style={{ marginBottom: 14 }}><thead><tr><th>Ступень</th><th>Кто</th><th>Когда нужна</th></tr></thead>
+              <tbody>{acts.ladder.map((l) => <tr key={l.step}><td>{l.step}</td><td><b>{l.role}</b></td><td>{l.when}</td></tr>)}</tbody></table>
+            <input placeholder="поиск: роль или действие — например «ЗГД», «виза», «архив»" value={actQ} onChange={(e) => setActQ(e.target.value)} style={{ width: "100%", maxWidth: 520, marginBottom: 10 }} />
+            {acts.sections.map((sec) => { const q = actQ.trim().toLowerCase(); const rules = q ? sec.rules.filter((r) => r.toLowerCase().includes(q)) : sec.rules;
+              if (!rules.length) return null;
+              return <details key={sec.title} open={!!q} style={{ borderTop: "1px solid var(--line)", padding: "8px 0" }}>
+                <summary style={{ cursor: "pointer" }}><b>{sec.title}</b> <span className="muted">· {rules.length}</span></summary>
+                <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>{rules.map((r) => <li key={r} style={{ margin: "3px 0" }}>{r}</li>)}</ul>
+                {!q && sec.silent > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>и ещё {sec.silent} проверок прав без текста пояснения</div>}
+              </details>; })}
+          </>}
+        </div>)}
       {tab === "history" && (
         <div className="card" style={{ overflowX: "auto" }}>
           {!hist ? <div className="muted">Загрузка…</div> : hist.length === 0 ? <div className="muted">Права ещё не меняли.</div> : (
