@@ -54,6 +54,8 @@ class KpVariant:
     extra_lines: list = field(default_factory=list)    # редакция КП: [(наименование, сумма RUB или None — «включено»)]
     adjustments: list = field(default_factory=list)    # редакция КП: [(подпись «Скидка 5 %», сумма RUB со знаком)]
     base_total_rub: Optional[float] = None             # стоимость оборудования до услуг и скидок / надбавок
+    qty_text: str = ""                                 # D-119: разные модели — «A — 3 шт.; B — 1 шт.» вместо суммы штук
+    per_set: bool = False                              # D-119: разные модели — цена за комплект, а не средняя «за единицу»
 
 
 @dataclass
@@ -144,7 +146,7 @@ def build_kp(data: KpData, path: str) -> str:
     p = doc.add_paragraph()
     _run(p, f"№ {data.kp_no} от {data.kp_date} · действительно до {data.valid_until}", size=11)
     p = doc.add_paragraph()
-    _run(p, f"Заказчик: {data.client}\nКонтактное лицо: {data.manager}, {data.manager_contact}", size=11)
+    _run(p, f"Заказчик: {data.client}" + (f"\nКонтактное лицо: {', '.join(x for x in (data.manager, data.manager_contact) if x)}" if data.manager else ""), size=11)
     doc.add_page_break()
 
     # Обращение
@@ -155,11 +157,12 @@ def build_kp(data: KpData, path: str) -> str:
     header = ["Показатель"] + (["Значение"] if data.single_offer else [v.name for v in data.variants])
     rows = [
         ["Модель" if data.brand_company else "Модель и завод"] + [v.model_factory for v in data.variants],
-        ["Количество"] + [str(v.qty) for v in data.variants],
+        ["Количество"] + [v.qty_text or str(v.qty) for v in data.variants],
         ["Комплектация и опции"] + [v.configuration for v in data.variants],
         ["Базис поставки"] + [v.basis for v in data.variants],
         ["Срок поставки"] + [v.delivery_term_text or f"{v.delivery_days} дн." for v in data.variants],
-        [f"Цена за единицу, {data.currency} без НДС"] + [f"{v.unit_price_rub:,.0f}".replace(",", " ") for v in data.variants],
+        [f"Цена за единицу, {data.currency} без НДС"] + [(f"за комплект: {(v.base_total_rub if v.base_total_rub is not None else v.total_rub):,.0f}" if v.per_set else f"{v.unit_price_rub:,.0f}").replace(",", " ")
+                                                         for v in data.variants],
         ["Условия оплаты"] + [v.payment_terms for v in data.variants],
         ["Гарантия"] + [v.warranty for v in data.variants],
     ]
