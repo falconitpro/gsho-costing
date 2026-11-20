@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from .. import adapters
 from ..core.auth import CurrentUser, require_roles
-from ..core.roles import Role
+from ..core.roles import ROLE_TITLES, Role
 from ..db import get_db
 from ..models import AuditLog, FxRate, HsCode, IntegrationLog, Template, User
 from ..services import settings_service
@@ -520,6 +520,30 @@ def access_matrix(db: Session = Depends(get_db), user: CurrentUser = Depends(_ac
                           "user_roles": users[o.user_id].roles if o.user_id in users else []} for o in rows]
     data["users"] = [{"id": u.id, "display_name": u.display_name, "roles": u.roles, "is_active": u.is_active} for u in users.values()]
     return data
+
+
+@router.get("/access/history")
+def access_history(limit: int = 200, db: Session = Depends(get_db), user: CurrentUser = Depends(_access_admin)):
+    """Журнал изменений прав (D-114): матрица и исключения — кто, когда, что было и что стало."""
+    from ..core.roles import FIELD_GROUPS, LEVEL_TITLES
+    users = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    rows = db.scalars(select(AuditLog).where(AuditLog.entity.in_(("access_rule", "access_override"))).order_by(AuditLog.at.desc())
+                      .limit(max(1, min(limit, 1000)))).all()
+    out = []
+    for a in rows:
+        before, after = a.before or {}, a.after or {}
+        if a.entity == "access_rule":
+            role, _, group = (a.entity_id or "").partition("/")
+            what = f"{ROLE_TITLES.get(Role(role), role) if role in Role._value2member_map_ else role} · {FIELD_GROUPS.get(group, (group,))[0]}"
+            change = f"{LEVEL_TITLES.get(before.get('level'), before.get('level'))} → {LEVEL_TITLES.get(after.get('level'), after.get('level'))}"
+        else:
+            src = after or before
+            what = f"исключение: {users.get(src.get('user_id'), src.get('user_id') or '')} · {FIELD_GROUPS.get(src.get('group'), (src.get('group'),))[0]}"
+            change = ("удалено" if a.action == "delete" else f"{LEVEL_TITLES.get(src.get('level'), src.get('level'))}"
+                      + (f" до {src.get('valid_to')}" if src.get("valid_to") else ""))
+        out.append({"at": a.at.isoformat() if a.at else None, "by": users.get(a.user_id, ""), "what": what, "change": change,
+                    "comment": a.comment or (after.get("comment") if isinstance(after, dict) else "") or ""})
+    return {"rows": out}
 
 
 # группы прав безопасности: повышение уровня требует подтверждения не старше 10 минут (09 §1)
