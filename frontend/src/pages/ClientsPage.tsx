@@ -1,3 +1,4 @@
+import { useAllColumns } from "../components/Levels";
 import { Fragment, useEffect, useState } from "react";
 import { lbl, OUTCOME } from "../labels";
 import { UndoButton, useUndoHistory } from "../undo";
@@ -67,6 +68,10 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState({ model: "", outcome: "", factory: "", from: "", to: "" });
   const canCreate = me.roles.some((r) => ["manager", "cd", "gd", "admin"].includes(r.code));
+  // реестр клиентов: в «Новом виде» — ключевые колонки, полный набор по кнопке «Все колонки»; при открытой карточке колонки и так сокращены
+  const finCols = clients.some((c) => c.stats?.sum_won_rub != null);
+  const [allC, colsEl0] = useAllColumns("gsho.clientsAllCols", ["последняя сделка или заявка", "менеджер", ...(finCols ? ["суммы"] : [])]);
+  const colsEl = card ? null : colsEl0;
   const canDelete = me.roles.some((r) => ["gd", "cd", "fd"].includes(r.code));
   const [confirmDel, setConfirmDel] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -159,25 +164,26 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
               <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
                 {kpis.map(([t, v]) => <div key={t} style={{ flex: "1 1 120px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", background: "#fff" }}><div style={{ fontSize: 20, fontWeight: 700 }}>{v}</div><div className="muted" style={{ fontSize: 12 }}>{t}</div></div>)}
               </div>
+              {colsEl}
               <div style={{ overflowX: "auto", marginTop: 10 }}>
                 <table style={{ fontSize: 13 }}>
                   <thead><tr>{th("name", "Клиент")}
-                    {showG && <>{th("deals", "Сделок ГШО", true)}{th("open", "В работе", true)}{th("won", "Выиграно", true)}{fin && !card && th("sum", "Сумма выигранных, RUB", true)}{!card && th("last", "Последняя сделка")}</>}
-                    {showP && <>{th("preq", "Заявок ЗЧ", true)}{th("popen", "Открытых", true)}{fin && !card && th("psum", "КП по ЗЧ, RUB", true)}{!card && seg === "parts" && th("plast", "Последняя заявка")}</>}
-                    {!card && <th>Менеджер</th>}{!card && <th title="юридический профиль и реквизиты для договоров">Юр. профиль</th>}</tr></thead>
+                    {showG && <>{th("deals", "Сделок ГШО", true)}{th("open", "В работе", true)}{th("won", "Выиграно", true)}{allC && fin && !card && th("sum", "Сумма выигранных, RUB", true)}{allC && !card && th("last", "Последняя сделка")}</>}
+                    {showP && <>{th("preq", "Заявок ЗЧ", true)}{th("popen", "Открытых", true)}{allC && fin && !card && th("psum", "КП по ЗЧ, RUB", true)}{allC && !card && seg === "parts" && th("plast", "Последняя заявка")}</>}
+                    {allC && !card && <th>Менеджер</th>}{!card && <th title="юридический профиль и реквизиты для договоров">Юр. профиль</th>}</tr></thead>
                   <tbody>{shown.map((c) => { const x = st(c); const p = pt(c); return (
                     <tr key={c.id} style={{ cursor: "pointer", background: card?.id === c.id ? "var(--accent-soft)" : undefined }} onClick={() => api.get<Card>(`/api/refs/clients/${c.id}`).then(setCard)}>
                       <td style={{ opacity: c.is_active === false ? .55 : 1 }}><b>{c.name}</b>{c.is_active === false && <span className="badge" style={{ marginLeft: 6 }}>архив</span>}<div className="muted" style={{ fontSize: 11 }}>ИНН {c.inn}{c.legal_status && c.legal_status !== "ACTIVE" && <span className="badge bad" style={{ marginLeft: 6 }}>{STATUS_RU[c.legal_status] || c.legal_status}</span>}</div></td>
                       {showG && <>
                         <td className="num">{x.deals || <span className="muted">—</span>}</td><td className="num">{x.open ? <span className="badge info">{x.open}</span> : <span className="muted">—</span>}</td>
                         <td className="num">{x.won ? <span className="badge ok">{x.won}</span> : <span className="muted">—</span>}{x.lost > 0 && <span className="muted" style={{ fontSize: 11 }}> / {x.lost} пр.</span>}</td>
-                        {fin && !card && <td className="num">{x.sum_won_rub ? fmtRub(x.sum_won_rub) : <span className="muted">—</span>}</td>}
-                        {!card && <td style={{ whiteSpace: "nowrap" }}>{x.last_number ? <>{x.last_number} <span className="badge" style={{ background: toneOf(x.last_status)[0], color: toneOf(x.last_status)[1], fontSize: 11 }}>{STATUS_TITLES[x.last_status] || x.last_status}</span><div className="muted" style={{ fontSize: 11 }}>{fmtDate(x.last_on)}</div></> : <span className="muted">—</span>}</td>}</>}
+                        {allC && fin && !card && <td className="num">{x.sum_won_rub ? fmtRub(x.sum_won_rub) : <span className="muted">—</span>}</td>}
+                        {allC && !card && <td style={{ whiteSpace: "nowrap" }}>{x.last_number ? <>{x.last_number} <span className="badge" style={{ background: toneOf(x.last_status)[0], color: toneOf(x.last_status)[1], fontSize: 11 }}>{STATUS_TITLES[x.last_status] || x.last_status}</span><div className="muted" style={{ fontSize: 11 }}>{fmtDate(x.last_on)}</div></> : <span className="muted">—</span>}</td>}</>}
                       {showP && <>
                         <td className="num">{p.requests || <span className="muted">—</span>}</td><td className="num">{p.open ? <span className="badge info">{p.open}</span> : <span className="muted">—</span>}{p.done > 0 && <span className="muted" style={{ fontSize: 11 }}> / {p.done} вып.</span>}</td>
-                        {fin && !card && <td className="num">{p.sum_rub ? fmtRub(p.sum_rub) : <span className="muted">—</span>}</td>}
-                        {!card && seg === "parts" && <td style={{ whiteSpace: "nowrap" }}>{p.last_number ? <>{p.last_number}<div className="muted" style={{ fontSize: 11 }}>{fmtDate(p.last_on)}</div></> : <span className="muted">—</span>}</td>}</>}
-                      {!card && <td style={{ whiteSpace: "nowrap" }}>{x.manager || <span className="muted">—</span>}</td>}
+                        {allC && fin && !card && <td className="num">{p.sum_rub ? fmtRub(p.sum_rub) : <span className="muted">—</span>}</td>}
+                        {allC && !card && seg === "parts" && <td style={{ whiteSpace: "nowrap" }}>{p.last_number ? <>{p.last_number}<div className="muted" style={{ fontSize: 11 }}>{fmtDate(p.last_on)}</div></> : <span className="muted">—</span>}</td>}</>}
+                      {allC && !card && <td style={{ whiteSpace: "nowrap" }}>{x.manager || <span className="muted">—</span>}</td>}
                       {!card && <td className="num">{c.requisites_count ? c.requisites_count : <span className="badge warn" title="юридический профиль не заполнен">нет</span>}</td>}</tr>); })}
                     {shown.length === 0 && <tr><td colSpan={12} className="muted">Не найдено</td></tr>}</tbody>
                 </table>

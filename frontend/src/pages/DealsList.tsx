@@ -101,8 +101,9 @@ function KpDue({ d }: { d: Row }) {
   if (!d.kp_due) return <span className="muted">—</span>;
   const n = daysTo(d.kp_due)!;
   const active = BLOCK_STATUSES.work.slice(0, 9).includes(d.status);
-  return <span style={{ whiteSpace: "nowrap" }}>{fmtDate(d.kp_due)}{active && (n < 0 ? <span className="badge bad" style={{ marginLeft: 4 }}>просрочен {-n} дн.</span>
-    : n <= 2 ? <span className="badge warn" style={{ marginLeft: 4 }}>{n === 0 ? "сегодня" : `через ${n} дн.`}</span> : null)}</span>;
+  // отметка о сроке — под датой, а не рядом: колонка уже, статус справа не обрезается
+  return <div style={{ whiteSpace: "nowrap" }}>{fmtDate(d.kp_due)}{active && (n < 0 ? <div><span className="badge bad">просрочен {-n} дн.</span></div>
+    : n <= 2 ? <div><span className="badge warn">{n === 0 ? "сегодня" : `через ${n} дн.`}</span></div> : null)}</div>;
 }
 function Prio({ p }: { p: string }) {
   const o = PRIO_ORDER[p] ?? 1;
