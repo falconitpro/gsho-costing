@@ -5,6 +5,7 @@ export interface Me {
   email: string;
   display_name: string;
   roles: { code: RoleCode; title: string }[];
+  acting_roles?: string[];        // D-112: роли ФД / ЗГД сотрудников, которых он сейчас замещает
   perms?: Record<string, number>;   // группа доступа → 0 не видит / 1 видит / 2 редактирует (задача 11)
   security?: MeSecurity;
 }

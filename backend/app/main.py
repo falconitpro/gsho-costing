@@ -111,6 +111,12 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("notification cleanup failed: %s", e)
+        try:   # D-112: виза ФД без ответа N рабочих дней → ЗГД
+            from .services.visa_watch import escalate_fd
+            with SessionLocal() as db:
+                escalate_fd(db)
+        except Exception as e:   # pragma: no cover
+            log.warning("fd visa escalation failed: %s", e)
         try:   # черновики сделок без движения: напоминание через 3 дня, предупреждение на 30-й, архив через сутки после него
             from .services.draft_watch import check as check_drafts
             with SessionLocal() as db:

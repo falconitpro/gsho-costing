@@ -449,6 +449,9 @@ def me(user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_
     return {"id": user.id, "email": user.email, "display_name": user.display_name,
             "roles": [{"code": r.value, "title": ROLE_TITLES[r]} for r in sorted(user.roles, key=lambda r: r.value)],
             "perms": user.perms,
+            # D-112: за кого сотрудник сейчас визирует как заместитель (роли ФД / ЗГД замещаемых)
+            "acting_roles": sorted({r for u in (db.get(User, i) for i in user.acting_for) if u is not None and u.is_active
+                                    for r in (u.roles or []) if r in ("fd", "gd")}),
             "security": {"mfa_enabled": user.mfa_enabled, "mfa_policy": s.mfa_policy, "mfa_required": s.mfa_policy == "required",
                          "mfa_setup_required": user.mfa_setup_required, "mfa_available": mfa_svc.available(s), "mfa_key_status": mfa_svc.key_status(s),
                          "password_must_change": user.password_must_change,

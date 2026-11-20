@@ -15,7 +15,7 @@ from ..models import Deal, NotificationLog
 from ..services.notification_kinds import INFO_EVENTS, is_action
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
-EVENT_TITLES = {"logistics_quote": "Ответ логистической компании", "task_overdue_team": "Просрочка в команде", "legal_review": "Юридическая проверка", "legal_doc": "Юридический документ",
+EVENT_TITLES = {"visa_escalated": "Виза передана ЗГД", "logistics_quote": "Ответ логистической компании", "task_overdue_team": "Просрочка в команде", "legal_review": "Юридическая проверка", "legal_doc": "Юридический документ",
                 "factory_approval": "Поставщик на утверждение", "client_address": "Адрес клиента на утверждение", "offers_selected": "Заводы отобраны",
                 "approved": "Утверждено", "contract": "Договор", "claim": "Платёж или претензия", "poa": "Доверенность", "finance_question": "Вопрос по финансам",
                 "file_download_request": "Запрос на скачивание", "file_download_decision": "Скачивание файла", "waiting": "Ожидание клиента",
