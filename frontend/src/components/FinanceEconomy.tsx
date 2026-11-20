@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtMoney, fmtPct, fmtRub, newKey } from "../api";
 import FinanceExportButton from "./FinanceExportButton";
+import { askPrompt } from "./Dialogs";
 
 // «Финансы → Экономика сделок» (docs/finance/05, раздел 11). План — утверждённая версия расчёта (без второго калькулятора),
 // текущий прогноз, факт P&L (признание) и факт денег — разными блоками. Признание вводится здесь и в карточке сделки.
@@ -241,7 +242,7 @@ function Recognition({ e, onChanged }: { e: Economy; onChanged: () => void }) {
     } catch (x) { setMsg(errText(x)); } finally { setBusy(false); }
   }
   async function reverse(id: string) {
-    const reason = window.prompt("Причина сторно признания");
+    const reason = (await askPrompt("Причина сторно признания"));
     if (!reason) return;
     try { await api.post(`/api/finance/recognition-events/${id}/reverse`, { reason }); load(); onChanged(); } catch (x) { setMsg(errText(x)); }
   }

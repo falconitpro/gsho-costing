@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
+import { askPrompt } from "./Dialogs";
 
 // Гарантийные претензии к заводу: деталь, наработка, фото → ответ завода → компенсация деталью, деньгами или скидкой (ТЗ запчастей, раздел 9).
 
@@ -85,7 +86,7 @@ export default function PartsClaims({ me }: { me: Me }) {
             {c.photos.map((p) => <a key={p.i} href={`/api/parts/claims/${c.id}/photos/${p.i}`} target="_blank" rel="noreferrer">{p.name}</a>)}
             {edit && c.status !== "closed" && <label className="btn ghost" style={{ cursor: "pointer" }}>+ фото<input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) act(() => api.upload<Claim>(`/api/parts/claims/${c.id}/photos`, f), "Фото добавлено"); e.target.value = ""; }} /></label>}
-            {edit && c.status === "draft" && <button className="btn" onClick={() => { const d = prompt("Срок ответа завода, дней", "14"); if (d) act(() => api.post<Claim>(`/api/parts/claims/${c.id}/sent`, { answer_days: Number(d) }), "Отмечено: отправлена заводу"); }}>Отправлена заводу</button>}
+            {edit && c.status === "draft" && <button className="btn" onClick={async () => { const d = (await askPrompt("Срок ответа завода, дней", "14")); if (d) act(() => api.post<Claim>(`/api/parts/claims/${c.id}/sent`, { answer_days: Number(d) }), "Отмечено: отправлена заводу"); }}>Отправлена заводу</button>}
           </div>
           {edit && ["sent", "accepted", "partial", "rejected"].includes(c.status) && (
             <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
@@ -111,7 +112,7 @@ export default function PartsClaims({ me }: { me: Me }) {
               <button className="btn" onClick={() => act(() => api.post<Claim>(`/api/parts/claims/${c.id}/compensations`, { ...comp, amount: comp.amount ? Number(comp.amount) : null }),
                 comp.kind === "part" ? "Создан заказ заводу со строками «гарантийная замена» по цене 0 — отправьте его во вкладке «Заказы поставщикам»" : "Компенсация добавлена")}>Добавить</button>
             </div>)}
-          {edit && c.status !== "closed" && <button className="btn ghost" style={{ marginTop: 8 }} onClick={() => { const r = prompt("Причина закрытия", c.status === "rejected" ? "отказ завода" : "компенсировано"); if (r !== null) act(() => api.post<Claim>(`/api/parts/claims/${c.id}/close`, { reason: r }), "Претензия закрыта"); }}>закрыть претензию</button>}
+          {edit && c.status !== "closed" && <button className="btn ghost" style={{ marginTop: 8 }} onClick={async () => { const r = (await askPrompt("Причина закрытия", c.status === "rejected" ? "отказ завода" : "компенсировано")); if (r !== null) act(() => api.post<Claim>(`/api/parts/claims/${c.id}/close`, { reason: r }), "Претензия закрыта"); }}>закрыть претензию</button>}
           {c.close_reason && <p className="muted">{c.close_reason}</p>}
         </div>)}
     </>

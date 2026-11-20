@@ -5,6 +5,7 @@ import { api, fmtDate, fmtRub } from "../api";
 import { can, type Deal, type Me, type Stage } from "../types";
 import ContractScans from "./ContractScans";
 import { reqSummary, type ReqSet } from "./ClientRequisites";
+import { askPrompt } from "./Dialogs";
 
 type Resp = { stages: Stage[]; status: string; contract_number: string; contract_signed_at: string | null; factory_contract_signed_at: string | null; factory_contract_number?: string | null; won_variant_id: string | null;
   related: { id: string; number: string; status: string }[]; contract_steps: CStep[]; status_detail: string;
@@ -119,7 +120,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
                     <input placeholder="комментарий" value={v.comment} onChange={(e) => setStep({ ...step, [c.code]: { ...v, comment: e.target.value } })} style={{ width: 200 }} />
                     {SCAN_KIND[c.code] && <div style={{ marginTop: 4 }}>скан: <input type="file" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.zip" style={{ fontSize: 11, maxWidth: 220 }}
                       onChange={(e) => setScan({ ...scan, [c.code]: e.target.files?.[0] || null })} /></div>}</>}</td>
-                  <td>{c.state === "done" ? (SCAN_KIND[c.code] ? (data.can_amend && <button className="btn ghost" title="только ЗГД или КД, с указанием причины" onClick={() => { const r = prompt("Причина снятия отметки о подписании договора"); if (r && r.trim().length >= 3) act(() => api.post(`/api/deals/${deal.id}/execution/contract-step`, { code: c.code, done: false, comment: r.trim() })); }}>снять отметку</button>)
+                  <td>{c.state === "done" ? (SCAN_KIND[c.code] ? (data.can_amend && <button className="btn ghost" title="только ЗГД или КД, с указанием причины" onClick={async () => { const r = (await askPrompt("Причина снятия отметки о подписании договора")); if (r && r.trim().length >= 3) act(() => api.post(`/api/deals/${deal.id}/execution/contract-step`, { code: c.code, done: false, comment: r.trim() })); }}>снять отметку</button>)
                       : canStep(c) && <button className="btn ghost" onClick={() => markStep(c, false)}>снять отметку</button>)
                     : editable && <button className={"btn " + (c.state === "current" ? "" : "secondary")} disabled={needNo(c, v)} title={needNo(c, v) ? "укажите номер контракта" : ""} onClick={() => markStep(c, true)}>Выполнено</button>}</td>
                 </tr>);
@@ -178,7 +179,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
             </div>
           )}
           {deal.status === "execution" && can(me, "execution_close", 2) && (
-            <div className="row" style={{ marginTop: 10 }}><button className="btn" onClick={() => { const r = prompt("Комментарий к закрытию:") || ""; act(() => api.post(`/api/deals/${deal.id}/execution/close`, { reason: r })); }}>Закрыть сделку (КД)</button></div>
+            <div className="row" style={{ marginTop: 10 }}><button className="btn" onClick={async () => { const r = (await askPrompt("Комментарий к закрытию:")) || ""; act(() => api.post(`/api/deals/${deal.id}/execution/close`, { reason: r })); }}>Закрыть сделку (КД)</button></div>
           )}
           {data.related.length > 0 && <div className="muted" style={{ marginTop: 8 }}>Связанные заявки: {data.related.map((r) => `${r.number} (${lbl(STATUS, r.status)})`).join(", ")}</div>}
         </div>

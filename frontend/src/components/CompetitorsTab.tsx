@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import type { Variant } from "../types";
+import { askConfirm } from "./Dialogs";
 
 type Offer = {
   id: string; variant_id: string | null; competitor_id: string | null; competitor: string; on: string; equipment: string; qty: number;
@@ -51,7 +52,7 @@ export default function CompetitorsTab({ dealId, variants }: { dealId: string; v
       delivery_term: o.delivery_term || "", payment_terms: o.payment_terms || "" });
   };
   async function remove(o: Offer) {
-    if (!window.confirm(`Удалить цену конкурента ${o.competitor || "(название неизвестно)"} от ${fmtDate(o.on)}? Запись останется в истории.`)) return;
+    if (!(await askConfirm(`Удалить цену конкурента ${o.competitor || "(название неизвестно)"} от ${fmtDate(o.on)}? Запись останется в истории.`))) return;
     try { await api.del(`/api/deals/${dealId}/competitors/${o.id}`); setSel(sel.filter((x) => x !== o.id)); load(); } catch (e) { setErr((e as Error).message); }
   }
   const toggleHist = (id: string) => {

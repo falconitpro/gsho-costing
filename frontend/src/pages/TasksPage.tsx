@@ -5,6 +5,7 @@ import { blockTitle } from "../labels";
 import { Link } from "react-router-dom";
 import { api, fmtDate } from "../api";
 import { STATUS_TITLES, type Task } from "../types";
+import { askPrompt } from "../components/Dialogs";
 
 // Мои задачи: карточками (по умолчанию) или таблицей. Карточки сгруппированы по сроку: просрочено · сегодня · неделя · позже.
 
@@ -29,7 +30,7 @@ export default function TasksPage() {
   useEffect(() => { reload(); }, []);
   const shown = tasks.filter((t) => !q || [t.deal_number, t.client_name, t.title, t.equipment].some((x) => (x || "").toLowerCase().includes(q.toLowerCase())));
   async function done(t: Task) {
-    const c = prompt(`Закрыть задачу «${t.title}»? Комментарий (необязательно):`, "");
+    const c = (await askPrompt(`Закрыть задачу «${t.title}»? Комментарий (необязательно):`, ""));
     if (c === null) return;
     try { await api.post(`/api/tasks/${t.id}/done`, { comment: c }); setMsg(`Задача закрыта: ${t.title}`); reload(); } catch (e) { setMsg((e as Error).message); }
   }

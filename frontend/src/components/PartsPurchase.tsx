@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import type { Me } from "../types";
+import { askAlert, askConfirm } from "./Dialogs";
 
 // Заказы поставщикам запчастей: к заказу, заказы и внутригрупповые заказы по маршруту, подтверждение, статусы поставки (ТЗ запчастей, раздел 7).
 
@@ -111,10 +112,10 @@ function PoCard({ po, meta, act }: { po: Po; meta: Meta; act: (fn: () => Promise
         {!po.prices_hidden && <a className="btn ghost" href={`${base}/xlsx`}>Excel</a>}
         {meta.can_edit && live && <>
           <button className="btn ghost" onClick={() => act(async () => { const x = await api.post<Po & { send_results: { via: string; ok: boolean; error: string }[] }>(`${base}/send`, {});
-            alert(x.send_results.map((s) => `${s.via === "mail" ? "почта" : "WeCom"}: ${s.ok ? "отправлено" : s.error}`).join("\n")); return x; })}>Отправить поставщику</button>
+            void askAlert(x.send_results.map((s) => `${s.via === "mail" ? "почта" : "WeCom"}: ${s.ok ? "отправлено" : s.error}`).join("\n")); return x; })}>Отправить поставщику</button>
           {po.status === "draft" && <button className="btn ghost" onClick={() => act(() => api.post(`${base}/mark-sent`), "Отмечено как отправленный")}>отправлен вручную</button>}
           {po.lines.every((l) => ["ordered", "confirmed", "cancelled"].includes(l.status)) &&
-            <button className="btn ghost" onClick={() => { if (confirm("Отменить заказ? Строки заявок вернутся «к заказу».")) act(() => api.post(`${base}/cancel`), "Заказ отменён"); }}>отменить заказ</button>}
+            <button className="btn ghost" onClick={async () => { if ((await askConfirm("Отменить заказ? Строки заявок вернутся «к заказу»."))) act(() => api.post(`${base}/cancel`), "Заказ отменён"); }}>отменить заказ</button>}
         </>}
       </div>
 

@@ -1,6 +1,7 @@
 import { useAllColumns } from "./Levels";
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
+import { askConfirm, askPrompt } from "./Dialogs";
 
 // Склад запчастей: приёмка по заказу поставщику (удобно с телефона), отклонения и претензии, движения (ТЗ запчастей, разделы 7–8).
 
@@ -199,15 +200,15 @@ function Inventory({ meta, setMsg }: { meta: Meta; setMsg: (s: string) => void }
               { lines: [{ article: found.article.trim(), counted: Number(found.counted.replace(",", ".")), cell: found.cell }] })).then(() => setFound({ article: "", counted: "", cell: "" }))}>добавить</button>
           </div>
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn" onClick={() => { const left = cur.summary.lines - cur.summary.counted;
-              if (left && !confirm(`Не посчитано строк: ${left}. Они будут считаться нулём (недостача). Отправить КД?`)) return;
+            <button className="btn" onClick={async () => { const left = cur.summary.lines - cur.summary.counted;
+              if (left && !(await askConfirm(`Не посчитано строк: ${left}. Они будут считаться нулём (недостача). Отправить КД?`))) return;
               run(() => api.post<Inv>(`/api/parts/stock/inventories/${cur.id}/submit`), "Отправлено КД на утверждение"); }}>Подсчёт завершён — на утверждение КД</button>
-            <button className="btn ghost" onClick={() => { if (confirm("Отменить инвентаризацию? Остатки не изменятся.")) run(() => api.post<Inv>(`/api/parts/stock/inventories/${cur.id}/cancel`), "Отменена"); }}>отменить</button>
+            <button className="btn ghost" onClick={async () => { if ((await askConfirm("Отменить инвентаризацию? Остатки не изменятся."))) run(() => api.post<Inv>(`/api/parts/stock/inventories/${cur.id}/cancel`), "Отменена"); }}>отменить</button>
           </div></>}
         {cur.status === "submitted" && meta.can_approve && (
           <div className="row" style={{ marginTop: 8 }}>
             <button className="btn" onClick={() => run(() => api.post<Inv>(`/api/parts/stock/inventories/${cur.id}/approve`, {}), "Утверждено: остатки исправлены, движения записаны")}>Утвердить и исправить остатки</button>
-            <button className="btn ghost" onClick={() => { const c = prompt("Что пересчитать?") ?? ""; run(() => api.post<Inv>(`/api/parts/stock/inventories/${cur.id}/approve`, { approve: false, comment: c }), "Возвращено на пересчёт"); }}>вернуть на пересчёт</button>
+            <button className="btn ghost" onClick={async () => { const c = (await askPrompt("Что пересчитать?")) ?? ""; run(() => api.post<Inv>(`/api/parts/stock/inventories/${cur.id}/approve`, { approve: false, comment: c }), "Возвращено на пересчёт"); }}>вернуть на пересчёт</button>
           </div>)}
       </div>);
   }

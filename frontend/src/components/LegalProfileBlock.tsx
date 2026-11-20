@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
+import { askConfirm } from "./Dialogs";
 
 // Юридический блок, этап 1: юридические профили контрагента (клиент / поставщик / компания группы) и банковские профили.
 // Один владелец — несколько профилей (головная организация, филиал); один по умолчанию. Правки — с историей; банк — статус и подтверждение.
@@ -55,7 +56,7 @@ function BankCard({ b, canEdit, canVerify, onSaved, onMsg }: { b: Bank; canEdit:
         <div className="row" style={{ gap: 6 }}>
           {!archived && canVerify && !b.verified && <button className="btn ghost" style={{ padding: "3px 10px", fontSize: 12 }} onClick={() => api.post(`/api/legal/banks/${b.id}/verify`).then(onSaved).catch((e) => onMsg((e as Error).message))}>Подтвердить</button>}
           {canEdit && !archived && <button className="btn ghost" style={{ padding: "3px 10px", fontSize: 12 }} onClick={() => setEdit(!edit)}>{edit ? "свернуть" : "изменить"}</button>}
-          {canEdit && !archived && <button className="btn ghost" style={{ padding: "3px 10px", fontSize: 12, color: "var(--muted)", borderColor: "var(--line)" }} onClick={() => { if (confirm("Перевести реквизиты в архив? В новые документы они подставляться не будут.")) api.post(`/api/legal/banks/${b.id}/archive`).then(onSaved).catch((e) => onMsg((e as Error).message)); }}>в архив</button>}
+          {canEdit && !archived && <button className="btn ghost" style={{ padding: "3px 10px", fontSize: 12, color: "var(--muted)", borderColor: "var(--line)" }} onClick={async () => { if ((await askConfirm("Перевести реквизиты в архив? В новые документы они подставляться не будут."))) api.post(`/api/legal/banks/${b.id}/archive`).then(onSaved).catch((e) => onMsg((e as Error).message)); }}>в архив</button>}
         </div>
       </div>
       {edit && (
@@ -167,9 +168,9 @@ function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, canDelete, onSave
             {canCheck && <>
               <button className="btn secondary" onClick={() => api.post(`/api/legal/profiles/${p.id}/check`, { status: "checked", comment: f.lawyer_comment }).then(onSaved).catch((e) => onMsg((e as Error).message))}>Проверен юристом</button>
               <button className="btn ghost" style={{ color: "var(--bad)" }} onClick={() => api.post(`/api/legal/profiles/${p.id}/check`, { status: "issues", comment: f.lawyer_comment }).then(onSaved).catch((e) => onMsg((e as Error).message))}>Есть замечания</button></>}
-            {canEdit && p.is_active && <button className="btn ghost" style={{ marginLeft: "auto", color: "var(--muted)", borderColor: "var(--line)" }} onClick={() => { if (confirm("Перевести профиль в архив? В новые договоры он подставляться не будет.")) api.put(`/api/legal/profiles/${p.id}`, { is_active: false, is_default: false }).then(onSaved).catch((e) => onMsg((e as Error).message)); }}>в архив</button>}
+            {canEdit && p.is_active && <button className="btn ghost" style={{ marginLeft: "auto", color: "var(--muted)", borderColor: "var(--line)" }} onClick={async () => { if ((await askConfirm("Перевести профиль в архив? В новые договоры он подставляться не будет."))) api.put(`/api/legal/profiles/${p.id}`, { is_active: false, is_default: false }).then(onSaved).catch((e) => onMsg((e as Error).message)); }}>в архив</button>}
             {canDelete && <button className="btn ghost" style={{ color: "var(--bad)", marginLeft: p.is_active && canEdit ? 0 : "auto" }} title="только ЗГД; профиль, использованный в пакетах или реквизитах контракта, удалить нельзя"
-              onClick={() => { if (confirm(`Удалить профиль «${p.title || "без названия"}» вместе со счетами и сканами? Действие необратимо.`)) api.del<{ message: string }>(`/api/legal/profiles/${p.id}`).then((r) => { onSaved(); onMsg(r.message); }).catch((e) => onMsg((e as Error).message)); }}>Удалить</button>}
+              onClick={async () => { if ((await askConfirm(`Удалить профиль «${p.title || "без названия"}» вместе со счетами и сканами? Действие необратимо.`))) api.del<{ message: string }>(`/api/legal/profiles/${p.id}`).then((r) => { onSaved(); onMsg(r.message); }).catch((e) => onMsg((e as Error).message)); }}>Удалить</button>}
           </div>
           {branches.length > 0 && <div style={{ fontSize: 12, marginTop: 6 }}><span className="muted">Филиалы в реестре — подставить вместо головной: </span>
             {branches.map((b) => <button key={b.kpp} className="btn ghost" style={{ padding: "1px 8px", fontSize: 11, marginRight: 4 }} title={b.address} onClick={() => fillByInn(b.kpp)}>{b.name} · КПП {b.kpp}</button>)}

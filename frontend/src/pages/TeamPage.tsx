@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
 import type { Me } from "../types";
 import { DeputyBlock, ObserverScopeBlock } from "../components/TeamExtras";
+import { askConfirm } from "../components/Dialogs";
 
 type Contacts = { position: string; department: string; mobile: string; work_phone: string; wechat: string; telegram: string; whatsapp: string; max: string; extra_email: string; note: string };
 type Card = { id: string; display_name: string; email: string; roles: string[]; role_titles: string[]; contacts: Contacts; wecom_user_id: string; can_manage?: boolean; pending_changes?: { fields?: Record<string, [string, string]>; requested_at?: string };
@@ -91,7 +92,7 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
   }
   async function removeUser() {
     if (!cur) return;
-    if (!confirm(`Удалить сотрудника «${cur.display_name}»? Если он участвует в сделках или задачах, учётная запись будет отключена с сохранением истории.`)) return;
+    if (!(await askConfirm(`Удалить сотрудника «${cur.display_name}»? Если он участвует в сделках или задачах, учётная запись будет отключена с сохранением истории.`))) return;
     try { const r = await api.del<{ message: string }>(`/api/admin/users/${cur.id}`); setMsg(r.message); setCur(null); load(); } catch (e) { setErr((e as Error).message); }
   }
   async function test() {

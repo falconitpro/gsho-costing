@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
+import { askConfirm } from "./Dialogs";
 
 // Рабочее место логиста (D-073): адреса отгрузки и доставки, выбранные ЗГД характеристики, запрос логистическим
 // компаниям (Excel / PDF / почта) и их ответы.
@@ -129,7 +130,7 @@ export default function LogistRequests({ dealId, ws, reload, onApplyChosen }: { 
     try { await api.form(`/api/deals/${dealId}/logistics/quotes`, fd); setQf({ ...emptyQ(), carrier: qf.carrier }); setQfile(null); ok(`Ответ ${qf.carrier} добавлен. Добавьте остальные услуги этой компании или следующую компанию.`); reload(); }
     catch (e) { bad(e); }
   }
-  const delQuote = (q: Quote) => { if (window.confirm(`Удалить ответ ${q.carrier}?`)) api.del(`/api/deals/${dealId}/logistics/quotes/${q.id}`).then(reload).catch(bad); };
+  const delQuote = async (q: Quote) => { if ((await askConfirm(`Удалить ответ ${q.carrier}?`))) api.del(`/api/deals/${dealId}/logistics/quotes/${q.id}`).then(reload).catch(bad); };
   const choose = (carrier: string, comment = "", need_gd = false) => api.post(`/api/deals/${dealId}/logistics/quotes/choose`, { carrier, comment, need_gd })
     .then(() => { setPick(null); ok(!carrier ? "Выбор снят." : need_gd && !isGD ? `Выбор «${carrier}» отправлен на согласование ЗГД.` : `Выбрано предложение: ${carrier}.`); reload(); })
     .catch(bad);

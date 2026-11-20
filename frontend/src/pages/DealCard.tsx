@@ -26,6 +26,7 @@ import { ModelDocsBlock, ZipBlock } from "../components/PositionExtras";
 import AcceptanceTab from "../components/AcceptanceTab";
 import CurrentOfferPanel from "../components/CurrentOfferPanel";
 import { payText } from "../components/PaymentTermsEditor";
+import { askConfirm, askPrompt } from "../components/Dialogs";
 
 type Tab = "overview" | "acceptance" | "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "documents" | "legal" | "catalog" | "feed" | "versions";
 const POST_WIN = ["contract", "execution", "closed"];
@@ -141,7 +142,7 @@ export default function DealCard({ me }: { me: Me }) {
     if (checks.length) {   // КД / ЗГД — отправка без полностью заполненных обязательных данных
       const items = deal!.check_items || [];
       const list = items.length ? items.map((x) => `• ${x.group}: ${[...x.fields, ...x.tech].join(", ")}`).join("\n") : `• ${checks.join("\n• ")}`;
-      const c = prompt(`Не заполнено:\n${list}\n\nОтправить на расчёт всё равно? Логист и сервис увидят пометку в ленте. Комментарий (необязательно):`, "");
+      const c = (await askPrompt(`Не заполнено:\n${list}\n\nОтправить на расчёт всё равно? Логист и сервис увидят пометку в ленте. Комментарий (необязательно):`, ""));
       if (c === null) return;
       body = { force: true, comment: c };
     }
@@ -150,7 +151,7 @@ export default function DealCard({ me }: { me: Me }) {
   }
   async function removeOrArchive() {
     const draft = deal!.status === "draft";
-    const reason = prompt(draft ? `Удалить черновик ${deal!.number}? Сделка пропадёт из списков и задач. Укажите причину:` : `Перенести сделку ${deal!.number} в архив? Её можно будет открыть и вернуть из архива. Укажите причину:`);
+    const reason = (await askPrompt(draft ? `Удалить черновик ${deal!.number}? Сделка пропадёт из списков и задач. Укажите причину:` : `Перенести сделку ${deal!.number} в архив? Её можно будет открыть и вернуть из архива. Укажите причину:`));
     if (reason === null) return;
     if (!reason.trim()) { setErr("Укажите причину"); return; }
     try {
@@ -162,7 +163,7 @@ export default function DealCard({ me }: { me: Me }) {
     try { await api.post(`/api/deals/${deal!.id}/unarchive`); setErr("Сделка возвращена из архива"); load(); } catch (e) { setErr((e as Error).message); }
   }
   async function duplicate() {
-    const comment = prompt("Дублировать заявку (новая заявка того же клиента: требования, технические характеристики, изображения, расчёты логиста и сервиса с пометкой «проверить»). Комментарий:") ?? null;
+    const comment = (await askPrompt("Дублировать заявку (новая заявка того же клиента: требования, технические характеристики, изображения, расчёты логиста и сервиса с пометкой «проверить»). Комментарий:")) ?? null;
     if (comment === null) return;
     try { const d = await api.post<Deal>(`/api/deals/${deal!.id}/duplicate`, { copy_calcs: true, comment }); nav(`/deals/${d.id}`); } catch (e) { setErr((e as Error).message); }
   }
@@ -356,7 +357,7 @@ export default function DealCard({ me }: { me: Me }) {
                   <td>{pr.last_price ? <>посл. {fmtRub(pr.last_price)} ({pr.deviation_pct} %) {pr.comment && <span className="muted">— {pr.comment}</span>}</> : <span className="muted">нет истории</span>}</td>
                   <td>{p.rfq_import_id ? <span className="badge accent">RFQ</span> : p.offer_id ? <span className="badge">ответ завода</span> : <span className="badge">вручную</span>}</td>
                   {editable && <td className="row"><button className="btn ghost" onClick={() => setPosForm(p)}>изменить</button>
-                    <button className="btn ghost" onClick={() => { if (confirm(`Удалить позицию ${designation(p)}?`)) api.del(`/api/deals/${deal.id}/positions/${p.id}`).then(load); }}>удалить</button></td>}</tr>);
+                    <button className="btn ghost" onClick={async () => { if ((await askConfirm(`Удалить позицию ${designation(p)}?`))) api.del(`/api/deals/${deal.id}/positions/${p.id}`).then(load); }}>удалить</button></td>}</tr>);
               })}</tbody>
             </table>
           </div>

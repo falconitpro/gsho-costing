@@ -3,6 +3,7 @@ import { api, fmtDate, fmtRub } from "../api";
 import type { Deal, Me } from "../types";
 import LegalSaleWizard from "./LegalSaleWizard";
 import ContractsBlock from "./ContractsBlock";
+import { askConfirm, askPrompt } from "./Dialogs";
 
 // Юридический блок, этап 3: вкладка «Юридические документы» в сделке — пакеты (реестр), мастер закупочного пакета,
 // экран подтверждения договорного комплекта ЗИП, предпросмотр источников и проверки перед формированием.
@@ -55,7 +56,7 @@ function ZipSetEditor({ dealId, factoryId, onChanged }: { dealId: string; factor
           {zs.confirmed_at ? <span className="badge ok" style={{ marginLeft: 8 }}>подтверждён {fmtDate(zs.confirmed_at)} · {zs.confirmed_by_name}</span> : <span className="badge warn" style={{ marginLeft: 8 }}>не подтверждён</span>}</div>
         {zs.can_edit && <div className="row" style={{ gap: 6 }}>
           <button className="btn ghost" style={{ padding: "3px 10px", fontSize: 12 }} onClick={() => { setLines([...lines, { id: "", article: "", name: "", unit: "шт", qty: 1, unit_price: null, currency: lines[0]?.currency || "CNY", interval_hours: null, kind: "supply", lead_days: null, included: mode === "included", selected: true, source: "manual" }]); setDirty(true); }}>Строка вручную</button>
-          <button className="btn ghost" style={{ padding: "3px 10px", fontSize: 12 }} title="заново взять ЗИП из сервисного блока и RFQ (ручные строки останутся)" onClick={() => { if (window.confirm("Предзаполнить заново из сервисного ЗИП и RFQ? Выбор и правки строк из источников будут сброшены.")) api.post<ZipSet>(`${base}/reset`).then((r) => { setZs(r); setLines(r.lines); setDirty(false); onChanged(); }); }}>Из источников</button>
+          <button className="btn ghost" style={{ padding: "3px 10px", fontSize: 12 }} title="заново взять ЗИП из сервисного блока и RFQ (ручные строки останутся)" onClick={async () => { if ((await askConfirm("Предзаполнить заново из сервисного ЗИП и RFQ? Выбор и правки строк из источников будут сброшены."))) api.post<ZipSet>(`${base}/reset`).then((r) => { setZs(r); setLines(r.lines); setDirty(false); onChanged(); }); }}>Из источников</button>
           <button className="btn secondary" disabled={!dirty} onClick={save}>Сохранить</button>
           <button className="btn" disabled={dirty || !!zs.confirmed_at} onClick={confirmSet}>Подтвердить комплект</button></div>}
       </div>
@@ -256,7 +257,7 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
                       onChange={(e) => { const fl = e.target.files?.[0]; if (fl) api.upload(`/api/legal/packages/${p.id}/signed-scan`, fl, {}).then(() => { loadPkgs(); reload(); }).catch((er) => setMsg((er as Error).message)); e.target.value = ""; }} /></label></div>}
                   {p.next_statuses.length > 0 && <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: "wrap" }}><span className="muted">Перевести:</span>
                     {p.next_statuses.map((s) => <button key={s} className={"btn " + (s === "archived" || s === "draft" ? "ghost" : "secondary")} style={{ padding: "3px 10px", fontSize: 12 }}
-                      onClick={() => { const c = s === "draft" || s === "archived" ? prompt("Комментарий / причина") : prompt("Комментарий (необязательно)") ?? null; if (c === null) return; api.post(`/api/legal/packages/${p.id}/status`, { status: s, comment: c }).then(() => { loadPkgs(); reload(); }).catch((e) => setMsg((e as Error).message)); }}>
+                      onClick={async () => { const c = s === "draft" || s === "archived" ? (await askPrompt("Комментарий / причина")) : (await askPrompt("Комментарий (необязательно)")) ?? null; if (c === null) return; api.post(`/api/legal/packages/${p.id}/status`, { status: s, comment: c }).then(() => { loadPkgs(); reload(); }).catch((e) => setMsg((e as Error).message)); }}>
                       {({ lawyer_review: "на проверку юристу", commercial_review: "на коммерческое согласование", approved: "утвердить", signed: "подписан", draft: "вернуть в черновик", archived: "в архив" } as Record<string, string>)[s] || s}</button>)}</div>}
                   <details style={{ marginTop: 6 }}><summary className="muted" style={{ cursor: "pointer" }}>История согласования · {p.approvals.length}</summary>
                     <table style={{ fontSize: 12 }}><tbody>{p.approvals.map((a, i) => <tr key={i}><td>{fmtDate(a.at)}</td><td>{a.by_name}</td><td>{a.from ? `${a.from} → ` : ""}{a.to}</td><td className="muted">{a.comment}</td></tr>)}</tbody></table></details>

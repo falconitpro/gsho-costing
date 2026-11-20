@@ -7,6 +7,7 @@ import { api, fmtDate, fmtRub } from "../api";
 import { can, STATUS_TITLES, type Deal, type Me } from "../types";
 import ColleaguesDeals from "../components/ColleaguesDeals";
 import PartsCreateForm from "../components/PartsRequestCreate";
+import { askAlert } from "../components/Dialogs";
 
 type Exec = { done: number; total: number; overdue: number; next: { title: string; on: string } | null; delay_days: number | null };
 type Row = Deal & { group?: string; parent_number?: string; related_count?: number; manager_name?: string; machines?: number; equipment?: string; equipment_lines?: { qty: number; name: string }[]; equipment_more?: number;
@@ -142,7 +143,7 @@ export default function DealsList({ me }: { me: Me }) {
   const addMType = async () => {
     const n = eq.newName.trim(); if (!n) return;
     try { const t = await api.post<{ id: string; name: string; status?: string }>("/api/refs/machine-types", { name: n }); setMtypes([...mtypes, t]); setEq({ ...eq, type: t.name, adding: false, newName: "" });
-      if (t.status === "pending") alert(`Тип «${t.name}» отправлен на утверждение КД / ЗГД. До утверждения заявка заполняется по типовому шаблону.`); }
+      if (t.status === "pending") void askAlert(`Тип «${t.name}» отправлен на утверждение КД / ЗГД. До утверждения заявка заполняется по типовому шаблону.`); }
     catch (e) { setErr((e as Error).message); }
   };
   const [err, setErr] = useState("");
@@ -233,7 +234,7 @@ export default function DealsList({ me }: { me: Me }) {
   async function create() {
     try {
       const d = await api.post<Deal & { warning?: string }>("/api/deals", { ...form, manager_id: managerId || undefined, kp_due: form.kp_due || null, target_hours: form.target_hours ? Number(form.target_hours) : null });
-      if (d.warning) alert(d.warning);
+      if (d.warning) void askAlert(d.warning);
       for (const x of docs) await api.upload(`/api/deals/${d.id}/documents`, x.file, { category: x.category, comment: "загружено при заведении сделки" });
       nav(eq.type && newKind === "gsho" ? `/deals/${d.id}?tab=positions&newpos=1&type=${encodeURIComponent(eq.type)}&qty=${Number(eq.qty) || 1}` : `/deals/${d.id}`);
     } catch (e) { setErr((e as Error).message); }

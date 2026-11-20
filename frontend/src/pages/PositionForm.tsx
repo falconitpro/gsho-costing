@@ -3,6 +3,7 @@ import { api, ApiError, designation, fmtDate, fmtRub, ru } from "../api";
 import { DELIVERY_START, PRODUCTION_START, TERM_UNITS, type Position } from "../types";
 import { collectFields, cmpCode, type RfqFieldData } from "../components/Questionnaire";
 import { UndoButton, useUndoHistory } from "../undo";
+import { askPrompt } from "../components/Dialogs";
 
 type Factory = { id: string; name: string; trademarks?: string[] };
 type Tree = { factory_id: string; factory: string; trademarks?: string[]; types: { machine_type: string; models: { id: string; model: string; trademark?: string; executions: { id: string; name: string; params: number }[] }[] }[] }[];
@@ -207,8 +208,8 @@ export default function PositionForm({ dealId, position, initial, onDone, onCanc
   const insTok = (id: string, idx: number) => { const k = newKey(); setExtras((e) => ({ ...e, [k]: { name: "", unit: "", req: "", val: "", comm: "" } }));
     setToks(id, (a) => { a.splice(idx + 1, 0, "x:" + k); return a; }); setOpen((o) => ({ ...o, [id]: true })); setFocusKey(k); };
   const delTok = (id: string, idx: number) => setToks(id, (a) => a.filter((_, j) => j !== idx));
-  const addOwnBlock = () => {
-    const n = prompt("Название блока (например, «Навесное оборудование»):")?.trim(); if (!n) return;
+  const addOwnBlock = async () => {
+    const n = (await askPrompt("Название блока (например, «Навесное оборудование»):"))?.trim(); if (!n) return;
     const id = `t:${n}`; const k = newKey();
     setExtras((e) => ({ ...e, [k]: { name: "", unit: "", req: "", val: "", comm: "" } }));
     setBlocks((bs) => bs.some((b) => b.id === id) ? bs.map((b) => (b.id === id ? { ...b, toks: [...b.toks, "x:" + k] } : b)) : [...bs, { id, area: "t", title: n, toks: ["x:" + k] }]);

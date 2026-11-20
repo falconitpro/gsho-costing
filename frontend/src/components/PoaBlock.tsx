@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "../api";
+import { askConfirm } from "./Dialogs";
 
 // Доверенности компаний группы: реестр (статусы, сроки, истекающие), конструктор (представитель → вид и срок → полномочия → ограничения),
 // печать DOCX/PDF, копии и сканы, отзыв с уведомлением. Оформляют и отзывают юрист, ЗГД и ФД; остальным — реестр без паспортных данных.
@@ -117,12 +118,12 @@ function PoaEditor({ reg, cat, entityId, poa, onClose, onSaved, onChanged }: { r
     const p = await save(); if (!p) return;
     const chk = await api.post<{ ok: boolean; errors: string[] }>(`/api/legal/poa/${p.id}/check`);
     if (!chk.ok) { setErr(chk.errors); return; }
-    if (!window.confirm(`Оформить доверенность на ${att.full_name} до ${d(validTo)}? Номер будет присвоен, текст — зафиксирован.`)) return;
+    if (!(await askConfirm(`Оформить доверенность на ${att.full_name} до ${d(validTo)}? Номер будет присвоен, текст — зафиксирован.`))) return;
     setBusy(true);
     try { onSaved(await api.post<Poa>(`/api/legal/poa/${p.id}/issue`, { template_id: tpl || null })); }
     catch (e) { const det = (e as { detail?: { errors?: string[] } }).detail; setErr(det?.errors?.length ? det.errors : [(e as Error).message]); } finally { setBusy(false); }
   };
-  const cancel = async () => { if (saved && window.confirm("Аннулировать черновик?")) { await api.post(`/api/legal/poa/${saved.id}/cancel`); onChanged?.(); } };
+  const cancel = async () => { if (saved && (await askConfirm("Аннулировать черновик?"))) { await api.post(`/api/legal/poa/${saved.id}/cancel`); onChanged?.(); } };
   const steps = ["Доверитель и представитель", "Вид и срок", "Полномочия", "Ограничения и печать"];
   const p = att.passport || {};
   const setP = (k: keyof Passport, v: string) => setAtt({ ...att, passport: { ...p, [k]: v } });
@@ -329,7 +330,7 @@ function PoaView({ p, reg, cat, onClose, onChanged }: { p: Poa; reg: Registry; c
               <table className="table poa-files"><thead><tr><th>Вид</th><th>Файл</th><th>Размер</th><th>Загрузил</th><th>Дата</th><th></th></tr></thead>
                 <tbody>{p.files.map((f) => (
                   <tr key={f.id}><td>{f.kind_title}</td><td><a href={`/api/legal/poa/${p.id}/files/${f.id}`} target="_blank" rel="noreferrer">{f.name}</a></td><td>{Math.max(1, Math.round(f.size / 1024))} КБ</td><td>{f.uploaded_by_name}</td><td>{d(f.uploaded_at)}</td>
-                    <td style={{ textAlign: "right" }}>{reg.can_issue && f.kind !== "issued" && <button className="btn ghost" style={{ padding: "0 8px" }} title="удалить файл" onClick={() => { if (window.confirm(`Удалить файл ${f.name}?`)) run(() => api.del<Poa>(`/api/legal/poa/${p.id}/files/${f.id}`)); }}>×</button>}</td></tr>))}
+                    <td style={{ textAlign: "right" }}>{reg.can_issue && f.kind !== "issued" && <button className="btn ghost" style={{ padding: "0 8px" }} title="удалить файл" onClick={async () => { if ((await askConfirm(`Удалить файл ${f.name}?`))) run(() => api.del<Poa>(`/api/legal/poa/${p.id}/files/${f.id}`)); }}>×</button>}</td></tr>))}
                 </tbody></table>)}
           </div>
           {revoking && (
@@ -339,7 +340,7 @@ function PoaView({ p, reg, cat, onClose, onChanged }: { p: Poa; reg: Registry; c
                 <label className="f" style={{ gridColumn: "span 2" }}><span>Причина отзыва</span><input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder="прекращение трудовых отношений / изменение полномочий / …" /></label>
               </div>
               <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                <button className="btn" disabled={reason.trim().length < 3} onClick={() => { if (window.confirm("Отозвать доверенность?")) run(() => api.post<Poa>(`/api/legal/poa/${p.id}/revoke`, { reason })).then(() => setRevoking(false)); }}>Подтвердить отзыв</button>
+                <button className="btn" disabled={reason.trim().length < 3} onClick={async () => { if ((await askConfirm("Отозвать доверенность?"))) run(() => api.post<Poa>(`/api/legal/poa/${p.id}/revoke`, { reason })).then(() => setRevoking(false)); }}>Подтвердить отзыв</button>
                 <button className="btn ghost" onClick={() => setRevoking(false)}>Отмена</button>
               </div>
             </div>)}
@@ -353,7 +354,7 @@ function PoaView({ p, reg, cat, onClose, onChanged }: { p: Poa; reg: Registry; c
           <div>{canRevoke && !revoking && <button className="btn ghost" style={{ color: "var(--bad)" }} onClick={() => setRevoking(true)}>Отозвать</button>}</div>
           <div className="row" style={{ gap: 8 }}>
             {p.status === "active" && p.profile_id && <button className="btn ghost" title="подставить представителя подписантом в юридический профиль компании с основанием «доверенности № … от …»"
-              onClick={() => { if (window.confirm(`Сделать ${a.full_name} подписантом компании по этой доверенности?`)) api.post(`/api/legal/poa/${p.id}/use-as-basis?profile_id=${p.profile_id}`).then(() => setInfo("Подписант в профиле компании обновлён")).catch((e) => setErr((e as Error).message)); }}>Основание для подписанта</button>}
+              onClick={async () => { if ((await askConfirm(`Сделать ${a.full_name} подписантом компании по этой доверенности?`))) api.post(`/api/legal/poa/${p.id}/use-as-basis?profile_id=${p.profile_id}`).then(() => setInfo("Подписант в профиле компании обновлён")).catch((e) => setErr((e as Error).message)); }}>Основание для подписанта</button>}
             {(p.status === "active" || p.status === "expired" || p.status === "revoked") && <button className="btn" onClick={() => run(() => api.post<Poa>(`/api/legal/poa/${p.id}/renew`))} title="новый черновик с теми же представителем, полномочиями и ограничениями">Продлить — новая на основе</button>}
           </div>
         </div>)}

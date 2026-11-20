@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ActionMenu, Crumbs, EntryGrid, UiModeSwitch, useQueryParam, useUiMode, type Entry } from "../components/Levels";
 import { api } from "../api";
 import type { Me } from "../types";
+import { askConfirm } from "../components/Dialogs";
 
 // Рабочее место — главная страница под роль. Каркас «командный центр»: показатели → «главное сейчас» → три колонки
 // (сегодня и задачи · сделки, согласования, деньги · внимание, уведомления, сроки, команда). Набор блоков — по роли,
@@ -130,7 +131,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
   if (!d) return <div className="muted" style={{ padding: 24 }}>Загрузка рабочего места…</div>;
   const done = (t: TaskRow) => api.post(`/api/tasks/${t.id}/done`, { comment: "с рабочего места" }).then(load).catch((e) => setErr((e as Error).message));
 
-  const closeTask = (id: string, title: string) => { if (window.confirm(`Закрыть задачу «${title}»?`)) api.post(`/api/tasks/${id}/done`, { comment: "с рабочего места" }).then(load).catch((e) => setErr((e as Error).message)); };
+  const closeTask = async (id: string, title: string) => { if ((await askConfirm(`Закрыть задачу «${title}»?`))) api.post(`/api/tasks/${id}/done`, { comment: "с рабочего места" }).then(load).catch((e) => setErr((e as Error).message)); };
   const block = (code: string) => {
     switch (code) {
       case "todo": { const list = d.todo || []; const [top, ...rest] = list; const shown = rest.slice(0, 11); return (
@@ -177,7 +178,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
           <div className="wp-head"><h2>Задачи и поручения <span className="muted">· {d.tasks_total}</span>{d.tasks_overdue > 0 && <span className="badge bad" style={{ marginLeft: 6 }}>{d.tasks_overdue} просроч.</span>}</h2><Link to="/tasks" className="muted">все →</Link></div>
           {d.tasks.length === 0 && <div className="muted" style={{ fontSize: 13 }}>Открытых задач нет.</div>}
           <ul className="wp-tasks">{d.tasks.map((t) => (
-            <li key={t.id}><input type="checkbox" aria-label="Выполнено" onChange={() => { if (window.confirm(`Закрыть задачу «${t.title}»?`)) done(t); }} />
+            <li key={t.id}><input type="checkbox" aria-label="Выполнено" onChange={async () => { if ((await askConfirm(`Закрыть задачу «${t.title}»?`))) done(t); }} />
               <Link to={`/deals/${t.deal_id}`} style={{ flex: 1, minWidth: 0 }}><div style={{ fontWeight: 500 }}>{t.title}{t.as_deputy && <span className="badge" style={{ marginLeft: 6, fontSize: 10 }}>замещение</span>}</div>
                 <small style={{ color: t.overdue ? "var(--bad)" : "var(--muted)" }}>{t.overdue ? `просрочено ${-t.days_left} дн.` : t.days_left === 0 ? "сегодня" : t.days_left === 1 ? "завтра" : dShort(t.due)} · {t.deal_number} {t.client_name}</small></Link>
               {t.priority !== "normal" && <span className={`badge ${t.priority === "urgent" ? "bad" : "warn"}`}>{t.priority === "urgent" ? "срочно" : "важно"}</span>}</li>))}</ul>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
+import { askConfirm } from "./Dialogs";
 
 // Сканы подписанных контрактов: с клиентом и с заводом. Загрузка — после отметки подписания; файлы хранятся в документах сделки.
 
@@ -33,8 +34,8 @@ export default function ContractScans({ dealId, meId, canRemoveAll, only, versio
               <div key={f.id} className="row" style={{ fontSize: 13, marginLeft: only ? 0 : 10, gap: 6 }}>
                 <span>📎</span><a href={f.url} target="_blank" rel="noreferrer" style={{ overflowWrap: "anywhere" }}>{f.file_name}</a>
                 <span className="muted" style={{ fontSize: 11 }}>{fmtDate(f.uploaded_at)} · {f.uploaded_by}</span>
-                {(canRemoveAll || f.uploaded_by_id === meId) && <a href="#" style={{ fontSize: 11 }} onClick={(e) => {
-                  e.preventDefault(); if (confirm("Убрать скан из документов сделки?")) api.del(`/api/deals/${dealId}/documents/${f.id}`).then(load).catch((z) => setMsg((z as Error).message)); }}>убрать</a>}
+                {(canRemoveAll || f.uploaded_by_id === meId) && <a href="#" style={{ fontSize: 11 }} onClick={async (e) => {
+                  e.preventDefault(); if ((await askConfirm("Убрать скан из документов сделки?"))) api.del(`/api/deals/${dealId}/documents/${f.id}`).then(load).catch((z) => setMsg((z as Error).message)); }}>убрать</a>}
               </div>))}
             {x.files.length === 0 && <div className="muted" style={{ fontSize: 12, marginLeft: only ? 0 : 10 }}>
               {x.signed ? <span style={{ color: "var(--warn, #b00000)" }}>скан не приложен</span> : "скан можно приложить после ввода даты договора или отметки подписания"}</div>}

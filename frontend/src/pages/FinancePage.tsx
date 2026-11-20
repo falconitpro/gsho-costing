@@ -9,6 +9,7 @@ import FinanceReconciliation from "../components/FinanceReconciliation";
 import FinanceDebt from "../components/FinanceDebt";
 import FinanceIntragroup from "../components/FinanceIntragroup";
 import FinanceExportButton from "../components/FinanceExportButton";
+import { askPrompt } from "../components/Dialogs";
 
 // Раздел «Финансы», вариант Б (docs/finance/05_UI_UX_в_стилистике_CRM.md). Первый вертикальный срез:
 // «Обзор», «Платёжный календарь», «Ликвидность и валюта» (счета, остатки, операции, разнесение), «Экономика сделок», «Обеспечение и неустойки», «Сверка и уточнения».
@@ -405,7 +406,7 @@ function AllocTable({ rows, canEdit, onChanged, side, txStatus }: { rows: Alloc[
   const act = async (a: Alloc, what: "confirm" | "reverse") => {
     let reason = "";
     if (what === "reverse") {
-      reason = window.prompt("Причина отмены разнесения") || "";
+      reason = (await askPrompt("Причина отмены разнесения")) || "";
       if (!reason.trim()) return;
     }
     setBusy(a.id); setErr("");
@@ -685,15 +686,15 @@ function TxCard({ id, canEdit, stamp, onChanged }: { id: string; canEdit: boolea
   if (!t) return <div className="muted">Загружаю…</div>;
   const changed = () => { load(); onChanged(); };
   const run = async (f: () => Promise<unknown>) => { setBusy(true); setErr(""); try { await f(); changed(); } catch (e) { setErr(errText(e)); } finally { setBusy(false); } };
-  const reverse = () => {
-    const reason = window.prompt("Причина сторно (обязательно). Исходная операция не удаляется — создаётся обратная проведённая операция, разнесения сторнируются.") || "";
+  const reverse = async () => {
+    const reason = (await askPrompt("Причина сторно (обязательно). Исходная операция не удаляется — создаётся обратная проведённая операция, разнесения сторнируются.")) || "";
     if (!reason.trim()) return;
     run(() => api.postIdem(`/api/finance/transactions/${t.id}/reverse`, { reason }, revKey.current));
   };
   const editable = t.origin_type !== "reversal" && t.status !== "reversed" && !t.withdrawn;
   const pending = (t.status === "draft" || t.status === "needs_reconciliation") && !t.withdrawn;
-  const withdraw = () => {
-    const reason = window.prompt("Почему запись отзывается (дубль операции из выписки, не платёж, ошибка ввода)? Запись не удаляется.") || "";
+  const withdraw = async () => {
+    const reason = (await askPrompt("Почему запись отзывается (дубль операции из выписки, не платёж, ошибка ввода)? Запись не удаляется.")) || "";
     if (!reason.trim()) return;
     run(() => api.post(`/api/finance/transactions/${t.id}/withdraw`, { reason }));
   };
@@ -1045,7 +1046,7 @@ function Conversions({ meta, accounts, stamp, onChanged }: { meta: Meta; account
   const revKey = useRef(newKey());
   useEffect(() => { api.get<{ items: FxOp[] }>("/api/finance/fx-operations").then((r) => setItems(r.items)).catch((e) => setErr(errText(e))); }, [stamp]);
   const reverse = async (op: FxOp) => {
-    const reason = window.prompt("Причина сторно конвертации (обе ноги и комиссия будут сторнированы, записи не удаляются)") || "";
+    const reason = (await askPrompt("Причина сторно конвертации (обе ноги и комиссия будут сторнированы, записи не удаляются)")) || "";
     if (!reason.trim()) return;
     try { await api.postIdem(`/api/finance/fx-operations/${op.id}/reverse`, { reason }, revKey.current); revKey.current = newKey(); onChanged(); }
     catch (e) { setErr(errText(e)); }
