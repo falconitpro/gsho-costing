@@ -105,7 +105,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
 
   return (
     <div className="grid approval-grid">
-      <div>
+      <div className="approval-side">
         {(deal.variants || []).length > 1 && <div className="card">
           <h2 style={{ marginTop: 0 }}>{deal.has_alternatives ? "Предложения (альтернативы в КП)" : "Предложение"}</h2>
           {(deal.variants || []).map((v) => {
@@ -134,7 +134,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
         )}
       </div>
 
-      <div>
+      <div className="approval-main">
         {(() => {
           // D-098: панель решения — главное по сделке и одно главное действие; закреплена при прокрутке
           const dR = dealCur === "RUB" ? 1 : (variant.price_currency || "").toUpperCase() === dealCur && variant.price_fx_rate ? variant.price_fx_rate : calc.input.fx.rates[dealCur] || 0;
