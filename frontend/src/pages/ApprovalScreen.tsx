@@ -127,9 +127,9 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
           <div className="alert warn">Вы ведёте эту сделку как менеджер и сами её утверждаете. Правило «считал — не утверждает»: об утверждении будет уведомлён ЗГД, пометка останется в ленте и журнале.</div>)}
         {(calc.warnings.length > 0 || calc.result.approval.reasons.length > 0 || cdChecks.length > 0) && (
           <div className="card">
-            {cdChecks.map((r, i) => <div key={"c" + i} className="alert warn">Перед утверждением: {r}</div>)}
+            {cdChecks.map((r, i) => <div key={"c" + i} className="alert error">Перед утверждением: {r}</div>)}
             {calc.result.approval.reasons.map((r, i) => <div key={i} className="alert warn">{r}</div>)}
-            {calc.warnings.map((w, i) => <div key={i} className="alert error">{w}</div>)}
+            {calc.warnings.map((w, i) => <div key={i} className="alert warn">{w}</div>)}
           </div>
         )}
       </div>
