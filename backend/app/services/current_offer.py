@@ -45,8 +45,9 @@ def build(db: Session, deal: Deal) -> dict:
     from .execution_service import won_variant
     vat = float(settings_service.get(db, "sales_vat_pct") or 22.0)
     ver = db.get(DealVersion, deal.approved_version_id) if deal.approved_version_id else None
+    from .contract_price import revisions_apply
     rev = step = None
-    if ver is not None:
+    if ver is not None and revisions_apply(deal):
         rev = db.scalar(select(KpRevision).where(KpRevision.deal_id == deal.id, KpRevision.version_id == ver.id)
                         .order_by(KpRevision.no.desc()).limit(1))
         step = db.scalar(select(NegotiationStep).where(NegotiationStep.deal_id == deal.id, NegotiationStep.version_id == ver.id)

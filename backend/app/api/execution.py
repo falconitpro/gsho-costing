@@ -352,6 +352,8 @@ def terms_changed(deal_id: str, body: TermsChangedIn, db: Session = Depends(get_
     for a in db.scalars(select(Approval).where(Approval.deal_id == deal.id, Approval.reset_at.is_(None))).all():
         a.reset_at = datetime.now(timezone.utc)
     deal.contract_terms_changed, deal.in_execution = True, True
+    from ..services.contract_price import rebase_for_contract_change
+    rebase_for_contract_change(db, deal, user.id)    # D-104: цена после торгов — исходная для повторного утверждения
     create_version(db, deal, "contract_change", user.id)
     apply_transition(db, deal, tr, user.id)
     db.commit()

@@ -307,7 +307,12 @@ def test_full_flow(client, tmp_path):
     assert client.post(f"/api/deals/{did}/execution/stages/{fa['id']}/actual", headers=H(MGR), json={"actual_on": acc}).status_code == 409
     # изменение условий контракта в исполнении → повторная виза → возврат в исполнение
     assert _ok(client.post(f"/api/deals/{did}/execution/terms-changed", headers=H(CD), json={"reason": "аванс 40 %"}))["status"] == "cd_approval"
-    assert _ok(client.post(f"/api/deals/{did}/submit", headers=H(CD)))["status"] == "execution"
+    # D-104: повторное утверждение — от цены после скидки 5 % в редакции КП, поэтому маржа ниже порога и нужны визы
+    stt = _ok(client.post(f"/api/deals/{did}/submit", headers=H(CD)))["status"]
+    for who in ((FD, GD) if stt != "execution" else ()):
+        if stt in ("fd_visa", "gd_visa") and (stt == "fd_visa") == (who == FD):
+            stt = _ok(client.post(f"/api/deals/{did}/visa", headers=H(who), json={"approved": True, "comment": "условия контракта"}))["status"]
+    assert stt == "execution"
     st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(FD)))
     adv = next(s for s in st["stages"] if s["code"] == "client_advance")
     assert adv["can_set"] and adv["amount"] > 0

@@ -56,3 +56,42 @@ def test_price_in_offer_differs_from_approved_version(client):
     v = o["variants"][0]
     assert abs(v["price"]["net_rub"] - first) < 1 and v["source"]["kind"] == "version"
     assert o["issues_count"] == 1 and v["issues"][0]["level"] == "error"
+
+
+def test_contract_change_keeps_negotiated_price(client):
+    """D-104: при изменении условий контракта цена после торгов переходит в предложение и в новую версию."""
+    did, vid, _ = _approved(client)
+    s = _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD), json={"prices": {vid: {"mode": "pct", "value": 5}}, "reason": "client"}), 201)
+    _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": ["a@b.example"]}))
+    assert _ok(client.post(f"/api/deals/{did}/outcome", headers=H(CD), json={"outcome": "won", "reason": "цена"}))["status"] == "contract"
+    assert _ok(client.post(f"/api/deals/{did}/execution/terms-changed", headers=H(CD), json={"reason": "аванс 40 %"}))["status"] == "cd_approval"
+    calc = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))
+    assert abs(calc["result"]["variants"][vid]["base"]["price_rub"] - s["price_rub"]) < 1      # повторное утверждение — от цены торгов
+    v = _offer(client, did)["variants"][0]
+    assert abs(v["price"]["net_rub"] - s["price_rub"]) < 1 and v["source"]["kind"] == "version"
+    assert _ok(client.post(f"/api/deals/{did}/submit", headers=H(CD)))["status"] == "contract"
+    o = _offer(client, did)
+    v = o["variants"][0]
+    assert abs(v["price"]["net_rub"] - s["price_rub"]) < 1 and o["issues_count"] == 0
+    assert {p["key"] for p in v["places"]} == {"variant", "version"}
+    calc = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))
+    assert abs(calc["result"]["variants"][vid]["base"]["price_rub"] - s["price_rub"]) < 1
+
+
+def test_repair_existing_contract_change(client):
+    """Разовое исправление: версия по изменению условий утверждена, в предложении первая цена → цена версии."""
+    from app.db import SessionLocal
+    from app.models import Deal, DealVersion, Variant
+    from app.services.contract_price import repair_existing
+    did, vid, _ = _approved(client)
+    with SessionLocal() as db:
+        deal = db.get(Deal, did)
+        db.get(DealVersion, deal.approved_version_id).reason = "contract_change"
+        v = db.get(Variant, vid)
+        good = v.price_rub
+        v.price_rub = round(good * 1.05, 2)
+        db.commit()
+        assert repair_existing(db) >= 1
+        db.refresh(v)
+        assert abs(v.price_rub - good) < 0.01
+        assert repair_existing(db) == 0 or abs(db.get(Variant, vid).price_rub - good) < 0.01
