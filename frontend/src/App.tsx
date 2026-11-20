@@ -1,8 +1,10 @@
+import type React from "react";
 import FilePreviewHost from "./components/FilePreview";
 import AssistantDrawer from "./components/AssistantDrawer";
 import { SupportAdmin, SupportList, SupportTicketRoute } from "./pages/SupportPage";
 import { HelpMenu, UserMenu } from "./components/HeaderMenus";
 import RoleNav from "./components/RoleNav";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { useEffect, useState } from "react";
 import FloatingScrollbar from "./components/FloatingScrollbar";
 import NotificationBell from "./components/NotificationBell";
@@ -53,6 +55,12 @@ function LoginRoute({ onLoggedIn }: { onLoggedIn: () => Promise<void> }) {
   const loc = useLocation();
   const next = new URLSearchParams(loc.search).get("next") || "/";
   return <LoginPage onLoggedIn={async () => { setDevUser(""); await onLoggedIn(); nav(next.startsWith("/") && !next.startsWith("//") ? next : "/", { replace: true }); }} />;
+}
+
+/** D-117: ошибка одного экрана не роняет шапку и меню; при переходе на другой адрес экран открывается заново. */
+function RouteBoundary({ children }: { children: React.ReactNode }) {
+  const loc = useLocation();
+  return <ErrorBoundary key={loc.pathname}>{children}</ErrorBoundary>;
 }
 
 export default function App() {
@@ -150,6 +158,7 @@ export default function App() {
       <SessionExpiryWarning />
       <main>
         {me && (
+          <RouteBoundary>
           <Routes>
             <Route path="/login" element={<AfterLogin />} />
             <Route path="/" element={<WorkplacePage me={me} />} />
@@ -178,6 +187,7 @@ export default function App() {
             <Route path="/access" element={<Navigate to="/settings?s=access" replace />} />
             <Route path="/admin" element={<Navigate to="/settings?s=admin" replace />} />
           </Routes>
+          </RouteBoundary>
         )}
       </main>
     </BrowserRouter>

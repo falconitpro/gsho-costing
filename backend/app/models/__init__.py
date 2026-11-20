@@ -1074,6 +1074,27 @@ class SecurityEvent(Base):
     alert_id: Mapped[Optional[str]] = mapped_column(String(36))
 
 
+class AppError(Base):
+    """Ошибка системы (D-117): необработанная ошибка сервера или страницы в браузере. Одна запись на «отпечаток»
+    (где + тип + место в коде), повторы — счётчик. Без тел запросов, содержимого файлов и персональных данных."""
+    __tablename__ = "app_errors"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    source: Mapped[str] = mapped_column(String(16))                 # server | browser
+    kind: Mapped[str] = mapped_column(String(120))                  # тип ошибки (ValueError, TypeError…)
+    message: Mapped[str] = mapped_column(Text, default="")
+    where: Mapped[str] = mapped_column(String(300), default="")     # метод и путь API / адрес страницы без параметров
+    trace: Mapped[str] = mapped_column(Text, default="")            # строки кода приложения, без значений переменных
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    users: Mapped[list] = mapped_column(JSONType, default=list)     # последние 10 сотрудников, у кого случилась
+    last_request_id: Mapped[str] = mapped_column(String(64), default="")
+    release: Mapped[str] = mapped_column(String(40), default="")
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    resolved_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+
 class SecurityAlert(Base):
     """Предупреждение безопасности (02 «security_alerts», 04 §7.3): одна открытая запись на правило и сотрудника, повторы — счётчик.
     Без закрытого содержимого: только сводка, обезличенные детали и ссылка на последнее событие."""

@@ -68,6 +68,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - run: cd frontend && npm install && npm run build
+      - name: храповик стилей (D-117) — встроенных стилей и цветов вне палитры не больше, чем было
+        run: python3 scripts/ci/style_budget.py
       - name: без системных окон браузера (D-108) — только askConfirm / askPrompt / askAlert
         run: |
           if grep -rnP "(?<![\w.])(window\.)?(confirm|prompt|alert)\(" frontend/src --include=*.ts --include=*.tsx | grep -v "function confirm(" | grep -v "components/Dialogs.tsx"; then

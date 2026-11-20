@@ -8,12 +8,12 @@ from datetime import date
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from pydantic import BaseModel
-from sqlalchemy import select
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import adapters
-from ..core.auth import CurrentUser, require_roles
+from ..core.auth import CurrentUser, get_current_user, require_roles
 from ..core.roles import ROLE_TITLES, Role
 from ..db import get_db
 from ..models import AuditLog, FxRate, HsCode, IntegrationLog, Template, User
@@ -651,3 +651,59 @@ def access_preview(role: Optional[str] = None, user_id: Optional[str] = None, db
         raise HTTPException(422, "Укажите роль или сотрудника")
     return {"who": who, "perms": [{"group": g, "title": FIELD_GROUPS[g][0], "level": lvl, "level_title": LEVEL_TITLES[lvl]} for g, lvl in perms.items()],
             "denied_fields": sorted(denied_fields_for(perms))}
+
+
+# ---------------- D-117: ошибки системы (сервер и страницы в браузере)
+class ClientErrorIn(BaseModel):
+    kind: str = Field(default="Error", max_length=120)
+    message: str = Field(default="", max_length=2000)
+    stack: str = Field(default="", max_length=8000)
+    url: str = Field(default="", max_length=500)
+    release: str = Field(default="", max_length=40)
+
+
+@router.post("/client-errors", status_code=204)
+def client_error(body: ClientErrorIn, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Ошибка страницы из браузера (frontend/src/errorReporter.ts). Не больше 30 сообщений с одного сотрудника за 10 минут."""
+    from ..services import app_errors
+    from ..services.security_events import request_id
+    if not app_errors.allow(user.id):
+        return
+    app_errors.record(db, source="browser", kind=body.kind, message=body.message, where=body.url, trace=app_errors.browser_frames(body.stack),
+                      user_id=user.id, request_id=request_id(request), release=body.release)
+    db.commit()
+
+
+def _errors_viewer(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if not user.can("security_audit", 1):
+        raise HTTPException(403, "Ошибки системы видят администратор и ЗГД")
+    return user
+
+
+@router.get("/app-errors")
+def app_errors_list(status: str = "open", db: Session = Depends(get_db), user: CurrentUser = Depends(_errors_viewer)):
+    """Ошибки системы: открытые (по умолчанию) или исправленные, свежие сверху."""
+    from ..models import AppError
+    q = select(AppError).order_by(AppError.last_seen.desc()).limit(300)
+    q = q.where(AppError.resolved_at.is_(None)) if status == "open" else q.where(AppError.resolved_at.is_not(None))
+    names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    rows = db.scalars(q).all()
+    return {"rows": [{"id": e.id, "source": e.source, "kind": e.kind, "message": e.message, "where": e.where, "trace": e.trace, "count": e.count,
+                      "users": [names.get(u, "—") for u in (e.users or [])], "request_id": e.last_request_id, "release": e.release,
+                      "first_seen": e.first_seen.isoformat() if e.first_seen else None, "last_seen": e.last_seen.isoformat() if e.last_seen else None,
+                      "resolved_at": e.resolved_at.isoformat() if e.resolved_at else None, "resolved_by": names.get(e.resolved_by or "", "")} for e in rows],
+            "open": db.scalar(select(func.count()).select_from(AppError).where(AppError.resolved_at.is_(None))) or 0}
+
+
+@router.post("/app-errors/{error_id}/resolve")
+def app_error_resolve(error_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_errors_viewer)):
+    """«Исправлено»: запись уходит в исправленные; если ошибка повторится — откроется снова и придёт уведомление."""
+    from datetime import datetime, timezone
+    from ..models import AppError
+    e = db.get(AppError, error_id)
+    if not e:
+        raise HTTPException(404)
+    e.resolved_at = datetime.now(timezone.utc)
+    e.resolved_by = user.id
+    db.commit()
+    return {"ok": True}
