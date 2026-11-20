@@ -100,7 +100,8 @@ def calc(deal_id: str, pos_id: str, body: ServiceCalcIn, db: Session = Depends(g
         if cat:
             cat.maintenance_regulations = [r.model_dump() for r in body.regulations]
             cat.default_hours_per_month = inp.hours_per_month
-    deal.service_head_id = deal.service_head_id or user.id
+    if Role.SERVICE_HEAD in user.roles:     # исполнитель сервиса — руководитель сервиса, а не ЗГД, заполнивший блок за него
+        deal.service_head_id = deal.service_head_id or user.id
     audit(db, user.id, deal.id, "position", pos.id, "service_calc", after={"total_rub_part": res.total_rub_part, "total_fx_part": res.total_fx_part.model_dump()})
     db.commit()
     return res.model_dump(mode="json")

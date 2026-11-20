@@ -47,7 +47,11 @@ def _assignee(db: Session, deal: Deal, spec: TaskSpec) -> str | None:
     if spec.assignee_hint:
         return spec.assignee_hint
     if spec.role in by_role and by_role[spec.role]:
-        return by_role[spec.role]
+        u = db.get(User, by_role[spec.role])
+        # исполнитель сделки — только если он активен и у него эта роль (иначе задача уходила, например, ЗГД, заполнившему
+        # логистику за логиста, или отключённому сотруднику, и логист её не видел)
+        if u is not None and u.is_active and spec.role.value in (u.roles or []):
+            return u.id
     # первый активный пользователь с ролью (в проде — правило назначения в настройках)
     for u in db.scalars(select(User).where(User.is_active.is_(True))).all():
         if spec.role.value in (u.roles or []):
@@ -251,3 +255,32 @@ def create_version(db: Session, deal: Deal, reason: str, user_id: str | None, ca
         audit(db, user_id, deal.id, "version", ver.id, "excel_failed", comment=str(e)[:500])
     audit(db, user_id, deal.id, "version", ver.id, "create", after={"version_no": ver.version_no, "reason": reason})
     return ver
+
+
+def repair_task_assignees(db: Session) -> int:
+    """Разово после старта: открытые задачи логиста / сервиса / менеджера, назначенные сотруднику без этой роли или отключённому
+    (например, ЗГД, заполнившему логистику за логиста), передаются сотруднику с ролью — с уведомлением. Повтор ничего не меняет."""
+    from ..core.roles import Role
+    users = {u.id: u for u in db.scalars(select(User)).all()}
+    fixed = 0
+    for deal in db.scalars(select(Deal).where(Deal.deleted_at.is_(None))).all():
+        for attr, role in (("logistician_id", Role.LOGISTICIAN), ("service_head_id", Role.SERVICE_HEAD)):
+            u = users.get(getattr(deal, attr))
+            if u is not None and (not u.is_active or role.value not in (u.roles or [])):
+                setattr(deal, attr, None)
+    for t in db.scalars(select(Task).where(Task.done_at.is_(None), Task.role.in_(("logistician", "service_head", "manager")))).all():
+        u = users.get(t.assignee_id)
+        if u is not None and u.is_active and t.role in (u.roles or []):
+            continue
+        deal = db.get(Deal, t.deal_id)
+        if deal is None:
+            continue
+        new = _assignee(db, deal, TaskSpec(Role(t.role), t.title, t.due, t.block))
+        if new and new != t.assignee_id:
+            before = t.assignee_id
+            t.assignee_id = new
+            audit(db, None, deal.id, "task", t.id, "reassign", {"assignee_id": before}, {"assignee_id": new}, "Исполнитель без роли задачи — передано сотруднику с ролью")
+            notify_new_task(db, t)
+            fixed += 1
+    db.commit()
+    return fixed

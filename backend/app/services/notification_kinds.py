@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import event, inspect, update
 from sqlalchemy.orm import Session
@@ -35,6 +35,12 @@ def close_stage_notices(db: Session, deal_id: str) -> None:
                                              NotificationLog.event.in_(STAGE_EVENTS)).values(read_at=datetime.now(timezone.utc)))
 
 
+def _same_moment(a, b) -> bool:
+    if a is None or b is None:
+        return True
+    return abs((a - b).total_seconds()) <= 2
+
+
 def close_done_task_notices(db: Session) -> int:
     """Уведомления о задачах, которые уже выполнены (в том числе до D-101), — прочитаны. Ежечасно, повторный запуск ничего не меняет."""
     from sqlalchemy import select
@@ -47,7 +53,8 @@ def close_done_task_notices(db: Session) -> int:
     n = 0
     now = datetime.now(timezone.utc)
     for r in rows:
-        hit = [t for t in done if t.deal_id == r.deal_id and t.title and t.title[:200] in r.text]
+        # уведомление о задаче создаётся в той же транзакции, что и задача: сверяем и название, и время
+        hit = [t for t in done if t.deal_id == r.deal_id and t.title and t.title[:200] in r.text and _same_moment(t.created_at, r.at)]
         # та же формулировка у ещё открытой задачи — не трогаем (повторная задача с тем же названием)
         if hit and not any(d == r.deal_id and ti and ti[:200] in r.text for d, ti in open_titles):
             r.read_at = now
@@ -63,10 +70,13 @@ def _close_task_notices(session: Session, flush_context, instances) -> None:   #
         if isinstance(obj, Task) and obj.done_at is not None and obj.deal_id:
             hist = inspect(obj).attrs.done_at.history
             if hist.has_changes() and not any(v is not None for v in hist.deleted):
-                done.append((obj.deal_id, obj.title))
-    for deal_id, title in done:
+                done.append((obj.deal_id, obj.title, obj.created_at))
+    for deal_id, title, created in done:
         if not title:
             continue
-        session.execute(update(NotificationLog).where(
+        q = update(NotificationLog).where(
             NotificationLog.deal_id == deal_id, NotificationLog.channel == "app", NotificationLog.read_at.is_(None),
-            NotificationLog.event.in_(TASK_EVENTS), NotificationLog.text.contains(title[:200], autoescape=True)).values(read_at=datetime.now(timezone.utc)))
+            NotificationLog.event.in_(TASK_EVENTS), NotificationLog.text.contains(title[:200], autoescape=True))
+        if created is not None:   # только уведомления этой задачи, а не другой открытой задачи с тем же названием
+            q = q.where(NotificationLog.at >= created - timedelta(seconds=2), NotificationLog.at <= created + timedelta(seconds=2))
+        session.execute(q.values(read_at=datetime.now(timezone.utc)))

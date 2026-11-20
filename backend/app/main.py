@@ -158,6 +158,11 @@ async def _daily_jobs() -> None:
                     fixed = repair_existing(db)
                 if fixed:
                     log.info("contract price repair: %s offers", fixed)
+                from .services.deal_service import repair_task_assignees
+                with SessionLocal() as db:
+                    moved = repair_task_assignees(db)
+                if moved:
+                    log.info("task assignee repair: %s tasks", moved)
             except Exception as e:   # pragma: no cover
                 log.warning("contract price repair failed: %s", e)
         asyncio.create_task(_scanner_check(0 if _first_done else SCANNER_START_GRACE_S))   # D-068: после старта — через 10 мин

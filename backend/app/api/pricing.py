@@ -531,6 +531,7 @@ def rework(deal_id: str, body: ReworkIn, db: Session = Depends(get_db), user: Cu
         deal.service_done = False
     for a in db.scalars(select(Approval).where(Approval.deal_id == deal.id, Approval.reset_at.is_(None))).all():
         a.reset_at = datetime.now(timezone.utc)
+    complete_tasks(db, deal, block=body.block)     # прежняя доработка того же блока заменяется новой (без дублей задач)
     create_version(db, deal, "rework", user.id)
     apply_transition(db, deal, tr, user.id)
     if item is not None:   # код причины — для отчёта «Возвраты на доработку»
