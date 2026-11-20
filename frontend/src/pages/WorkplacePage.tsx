@@ -359,6 +359,13 @@ export default function WorkplacePage({ me }: { me: Me }) {
         : dl0 ? { label: <b>{dl0.title}</b>, sub: `${dShort(dl0.on)} · ${dl0.sub}`, to: dl0.url, tone: dl0.tone } : null,
       links: [{ label: "Все данные направления", to: "/?w=tasks" }, { label: "Мои задачи", to: "/tasks" }] });
   }
+  {   // D-116: одна и та же сделка не показывается и в «Сделках», и в «Задачах» — в «Сделках» берётся следующая
+    const [de, te] = mainEntries;
+    if (de?.top && te?.top && de.top.to.split("?")[0] === te.top.to.split("?")[0]) {
+      const other = (on("deals") ? d.deals : []).find((r) => (r.url || `/deals/${r.id}`).split("?")[0] !== te.top!.to.split("?")[0]);
+      de.top = other ? { label: <b>{other.number} · {other.client_name}</b>, sub: other.action || other.status_title, to: other.url || `/deals/${other.id}`, tone: other.tone } : null;
+    }
+  }
   if (on("attention") || on("notifications") || on("briefing") || on("focus")) {
     const unread = d.notifications.filter((n) => !n.read).length;
     const att0 = on("attention") ? d.attention[0] : undefined;
@@ -391,9 +398,6 @@ export default function WorkplacePage({ me }: { me: Me }) {
       links: [{ label: "Все юридические показатели", to: "/?w=legal" }] });
   }
   // остальные направления по ролям — те же правила видимости, что и в меню
-  if (has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager")) entries.push({ key: "summary", title: "Сводка", to: "/summary", hint: "сводные реестры и графики по сделкам — виды по вашей роли" });
-  entries.push({ key: "catalog", title: "Каталог", to: "/catalog", hint: "оборудование ГШО, запчасти, комплекты ТО, склады, ТН ВЭД, маршруты" });
-  if (has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head")) entries.push({ key: "supply", title: "Снабжение и склад", to: "/supply", hint: "заказы поставщикам, партии, склад, гарантия, отчёты" });
   if (perm("finance_section") && !entries.some((e) => e.key === "money")) entries.push({ key: "finance", title: "Финансы", to: "/finance", hint: "обзор, платёжный календарь, дебиторка и кредиторка, ликвидность" });
 
   // вход без видимых данных (блоки направления скрыты в настройках) — с пояснением, что внутри

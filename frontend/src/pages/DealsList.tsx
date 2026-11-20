@@ -356,7 +356,8 @@ export default function DealsList({ me }: { me: Me }) {
               <div className="muted" style={{ fontSize: 12 }}>{t}</div></div>))}
         </div>
       </div>
-      {block === "work" && <div className="row" style={{ gap: 6, margin: "0 0 8px", alignItems: "center", flexWrap: "wrap" }}>
+      <div className="row" style={{ gap: "6px 18px", margin: "0 0 8px", alignItems: "center", flexWrap: "wrap" }}>
+      {block === "work" && <div className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <span className="muted">Порядок:</span>
         <div className="seg" role="group" aria-label="Порядок">
         {([["task", "по сроку моих задач"], ["prio_task", "по приоритету и сроку"], ["kp_due", "по сроку КП"], ["date", "по дате заявки"]] as const).map(([k, t]) => (
@@ -364,7 +365,7 @@ export default function DealsList({ me }: { me: Me }) {
             onClick={() => { const n = { key: k as SortKey, dir: (k === "date" ? -1 : 1) as 1 | -1 }; setSort(n); save("gsho.dealsSort2", n); }}>{t}</button>))}
         </div>
       </div>}
-      {uiMode !== "classic" && <div className="row" style={{ gap: 8, margin: "0 0 8px", alignItems: "center", flexWrap: "wrap" }}>
+      {uiMode !== "classic" && <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <span className="muted">Колонки:</span>
         <div className="seg" role="group" aria-label="Набор колонок">
           <button type="button" className={!allCols ? "on" : ""} aria-pressed={!allCols} onClick={() => { setWantAll(false); save("gsho.dealsAllCols", false); }}>Основные</button>
@@ -372,6 +373,7 @@ export default function DealsList({ me }: { me: Me }) {
         </div>
         {!allCols && <span className="muted" style={{ fontSize: 12 }}>скрыты: {block === "won" ? `количество, контракт, ${fin ? "сумма, " : ""}менеджер` : `количество, менеджер, ${fin && block !== "work" ? "сумма, " : ""}версия`}</span>}
       </div>}
+      </div>
       <div className="card" style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ minWidth: allCols ? 900 : 720 }}>
           {block === "won" ? (

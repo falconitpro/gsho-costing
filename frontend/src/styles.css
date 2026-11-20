@@ -899,3 +899,8 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .lb-wiz button.on .n { background: var(--ink); color: #fff; }
 .lb-wiz button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
+
+/* шапка сделки (D-116): этапы текущей фазы и «Сейчас» — одним блоком */
+.dh-box { background: #fff; border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; overflow: hidden; }
+.dh-strip { padding: 8px 12px; }
+.dh-now { padding: 7px 12px; border-top: 1px solid var(--line); border-left: 4px solid var(--accent); }

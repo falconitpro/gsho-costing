@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Crumbs, EntryGrid, useUiMode, type Entry } from "../components/Levels";
+import { ActionMenu, Crumbs, EntryGrid, useUiMode, type Entry } from "../components/Levels";
 import { toneOf } from "../colors";
 import ChecksPanel from "../components/ChecksPanel";
 import { NowLine, POST_WIN_STATUSES, SaleSummary, StageStrip, dealPhase } from "../components/DealHeader";
@@ -113,7 +113,13 @@ export default function DealCard({ me }: { me: Me }) {
     if (tab === "catalog") api.get<typeof cand>(`/api/deals/${id}/catalog/candidates`).then(setCand);
   }, [tab, id, me.id]);
 
-  if (!deal) return <div className="muted">{err || "Загрузка…"}</div>;
+  if (!deal) return !err ? <div className="muted">Загрузка…</div> : (
+    <div className="card" style={{ maxWidth: 640, margin: "40px auto" }}>
+      <h2 style={{ marginTop: 0 }}>Сделка недоступна</h2>
+      <p>Сделки с таким адресом нет, она удалена или закрыта для вашей роли. Менеджер видит свои сделки; логист и сервис — сделки, переданные им на расчёт.</p>
+      <p className="muted" style={{ fontSize: 13 }}>Если сделка нужна для работы — попросите КД или ЗГД назначить вас или выдать доступ («Настройки → Уровни доступа»). Ответ сервера: {err}</p>
+      <div className="row" style={{ gap: 8 }}><button className="btn" onClick={() => nav("/deals")}>К списку сделок</button><button className="btn ghost" onClick={() => nav("/")}>На рабочее место</button></div>
+    </div>);
   const isOwner = has("gd") || (has("manager", "cd") && deal.manager_id === me.id);
   const editable = isOwner && ["draft", "rework", "approved", "kp_sent"].includes(deal.status);
   const canTech = (isOwner || has("cd")) && can(me, "tech_params", 2) && !POST_WIN.includes(deal.status);
@@ -190,7 +196,11 @@ export default function DealCard({ me }: { me: Me }) {
     if (t === "pricing") stats.push({ value: deal.current_version_no, label: "версия расчёта" });
     if (t === "execution" && deal.contract_number) stats.push({ value: deal.contract_number, label: "контракт с клиентом" });
     if (t === "execution" && deal.factory_contract_number) stats.push({ value: deal.factory_contract_number, label: "контракт с заводом" });
-    return { key: t, title: TAB_TITLES[t], to: `/deals/${deal.id}?tab=${t}`, hint: TAB_HINTS[t], stats,
+    // D-116: обзор показывает состояние, а не только описание раздела — где сейчас работа по сделке и чей ход
+    const nt = deal.now?.task, nb = nt?.block || "";
+    const nowTab: Tab | null = !nt ? null : nb.startsWith("stage:") || nb === "contract" ? "execution" : nb === "logistics" ? "logistics" : nb === "service" ? "service" : ["pricing", "visa", "gd", "kp"].includes(nb) ? "pricing" : "main";
+    const here = nowTab === t && nt ? { label: <b>Сейчас: {nt.title}</b>, sub: `${nt.who} · срок ${fmtDate(nt.due)}${nt.overdue_days > 0 ? ` · просрочено ${nt.overdue_days} дн.` : ""}`, to: `/deals/${deal.id}?tab=${t}`, tone: nt.overdue_days > 0 ? "bad" : "info" } : null;
+    return { key: t, title: TAB_TITLES[t], to: `/deals/${deal.id}?tab=${t}`, hint: here ? undefined : TAB_HINTS[t], stats, top: here,
       attention: miss.length ? `не заполнено: ${miss.reduce((a, x) => a + x.fields.length + x.tech.length, 0)}` : undefined };
   };
   return (
@@ -223,25 +233,19 @@ export default function DealCard({ me }: { me: Me }) {
           {has("cd", "gd") && !deal.archived_at && (has("gd") || !["contract", "execution", "closed"].includes(deal.status)) && (
             <button className="btn secondary" onClick={removeOrArchive} title={deal.status === "draft" ? "удалить черновик сделки (КД, ЗГД)" : "удалить можно только черновик — сделка в другом статусе переносится в архив"}>
               {deal.status === "draft" ? "Удалить сделку" : "В архив"}</button>)}
-          <div className="row" style={{ gap: 8, marginLeft: 6 }}>
+          <div className="row" style={{ gap: 8, marginLeft: 6, alignItems: "center" }}>
+            <ActionMenu label="Связано" onPick={(u) => nav(u)} items={[
+              ...(deal.client_id ? [{ title: `Клиент ${deal.client_name}`, url: `/legal?tab=counterparties&type=clients&client=${deal.client_id}` }] : []),
+              ...(can(me, "finance_section") ? [{ title: "Финансы по сделке", url: `/finance?tab=calendar&deal_id=${deal.id}` }] : []),
+              ...(can(me, "legal_docs") ? [POST_WIN_STATUSES.includes(deal.status) ? { title: "Договоры и юридические документы", url: `/deals/${deal.id}?tab=legal` } : { title: "Документы клиента и юридические", url: `/deals/${deal.id}?tab=documents` }] : []),
+              { title: "Реестр договоров", url: "/legal?tab=contracts" }, { title: "Мои задачи", url: "/tasks" }]} />
             <a href="#" style={{ fontSize: 12, fontWeight: tab === "feed" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("feed"); }}>Лента</a>
             <a href="#" style={{ fontSize: 12, fontWeight: tab === "versions" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("versions"); }}>Версии и файлы</a>
             {phase === "sale" && can(me, "legal_docs") && <a href="#" style={{ fontSize: 12, fontWeight: tab === "documents" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("documents"); }}>Документы</a>}
           </div>
         </div>
       </div>
-      {/* межмодульные переходы — явно в объекте сделки (клиент, финансы, договоры), с учётом прав */}
-      <div className="lv-views" style={{ margin: "6px 0 0" }} aria-label="Связанные разделы">
-        <span className="muted">Связано:</span>
-        {deal.client_id && <Link to={`/legal?tab=counterparties&type=clients&client=${deal.client_id}`}>клиент {deal.client_name}</Link>}
-        {can(me, "finance_section") && <Link to={`/finance?tab=calendar&deal_id=${deal.id}`}>финансы по сделке</Link>}
-        {can(me, "legal_docs") && (POST_WIN_STATUSES.includes(deal.status)
-          ? <Link to={`/deals/${deal.id}?tab=legal`}>договоры и юридические документы</Link>
-          : <Link to={`/deals/${deal.id}?tab=documents`}>документы клиента и юридические</Link>)}
-        <Link to="/legal?tab=contracts">реестр договоров</Link>
-        <Link to="/tasks">мои задачи</Link>
-      </div>
-      <div style={{ display: "grid", gap: 8, margin: "8px 0" }}>
+      <div className="dh-box">
         <StageStrip deal={deal} now={deal.now} />
         <NowLine now={deal.now} onGo={(block) => {
           if (block.startsWith("stage:")) setTab("execution");
