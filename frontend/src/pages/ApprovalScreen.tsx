@@ -22,13 +22,22 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [tab, setTab] = useState<"cost" | "money" | "kp">("cost");   // D-098: три подвкладки вместо семи
-  const [rework, setRework] = useState({ block: "logistics", reason: "" });
+  const [rework, setRework] = useState({ block: "logistics", reason: "", reason_code: "", comment: "" });
+  // D-100: причина возврата — из справочника («Настройки → Ставки и нормативы → Возвраты на доработку»), комментарий — по желанию
+  const [reasons, setReasons] = useState<{ code: string; title: string; block: string }[] | null>(null);
   const [visaComment, setVisaComment] = useState("");
   const [insistComment, setInsistComment] = useState("");
   const isCD = me.roles.some((r) => r.code === "cd" || r.code === "gd");
   const canTerms = can(me, "payment_terms", 2);
   const isFD = me.roles.some((r) => r.code === "fd");
   const isGD = me.roles.some((r) => r.code === "gd");
+  useEffect(() => { if (isCD || isFD) api.get<{ items: { code: string; title: string; block: string }[] }>("/api/rework-reasons").then((r) => setReasons(r.items)).catch(() => setReasons(null)); }, [isCD, isFD]);
+  const blockAllowed = (b: string) => b === "logistics" || b === "pricing" || b === "gd" || (b === "manager" && isCD) || (b === "service" && !!deal.service_flag);
+  const pickReason = (code: string) => {
+    const r = reasons?.find((x) => x.code === code);
+    setRework({ ...rework, reason_code: code, block: r && r.block && blockAllowed(r.block) ? r.block : rework.block });
+  };
+  const reworkReady = reasons ? !!rework.reason_code && (rework.reason_code !== "other" || !!rework.comment.trim()) : !!rework.reason.trim();
 
   const [repDate, setRepDate] = useState(deal.report_date || "");
   async function saveReportDate(v: string | null) {
@@ -354,8 +363,16 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                   {isCD && <option value="manager">менеджер</option>}<option value="logistics">логист</option>{deal.service_flag && <option value="service">сервис</option>}
                   <option value="pricing">КД (цена и условия)</option><option value="gd">ЗГД</option>
                 </select>
-                <input placeholder="причина возврата (обязательно)" value={rework.reason} onChange={(e) => setRework({ ...rework, reason: e.target.value })} style={{ width: 320 }} />
-                <button className="btn ghost" disabled={busy || !rework.reason} onClick={() => act(`/api/deals/${deal.id}/rework`, rework)}>Вернуть на доработку</button>
+                {reasons ? <>
+                  <select value={rework.reason_code} onChange={(e) => pickReason(e.target.value)} aria-label="Причина возврата" style={{ maxWidth: 380 }}>
+                    <option value="">причина возврата (обязательно)…</option>
+                    {[...reasons].sort((a, b) => Number(b.block === rework.block) - Number(a.block === rework.block)).map((r) => <option key={r.code} value={r.code}>{r.title}</option>)}
+                  </select>
+                  <input placeholder={rework.reason_code === "other" ? "что не так (обязательно)" : "уточнение (по желанию)"} value={rework.comment}
+                    onChange={(e) => setRework({ ...rework, comment: e.target.value })} style={{ width: 260 }} />
+                </> : <input placeholder="причина возврата (обязательно)" value={rework.reason} onChange={(e) => setRework({ ...rework, reason: e.target.value })} style={{ width: 320 }} />}
+                <button className="btn ghost" disabled={busy || !reworkReady}
+                  onClick={() => act(`/api/deals/${deal.id}/rework`, reasons ? { block: rework.block, reason_code: rework.reason_code, comment: rework.comment } : { block: rework.block, reason: rework.reason })}>Вернуть на доработку</button>
               </div>
             )}
             {((isFD && deal.status === "fd_visa") || (isGD && deal.status === "gd_visa")) && (

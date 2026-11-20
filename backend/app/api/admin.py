@@ -26,7 +26,7 @@ ADMIN = require_roles(Role.ADMIN, Role.GD)
 FD_ADMIN = require_roles(Role.ADMIN, Role.FD, Role.GD)
 SETTINGS_READ = require_roles(Role.ADMIN, Role.FD, Role.GD, Role.CD)
 # ключи, которые меняет КД (и ЗГД): комиссии внешняя и менеджера
-CD_KEYS = {"external_commission_pct", "manager_commission_pct", "door_to_door_border_pct"}
+CD_KEYS = {"rework_reasons", "external_commission_pct", "manager_commission_pct", "door_to_door_border_pct"}
 
 # ключи, которые может менять ФД (ставки стоимости денег, порог маржи, ΔK/Δt, лимиты)
 FD_KEYS = {"margin_threshold_pct", "margin_threshold_scale", "scenario_dk", "scenario_dt", "use_historical_volatility", "vol_multipliers", "fx_weights",
@@ -72,6 +72,12 @@ def set_setting(key: str, body: SettingIn, db: Session = Depends(get_db), user: 
     if key == "request_required_fields":   # D-069: только известные поля; обязательное при создании — и перед расчётом
         from ..services import request_fields as rf
         body.value = rf.normalize(body.value)
+    if key == "rework_reasons":   # D-100: код — уникальный, латиница; «other» всегда есть
+        from ..services.rework_reasons import normalize
+        try:
+            body.value = normalize(body.value)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
     if key == "margin_threshold_scale":   # D-067: ступени по цене сделки, «свыше» (пустое «до») — последней
         try:
             rows = [{"up_to_rub": None if r.get("up_to_rub") in (None, "") else float(r["up_to_rub"]), "pct": float(r["pct"])}
