@@ -120,8 +120,10 @@ export default function LogistRequests({ dealId, ws, reload, onApplyChosen }: { 
     api.put(`/api/deals/${dealId}/logistics/services`, { services: next }).then(reload).catch(bad);
   };
   const recipients = [...to, ...extra.split(/[,;\s]+/).filter((x) => x.includes("@"))];
-  const send = (manual: boolean) => api.post(`/api/deals/${dealId}/logistics/request/send`, { emails: recipients, message: text, answer_days: days, manual })
-    .then(() => { ok(manual ? "Отправка отмечена в сделке." : `Запрос отправлен: ${recipients.join(", ")}`); setTo([]); setExtra(""); reload(); }).catch(bad);
+  const [links, setLinks] = useState<{ email: string; url: string; expires: string }[]>([]);
+  const send = (manual: boolean) => api.post<{ links?: { email: string; url: string; expires: string }[] }>(`/api/deals/${dealId}/logistics/request/send`, { emails: recipients, message: text, answer_days: days, manual })
+    .then((r) => { ok(manual ? "Запрос записан в сделке. Вставьте каждой компании её ссылку для ответа в письмо." : `Запрос отправлен: ${recipients.join(", ")}. В каждом письме — своя ссылка для ответа.`);
+      setLinks(manual ? r.links || [] : []); setTo([]); setExtra(""); reload(); }).catch(bad);
   const saveCarrier = () => { if (!carrierForm) return; api.put("/api/refs/logistics-carriers", [...ws.carriers, carrierForm]).then(() => { setCarrierForm(null); reload(); }).catch(bad); };
   async function addQuote() {
     const fd = new FormData();
@@ -178,9 +180,14 @@ export default function LogistRequests({ dealId, ws, reload, onApplyChosen }: { 
           <textarea placeholder="текст письма (необязательно)" value={text} rows={2} onChange={(e) => setText(e.target.value)} style={{ width: "100%", marginTop: 6 }} />
           <div className="row" style={{ gap: 8, marginTop: 6, flexWrap: "wrap" }}>
             <button className="btn" disabled={!ws.mail_enabled || !recipients.length} title={ws.mail_enabled ? "" : "почта не подключена"} onClick={() => send(false)}>✉ Отправить из системы{recipients.length > 1 ? ` (${recipients.length})` : ""}</button>
-            <button className="btn ghost" disabled={!recipients.length} onClick={() => send(true)}>Отмечу: отправлено вручную</button>
+            <button className="btn ghost" disabled={!recipients.length} onClick={() => send(true)} title="запрос записывается в сделку, для каждой компании — ссылка для ответа">Отправлю своей почтой — получить ссылки</button>
           </div>
-          {!ws.mail_enabled && <p className="muted lw-sub">Почта пока не подключена: скачайте Excel или PDF, отправьте своей почтой и отметьте отправку.</p>}
+          {links.length > 0 && <div className="alert info" style={{ marginTop: 6 }}>
+            <b>Ссылки для ответа</b> — каждой компании своя, без регистрации; ответ сам появится в «Ответах» ниже. Действуют до {fmtDate(links[0].expires)}.
+            {links.map((l) => <div key={l.email} className="row" style={{ gap: 6, marginTop: 4, flexWrap: "wrap" }}><span>{l.email}:</span><code style={{ fontSize: 11, wordBreak: "break-all" }}>{l.url}</code>
+              <button className="btn ghost" style={{ padding: "1px 8px" }} onClick={() => navigator.clipboard?.writeText(`Ответить на запрос можно по ссылке: ${l.url}`)}>копировать</button></div>)}
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>Ссылки показываются один раз — скопируйте их сейчас.</div></div>}
+          {!ws.mail_enabled && <p className="muted lw-sub">Почта пока не подключена: скачайте Excel или PDF, нажмите «Отправлю своей почтой — получить ссылки» и отправьте каждой компании письмо с файлом и её ссылкой.</p>}
         </div>}
       </div>
 

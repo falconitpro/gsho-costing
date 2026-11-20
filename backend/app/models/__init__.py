@@ -722,6 +722,25 @@ class KpRevision(Base):
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
+class QuoteLink(Base):
+    """Ссылка для ответа логистической компании на запрос (D-107): без входа в CRM, по одному адресу получателя.
+    В базе — только хэш ссылки; ответ пишется в ответы сделки, повторная отправка по той же ссылке заменяет прежний ответ."""
+    __tablename__ = "quote_links"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    request_id: Mapped[str] = mapped_column(String(36), default="")
+    request_no: Mapped[str] = mapped_column(String(64), default="")
+    email: Mapped[str] = mapped_column(String(255), default="")
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    answered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    quote_ids: Mapped[str] = mapped_column(Text, default="")          # ответы по ссылке (через запятую): по строке на услугу
+    answers: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class FileDownloadRequest(Base):
     """Запрос на скачивание файла сделки, когда скачивание закрыто для роли (D-077); одобрение действует 24 часа."""
     __tablename__ = "file_download_requests"
