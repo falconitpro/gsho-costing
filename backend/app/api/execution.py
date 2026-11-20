@@ -40,15 +40,17 @@ def stages(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     deal = get_deal_or_404(db, deal_id, user)
     if deal.status not in (DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED):
         return {"stages": [], "status": deal.status.value}
-    if not db.scalar(select(ExecutionStage.id).where(ExecutionStage.deal_id == deal.id)):
-        ex.rebuild_stages(db, deal)
+    if not db.scalar(select(ExecutionStage.id).where(ExecutionStage.deal_id == deal.id)) or db.scalar(
+            select(ExecutionStage.id).where(ExecutionStage.deal_id == deal.id, ExecutionStage.code.in_(ex.CLIENT_PAY),
+                                            ExecutionStage.amount_rub_net.is_(None), ExecutionStage.actual_amount.is_(None))):
+        ex.rebuild_stages(db, deal)     # D-120: платежи клиента до перехода на «с НДС в валюте договора» — пересчитать один раз
         db.commit()
     rows = ex.stage_rows(db, deal)
     for r in rows:
         st = db.get(ExecutionStage, r["id"])
         r["can_set"] = st is not None and ex.can_set(user, st)
         if not user.can("cost"):
-            r.pop("amount", None); r.pop("actual_amount", None)
+            r.pop("amount", None); r.pop("actual_amount", None); r.pop("amount_rub_net", None)
     from ..services.finance import legacy
     from ..services.finance.access import can_read as fin_read
     fin_ok = fin_read(user)

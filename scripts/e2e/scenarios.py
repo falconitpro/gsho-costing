@@ -264,7 +264,7 @@ async def s4_rework_qty(browser):
 
 async def s5_bargain_contract(browser):
     """5. Торги −3 % → выигрыш → договор"""
-    scn = "5. Торги −3 % → выигрыш → платежи клиента в договоре"
+    scn = "5. Торги −3 % → выигрыш → платежи клиента в договоре = КП с НДС"
     did, var, pos = new_deal("E2E: торги и договор", [{"model": "E2E-T", "qty": 2, "unit_price": 1500000}])
     logistics(did, pos)
     api(CD, "POST", f"/api/deals/{did}/price", {"variant_id": var["id"], "mode": "margin", "value": 20})
@@ -283,12 +283,17 @@ async def s5_bargain_contract(browser):
     api(MGR, "POST", f"/api/deals/{did}/kp-sent", {"recipients": ["e2e@example.com"]})
     check_true(scn, "выигрыш → договор", api(CD, "POST", f"/api/deals/{did}/outcome", {"outcome": "won", "reason": "e2e"})["status"] == "contract")
     st = api(CD, "GET", f"/api/deals/{did}/execution/stages")
-    pay_in = [s for s in st["stages"] if s.get("kind") == "payment_in" or s["code"].startswith("client_")]
-    amounts = [s.get("amount") for s in pay_in if s.get("amount") is not None]
-    check_true(scn, "в договоре есть платежи клиента с суммами", bool(amounts), json.dumps([(s["code"], s.get("amount")) for s in pay_in], ensure_ascii=False)[:200])
-    if amounts:
-        # этапы «Аванс клиента» / «Окончательная оплата клиента» считаются от цены после торгов, в рублях без НДС (как в расчёте)
-        check(scn, "платежи клиента в договоре = цена после торгов (₽ без НДС)", sum(amounts), m["price_rub"], tol=2)
+    pay_in = [s for s in st["stages"] if s["code"] in ("client_advance", "client_final")]
+    check_true(scn, "в договоре есть аванс и окончательный расчёт клиента", len(pay_in) == 2, ", ".join(s["code"] for s in pay_in))
+    if pay_in:
+        # D-120: платежи клиента — в валюте договора с НДС; справочно — рубли без НДС, как в расчёте
+        check_true(scn, "платежи клиента — в валюте договора, с НДС", all(s["currency"] == m["cur"] and s.get("with_vat") for s in pay_in),
+                   json.dumps([(s["code"], s["currency"], s.get("with_vat")) for s in pay_in], ensure_ascii=False))
+        check(scn, f"платежи клиента = цена после торгов с НДС, {m['cur']}", sum(s["amount"] for s in pay_in), m["price"] * (1 + m["vat"] / 100), tol=2)
+        check(scn, "справочно ₽ без НДС = цена после торгов", sum(s["amount_rub_net"] for s in pay_in), m["price_rub"], tol=2)
+        rows, _ = kp_rows(did)
+        gross_key = next((k for k in rows if k.startswith(f"Итого, {m['cur']} с НДС")), "")
+        check(scn, "платежи клиента = «Итого с НДС» в КП", sum(s["amount"] for s in pay_in), num(rows.get(gross_key, "")), tol=2)
 
 
 SCENARIOS = [s1_single, s2_two_models, s3_usd_rub_input, s4_rework_qty, s5_bargain_contract]
