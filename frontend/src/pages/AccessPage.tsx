@@ -12,7 +12,8 @@ type Matrix = {
 /** Задача 11: уровни доступа как данные — матрица «роль × группа полей», исключения для сотрудников, предпросмотр. Меняют администратор и ЗГД. */
 export default function AccessPage({ me, embedded = false }: { me: Me; embedded?: boolean }) {
   const [m, setM] = useState<Matrix | null>(null);
-  const [tab, setTab] = useState<"roles" | "overrides" | "preview">("roles");
+  const [tab, setTab] = useState<"roles" | "overrides" | "preview" | "history">("roles");
+  const [hist, setHist] = useState<{ at: string | null; by: string; what: string; change: string; comment: string }[] | null>(null);
   const [ov, setOv] = useState({ user_id: "", group: "", level: 1, valid_to: "", comment: "" });
   const [preview, setPreview] = useState<{ who: string; perms: { group: string; title: string; level: number; level_title: string }[]; denied_fields: string[] } | null>(null);
   const [pv, setPv] = useState({ role: "", user_id: "" });
@@ -33,7 +34,14 @@ export default function AccessPage({ me, embedded = false }: { me: Me; embedded?
         <button className={tab === "roles" ? "active" : ""} onClick={() => setTab("roles")}>По ролям</button>
         <button className={tab === "overrides" ? "active" : ""} onClick={() => setTab("overrides")}>Исключения для сотрудников ({m.overrides.length})</button>
         <button className={tab === "preview" ? "active" : ""} onClick={() => setTab("preview")}>Предпросмотр «как видит»</button>
+        <button className={tab === "history" ? "active" : ""} onClick={() => { setTab("history"); api.get<{ rows: NonNullable<typeof hist> }>("/api/admin/access/history").then((r) => setHist(r.rows)).catch((e) => setMsg(e.message)); }}>Журнал изменений</button>
       </div>
+      {tab === "history" && (
+        <div className="card" style={{ overflowX: "auto" }}>
+          {!hist ? <div className="muted">Загрузка…</div> : hist.length === 0 ? <div className="muted">Права ещё не меняли.</div> : (
+            <table><thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Изменение</th><th>Комментарий</th></tr></thead>
+              <tbody>{hist.map((h, i) => <tr key={i}><td style={{ whiteSpace: "nowrap" }}>{h.at ? new Date(h.at).toLocaleString("ru-RU") : "—"}</td><td>{h.by}</td><td>{h.what}</td><td>{h.change}</td><td className="muted">{h.comment}</td></tr>)}</tbody></table>)}
+        </div>)}
       {tab === "roles" && (
         <div className="card" style={{ overflowX: "auto" }}>
           <table>

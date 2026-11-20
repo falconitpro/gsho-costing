@@ -608,6 +608,10 @@ def test_access_levels_admin(client):
     _ok(client.delete(f"/api/admin/access/overrides/{ov['id']}", headers=H(GD)), 204)
     _ok(client.put("/api/admin/access/manager/client_price_history", headers=H(ADM), json={"level": 0}))
     assert _ok(client.get("/api/auth/me", headers=H(MGR)))["perms"]["client_price_history"] == 0
+    # D-114: журнал изменений прав — правило по роли и исключение, кто и что изменил
+    hist = _ok(client.get("/api/admin/access/history", headers=H(GD)))["rows"]
+    assert any("→" in h["change"] and h["by"] for h in hist) and any(h["what"].startswith("исключение") for h in hist)
+    assert client.get("/api/admin/access/history", headers=H(CD)).status_code == 403
 
 
 def test_catalog_add_clients_by_inn_factories_settings(client, tmp_path):
