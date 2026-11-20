@@ -14,6 +14,7 @@ from ..calc.types import (
     ServiceSummary, Thresholds, VariantInput,
 )
 from ..models import Deal, ExecutionStage, FxRate, LocalOption
+from . import offer_prices as _offer_prices  # noqa: F401  (D-109: запись цен предложения при сохранении)
 from . import settings_service
 
 
@@ -114,25 +115,24 @@ def _local_options(rows: list[LocalOption], units: int = 1) -> list[LocalOptionI
 def negotiated(db: Session, deal: Deal) -> dict[str, dict]:
     """Актуальная цена после торгов (D-093): последняя редакция КП утверждённой версии — цена оборудования без услуг,
     добавленных в КП, и условия оплаты последнего шага торгов. Пока торгов не было — пусто (цена версии)."""
-    from ..models import KpRevision, NegotiationStep
+    from ..models import NegotiationStep
     from .contract_price import revisions_apply
     if not deal.approved_version_id or deal.status.value not in ("approved", "kp_sent", "won", "contract", "execution", "closed") \
             or not revisions_apply(deal):     # D-104: после изменения условий контракта цена уже в предложении
         return {}
-    rev = db.scalar(select(KpRevision).where(KpRevision.deal_id == deal.id, KpRevision.version_id == deal.approved_version_id)
-                    .order_by(KpRevision.no.desc()).limit(1))
+    from . import offer_prices
     step = db.scalar(select(NegotiationStep).where(NegotiationStep.deal_id == deal.id, NegotiationStep.version_id == deal.approved_version_id)
                      .order_by(NegotiationStep.no.desc()).limit(1))
     out: dict[str, dict] = {}
-    if rev is not None:
-        from ..api.pricing import revision_totals
-        from ..models import DealVersion
-        ver = db.get(DealVersion, deal.approved_version_id)
-        for vid, t in revision_totals(deal, ver, rev.changes or {}).items():
-            eq = round(t["total"] - sum(a for _, a in t["extras"] if a), 2)
-            first = next((float(v.price_rub) for v in deal.variants if v.id == vid and v.price_rub is not None), None)
-            if first is not None and abs(eq - first) > 0.005:
-                out[vid] = {"price_rub": eq, "first_rub": first, "revision_no": rev.no}
+    for v in deal.variants:          # D-109: цена — из «Цен предложения»: редакция КП без услуг, добавленных в КП
+        if not v.in_kp or v.price_rub is None:
+            continue
+        cur = offer_prices.current(db, deal, v)
+        r, first = cur["revision"], cur["kd_rub"]
+        if r is not None and first is not None:
+            eq = round(float(r.total_rub) - float(r.extras_rub or 0), 2)
+            if abs(eq - first) > 0.005:
+                out[v.id] = {"price_rub": eq, "first_rub": first, "revision_no": r.revision_no}
     for vid, t in ((step.terms or {}) if step is not None else {}).items():
         if (t or {}).get("client_payments"):
             out.setdefault(vid, {})["client_payments"] = t["client_payments"]
@@ -144,20 +144,23 @@ def actual_offer(deal: Deal, v, db: Session | None = None) -> dict:
     """Актуальная цена предложения для клиента (D-093): итог последней редакции КП утверждённой версии (после торгов и
     правок КП), в валюте КП; условия оплаты — последнего шага торгов. Пока редакций нет — цена утверждённой версии."""
     from sqlalchemy.orm import object_session
-    from ..models import KpRevision, NegotiationStep
+    from ..models import NegotiationStep
     out = {"price_rub": v.price_rub, "price_amount": v.price_amount, "currency": (v.price_currency or "RUB").upper(),
            "client_payments": v.client_payments or deal.client_payments, "negotiated": False}
     db = db or object_session(deal)
     from .contract_price import revisions_apply
     if db is None or v is None or v.price_rub is None or not deal.approved_version_id or not revisions_apply(deal):
         return out
-    rev = db.scalar(select(KpRevision).where(KpRevision.deal_id == deal.id, KpRevision.version_id == deal.approved_version_id)
-                    .order_by(KpRevision.no.desc()).limit(1))
-    if rev is not None and (rev.prices or {}).get(v.id) is not None:
-        rub = float(rev.prices[v.id])
+    from . import offer_prices
+    cur = offer_prices.current(db, deal, v)          # D-109: «Цены предложения»
+    if cur["kd_rub"] is not None:
+        out["price_rub"] = cur["kd_rub"]
+    r = cur["revision"]
+    if r is not None:
+        rub = float(r.total_rub)
         rate = float(v.price_fx_rate or 0) if out["currency"] != "RUB" else 1.0
-        out.update(price_rub=round(rub, 2), price_amount=round(rub / rate, 2) if rate else v.price_amount, negotiated=abs(rub - float(v.price_rub)) > 0.005,
-                   revision_no=rev.no)
+        out.update(price_rub=round(rub, 2), price_amount=round(rub / rate, 2) if rate else v.price_amount, negotiated=abs(rub - float(cur["kd_rub"])) > 0.005,
+                   revision_no=r.revision_no)
     step = db.scalar(select(NegotiationStep).where(NegotiationStep.deal_id == deal.id, NegotiationStep.version_id == deal.approved_version_id)
                      .order_by(NegotiationStep.no.desc()).limit(1))
     if step is not None and ((step.terms or {}).get(v.id) or {}).get("client_payments"):
