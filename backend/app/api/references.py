@@ -710,7 +710,7 @@ def approve_factory(factory_id: str, body: DecisionIn, db: Session = Depends(get
     audit(db, user.id, None, "factory", f.id, "approve", None, {"comment": body.comment})
     if f.created_by and f.created_by != user.id:
         from ..services.deal_service import notify
-        notify(db, None, f.created_by, "factory_approval", None, f"Поставщик «{f.short_name or f.name}» утверждён")
+        notify(db, None, f.created_by, "factory_decision", None, f"Поставщик «{f.short_name or f.name}» утверждён")
     db.commit()
     return _factory_out(db, f, user)
 
@@ -728,7 +728,7 @@ def reject_factory(factory_id: str, body: DecisionIn, db: Session = Depends(get_
     audit(db, user.id, None, "factory", f.id, "reject", None, {"comment": body.comment})
     if f.created_by and f.created_by != user.id:
         from ..services.deal_service import notify
-        notify(db, None, f.created_by, "factory_approval", None, f"Поставщик «{f.short_name or f.name}» не утверждён: {body.comment}")
+        notify(db, None, f.created_by, "factory_decision", None, f"Поставщик «{f.short_name or f.name}» не утверждён: {body.comment}")
     db.commit()
     return _factory_out(db, f, user)
 
@@ -767,7 +767,7 @@ def approve_change(change_id: str, body: DecisionIn, db: Session = Depends(get_d
     ch.status, ch.decided_by, ch.decided_at, ch.decision_comment = "approved", user.id, datetime.now(timezone.utc), body.comment
     audit(db, user.id, None, "factory", f.id, "change_approve", ch.before, data)
     if ch.proposed_by and ch.proposed_by != user.id:
-        notify(db, None, ch.proposed_by, "factory_approval", None, f"Изменения поставщика «{f.short_name or f.name}» утверждены")
+        notify(db, None, ch.proposed_by, "factory_decision", None, f"Изменения поставщика «{f.short_name or f.name}» утверждены")
     db.commit()
     return _factory_out(db, f, user)
 
@@ -780,7 +780,7 @@ def reject_change(change_id: str, body: DecisionIn, db: Session = Depends(get_db
     ch.status, ch.decided_by, ch.decided_at, ch.decision_comment = "rejected", user.id, datetime.now(timezone.utc), body.comment
     audit(db, user.id, None, "factory", f.id, "change_reject", None, {"comment": body.comment})
     if ch.proposed_by and ch.proposed_by != user.id:
-        notify(db, None, ch.proposed_by, "factory_approval", None, f"Изменения поставщика «{f.short_name or f.name}» не утверждены: {body.comment}")
+        notify(db, None, ch.proposed_by, "factory_decision", None, f"Изменения поставщика «{f.short_name or f.name}» не утверждены: {body.comment}")
     db.commit()
     return _factory_out(db, f, user)
 

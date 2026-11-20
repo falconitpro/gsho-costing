@@ -12,9 +12,17 @@ from sqlalchemy.orm import Session
 from ..core.auth import CurrentUser, get_current_user
 from ..db import get_db
 from ..models import Deal, NotificationLog
+from ..services.notification_kinds import INFO_EVENTS, is_action
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
-EVENT_TITLES = {"draft_stale": "Черновик без движения", "draft_archive_warn": "Черновик уйдёт в архив", "draft_auto_archived": "Черновик в архиве", "deal_archived": "Архив", "deal_deleted": "Удаление", "task": "Задача", "task_new": "Задача", "task_overdue": "Просрочка", "legal_doc": "Документы", "acceptance": "Приёмка",
+EVENT_TITLES = {"task_overdue_team": "Просрочка в команде", "legal_review": "Юридическая проверка", "legal_doc": "Юридический документ",
+                "factory_approval": "Поставщик на утверждение", "client_address": "Адрес клиента на утверждение", "offers_selected": "Заводы отобраны",
+                "approved": "Утверждено", "contract": "Договор", "claim": "Платёж или претензия", "poa": "Доверенность", "finance_question": "Вопрос по финансам",
+                "file_download_request": "Запрос на скачивание", "file_download_decision": "Скачивание файла", "waiting": "Ожидание клиента",
+                "logistics_choice": "Выбор логистики", "negotiation_below_threshold": "Торги ниже порога", "self_approval": "Самоутверждение цены",
+                "mirror_offer": "Предложение компании группы", "mirror_changed": "Предложение изменилось", "parts_eta": "Срок поставки ЗЧ",
+                "parts_receipt": "Приёмка на склад", "parts_inventory": "Инвентаризация", "parts_margin": "КП по запчастям", "parts_to": "ТО машины",
+                "markup_policy": "Наценки", "user_change": "Карточка сотрудника", "task_new": "Задача", "task_overdue": "Просрочена задача", "factory_decision": "Поставщик", "user_change_decision": "Карточка сотрудника", "visa_required": "Нужна виза", "calc_ready": "Расчёт готов", "won": "Выиграна", "execution": "Исполнение", "draft_stale": "Черновик без движения", "draft_archive_warn": "Черновик уйдёт в архив", "draft_auto_archived": "Черновик в архиве", "deal_archived": "Архив", "deal_deleted": "Удаление", "task": "Задача", "task_new": "Задача", "task_overdue": "Просрочка", "legal_doc": "Документы", "acceptance": "Приёмка",
                 "rework": "Доработка", "approval": "Утверждение", "parts_sla": "Запчасти", "to_reminder": "ТО машины",
                 "backup": "Резервные копии", "security": "Безопасность",
                 "access_review": "Пересмотр прав", "security_alert": "Предупреждение безопасности",
@@ -33,17 +41,27 @@ def _base(db: Session, user: CurrentUser):
 
 @router.get("/unread-count")
 def unread_count(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    n = db.scalar(select(func.count()).select_from(_base(db, user).where(NotificationLog.read_at.is_(None)).subquery()))
-    return {"unread": int(n or 0)}
+    """D-101: на значке — только уведомления, которые требуют действия; сведения считаются отдельно (info) и значок не зажигают."""
+    q = _base(db, user).where(NotificationLog.read_at.is_(None))
+    n = db.scalar(select(func.count()).select_from(q.where(NotificationLog.event.not_in(INFO_EVENTS)).subquery()))
+    info = db.scalar(select(func.count()).select_from(q.where(NotificationLog.event.in_(INFO_EVENTS)).subquery()))
+    return {"unread": int(n or 0), "info": int(info or 0)}
 
 
 @router.get("")
-def list_notifications(limit: int = 50, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    rows = db.scalars(_base(db, user).order_by(NotificationLog.at.desc()).limit(min(limit, 200))).all()
+def list_notifications(limit: int = 50, kind: str = "all", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """kind: action — требуют действия, info — для сведения, all — все (как раньше)."""
+    q = _base(db, user)
+    if kind == "action":
+        q = q.where(NotificationLog.event.not_in(INFO_EVENTS))
+    elif kind == "info":
+        q = q.where(NotificationLog.event.in_(INFO_EVENTS))
+    rows = db.scalars(q.order_by(NotificationLog.at.desc()).limit(min(limit, 200))).all()
+    cnt = unread_count(db, user)
     deals = {d.id: d.number for d in db.scalars(select(Deal).where(Deal.id.in_({r.deal_id for r in rows if r.deal_id}))).all()} if rows else {}
-    return {"unread": sum(1 for r in rows if r.read_at is None),
+    return {"unread": cnt["unread"], "info_unread": cnt["info"],
             "items": [{"id": r.id, "at": r.at.isoformat() if r.at else None, "event": r.event, "event_title": EVENT_TITLES.get(r.event, r.event),
-                       "text": r.text, "deal_id": r.deal_id, "deal_number": deals.get(r.deal_id, ""), "url": r.link or EVENT_ROUTES.get(r.event), "read": r.read_at is not None} for r in rows]}
+                       "text": r.text, "deal_id": r.deal_id, "deal_number": deals.get(r.deal_id, ""), "url": r.link or EVENT_ROUTES.get(r.event), "read": r.read_at is not None, "action": is_action(r.event)} for r in rows]}
 
 
 class ReadIn(BaseModel):
