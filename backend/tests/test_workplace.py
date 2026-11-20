@@ -91,8 +91,8 @@ def test_workplace_todo_feed_drafts_and_default_layout():
         lay = m["layout"]
         assert lay["order"][:2] == ["kpis", "todo"]
         assert {"focus", "tasks", "deadlines", "notifications", "briefing"} <= set(lay["hidden"]) and "todo" not in lay["hidden"] and "deals" not in lay["hidden"]
-        drafts = [x for x in m["todo"] if x["kind"] == "draft"]
-        assert drafts and drafts[0]["when"] == "10 дн. без движения" and "на расчёт или в архив" in drafts[0]["sub"] and drafts[0]["url"] == f"/deals/{did}"
+        drafts = [x for x in m["todo"] if x["kind"] == "draft" and x["url"] == f"/deals/{did}"]   # другие тесты тоже оставляют черновики у менеджера
+        assert drafts and drafts[0]["when"] == "10 дн. без движения" and "на расчёт или в архив" in drafts[0]["sub"]
         # без повторов: одна строка на задачу, задачи с id можно закрыть
         assert all(x["kind"] != "task" or x["task_id"] for x in m["todo"])
         assert len({(x["kind"], x["title"], x["url"]) for x in m["todo"]}) == len(m["todo"])

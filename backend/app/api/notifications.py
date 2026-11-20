@@ -14,7 +14,7 @@ from ..db import get_db
 from ..models import Deal, NotificationLog
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
-EVENT_TITLES = {"task": "Задача", "task_new": "Задача", "task_overdue": "Просрочка", "legal_doc": "Документы", "acceptance": "Приёмка",
+EVENT_TITLES = {"draft_stale": "Черновик без движения", "draft_archive_warn": "Черновик уйдёт в архив", "draft_auto_archived": "Черновик в архиве", "deal_archived": "Архив", "deal_deleted": "Удаление", "task": "Задача", "task_new": "Задача", "task_overdue": "Просрочка", "legal_doc": "Документы", "acceptance": "Приёмка",
                 "rework": "Доработка", "approval": "Утверждение", "parts_sla": "Запчасти", "to_reminder": "ТО машины",
                 "backup": "Резервные копии", "security": "Безопасность",
                 "access_review": "Пересмотр прав", "security_alert": "Предупреждение безопасности",
