@@ -49,6 +49,8 @@ def delete_deal(deal_id: str, body: DeleteIn, db: Session = Depends(get_db), use
     if not reason:
         raise HTTPException(422, "Укажите причину")
     now = datetime.now(timezone.utc)
+    from ..services.notification_kinds import close_stage_notices
+    close_stage_notices(db, deal.id)   # D-101: в архиве или удалена — уведомления этапа больше не ждут действия
     if deal.status != DealStatus.DRAFT:
         if deal.archived_at:
             raise HTTPException(409, "Сделка уже в архиве")
