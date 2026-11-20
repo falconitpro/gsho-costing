@@ -68,6 +68,7 @@ DEFAULTS: dict[str, Any] = {
     "gd_deal_limit_rub": None,
     "price_deviation_pct": 10.0,
     "logistics_deviation_pct": 15.0,
+    "fd_visa_escalation_days": 2,
     "plan_fact_deviation_pct": 10.0,
     "sla_days": {"logistics": 1, "service": 2, "cd": 1, "fd": 1, "gd": 1, "manager_rework": 1},
     "legal_ai": {"provider": "yandexgpt", "model": ""},
@@ -311,6 +312,8 @@ META: dict[str, dict] = {
     "logistics_deviation_pct": {"group": "Контроль отклонений", "title": "Отклонение логистики от истории", "unit": "%", "type": "number",
                                 "help": "Больше — логист обязан написать комментарий."},
     "plan_fact_deviation_pct": {"group": "Контроль отклонений", "title": "Допустимое отклонение план/факт", "unit": "%", "type": "number"},
+    "fd_visa_escalation_days": {"group": "Контроль отклонений", "title": "Виза ФД: передать ЗГД, если нет ответа", "unit": "раб. дн.", "type": "number",
+                                "help": "ФД не завизировал и не отказал за это число рабочих дней — виза переходит ЗГД (D-112). 0 — не передавать."},
     # Сроки
     "contract_penalty_defaults": {"group": "Юридический блок", "title": "Типовые неустойки для новых договоров", "type": "json",
                                   "help": "По умолчанию: просрочка поставки 0,1 % в день, не более 5 %; просрочка оплаты 0,1 % в день; общая ответственность до 10 % цены. Меняет ЗГД."},

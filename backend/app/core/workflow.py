@@ -316,6 +316,19 @@ def visa_decision(state: DealState, by: Role, approved: bool, flags: dict[str, b
     return approve(state, today, sla, by=by)
 
 
+def fd_visa_timeout(state: DealState, days: int, today: date, ladder: list[ApprovalStep] = DEFAULT_APPROVAL_LADDER) -> TransitionResult:
+    """D-112: ФД не ответил на визу за N рабочих дней → виза ЗГД (решение ЗГД — окончательное)."""
+    if state.status != DealStatus.FD_VISA:
+        raise WorkflowError("Сделка не на визе ФД.")
+    step = next((s for s in ladder if s.role == Role.GD), None)
+    if step is None:
+        raise WorkflowError("В ступенях визации нет ступени ЗГД.")
+    res = TransitionResult(status=step.status, audit=f"ФД не ответил за {days} раб. дн. — виза передана ЗГД")
+    res.tasks.append(TaskSpec(Role.GD, f"Виза: ЗГД (ФД не ответил за {days} раб. дн.)", add_business_days(today, step.sla_days), "visa"))
+    res.notifications.append(Notification("visa_required", [Role.GD], ["outlook", "wecom"], f"Требуется виза ЗГД: ФД не ответил за {days} раб. дн."))
+    return res
+
+
 def cd_insists_after_fd(state: DealState, today: date, sla: SlaDefaults,
                         ladder: list[ApprovalStep] = DEFAULT_APPROVAL_LADDER) -> TransitionResult:
     """ФД отказал (сделка на доработке у КД), КД настаивает на цене → виза ЗГД (условие fd_declined)."""

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..models import NotificationLog, Task
 
-INFO_EVENTS = frozenset({
+INFO_EVENTS = frozenset({"visa_escalated", 
     "approved", "won", "execution", "offers_selected", "deal_archived", "deal_deleted", "draft_auto_archived", "legal_doc",
     "mirror_offer", "mirror_changed", "parts_eta", "parts_receipt", "parts_margin", "markup_policy", "file_download_decision",
     "support_resolved", "security", "factory_decision", "user_change_decision", "test", "task_overdue_team",

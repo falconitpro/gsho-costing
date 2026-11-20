@@ -29,8 +29,8 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   const [insistComment, setInsistComment] = useState("");
   const isCD = me.roles.some((r) => r.code === "cd" || r.code === "gd");
   const canTerms = can(me, "payment_terms", 2);
-  const isFD = me.roles.some((r) => r.code === "fd");
-  const isGD = me.roles.some((r) => r.code === "gd");
+  const isFD = me.roles.some((r) => r.code === "fd") || !!me.acting_roles?.includes("fd");     // D-112: заместитель ФД визирует за него
+  const isGD = me.roles.some((r) => r.code === "gd") || !!me.acting_roles?.includes("gd");
   useEffect(() => { if (isCD || isFD) api.get<{ items: { code: string; title: string; block: string }[] }>("/api/rework-reasons").then((r) => setReasons(r.items)).catch(() => setReasons(null)); }, [isCD, isFD]);
   const blockAllowed = (b: string) => b === "logistics" || b === "pricing" || b === "gd" || (b === "manager" && isCD) || (b === "service" && !!deal.service_flag);
   const pickReason = (code: string) => {

@@ -429,11 +429,16 @@ class VisaIn(BaseModel):
 
 
 @router.post("/visa")
-def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.FD, Role.GD))):
+def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     deal = get_deal_or_404(db, deal_id, user)
     by = Role.GD if deal.status == DealStatus.GD_VISA else Role.FD
+    acting = None
     if by not in user.roles:
-        raise HTTPException(403, f"Виза этой ступени — {'ЗГД' if by == Role.GD else 'ФД'}")
+        # D-112: заместитель на период отсутствия визирует за ФД / ЗГД (назначается в карточке сотрудника)
+        from ..models import User as _U
+        acting = next((u for u in (db.get(_U, i) for i in user.acting_for) if u is not None and by.value in (u.roles or [])), None)
+        if acting is None:
+            raise HTTPException(403, f"Виза этой ступени — {'ЗГД' if by == Role.GD else 'ФД'}")
     if not body.approved and not body.comment:
         raise HTTPException(422, "Отказ требует комментария")
     inp, res = run_calc(db, deal)
@@ -444,7 +449,8 @@ def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: Curren
     except Exception as e:
         raise HTTPException(409, str(e))
     db.add(Approval(deal_id=deal.id, step="financial" if by == Role.FD else "general", role=by.value, user_id=user.id,
-                    approved=body.approved, comment=body.comment, prices_snapshot={v.id: v.price_rub for v in deal.variants}))
+                    approved=body.approved, comment=((f"за {acting.display_name}: " if acting is not None else "") + body.comment).strip(),
+                    prices_snapshot={v.id: v.price_rub for v in deal.variants}))
     complete_tasks(db, deal, block="visa")
     apply_transition(db, deal, tr, user.id)
     if tr.status == DealStatus.APPROVED:
