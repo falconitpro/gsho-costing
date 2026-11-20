@@ -91,6 +91,17 @@ class PositionIn(BaseModel):
     row_order: list[str] = Field(default_factory=list)     # порядок строк формы: «c:<код>» / «x:<номер своей строки>»
 
 
+def _actual_sale(deal, v, db) -> dict:
+    """Цена предложения для показа (D-103): действующая — после торгов и редакций КП (actual_offer, D-093)."""
+    if v is None:
+        return {"price_rub": None, "price_amount": None, "price_currency": None}
+    if v.price_rub is None:
+        return {"price_rub": None, "price_amount": v.price_amount, "price_currency": v.price_currency}
+    from ..services.deal_calc import actual_offer
+    ao = actual_offer(deal, v, db)
+    return {"price_rub": ao["price_rub"], "price_amount": ao["price_amount"], "price_currency": v.price_currency}
+
+
 def _production_days(term: dict, fallback: int) -> int:
     """Срок производства в календарных днях (производное поле для совместимости и справок)."""
     unit, value = term.get("unit"), term.get("value")
@@ -293,7 +304,7 @@ def _now_block(db: Session, deal: Deal, user: CurrentUser) -> dict:
         won_log = db.scalar(select(AuditLog).where(AuditLog.deal_id == deal.id, AuditLog.entity == "deal", AuditLog.action == "status",
                                                    AuditLog.after["status"].as_string() == "won").order_by(AuditLog.at.desc()).limit(1))
         out["sale"] = {"won_on": won_log.at.date().isoformat() if won_log and won_log.at else None,
-                       "price_rub": v.price_rub if v else None, "price_amount": v.price_amount if v else None, "price_currency": v.price_currency if v else None,
+                       **_actual_sale(deal, v, db),
                        "margin_pct": res.get("margin_pct"), "approved_by": name(ver.created_by) if ver else "", "kp_version": ver.version_no if ver else None}
         if not user.can("price"):
             out["sale"].update(price_rub=None, price_amount=None)
@@ -997,7 +1008,8 @@ def related(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Dep
         row = {"id": d.id, "number": d.number, "status": d.status.value, "outcome": d.outcome, "parent_deal_id": d.parent_deal_id,
                "factories": sorted({p.factory_id for p in d.positions}), "models": [p.designation for p in d.positions], "current": d.id == deal.id}
         if user.can("price"):
-            row["price_rub"] = next((v.price_rub for v in d.variants if v.price_rub is not None), None)
+            v0 = next((v for v in d.variants if v.price_rub is not None), None)
+            row["price_rub"] = _actual_sale(d, v0, db)["price_rub"]
         out.append(row)
     return out
 

@@ -943,6 +943,16 @@ def _cd_gd(user: CurrentUser) -> None:
         raise HTTPException(403, "Изменяют КП КД или ЗГД")
 
 
+@router.get("/current-offer")
+def current_offer(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """«Действующее предложение» (D-103): цена, которую клиент видит сейчас, и сверка мест её хранения. Только чтение."""
+    from ..services import current_offer as co
+    deal = get_deal_or_404(db, deal_id, user)
+    if not user.can("price"):
+        raise HTTPException(403, "Цена сделки для вашей роли закрыта")
+    return co.build(db, deal)
+
+
 @router.get("/kp/revisions")
 def kp_revisions(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """История КП: исходное КП утверждённой версии и все редакции — дата, автор, цена, изменения, файлы."""
