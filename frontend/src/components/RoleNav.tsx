@@ -52,7 +52,16 @@ export default function RoleNav({ me }: { me: Me }) {
   const active = more.find((i) => (i.end ? loc.pathname === i.to : loc.pathname === i.to || loc.pathname.startsWith(i.to + "/")));
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { setOpen(false); }, [loc.pathname, loc.search]);
+  const [phoneOpen, setPhoneOpen] = useState(false);
+  const phoneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { setOpen(false); setPhoneOpen(false); }, [loc.pathname, loc.search]);
+  useEffect(() => {
+    if (!phoneOpen) return;
+    const onDown = (e: MouseEvent) => { if (phoneRef.current && !phoneRef.current.contains(e.target as Node)) setPhoneOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPhoneOpen(false); };
+    document.addEventListener("mousedown", onDown); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [phoneOpen]);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
@@ -61,11 +70,18 @@ export default function RoleNav({ me }: { me: Me }) {
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [open]);
 
+  const cur = items.find((i) => (i.end ? loc.pathname === i.to : loc.pathname === i.to || loc.pathname.startsWith(i.to + "/")));
   return (
     <nav>
-      {main.map((i) => <NavLink key={i.key} to={i.to} end={i.end}>{i.label}</NavLink>)}
+      {/* D-118: на телефоне — одна кнопка «☰ <текущий раздел>» со всеми разделами роли */}
+      <div className="nav-phone" ref={phoneRef}>
+        <button type="button" aria-haspopup="menu" aria-expanded={phoneOpen} onClick={() => setPhoneOpen(!phoneOpen)}>☰ {cur ? cur.label : "Меню"}</button>
+        {phoneOpen && <div className="hm-menu nav-more-menu" role="menu">{[...main, ...more].map((i) => (
+          <NavLink key={i.key} to={i.to} end={i.end} role="menuitem">{i.label}</NavLink>))}</div>}
+      </div>
+      {main.map((i) => <NavLink key={i.key} to={i.to} end={i.end} className="nav-wide">{i.label}</NavLink>)}
       {more.length > 0 && (
-        <div className="nav-more" ref={ref}>
+        <div className="nav-more nav-wide" ref={ref}>
           <button type="button" className={active ? "active" : ""} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
             {active ? active.label : "Ещё"} <span aria-hidden>▾</span></button>
           {open && <div className="hm-menu nav-more-menu" role="menu">{more.map((i) => (

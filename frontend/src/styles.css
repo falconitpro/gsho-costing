@@ -882,14 +882,34 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .lv-views a.cur { color: var(--ink); font-weight: 700; text-decoration: none; }
 
 /* Узкий экран (телефон): меню по роли — отдельной строкой под логотипом и кнопками, с переносом; страница не прокручивается вбок */
+/* D-118: на телефоне меню — одна кнопка «☰ раздел», шапка в одну строку */
+.nav-phone { display: none; position: relative; }
+.nav-phone > button { background: #fff; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 14px; font-weight: 600; padding: 7px 12px; cursor: pointer; color: var(--ink); white-space: nowrap; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; }
+.nav-phone .nav-more-menu { left: 0; right: auto; min-width: 240px; max-height: 70vh; overflow-y: auto; }
 @media (max-width: 760px) {
-  header.top .top-row { flex-wrap: wrap; gap: 4px 10px; }
-  header.top nav { order: 3; flex: 1 0 100%; flex-wrap: wrap; row-gap: 2px; }
+  header.top { padding: 6px 10px; }
+  header.top .top-row { gap: 8px; min-height: 44px; flex-wrap: nowrap; }
+  header.top .brand img { height: 28px; width: auto; }
+  header.top nav { flex: 1 1 auto; }
+  header.top nav .nav-wide { display: none; }
+  .nav-phone { display: block; }
   header.top .account { gap: 6px; }
+  header.top .dev-switch select { max-width: 92px; }
 }
 /* «Расчёт и утверждение»: слева варианты, справа расчёт; на узком экране — друг под другом */
 .approval-grid { grid-template-columns: 260px minmax(0, 1fr); }
-@media (max-width: 760px) { .approval-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 760px) {
+  .approval-grid { grid-template-columns: minmax(0, 1fr); }
+  .approval-side { order: 2; }                 /* D-118: на телефоне — сначала панель решения и расчёт, курсы и предупреждения — ниже */
+  .dp { grid-template-columns: 1fr 1fr; gap: 10px 12px; padding: 12px; }
+  .dp-m { grid-column: 1 / -1; }
+  .dp-k { border-left: 0; padding-left: 0; }
+  .dp-k b { font-size: 15px; }
+  .dp-act { position: fixed; left: 10px; right: 10px; bottom: 10px; z-index: 20; justify-content: stretch; }
+  .dp-act .btn { width: 100%; min-height: 46px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+  .dp-act .muted { display: none; }
+  main { padding-bottom: 72px; }
+}
 /* Логистика: мастер в три шага (новый вид) */
 .lb-wiz { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .lb-wiz button { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: #fff; border-radius: 20px; padding: 6px 14px 6px 6px; font: inherit; font-size: 14px; cursor: pointer; color: var(--ink); }
