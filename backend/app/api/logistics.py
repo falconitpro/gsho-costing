@@ -93,7 +93,8 @@ def create_batch(deal_id: str, body: BatchIn, db: Session = Depends(get_db), use
         p = db.get(Position, pid)
         if p and p.deal_id == deal.id:
             p.batch_id = b.id
-    deal.logistician_id = deal.logistician_id or user.id
+    if Role.LOGISTICIAN in user.roles:      # исполнитель логистики сделки — логист; ЗГД, заполнивший партию за него, исполнителем не становится
+        deal.logistician_id = deal.logistician_id or user.id
     audit(db, user.id, deal.id, "batch", b.id, "create", after=data)
     _finance_sync(db, b, user.id)
     db.commit()
