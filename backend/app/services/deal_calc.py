@@ -171,6 +171,8 @@ def actual_offer(deal: Deal, v, db: Session | None = None) -> dict:
 
 def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> DealCalcInput:
     s = settings_service.get_all(db)
+    from . import logistics_vat as lv
+    vat_in_pct = float(s.get("sales_vat_pct") or 22.0)   # D-122: входящий НДС российских услуг — по общей ставке
     calc_date = calc_date or deal.report_date or date.today()   # дата отчёта — задают КД / ЗГД
     fx, history = load_fx(db, calc_date)
     ov = deal.scenario_override or {}
@@ -228,6 +230,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             service = ServiceSummary(cost_fx=Money(**res["total_fx_part"]), cost_rub=res["total_rub_part"], show_in_kp=sc.get("show_in_kp", False))
         fp = _lines(p.factory_payments)
         dterm = {k: v for k, v in (p.delivery_term or {}).items() if k in DeliveryTerm.model_fields}
+        _cert = lv.split(_num(lg.get("certification_rub")), lv.included(lg, "certification_rub"), vat_in_pct)
         positions.append(PositionInput(
             id=p.id, factory=p.factory_id, model=p.designation, machine_type=p.machine_type or "", qty=p.qty, unit_price=p.unit_price,
             options_price=_num(p.options_price), currency=p.currency, production_days=p.production_days or 90, delivery_days=p.delivery_days,
@@ -237,7 +240,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             actual_events=_dates(p.actual_events),
             domestic_logistics=Money(**dl), export_formalities=Money(**ef),
             hs_code=lg.get("hs_code") or "", duty_pct=_num(lg.get("duty_pct")), vat_pct=_num(lg.get("vat_pct"), 22.0),
-            util_fee_rub=_num(lg.get("util_fee_rub")) * util_mult, certification_rub=_num(lg.get("certification_rub")) * mult,
+            util_fee_rub=_num(lg.get("util_fee_rub")) * util_mult, certification_rub=_cert[0] * mult, certification_vat_rub=_cert[1] * mult,
             weight_kg=_num(((p.logistics_params or {}).get("1.15") or (p.logistics_params or {}).get("1.14") or {}).get("value")) * p.qty,
             volume_m3=_num(lg.get("volume_m3")),
             warranty_reserve_pct=p.warranty_reserve_pct if p.warranty_reserve_pct is not None else wr.get(p.machine_type, wr.get("default", 1.5)),
@@ -253,11 +256,13 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
                     it[key] = {**it[key], "amount": _num(it[key]["amount"]) * bn}
             for key in ("broker_rub", "rf_delivery_rub"):
                 it[key] = _num(it.get(key)) * bn
+        _br = lv.split(_num(it.get("broker_rub")), lv.included(it, "broker_rub"), vat_in_pct)
+        _rf = lv.split(_num(it.get("rf_delivery_rub")), lv.included(it, "rf_delivery_rub"), vat_in_pct)
         batches.append(BatchInput(
             id=b.id, route=b.route, transport_units=b.transport_units,
             intl_freight=Money(**it.get("intl_freight", {"amount": 0, "currency": "CNY"})),
             insurance_pct=it.get("insurance_pct"), insurance_amount=Money(**it.get("insurance_amount", {"amount": 0, "currency": "CNY"})),
-            broker_rub=_num(it.get("broker_rub")), rf_delivery_rub=_num(it.get("rf_delivery_rub")),
+            broker_rub=_br[0], rf_delivery_rub=_rf[0], broker_vat_rub=_br[1], rf_delivery_vat_rub=_rf[1],
             door_to_door=Money(**it["door_to_door"]) if (it.get("door_to_door") or {}).get("amount") else None,
             door_to_door_border_pct=float(s.get("door_to_door_border_pct") or 10.0),
             allocation=AllocationMethod(b.allocation), transit_days=b.transit_days, customs_days=b.customs_days,

@@ -136,7 +136,8 @@ def _vat_settlement(flows: list[Flow], payment_dates: list[dict], price: float, 
     - Клиент платит с НДС: к каждой оплате — приход НДС (ставка «НДС с продажи»).
     - НДС к уплате начисляется с каждой оплаты клиента (аванс) на дату оплаты; с остатка цены, не оплаченного до поставки, — на дату поставки
       (отгрузка, ст. 167 НК: на более раннюю из дат).
-    - Ввозной НДС (уплачен на дату ДТ) принимается к вычету в квартале ввоза, если не включён в себестоимость.
+    - Ввозной НДС (уплачен на дату ДТ) принимается к вычету в квартале ввоза, если не включён в себестоимость;
+      входящий НДС российских услуг логиста, введённых «с НДС» (D-122), — в квартале оплаты.
     - Итог квартала (начислено − вычеты) — платёж в бюджет тремя равными долями 28-го числа трёх следующих месяцев; отрицательный итог
       уменьшает платежи компании в те же даты (вычет зачитывается против НДС компании по другим сделкам)."""
     v = (inp.client_vat_pct or 0.0) / 100.0
@@ -157,10 +158,9 @@ def _vat_settlement(flows: list[Flow], payment_dates: list[dict], price: float, 
     rest = max(price - paid_before, 0.0)
     if rest > 0.005:
         accr[q(delivery)] = accr.get(q(delivery), 0.0) + rest * v
-    if not inp.finance.import_vat_in_cost:
-        for f in flows:
-            if f.kind == "customs" and f.ref.endswith("/vat"):
-                accr[q(f.on)] = accr.get(q(f.on), 0.0) + f.amount_rub    # отрицательная сумма — вычет
+    for f in flows:
+        if (f.kind == "customs" and f.ref.endswith("/vat") and not inp.finance.import_vat_in_cost) or f.kind == "input_vat":
+            accr[q(f.on)] = accr.get(q(f.on), 0.0) + f.amount_rub        # отрицательная сумма — вычет (ввозной и входящий НДС, D-122)
     for qs, net in sorted(accr.items()):
         if abs(net) < 0.005:
             continue
@@ -277,6 +277,7 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
                 items["insurance"] = ia.amount * share * fx.rate(ia.currency, ship, s, f"{batch.id}/ins", None, fx_mult)
             items["broker_util"] = batch.broker_rub * share
             items["rf_delivery"] = batch.rf_delivery_rub * share
+            in_vat_broker, in_vat_rf = batch.broker_vat_rub * share, batch.rf_delivery_vat_rub * share   # D-122: входящий НДС
             if d2d:   # остальное — от границы РФ до клиента, в рублях по курсу на дату поставки
                 rf_part = d2d.amount * (100.0 - batch.door_to_door_border_pct) / 100.0 * share
                 items["rf_delivery"] = rf_part * fx.rate(d2d.currency, ev[PaymentEvent.DELIVERY], s, f"{batch.id}/door_to_door", None, fx_mult)
@@ -284,6 +285,8 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
                 m = items_fx[key]
                 if m.amount:
                     flows.append(Flow(on=ship, amount_rub=-items[key], kind="logistics", ref=key, fx_amount=m.amount, currency=m.currency))
+        else:
+            in_vat_broker = in_vat_rf = 0.0
         items["broker_util"] += p.util_fee_rub
 
         # 6–7. Таможня от таможенной стоимости (п.1–5 в RUB на дату оформления)
@@ -298,6 +301,8 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
         items["customs_duty"] = duty
         items["import_vat"] = vat if inp.finance.import_vat_in_cost else 0.0
         flows.append(Flow(on=decl, amount_rub=-(duty + items["broker_util"]), kind="customs", ref=f"{p.id}/duty+broker"))
+        if in_vat_broker:
+            flows.append(Flow(on=decl, amount_rub=-in_vat_broker, kind="input_vat", ref=f"{p.id}/broker/in_vat"))
         if vat:   # уплата на дату ДТ; вычет — в квартале ввоза, в расчётах с бюджетом (_vat_settlement, D-121)
             flows.append(Flow(on=decl, amount_rub=-vat, kind="customs", ref=f"{p.id}/vat"))
 
@@ -307,6 +312,10 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
             flows.append(Flow(on=ev[PaymentEvent.READINESS], amount_rub=-p.certification_rub, kind="other", ref="cert"))
         if items["rf_delivery"]:
             flows.append(Flow(on=ev[PaymentEvent.DELIVERY], amount_rub=-items["rf_delivery"], kind="logistics", ref="rf"))
+        if p.certification_vat_rub:
+            flows.append(Flow(on=ev[PaymentEvent.READINESS], amount_rub=-p.certification_vat_rub, kind="input_vat", ref=f"{p.id}/cert/in_vat"))
+        if in_vat_rf:
+            flows.append(Flow(on=ev[PaymentEvent.DELIVERY], amount_rub=-in_vat_rf, kind="input_vat", ref=f"{p.id}/rf/in_vat"))
 
         # 12. Сервис до наработки
         if p.service:
@@ -398,6 +407,7 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
         vat_info = {"pct": inp.client_vat_pct, "from_client_rub": round(sum(f.amount_rub for f in vat_flows if f.kind == "client_vat"), 2),
                     "import": [{"on": f.on, "amount_rub": round(-f.amount_rub, 2)} for f in imp],
                     "import_deducted": not inp.finance.import_vat_in_cost,
+                    "input_rub": round(-sum(f.amount_rub for f in flows if f.kind == "input_vat"), 2),
                     "budget": [{**q, "amount_rub": round(q["amount_rub"], 2)} for q in sorted(quarters.values(), key=lambda x: x["quarter"])]}
 
     cf = build_cashflow(flows, inp.finance, guarantee_cost)

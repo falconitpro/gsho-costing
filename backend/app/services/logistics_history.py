@@ -21,7 +21,8 @@ from ..models import Deal, LogisticsHistory, RateSetting
 MARK = "_migration_logistics_history_v2"
 
 
-def _rows(deal: Deal, on: date) -> list[LogisticsHistory]:
+def _rows(deal: Deal, on: date, vat_pct: float = 22.0) -> list[LogisticsHistory]:
+    from . import logistics_vat as lv
     out = []
     for b in deal.batches:
         it = b.items or {}
@@ -33,6 +34,8 @@ def _rows(deal: Deal, on: date) -> list[LogisticsHistory]:
                 amount = float(amount) if amount not in (None, "") else 0.0
             except (TypeError, ValueError):
                 amount = 0.0
+            if amount and key in lv.BATCH_ITEMS and lv.included(it, key):   # D-122: в историю — без НДС
+                amount = lv.split(amount, True, vat_pct)[0]
             if amount:
                 if not it.get("per_unit"):           # запись старого режима, не переведённая 031, — на всю партию
                     amount = amount / machines
@@ -58,7 +61,8 @@ def _rows(deal: Deal, on: date) -> list[LogisticsHistory]:
 def record_deal(db: Session, deal: Deal, on: Optional[date] = None) -> int:
     """Записи сделки в истории — по текущему расчёту логистики (прежние записи сделки заменяются)."""
     db.execute(delete(LogisticsHistory).where(LogisticsHistory.deal_id == deal.id, LogisticsHistory.source == "plan"))
-    rows = _rows(deal, on or date.today())
+    from . import settings_service
+    rows = _rows(deal, on or date.today(), float(settings_service.get(db, "sales_vat_pct") or 22.0))
     db.add_all(rows)
     return len(rows)
 

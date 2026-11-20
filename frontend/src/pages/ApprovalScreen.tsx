@@ -285,9 +285,10 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
                 <table><tbody>
                   <tr><td>НДС {v.pct} % в оплатах клиента</td><td className="num">+{fmtRub(v.from_client_rub)} ₽</td><td className="muted">приходит вместе с каждой оплатой</td></tr>
                   {(v.import || []).map((x, i) => <tr key={"i" + i}><td>Ввозной НДС (база: таможенная стоимость с доставкой до границы РФ + пошлина)</td><td className="num">−{fmtRub(x.amount_rub)} ₽</td><td className="muted">на дату ДТ {fmtDate(x.on)}{v.import_deducted ? " · к вычету в квартале ввоза" : " · расход, к вычету не принимается"}</td></tr>)}
+                  {!!v.input_rub && <tr><td>Входящий НДС: брокер, доставка по РФ, сертификация (введены «с НДС»)</td><td className="num">−{fmtRub(v.input_rub)} ₽</td><td className="muted">с оплатой услуги · к вычету в квартале оплаты</td></tr>}
                   {v.budget.map((q) => <tr key={q.quarter}><td>В бюджет за {qName(q.quarter)}{q.amount_rub < 0 ? " (вычет больше начисленного)" : ""}</td>
                     <td className="num">{q.amount_rub < 0 ? "+" : "−"}{fmtRub(Math.abs(q.amount_rub))} ₽</td><td className="muted">по 1/3: {q.dates.map((d) => fmtDate(d)).join(", ")}</td></tr>)}
-                  <tr className="vat-sum"><td>Остаток после расчётов с бюджетом</td><td className="num">{fmtRub(v.from_client_rub - imp - v.budget.reduce((a, q) => a + q.amount_rub, 0))} ₽</td>
+                  <tr className="vat-sum"><td>Остаток после расчётов с бюджетом</td><td className="num">{fmtRub(v.from_client_rub - imp - (v.input_rub || 0) - v.budget.reduce((a, q) => a + q.amount_rub, 0))} ₽</td>
                     <td className="muted">0 — НДС для компании нейтрален и влияет только на кассовый разрыв и стоимость денег. НДС с аванса — с даты оплаты, с остатка цены — на дату поставки; итог квартала — 28-го числа трёх следующих месяцев</td></tr>
                 </tbody></table>
               </div>);

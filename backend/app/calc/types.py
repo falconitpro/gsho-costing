@@ -263,6 +263,7 @@ class PositionInput(BaseModel):
     vat_pct: float = 22.0
     util_fee_rub: float = 0.0
     certification_rub: float = 0.0
+    certification_vat_rub: float = 0.0       # D-122: входящий НДС по сертификации (если введена с НДС) — к вычету
     # Для распределения общих статей партии
     weight_kg: float = 0.0
     volume_m3: float = 0.0
@@ -287,6 +288,8 @@ class BatchInput(BaseModel):
     insurance_amount: Money = Field(default_factory=lambda: Money(amount=0, currency="CNY"))
     broker_rub: float = 0.0
     rf_delivery_rub: float = 0.0
+    broker_vat_rub: float = 0.0              # D-122: входящий НДС брокера / доставки по РФ (суммы выше — без НДС)
+    rf_delivery_vat_rub: float = 0.0
     door_to_door: Optional[Money] = None      # единая стоимость доставки завод → клиент (вместо перевозки до границы и доставки по РФ)
     door_to_door_border_pct: float = 10.0     # доля до границы РФ (остальное — от границы до клиента)
     allocation: AllocationMethod = AllocationMethod.COST
