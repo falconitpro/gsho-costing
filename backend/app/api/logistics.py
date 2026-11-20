@@ -68,8 +68,11 @@ def _ensure_logistics_stage(deal: Deal) -> None:
         raise HTTPException(409, "Блок логистики редактируется только на этапе расчёта или доработки")
 
 
-def _history(db: Session, item: str, route: str = "", machine_type: str = "", region: str = "") -> list[dict]:
+def _history(db: Session, item: str, route: str = "", machine_type: str = "", region: str = "", currency: str = "") -> list[dict]:
+    """История статьи — суммы на 1 машину (D-111); сравнивается только с суммами в той же валюте."""
     q = select(LogisticsHistory).where(LogisticsHistory.item_code == item)
+    if currency:
+        q = q.where(LogisticsHistory.currency == currency.upper())
     rows = db.scalars(q.order_by(LogisticsHistory.on.desc())).all()
     scored = []
     for r in rows:
@@ -117,8 +120,9 @@ def _check_batch_items(db: Session, deal: Deal, b: Batch, items: dict) -> dict:
     for key in ("intl_freight", "broker_rub", "rf_delivery_rub"):
         val = items.get(key)
         amount = val.get("amount") if isinstance(val, dict) else val
+        cur = (val.get("currency") or "") if isinstance(val, dict) else "RUB"
         if amount:
-            chk = history_check(amount, _history(db, key, b.route, region=deal.region), thr)
+            chk = history_check(amount, _history(db, key, b.route, region=deal.region, currency=cur), thr)
             chk["value"] = amount
             chk["comment"] = comments.get(key, "")
             if chk["needs_comment"] and not chk["comment"]:
@@ -261,13 +265,13 @@ def update_position_logistics(deal_id: str, pos_id: str, body: PositionLogistics
     for key in ("domestic_logistics", "export_formalities"):
         amt = data[key].get("amount")
         if amt:
-            c = history_check(amt, _history(db, key, machine_type=pos.machine_type), thr)
+            c = history_check(amt, _history(db, key, machine_type=pos.machine_type, currency=data[key].get("currency") or ""), thr)
             c["value"], c["comment"] = amt, body.comments.get(key, "")
             if c["needs_comment"] and not c["comment"]:
                 raise HTTPException(422, {"message": f"{ {'domestic_logistics': 'Внутрикитайская логистика', 'export_formalities': 'Экспортные формальности КНР'}[key]}: отклонение от истории выше {thr} % — нужен комментарий", "check": c})
             checks[key] = c
     if body.certification_rub:
-        c = history_check(body.certification_rub, _history(db, "certification_rub", machine_type=pos.machine_type), thr)
+        c = history_check(body.certification_rub, _history(db, "certification_rub", machine_type=pos.machine_type, currency="RUB"), thr)
         c["value"], c["comment"] = body.certification_rub, body.comments.get("certification_rub", "")
         if c["needs_comment"] and not c["comment"]:
             raise HTTPException(422, {"message": "Сертификация: отклонение выше порога — нужен комментарий", "check": c})
@@ -316,20 +320,9 @@ def complete(deal_id: str, body: Optional[CompleteIn] = None, db: Session = Depe
     st = DealState(status=deal.status, service_flag=deal.service_flag, logistics_done=deal.logistics_done, service_done=deal.service_done)
     tr = block_completed(st, "logistics", date.today(), sla(db))
     deal.logistics_done = True
-    # история логистики пополняется из каждого расчёта
-    for b in deal.batches:
-        for key in ("intl_freight", "broker_rub", "rf_delivery_rub"):
-            val = (b.items or {}).get(key)
-            amount, cur = (val.get("amount"), val.get("currency")) if isinstance(val, dict) else (val, "RUB")
-            if amount:
-                db.add(LogisticsHistory(item_code=key, route=b.route, region=deal.region, amount=amount, currency=cur,
-                                        per_unit=amount / max(b.transport_units, 1), on=date.today(), deal_id=deal.id, batch_id=b.id))
-    for p in deal.positions:
-        for key in ("domestic_logistics", "export_formalities"):
-            val = (p.logistics or {}).get(key) or {}
-            if val.get("amount"):
-                db.add(LogisticsHistory(item_code=key, machine_type=p.machine_type, amount=val["amount"], currency=val.get("currency", "CNY"),
-                                        on=date.today(), deal_id=deal.id))
+    # история логистики пополняется из каждого расчёта: суммы на 1 машину (D-111), по сделке — последний расчёт
+    from ..services.logistics_history import record_deal
+    record_deal(db, deal)
     complete_tasks(db, deal, block="logistics")
     apply_transition(db, deal, tr, user.id)
     db.commit()

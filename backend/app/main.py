@@ -158,6 +158,9 @@ async def _daily_jobs() -> None:
                     fixed = repair_existing(db)
                 if fixed:
                     log.info("contract price repair: %s offers", fixed)
+                from .services.logistics_history import rebuild_once
+                with SessionLocal() as db:
+                    rebuild_once(db)
                 from .services.deal_service import repair_task_assignees
                 with SessionLocal() as db:
                     moved = repair_task_assignees(db)
