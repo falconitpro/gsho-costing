@@ -23,6 +23,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ..core.workflow import DealStatus
 from ..db import Base
 
+# D-113: денежные суммы и курсы — десятичные числа в базе (без «хвостов» двоичной дроби); в Python — float, как раньше
+from sqlalchemy import Numeric as _Numeric  # noqa: E402
+Money = _Numeric(20, 6, asdecimal=False)
+
 JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 
@@ -237,7 +241,7 @@ class FactoryPriceHistory(Base):
     model: Mapped[str] = mapped_column(String(255), index=True)
     execution_id: Mapped[Optional[str]] = mapped_column(String(36))
     configuration: Mapped[str] = mapped_column(Text, default="")
-    unit_price: Mapped[float] = mapped_column(Float)
+    unit_price: Mapped[float] = mapped_column(Money)
     currency: Mapped[str] = mapped_column(String(3))
     basis: Mapped[str] = mapped_column(String(32), default="")
     production_term: Mapped[dict] = mapped_column(JSONType, default=dict)    # {value, unit, start_event} (задача 3)
@@ -264,10 +268,10 @@ class ClientPriceHistory(Base):
     model: Mapped[str] = mapped_column(String(255), default="")
     execution_id: Mapped[Optional[str]] = mapped_column(String(36))
     qty: Mapped[int] = mapped_column(Integer, default=1)
-    unit_price_rub: Mapped[Optional[float]] = mapped_column(Float)
-    total_rub: Mapped[Optional[float]] = mapped_column(Float)
+    unit_price_rub: Mapped[Optional[float]] = mapped_column(Money)
+    total_rub: Mapped[Optional[float]] = mapped_column(Money)
     currency: Mapped[str] = mapped_column(String(3), default="RUB")          # валюта КП (D-095); цены в ней = RUB / fx_rate
-    fx_rate: Mapped[Optional[float]] = mapped_column(Float)                 # курс на момент назначения цены (RUB за единицу)
+    fx_rate: Mapped[Optional[float]] = mapped_column(Money)                 # курс на момент назначения цены (RUB за единицу)
     payment_terms: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     delivery_term: Mapped[str] = mapped_column(String(255), default="")
     kp_brand: Mapped[str] = mapped_column(String(16), default="factory")   # factory | company
@@ -285,9 +289,9 @@ class LogisticsHistory(Base):
     route: Mapped[str] = mapped_column(String(255), default="")
     machine_type: Mapped[str] = mapped_column(String(255), default="")
     region: Mapped[str] = mapped_column(String(255), default="")
-    amount: Mapped[float] = mapped_column(Float)
+    amount: Mapped[float] = mapped_column(Money)
     currency: Mapped[str] = mapped_column(String(3))
-    per_unit: Mapped[Optional[float]] = mapped_column(Float)         # ставка за единицу транспорта
+    per_unit: Mapped[Optional[float]] = mapped_column(Money)         # ставка за единицу транспорта
     on: Mapped[date] = mapped_column(Date)
     deal_id: Mapped[Optional[str]] = mapped_column(String(36))
     batch_id: Mapped[Optional[str]] = mapped_column(String(36))
@@ -480,10 +484,10 @@ class Position(TimestampMixin, Base):
     trademark: Mapped[str] = mapped_column(String(128), default="")            # торговая марка оборудования (по заводу)
     model: Mapped[str] = mapped_column(String(255))
     qty: Mapped[int] = mapped_column(Integer, default=1)                       # 13.4
-    unit_price: Mapped[float] = mapped_column(Float)                           # 13.5
+    unit_price: Mapped[float] = mapped_column(Money)                           # 13.5
     currency: Mapped[str] = mapped_column(String(3), default="CNY")
     options: Mapped[list[dict]] = mapped_column(JSONType, default=list)        # 12.x
-    options_price: Mapped[float] = mapped_column(Float, default=0)
+    options_price: Mapped[float] = mapped_column(Money, default=0)
     basis: Mapped[str] = mapped_column(String(32), default="FCA")             # 13.2
     delivery_point: Mapped[str] = mapped_column(String(255), default="")       # 13.3
     production_days: Mapped[int] = mapped_column(Integer, default=90)          # 14.1 (календарные дни, производное от срока ниже)
@@ -493,7 +497,7 @@ class Position(TimestampMixin, Base):
     delivery_term: Mapped[dict] = mapped_column(JSONType, default=dict)        # {unit: calendar_days|working_days|weeks, start_event: client_contract|client_prepayment|lc_opened}
     warranty_months: Mapped[Optional[int]] = mapped_column(Integer)            # 14.4
     warranty_hours: Mapped[Optional[float]] = mapped_column(Float)             # 14.5
-    zip_price: Mapped[Optional[float]] = mapped_column(Float)                  # 13.8
+    zip_price: Mapped[Optional[float]] = mapped_column(Money)                  # 13.8
     factory_payments: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # задаёт КД (задача 1); пусто = типовая схема
     factory_payments_offer: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # условия завода из RFQ/ответа (справка для КД)
     tech_params: Mapped[dict] = mapped_column(JSONType, default=dict)          # все поля RFQ позиции (по кодам)
@@ -558,14 +562,14 @@ class LocalOption(TimestampMixin, Base):
     qty: Mapped[int] = mapped_column(Integer, default=1)
     supplier: Mapped[str] = mapped_column(String(255), default="")
     quote_attachment_id: Mapped[Optional[str]] = mapped_column(String(36))
-    cost: Mapped[float] = mapped_column(Float, default=0.0)                   # за единицу
+    cost: Mapped[float] = mapped_column(Money, default=0.0)                   # за единицу
     currency: Mapped[str] = mapped_column(String(3), default="RUB")
     supplier_lead_days: Mapped[int] = mapped_column(Integer, default=30)
     needs_install: Mapped[bool] = mapped_column(Boolean, default=True)
     install_stage: Mapped[str] = mapped_column(String(32), default="during_commissioning")   # before_handover | during_commissioning
     installer: Mapped[str] = mapped_column(String(32), default="service")    # service | contractor
     install_days: Mapped[int] = mapped_column(Integer, default=0)
-    install_cost_rub: Mapped[float] = mapped_column(Float, default=0.0)
+    install_cost_rub: Mapped[float] = mapped_column(Money, default=0.0)
     per_unit: Mapped[bool] = mapped_column(Boolean, default=False)          # D-089: кол-во и монтаж — на 1 машину (× количество позиции); старые — на всю позицию
     status: Mapped[str] = mapped_column(String(16), default="estimate")      # estimate | approved | ordered | received | installed
     cost_approved_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
@@ -600,7 +604,7 @@ class FactoryOffer(TimestampMixin, Base):
     source_position_id: Mapped[Optional[str]] = mapped_column(String(36))    # позиция-запрос клиента, по которой собирались ответы
     factory_id: Mapped[str] = mapped_column(ForeignKey("factories.id"))
     model: Mapped[str] = mapped_column(String(255), default="")
-    unit_price: Mapped[Optional[float]] = mapped_column(Float)
+    unit_price: Mapped[Optional[float]] = mapped_column(Money)
     currency: Mapped[str] = mapped_column(String(3), default="CNY")
     basis: Mapped[str] = mapped_column(String(32), default="FCA")
     production_term: Mapped[dict] = mapped_column(JSONType, default=dict)
@@ -621,7 +625,7 @@ class FactoryOffer(TimestampMixin, Base):
     chain: Mapped[dict] = mapped_column(JSONType, default=dict)                       # U: снимок цепочки (ступени, наценки, маржа группы, курсы, версия политики)
     mirror_state: Mapped[str] = mapped_column(String(24), default="")                 # U: waiting | ok | no_policy | error | changed_after_select
     revision: Mapped[int] = mapped_column(Integer, default=0)                         # U: редакция зеркального предложения
-    transfer_price: Mapped[Optional[float]] = mapped_column(Float)                    # U: трансфертная цена, зафиксированная ФД/ЗГД (вместо наценки)
+    transfer_price: Mapped[Optional[float]] = mapped_column(Money)                    # U: трансфертная цена, зафиксированная ФД/ЗГД (вместо наценки)
     transfer_note: Mapped[str] = mapped_column(Text, default="")
 
 
@@ -681,14 +685,14 @@ class Variant(TimestampMixin, Base):
     deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
     name: Mapped[str] = mapped_column(String(255))
     position_ids: Mapped[list[str]] = mapped_column(JSONType, default=list)
-    price_rub: Mapped[Optional[float]] = mapped_column(Float)              # без НДС, назначает КД
+    price_rub: Mapped[Optional[float]] = mapped_column(Money)              # без НДС, назначает КД
     price_mode: Mapped[str] = mapped_column(String(16), default="amount")  # amount | markup | margin
     price_currency: Mapped[Optional[str]] = mapped_column(String(3))       # валюта цены клиенту (по умолчанию — валюта предложения завода)
-    price_amount: Mapped[Optional[float]] = mapped_column(Float)           # цена в этой валюте без НДС
-    price_fx_rate: Mapped[Optional[float]] = mapped_column(Float)          # курс ЦБ (RUB за единицу) на момент назначения цены
+    price_amount: Mapped[Optional[float]] = mapped_column(Money)           # цена в этой валюте без НДС
+    price_fx_rate: Mapped[Optional[float]] = mapped_column(Money)          # курс ЦБ (RUB за единицу) на момент назначения цены
     price_vat_included: Mapped[bool] = mapped_column(Boolean, default=False)   # КД ввёл цену с НДС (D-066); price_amount / price_rub — всегда без НДС
     price_vat_pct: Mapped[Optional[float]] = mapped_column(Float)              # ставка НДС на момент ввода
-    price_input_amount: Mapped[Optional[float]] = mapped_column(Float)         # сумма, как её ввёл КД (с НДС или без)
+    price_input_amount: Mapped[Optional[float]] = mapped_column(Money)         # сумма, как её ввёл КД (с НДС или без)
     price_input_currency: Mapped[Optional[str]] = mapped_column(String(3))     # валюта ввода (D-080); цена хранится в валюте сделки
     price_input_units: Mapped[Optional[int]] = mapped_column(Integer)          # введено за 1 шт. при этом количестве (D-085)
     service_in_kp: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -713,8 +717,8 @@ class KpRevision(Base):
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     description: Mapped[str] = mapped_column(Text, default="")                    # что изменено и почему
     changes: Mapped[dict] = mapped_column(JSONType, default=dict)                 # по предложениям: adjustments, extras, configuration, service_in_kp
-    price_before_rub: Mapped[Optional[float]] = mapped_column(Float)
-    price_rub: Mapped[Optional[float]] = mapped_column(Float)                     # итог КП без НДС после изменений
+    price_before_rub: Mapped[Optional[float]] = mapped_column(Money)
+    price_rub: Mapped[Optional[float]] = mapped_column(Money)                     # итог КП без НДС после изменений
     margin_pct: Mapped[Optional[float]] = mapped_column(Float)                    # маржа базового сценария по итоговой цене (ориентир)
     prices: Mapped[dict] = mapped_column(JSONType, default=dict)                  # {variant_id: итог без НДС}
     kp_path: Mapped[str] = mapped_column(String(1024), default="")
@@ -753,12 +757,12 @@ class OfferPrice(Base):
     kind: Mapped[str] = mapped_column(String(16))                          # kd | revision
     source_id: Mapped[str] = mapped_column(String(36), default="")         # редакция КП
     revision_no: Mapped[Optional[int]] = mapped_column(Integer)
-    total_rub: Mapped[float] = mapped_column(Float)                        # итог без НДС, RUB (для редакции — с услугами КП)
-    extras_rub: Mapped[float] = mapped_column(Float, default=0)            # услуги, добавленные в КП (в расчёт маржи не входят)
+    total_rub: Mapped[float] = mapped_column(Money)                        # итог без НДС, RUB (для редакции — с услугами КП)
+    extras_rub: Mapped[float] = mapped_column(Money, default=0)            # услуги, добавленные в КП (в расчёт маржи не входят)
     currency: Mapped[str] = mapped_column(String(3), default="RUB")        # валюта цены клиенту
-    fx_rate: Mapped[Optional[float]] = mapped_column(Float)                # RUB за единицу валюты цены
+    fx_rate: Mapped[Optional[float]] = mapped_column(Money)                # RUB за единицу валюты цены
     units: Mapped[int] = mapped_column(Integer, default=1)                 # машин в предложении
-    unit_amount: Mapped[Optional[float]] = mapped_column(Float)            # за 1 машину в валюте цены, без НДС
+    unit_amount: Mapped[Optional[float]] = mapped_column(Money)            # за 1 машину в валюте цены, без НДС
     created_by: Mapped[Optional[str]] = mapped_column(String(36))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     seq: Mapped[int] = mapped_column(BigInteger, default=0)                # порядок записей в одной транзакции
@@ -796,8 +800,8 @@ class NegotiationStep(Base):
     input: Mapped[dict] = mapped_column(JSONType, default=dict)                   # {variant_id: {mode, basis, currency, value}}
     terms: Mapped[dict] = mapped_column(JSONType, default=dict)                   # {variant_id: {client_payments, delivery_term}}
     result: Mapped[dict] = mapped_column(JSONType, default=dict)                  # {variant_id: цены, маржа по сценариям, минимальная цена…}
-    price_before_rub: Mapped[Optional[float]] = mapped_column(Float)
-    price_rub: Mapped[Optional[float]] = mapped_column(Float)
+    price_before_rub: Mapped[Optional[float]] = mapped_column(Money)
+    price_rub: Mapped[Optional[float]] = mapped_column(Money)
     margin_pct: Mapped[Optional[float]] = mapped_column(Float)
     show_discount: Mapped[bool] = mapped_column(Boolean, default=False)
     kp_revision_id: Mapped[Optional[str]] = mapped_column(String(36))
@@ -933,9 +937,9 @@ class PlanFactEntry(Base):
     kind: Mapped[str] = mapped_column(String(16))        # cost_item | payment_in | payment_out | delivery | fx
     cost_item_code: Mapped[Optional[str]] = mapped_column(String(32))
     ref: Mapped[str] = mapped_column(String(128), default="")
-    amount: Mapped[float] = mapped_column(Float)
+    amount: Mapped[float] = mapped_column(Money)
     currency: Mapped[str] = mapped_column(String(3), default="RUB")
-    fx_rate: Mapped[Optional[float]] = mapped_column(Float)
+    fx_rate: Mapped[Optional[float]] = mapped_column(Money)
     on: Mapped[date] = mapped_column(Date)
     deviation_reason: Mapped[str] = mapped_column(String(64), default="")   # fx | route | border_delay | client_req | estimate_error
     comment: Mapped[str] = mapped_column(Text, default="")
@@ -2333,11 +2337,11 @@ class CompetitorOffer(TimestampMixin, Base):
     on: Mapped[date] = mapped_column(Date)
     equipment: Mapped[str] = mapped_column(String(500), default="")          # что предлагает конкурент (марка, модель, комплектация)
     qty: Mapped[float] = mapped_column(Float, default=1)
-    amount: Mapped[float] = mapped_column(Float)                             # как введено
+    amount: Mapped[float] = mapped_column(Money)                             # как введено
     currency: Mapped[str] = mapped_column(String(3), default="RUB")
     vat_included: Mapped[bool] = mapped_column(Boolean, default=False)
     vat_pct: Mapped[float] = mapped_column(Float, default=22.0)
-    fx_rate: Mapped[float] = mapped_column(Float, default=1.0)               # RUB за единицу валюты на дату сведений
+    fx_rate: Mapped[float] = mapped_column(Money, default=1.0)               # RUB за единицу валюты на дату сведений
     fx_on: Mapped[Optional[date]] = mapped_column(Date)
     source: Mapped[str] = mapped_column(String(255), default="")             # откуда сведения (тендер, клиент, рынок…)
     delivery_term: Mapped[str] = mapped_column(String(255), default="")      # срок поставки конкурента (D-074)
