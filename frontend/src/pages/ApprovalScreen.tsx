@@ -104,7 +104,7 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
   const terms = calc.terms?.[vid] || [];
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: "260px minmax(0, 1fr)" }}>
+    <div className="grid approval-grid">
       <div>
         {(deal.variants || []).length > 1 && <div className="card">
           <h2 style={{ marginTop: 0 }}>{deal.has_alternatives ? "Предложения (альтернативы в КП)" : "Предложение"}</h2>

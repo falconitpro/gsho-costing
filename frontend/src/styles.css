@@ -823,17 +823,21 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .nav-more-menu a.active { color: var(--accent); font-weight: 700; }
 
 /* панель решения на «Расчёте и утверждении» (D-098): главное по сделке и одно действие, закреплена при прокрутке */
-.dp { position: sticky; top: 64px; z-index: 4; display: grid; grid-template-columns: minmax(150px, auto) repeat(4, minmax(0, 1fr)) auto; gap: 18px; align-items: center;
+/* Раскладка гибкая: каждый показатель не уже своего содержимого (числа не наезжают на соседей); если в ряд не помещается —
+   показатель переносится на следующую строку, кнопка — к правому краю. */
+.dp { position: sticky; top: 64px; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
   background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
-.dp-m b { display: block; font-size: 28px; font-weight: 800; line-height: 1.1; }
+.dp-m { flex: 1 1 170px; max-width: 250px; min-width: 150px; }
+.dp-m b { display: block; font-size: 28px; font-weight: 800; line-height: 1.1; white-space: nowrap; }
 .dp-m span { font-size: 12px; color: var(--muted); }
 .dp-m.ok b { color: var(--ok); } .dp-m.warn b { color: var(--warn); } .dp-m.bad b { color: var(--bad); }
-.dp-k { display: flex; flex-direction: column; gap: 2px; min-width: 0; border-left: 1px solid var(--line); padding-left: 16px; }
-.dp-k span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
-.dp-k b { font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.dp-k small { font-size: 12px; color: var(--muted); }
-.dp-act { display: flex; justify-content: flex-end; }
-@media (max-width: 1100px) { .dp { grid-template-columns: 1fr 1fr; position: static; } .dp-act { grid-column: 1 / -1; justify-content: flex-start; } }
+.dp-k { flex: 1 0 auto; display: flex; flex-direction: column; gap: 2px; min-width: max-content; border-left: 1px solid var(--line); padding-left: 16px; }
+.dp-k span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; line-height: 1.3; }
+.dp-k b { font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.3; }
+.dp-k small { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dp-act { flex: 0 0 auto; display: flex; justify-content: flex-end; margin-left: auto; }
+@media (max-width: 1100px) { .dp { position: static; } }
+@media (max-width: 560px) { .dp-k { flex-basis: 40%; min-width: 0; } .dp-k b, .dp-k span, .dp-k small { white-space: normal; } .dp-act { width: 100%; } .dp-act > * { width: 100%; } }
 .dp-more { margin-top: 4px; } .dp-more summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .dp-fx summary { cursor: pointer; }
 /* ---------- «Матрёшка»: уровни навигации (хлебные крошки, крупные входы) — текущая палитра и карточки ---------- */
@@ -883,3 +887,6 @@ a.lv-stat:hover { background: var(--accent-soft); }
   header.top nav { order: 3; flex: 1 0 100%; flex-wrap: wrap; row-gap: 2px; }
   header.top .account { gap: 6px; }
 }
+/* «Расчёт и утверждение»: слева варианты, справа расчёт; на узком экране — друг под другом */
+.approval-grid { grid-template-columns: 260px minmax(0, 1fr); }
+@media (max-width: 760px) { .approval-grid { grid-template-columns: minmax(0, 1fr); } }
