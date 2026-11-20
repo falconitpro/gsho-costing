@@ -860,7 +860,7 @@ def test_admin_screens_and_overdue(client, tmp_path):
     assert "notified" in _ok(client.post("/api/tasks/check-overdue", headers=H(ADM)))
     with SessionLocal() as db:   # просрочку получил и ЗГД
         gd = db.query(User).filter(User.email == GD).one()
-        assert db.query(NotificationLog).filter(NotificationLog.event == "task_overdue", NotificationLog.user_id == gd.id).count() >= 1
+        assert db.query(NotificationLog).filter(NotificationLog.event.in_(("task_overdue", "task_overdue_team")), NotificationLog.user_id == gd.id).count() >= 1
     # история просрочек по сотрудникам — только ЗГД
     assert client.get("/api/reports/overdue", headers=H(CD)).status_code == 403
     assert client.get("/api/reports/overdue", headers=H(ADM)).status_code == 403
