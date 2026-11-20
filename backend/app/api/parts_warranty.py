@@ -384,6 +384,13 @@ class BatchIn(BaseModel):
     comment: str = ""
 
 
+def _batch_reader(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Просмотр кандидатов в партию: кто ведёт партии, плюс ФД и администратор (вкладка «Партии» им видна; решение владельца 20.11.2026)."""
+    if not user.has(*BATCH_ROLES, Role.FD, Role.ADMIN):
+        raise HTTPException(403, "Нет доступа к партиям")
+    return user
+
+
 def _batcher(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     if not user.has(*BATCH_ROLES):
         raise HTTPException(403, "Партии ведут логист, менеджеры, закупки, КД и ЗГД")
@@ -404,7 +411,7 @@ def _attach(db: Session, b: PartBatch, ids: list[str]) -> None:
 
 
 @router.get("/batches/candidates")
-def batch_candidates(db: Session = Depends(get_db), user: CurrentUser = Depends(_batcher)):
+def batch_candidates(db: Session = Depends(get_db), user: CurrentUser = Depends(_batch_reader)):
     """Строки заказов поставщикам, которые можно собрать в партию: подтверждены или отгружены, ещё не в партии."""
     rows = db.execute(select(PoLine, PurchaseOrder).join(PurchaseOrder, PurchaseOrder.id == PoLine.po_id).where(
         PurchaseOrder.kind == "external", PoLine.batch_id.is_(None), PoLine.status.in_(("confirmed", "shipped", "consolidation")))).all()

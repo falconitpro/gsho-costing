@@ -528,7 +528,8 @@ class AiSettingsIn(BaseModel):
 @router.get("/legal/ai")
 def ai_settings(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Провайдер ИИ для анализа договоров: текущий выбор, какие настроены ключами (сами ключи не показываются), версия правил."""
-    if not user.can("legal_docs"):
+    # администратор видит настройки ИИ (вкладка «Правила и ИИ» ему видна; ключи не показываются; решение владельца 20.11.2026). Менять — только ЗГД.
+    if not (user.can("legal_docs") or user.has(Role.ADMIN)):
         raise HTTPException(403)
     cur = settings.get(db, "legal_ai") or {}
     return {"provider": cur.get("provider", "yandexgpt"), "model": cur.get("model", ""), "providers": PROVIDERS, "default_models": DEFAULT_MODELS, "configured": configured_providers(),
