@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
+import { askConfirm } from "./Dialogs";
 
 // Каталог запасных частей: поиск, карточка (утверждена 05.11.2026), проверка дублей, перенос из МойСклад.
 
@@ -215,7 +216,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
                 <div key={`${cur.id}-${i}-${f.name}`} style={{ textAlign: "center" }}>
                   <a href={`/api/parts/catalog/${cur.id}/photo/${i}`} target="_blank" rel="noreferrer">
                     <img src={`/api/parts/catalog/${cur.id}/photo/${i}`} alt={f.name} loading="lazy" style={{ width: 120, height: 120, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} /></a>
-                  {edit && <div><a href="#" style={{ fontSize: 11 }} onClick={(e) => { e.preventDefault(); if (confirm("Убрать фото из карточки?")) api.del<{ photo_files: { name: string }[] }>(`/api/parts/catalog/${cur.id}/photo/${i}`).then((x) => set({ photo_files: x.photo_files })); }}>убрать</a></div>}
+                  {edit && <div><a href="#" style={{ fontSize: 11 }} onClick={async (e) => { e.preventDefault(); if ((await askConfirm("Убрать фото из карточки?"))) api.del<{ photo_files: { name: string }[] }>(`/api/parts/catalog/${cur.id}/photo/${i}`).then((x) => set({ photo_files: x.photo_files })); }}>убрать</a></div>}
                 </div>))}
             </div>)}
           <div className="grid cols-3">

@@ -6,6 +6,7 @@ import { STATUS_TITLES } from "../types";
 import { toneOf } from "../colors";
 import { can, type Me } from "../types";
 import LegalProfileBlock from "../components/LegalProfileBlock";
+import { askPrompt } from "../components/Dialogs";
 
 type Contact = {
   name: string; name_zh: string; position: string; roles: string[]; phone: string; mobile: string; email: string; wechat: string;
@@ -177,7 +178,7 @@ export default function FactoriesPage({ me, embedded = false }: { me: Me; embedd
                 {cur.id && cur.approval_status === "pending" && (
                   <div className="alert info">Новый поставщик{cur.created_by_name && ` (завёл ${cur.created_by_name})`} — ждёт утверждения КД или ЗГД. Пока правки сохраняются сразу; заказ у него оформить нельзя.
                     {approver && <div className="row" style={{ marginTop: 6 }}><button className="btn" onClick={() => api.post(`/api/refs/factories/${cur.id}/approve`, {}).then(() => { open(cur.id!); load(); setMsg("Поставщик утверждён"); }).catch((e) => setMsg((e as Error).message))}>Утвердить</button>
-                      <button className="btn ghost" onClick={() => { const c = prompt("Почему не утверждаем? Карточка уйдёт в архив."); if (c !== null) api.post(`/api/refs/factories/${cur.id}/reject`, { comment: c }).then(() => { open(cur.id!); load(); setMsg("Не утверждён — в архиве"); }).catch((e) => setMsg((e as Error).message)); }}>Не утверждать</button></div>}</div>)}
+                      <button className="btn ghost" onClick={async () => { const c = (await askPrompt("Почему не утверждаем? Карточка уйдёт в архив.")); if (c !== null) api.post(`/api/refs/factories/${cur.id}/reject`, { comment: c }).then(() => { open(cur.id!); load(); setMsg("Не утверждён — в архиве"); }).catch((e) => setMsg((e as Error).message)); }}>Не утверждать</button></div>}</div>)}
                 {cur.id && cur.approval_status === "rejected" && <div className="alert info">Поставщик не утверждён (в архиве).</div>}
                 {cur.id && cur.approval_status === "approved" && !approver && <p className="muted" style={{ marginTop: 0 }}>Карточка утверждена{cur.approved_by_name && ` (${cur.approved_by_name})`}. Ваши правки уйдут на утверждение КД или ЗГД и появятся в карточке после него.</p>}
                 {Array.isArray(cur.pending_changes) && cur.pending_changes.map((ch) => (
@@ -187,7 +188,7 @@ export default function FactoriesPage({ me, embedded = false }: { me: Me; embedd
                       <tr key={x.field}><td>{x.title}</td><td className="muted">{showVal(x.old)}</td><td>→</td><td><b>{showVal(x.new)}</b></td></tr>))}</tbody></table>
                     {approver && <div className="row" style={{ marginTop: 4 }}>
                       <button className="btn" onClick={() => api.post(`/api/refs/factory-changes/${ch.id}/approve`, {}).then(() => { open(cur.id!); load(); setMsg("Изменения утверждены и внесены в карточку"); }).catch((e) => setMsg((e as Error).message))}>Утвердить изменения</button>
-                      <button className="btn ghost" onClick={() => { const c = prompt("Причина отказа"); if (c !== null) api.post(`/api/refs/factory-changes/${ch.id}/reject`, { comment: c }).then(() => { open(cur.id!); load(); setMsg("Изменения отклонены"); }).catch((e) => setMsg((e as Error).message)); }}>Отклонить</button></div>}
+                      <button className="btn ghost" onClick={async () => { const c = (await askPrompt("Причина отказа")); if (c !== null) api.post(`/api/refs/factory-changes/${ch.id}/reject`, { comment: c }).then(() => { open(cur.id!); load(); setMsg("Изменения отклонены"); }).catch((e) => setMsg((e as Error).message)); }}>Отклонить</button></div>}
                   </div>))}
                 <div className="grid cols-3">
                   {field("Наименование (как в документах, EN)", "name")}{field("Наименование (中文)", "name_zh")}{field("Краткое название", "short_name")}

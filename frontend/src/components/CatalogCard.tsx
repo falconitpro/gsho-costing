@@ -8,6 +8,7 @@ import type { TechParamRow } from "../types";
 import TechParamsView from "./TechParamsView";
 import { ImagesEditor, MoreEditor, TechEditor } from "./CatalogEdit";
 import { ModelDocsBlock } from "./PositionExtras";
+import { askConfirm, askPrompt } from "./Dialogs";
 
 type Hist = { at: string | null; user: string; object: string; action: string; changes: { field: string; before: unknown; after: unknown }[]; comment: string; deal: string | null };
 const fmtVal = (v: unknown) => (v == null || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
@@ -99,11 +100,11 @@ export default function CatalogCard({ modelId, execId, onExec, models = [], onCh
       <h2 style={{ marginTop: 0 }}>{card.machine_type} <b>{designation(card)}</b> {card.brand_name && <span className="badge accent" title="наименование под брендом компании">{card.brand_name}</span>}</h2>
       {canEdit && (
         <div className="row" style={{ flexWrap: "wrap", marginBottom: 6, fontSize: 13 }}>
-          <button className="btn ghost" title="собственное наименование для КП под брендом компании" onClick={() => { const b = prompt("Наименование под брендом компании (пусто — убрать):", card.brand_name || ""); if (b !== null) api.patch(`/api/catalog/models/${card.id}`, { brand_name: b, comment: "наименование под брендом" }).then(() => { setMsg("Наименование под брендом сохранено"); reload(); onChanged?.(); }).catch((x) => setMsg((x as Error).message)); }}>Под своим брендом…</button>
+          <button className="btn ghost" title="собственное наименование для КП под брендом компании" onClick={async () => { const b = (await askPrompt("Наименование под брендом компании (пусто — убрать):", card.brand_name || "")); if (b !== null) api.patch(`/api/catalog/models/${card.id}`, { brand_name: b, comment: "наименование под брендом" }).then(() => { setMsg("Наименование под брендом сохранено"); reload(); onChanged?.(); }).catch((x) => setMsg((x as Error).message)); }}>Под своим брендом…</button>
           {models.length > 1 && <><select value={mergeInto} onChange={(x) => setMergeInto(x.target.value)} style={{ maxWidth: 260 }} title="дубль: сделки и история цен перейдут в выбранную модель">
             <option value="">объединить дубль с моделью…</option>{models.filter((m) => m.id !== card.id).map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}</select>
             {mergeInto && <button className="btn ghost" onClick={() => api.post(`/api/catalog/models/${card.id}/merge`, { into_id: mergeInto }).then(() => { setMsg("Модели объединены; дубль в архиве"); onChanged?.(); }).catch((x) => setMsg((x as Error).message))}>объединить</button>}</>}
-          <button className="btn ghost" onClick={() => { if (confirm(`Перенести модель ${card.model} в архив? В подборе участвовать не будет, восстановить можно на вкладке «Архив».`)) api.patch(`/api/catalog/models/${card.id}`, { status: "archived" }).then(() => onChanged?.()).catch((x) => setMsg((x as Error).message)); }}>Модель в архив</button>
+          <button className="btn ghost" onClick={async () => { if ((await askConfirm(`Перенести модель ${card.model} в архив? В подборе участвовать не будет, восстановить можно на вкладке «Архив».`))) api.patch(`/api/catalog/models/${card.id}`, { status: "archived" }).then(() => onChanged?.()).catch((x) => setMsg((x as Error).message)); }}>Модель в архив</button>
         </div>)}
       <div className="muted" style={{ marginBottom: 8, whiteSpace: "normal" }}>{card.factory} · торговая марка: {card.trademark || "—"} · исполнений: {card.executions.length}{card.manually_checked ? "" : " · данные модели пока не проверены КД / ЗГД"}</div>
       {msg && <div className="alert info">{msg}</div>}

@@ -5,6 +5,7 @@ import LogistRequests, { LogistAddresses, LogistFields, FieldsChooser, type Work
 import SpecTable from "../components/SpecTable";
 import { UndoButton, useUndoHistory } from "../undo";
 import { useQueryParam, useUiMode } from "../components/Levels";
+import { askConfirm } from "../components/Dialogs";
 
 type Money = { amount: number; currency: string };
 type PosForm = { domestic_logistics: Money; export_formalities: Money; hs_code: string; duty_pct: string; vat_pct: string; hs_manual_comment: string; hs_description: string; util_fee_rub: number; certification_rub: number; volume_m3: string; comments: Record<string, string>;
@@ -116,7 +117,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const onErr = (e: unknown) => { const d = (e as ApiError).detail as { message?: string; check?: { history_avg: number; deviation_pct: number } }; setErr((d?.message || (e as Error).message) + (d?.check ? ` (среднее по истории ${fmtRub(d.check.history_avg)}, отклонение ${d.check.deviation_pct} %)` : "")); };
 
   async function saveBatch(silent = false): Promise<boolean> {
-    if (!posSel.length && !silent && !window.confirm("В партии нет позиций — её расходы не попадут в себестоимость. Сохранить всё равно?")) return false;
+    if (!posSel.length && !silent && !(await askConfirm("В партии нет позиций — её расходы не попадут в себестоимость. Сохранить всё равно?"))) return false;
     try {
       const body = { name: batch.name, route: batch.route, transport_units: batch.transport_units, transit_days: batch.transit_days, customs_days: batch.customs_days,
         rf_delivery_days: batch.rf_delivery_days, border_planned: batch.border_planned || null, allocation: batch.allocation,
@@ -132,7 +133,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
     } catch (e) { onErr(e); return false; }
   }
   async function deleteBatch(b: Batch) {
-    if (!window.confirm(`Удалить партию «${b.name}»? Её позиции станут нераспределёнными.`)) return;
+    if (!(await askConfirm(`Удалить партию «${b.name}»? Её позиции станут нераспределёнными.`))) return;
     try { await api.del(`/api/deals/${deal.id}/logistics/batches/${b.id}`); if (editId === b.id) resetBatchForm(); setErr(""); reload(); } catch (e) { onErr(e); }
   }
   async function savePos(pid: string, silent = false): Promise<boolean> {
@@ -152,7 +153,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
     try { await api.post(`/api/deals/${deal.id}/logistics/complete`, { no_delivery_cost: noDeliveryCost }); setErr(""); reload(); }
     catch (e) {
       const d = (e as ApiError).detail as { message?: string; confirm?: string } | undefined;
-      if (d?.confirm === "no_delivery_cost" && window.confirm(`${d.message}\n\nОтправить на расчёт без стоимости доставки?`)) return complete(true);
+      if (d?.confirm === "no_delivery_cost" && (await askConfirm(`${d.message}\n\nОтправить на расчёт без стоимости доставки?`))) return complete(true);
       onErr(e); reload();
     }
   }

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { UndoButton, useUndoHistory } from "../undo";
 import { addBlock, blockOf, blockRange, insertAfter, moveBlock, moveRow, removeBlock, renameBlock, renumber } from "../rowOps";
+import { askConfirm, askPrompt } from "./Dialogs";
 
 export type TplRow = { id?: string; no: number; code: string; name_ru: string; name_zh: string; unit: string; required: boolean; section: string; _k?: string };
 type Parsed = { rows: TplRow[]; blocks: number; warnings: string[]; sheet: string };
@@ -42,7 +43,7 @@ export default function TemplateEditor({ editor, types, onTypesChanged }: { edit
     window.addEventListener("beforeunload", h); return () => window.removeEventListener("beforeunload", h);
   }, [dirty]);
 
-  const pickType = (id: string) => { if (dirty && !window.confirm("Есть несохранённые правки шаблона. Перейти без сохранения?")) return; setTypeId(id); };
+  const pickType = async (id: string) => { if (dirty && !(await askConfirm("Есть несохранённые правки шаблона. Перейти без сохранения?"))) return; setTypeId(id); };
   const upd = (i: number, patch: Partial<TplRow>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const ins = (i: number) => { const r = empty(); setRows(insertAfter(rows, i, r)); setFocusKey(r._k!); };
   const mv = (i: number, d: -1 | 1) => { const k = rows[i]._k!; setRows(moveRow(rows, i, d)); setFocusKey(k); };
@@ -54,7 +55,7 @@ export default function TemplateEditor({ editor, types, onTypesChanged }: { edit
 
   async function save() {
     const named = rows.filter((r) => r.name_ru.trim());
-    if (named.length !== rows.length && !window.confirm(`Пустых строк: ${rows.length - named.length} — они не сохранятся. Продолжить?`)) return;
+    if (named.length !== rows.length && !(await askConfirm(`Пустых строк: ${rows.length - named.length} — они не сохранятся. Продолжить?`))) return;
     try {
       await api.put(isHeader ? "/api/refs/request-header" : `/api/refs/tech-param-templates?machine_type_id=${typeId}`, renumber(named).map(({ _k, ...r }) => r));
       setMsg({ ok: true, text: isHeader ? "Шапка заявки сохранена — новые и открытые заново заявки показывают её" : inherited ? "Сохранён отдельный шаблон для этого типа машины" : "Шаблон сохранён" }); load();
@@ -74,8 +75,8 @@ export default function TemplateEditor({ editor, types, onTypesChanged }: { edit
   };
   const copyFrom = (id: string) => {
     if (id === "-") return;
-    api.get<{ rows: TplRow[] }>(`/api/refs/tech-param-templates?machine_type_id=${id === "general" ? "" : id}`).then((r) => {
-      if (rows.length && !window.confirm("Заменить строки на экране строками выбранного шаблона? Сохранится только после «Сохранить шаблон».")) return;
+    api.get<{ rows: TplRow[] }>(`/api/refs/tech-param-templates?machine_type_id=${id === "general" ? "" : id}`).then(async (r) => {
+      if (rows.length && !(await askConfirm("Заменить строки на экране строками выбранного шаблона? Сохранится только после «Сохранить шаблон»."))) return;
       setRows(withKeys(r.rows.map((x) => ({ ...x, id: undefined, _k: undefined })))); setMsg({ ok: true, text: "Строки скопированы — поправьте и сохраните." });
     });
   };
@@ -93,7 +94,7 @@ export default function TemplateEditor({ editor, types, onTypesChanged }: { edit
             <option value="">Общий (типовой) шаблон техники</option>
             {types.map((t) => <option key={t.id} value={t.id}>{t.name}{t.status === "pending" ? " (на подтверждение)" : ""}</option>)}
           </select></label>
-        {editor && <button className="btn ghost" onClick={() => { const n = prompt("Новый тип машины:"); if (n) api.post("/api/refs/machine-types", { name: n }).then(onTypesChanged); }}>+ тип машины</button>}
+        {editor && <button className="btn ghost" onClick={async () => { const n = (await askPrompt("Новый тип машины:")); if (n) api.post("/api/refs/machine-types", { name: n }).then(onTypesChanged); }}>+ тип машины</button>}
         <span className="te-spacer" />
         <a className="btn ghost" href={isHeader ? "/api/refs/tech-param-templates/file?kind=header" : `/api/refs/tech-param-templates/file?machine_type_id=${typeId}`}>⬇ Скачать в Excel</a>
         {editor && <><button className="btn ghost" onClick={() => fileRef.current?.click()}>⬆ Загрузить из Excel</button>
@@ -154,7 +155,7 @@ export default function TemplateEditor({ editor, types, onTypesChanged }: { edit
                       <button title="блок ниже" disabled={be >= rows.length} onClick={() => setRows(moveBlock(rows, i, 1))}>↓</button>
                       <button title="параметр в конец блока" onClick={() => ins(be - 1)}>+ параметр</button>
                       <button title="новый блок после этого" onClick={() => setNewBlock(String(i))}>+ блок</button>
-                      <button title="удалить блок" className="te-del" onClick={() => { if (window.confirm(`Удалить блок «${b}» (${inB.length} парам.)?`)) setRows(removeBlock(rows, i)); }}>×</button>
+                      <button title="удалить блок" className="te-del" onClick={async () => { if ((await askConfirm(`Удалить блок «${b}» (${inB.length} парам.)?`))) setRows(removeBlock(rows, i)); }}>×</button>
                     </span>}
                   </div>
                 </td>
@@ -195,7 +196,7 @@ export default function TemplateEditor({ editor, types, onTypesChanged }: { edit
       {editor && dirty && (
         <div className="te-save">
           <button className="btn" onClick={save}>Сохранить шаблон</button>
-          <button className="btn ghost" onClick={() => { if (window.confirm("Отменить все несохранённые правки?")) load(); }}>Отменить правки</button>
+          <button className="btn ghost" onClick={async () => { if ((await askConfirm("Отменить все несохранённые правки?"))) load(); }}>Отменить правки</button>
           <span className="muted">есть несохранённые изменения{inherited ? " — сохранение создаст отдельный шаблон для типа" : ""}</span>
         </div>)}
     </div>

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { ClaimCard, ClaimsTable, NewClaimDialog, type ClaimRow } from "./ClaimsBlock";
+import { askConfirm } from "./Dialogs";
 
 // Реестр договоров (юридический блок, этап 1): договоры с клиентами, поставщиками, подрядчиками и прочие.
 // По каждому договору обязательны условия оплаты «сколько — через сколько дней — после какого события»; неустойки — для потока и претензий.
@@ -178,7 +179,7 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
   const pull = () => api.post<Full>(`/api/legal/contracts/${id}/pull-terms`).then((x) => { setC(x); setDraft({}); setInfo("Цена и условия оплаты перенесены из расчёта сделки"); }).catch(fail);
   const tabs: [Tab, string][] = [["main", "Основное"], ["pay", "Оплата"], ["perf", "Сроки и неустойки"], ...(c.obligations ? [["exec", "Исполнение"] as [Tab, string]] : []), ["files", c.package ? `Документы (${c.files.length} + пакет)` : `Документы (${c.files.length})`], ["history", "История"]];
   return (
-    <Modal title={`${c.doc_type_title} ${c.number}${c.cp_name ? " — " + c.cp_name : ""}`} onClose={() => { if (!dirty || window.confirm("Закрыть без сохранения?")) onClose(); }} wide>
+    <Modal title={`${c.doc_type_title} ${c.number}${c.cp_name ? " — " + c.cp_name : ""}`} onClose={async () => { if (!dirty || (await askConfirm("Закрыть без сохранения?"))) onClose(); }} wide>
       <div className="poa-steps" style={{ gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}>
         {tabs.map(([k, t], i) => <button key={k} className={`poa-step ${tab === k ? "cur" : ""}`} onClick={() => setTab(k)}><span className="n">{i + 1}</span><span>{t}</span></button>)}
       </div>
@@ -278,7 +279,7 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
               <table className="table poa-files"><thead><tr><th>Вид</th><th>Файл</th><th>Версия</th><th>Загрузил</th><th>Дата</th><th /></tr></thead>
                 <tbody>{c.files.map((x) => (
                   <tr key={x.id}><td>{x.kind_title}</td><td><a href={`/api/legal/contracts/${id}/files/${x.id}`} target="_blank" rel="noreferrer">{x.name}</a></td><td>v{x.version}</td><td>{x.uploaded_by_name}</td><td>{d(x.uploaded_at)}</td>
-                    <td style={{ textAlign: "right" }}>{c.can_edit && !(c.locked && ["signed_scan", "edo"].includes(x.kind)) && <button className="btn ghost" style={{ padding: "0 8px" }} title="удалить" onClick={() => { if (window.confirm(`Удалить ${x.name}?`)) api.del<Full>(`/api/legal/contracts/${id}/files/${x.id}`).then((y) => setC({ ...c, ...y })).catch(fail); }}>×</button>}</td></tr>))}
+                    <td style={{ textAlign: "right" }}>{c.can_edit && !(c.locked && ["signed_scan", "edo"].includes(x.kind)) && <button className="btn ghost" style={{ padding: "0 8px" }} title="удалить" onClick={async () => { if ((await askConfirm(`Удалить ${x.name}?`))) api.del<Full>(`/api/legal/contracts/${id}/files/${x.id}`).then((y) => setC({ ...c, ...y })).catch(fail); }}>×</button>}</td></tr>))}
                 </tbody></table>)}
           </div>)}
 
@@ -290,7 +291,7 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
       <div className="poa-footer">
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           {c.can_delete && <button className="btn ghost" style={{ color: "var(--bad)" }} title="Проект заведён по ошибке — удалить из реестра (снимок останется в журнале)"
-            onClick={() => { if (window.confirm(`Удалить проект ${c.doc_type_title.toLowerCase()}а ${c.number}${c.cp_name ? " — " + c.cp_name : ""}? Восстановить из системы нельзя, снимок останется в журнале.`))
+            onClick={async () => { if ((await askConfirm(`Удалить проект ${c.doc_type_title.toLowerCase()}а ${c.number}${c.cp_name ? " — " + c.cp_name : ""}? Восстановить из системы нельзя, снимок останется в журнале.`)))
               api.del<{ deleted: string }>(`/api/legal/contracts/${id}`).then(() => onClose()).catch(fail); }}>Удалить проект</button>}
           {c.status === "draft" && c.can_edit && <button className="btn" disabled={dirty} title={dirty ? "сначала сохраните" : ""} onClick={() => act("submit")}>На согласование</button>}
           {c.my_steps.length > 0 && <>

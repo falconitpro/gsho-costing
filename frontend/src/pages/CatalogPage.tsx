@@ -5,6 +5,7 @@ import { api, fmtDate, fmtRub, designation } from "../api";
 import { can, type Me } from "../types";
 import CatalogCard from "../components/CatalogCard";
 import CatalogAdd from "../components/CatalogAdd";
+import { askPrompt } from "../components/Dialogs";
 
 type Tree = { factory_id: string; factory: string; types: { machine_type: string; models: { id: string; model: string; trademark?: string; brand_name: string; status: string; executions: { id: string; name: string; brand_name: string; status: string; params: number; images: number; source_deal_id: string | null }[] }[] }[] }[];
 type Exec = { id: string; name: string; brand_name: string; status: string; tech_params: { no: number; name_ru: string; unit: string; value_ru: string; required: boolean; local_ru: boolean }[]; images: unknown[];
@@ -46,7 +47,7 @@ export default function CatalogPage({ me, embedded, openModelId }: { me: Me; emb
   }
   const openExec = (id: string) => api.get<Exec>(`/api/catalog/executions/${id}`).then((x) => { setExec(x); if (x.model?.id) setModelId(x.model.id); });
   async function decide(id: string, approve: boolean) {
-    const brand = approve && editor ? prompt("Наименование под брендом компании (можно оставить пустым):", "") ?? "" : "";
+    const brand = approve && editor ? (await askPrompt("Наименование под брендом компании (можно оставить пустым):", "")) ?? "" : "";
     try { await api.post(`/api/catalog/executions/${id}/decision`, { approve, brand_name: brand || null }); setMsg(approve ? "Исполнение занесено в каталог" : "Отклонено"); api.get<typeof pending>("/api/catalog/pending").then(setPending); loadTree(); if (exec?.id === id) openExec(id); }
     catch (e) { setMsg((e as Error).message); }
   }
@@ -146,7 +147,7 @@ export default function CatalogPage({ me, embedded, openModelId }: { me: Me; emb
               <button className="btn" disabled={!glNew.term_ru || !glNew.term_zh} onClick={() => api.post("/api/refs/glossary", { ...glNew, status: "confirmed" }).then(() => { setGlNew({ term_ru: "", term_zh: "", kind: "param" }); loadGl(); })}>Добавить</button></>}</div>
           <table style={{ marginTop: 8 }}><thead><tr><th>RU</th><th>CN</th><th>Тип</th><th>Статус</th><th /></tr></thead>
             <tbody>{gl.map((g) => <tr key={g.id} style={{ background: g.status === "machine" ? "#f3e8ff" : undefined }}><td>{g.term_ru}</td><td>{g.term_zh}</td><td>{lbl(GLOSSARY_KIND, g.kind)}</td><td><span className={"badge " + (g.status === "confirmed" ? "ok" : "warn")}>{g.status === "confirmed" ? "подтверждён" : "машинный"}</span></td>
-              <td className="row">{can(me, "glossary", 2) && g.status === "machine" && <button className="btn ghost" onClick={() => { const z = prompt("Перевод CN:", g.term_zh); if (z !== null) api.post(`/api/refs/glossary/${g.id}/confirm?term_zh=${encodeURIComponent(z)}`).then(loadGl); }}>подтвердить</button>}
+              <td className="row">{can(me, "glossary", 2) && g.status === "machine" && <button className="btn ghost" onClick={async () => { const z = (await askPrompt("Перевод CN:", g.term_zh)); if (z !== null) api.post(`/api/refs/glossary/${g.id}/confirm?term_zh=${encodeURIComponent(z)}`).then(loadGl); }}>подтвердить</button>}
                 {can(me, "glossary", 2) && <button className="btn ghost" onClick={() => api.del(`/api/refs/glossary/${g.id}`).then(loadGl)}>×</button>}</td></tr>)}
               {gl.length === 0 && <tr><td colSpan={5} className="muted">Пусто</td></tr>}</tbody></table>
         </div>

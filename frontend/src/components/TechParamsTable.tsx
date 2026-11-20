@@ -6,6 +6,7 @@ import { api, ApiError, designation, ru } from "../api";
 import { UndoButton, useUndoHistory } from "../undo";
 import type { Position, TechParamRow } from "../types";
 import { addBlock, insertAfter, moveRow, renumber } from "../rowOps";
+import { askPrompt } from "./Dialogs";
 
 type Preview = { sheets: { name: string; rows: unknown[][]; total_rows: number; mapping: { header_row: number; first_row: number; columns: Record<string, number>; source?: string } }[];
   columns: { key: string; title: string }[] };
@@ -70,7 +71,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
   const [focusNo, setFocusNo] = useState<number | null>(null);
   const insRow = (i: number) => { setRows((rs) => renumber(insertAfter(rs, i, blank()))); setShowFree((f) => ({ ...f, [rows[i]?.section || "Дополнительные параметры"]: true })); setFocusNo(i + 2); setDirty(true); };
   const mvRow = (i: number, d: -1 | 1) => { setRows((rs) => renumber(moveRow(rs, i, d))); setDirty(true); };
-  const newBlock = () => { const n = prompt("Название нового блока (например, «Навесное оборудование»):"); if (!n?.trim()) return;
+  const newBlock = async () => { const n = (await askPrompt("Название нового блока (например, «Навесное оборудование»):")); if (!n?.trim()) return;
     setRows((rs) => renumber(addBlock(rs, n.trim(), blank()))); setShowFree((f) => ({ ...f, [n.trim()]: true })); setFocusNo(rows.length + 1); setDirty(true); };
   useEffect(() => { if (focusNo != null) { (document.querySelector(`[data-tp-no="${focusNo}"]`) as HTMLInputElement | null)?.focus(); setFocusNo(null); } }, [focusNo, rows]);
   async function save(auto = false) {

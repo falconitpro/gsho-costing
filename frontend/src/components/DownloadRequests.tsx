@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
+import { askPrompt } from "./Dialogs";
 
 type R = { id: string; user: string; deal_id: string; deal_number: string; file_name: string; path: string; reason: string; requested_at: string };
 
@@ -10,8 +11,8 @@ export default function DownloadRequests() {
   const load = () => api.get<R[]>("/api/files-download-requests?status=pending").then(setRows).catch(() => setRows([]));
   useEffect(() => { load(); }, []);
   if (!rows.length) return null;
-  const decide = (id: string, approve: boolean) => {
-    const comment = approve ? "" : window.prompt("Причина отказа (необязательно)") ?? "";
+  const decide = async (id: string, approve: boolean) => {
+    const comment = approve ? "" : (await askPrompt("Причина отказа (необязательно)")) ?? "";
     api.post(`/api/files-download-requests/${id}`, { approve, comment }).then(load).catch((e) => setErr((e as Error).message));
   };
   return (

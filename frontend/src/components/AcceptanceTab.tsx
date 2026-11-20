@@ -1,5 +1,6 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import { api, fmtDate } from "../api";
+import { askConfirm, askPrompt } from "./Dialogs";
 
 // Приёмка машин на заводе: по каждой машине — номера, чек-лист, испытания, фото и видео, замечания, решение и акт.
 
@@ -98,8 +99,8 @@ function UnitCard({ base, u, data, onSaved }: { base: string; u: Unit; data: Dat
     ? <span className="badge bad" style={{ marginLeft: 4, fontSize: 10 }} title={x.prev?.comment || ""}>не принято в приёмке № {x.prev_fail.join(", ")}</span>
     : x.prev?.result ? <span className="muted" style={{ fontSize: 10, marginLeft: 4 }}>ранее: {data.results[x.prev.result] || x.prev.result}</span> : null);
   const prevStyle = (x: Prev) => (x.prev_fail && x.prev_fail.length > 0 ? { background: "#f4f4f4", boxShadow: "inset 3px 0 0 #ff3131" } : undefined);
-  const newRound = (mode: string) => {
-    if (!confirm(`Начать новую приёмку (${data.modes[mode]})? Текущая приёмка № ${u.round_no || 1} сохранится в истории; результаты проверок — заново, не принятые ранее пункты будут выделены.`)) return;
+  const newRound = async (mode: string) => {
+    if (!(await askConfirm(`Начать новую приёмку (${data.modes[mode]})? Текущая приёмка № ${u.round_no || 1} сохранится в истории; результаты проверок — заново, не принятые ранее пункты будут выделены.`))) return;
     run(() => api.post(`${url}/rounds`, { mode, is_final: mode === "factory" }), `Начата приёмка № ${(u.round_no || 1) + 1} — ${data.modes[mode]}`);
   };
   const res = (v: string, on: (x: string) => void) => (
@@ -156,7 +157,7 @@ function UnitCard({ base, u, data, onSaved }: { base: string; u: Unit; data: Dat
                 <label style={{ cursor: "pointer", marginLeft: 4 }} title="фото / видео к пункту из файла">📁<input type="file" accept="image/*,video/*" multiple style={{ display: "none" }}
                 onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; if (fs.length) uploadMedia(fs, x.id!); }} /></label></>}</td></tr>)),
       ])}</tbody></table>
-      {edit && <button className="btn ghost" onClick={() => set({ checklist: [...f.checklist, { group: "Дополнительно", item: prompt("Пункт проверки") || "", expected: "", result: "", comment: "" }].filter((x) => x.item) })}>+ пункт</button>}
+      {edit && <button className="btn ghost" onClick={async () => set({ checklist: [...f.checklist, { group: "Дополнительно", item: (await askPrompt("Пункт проверки")) || "", expected: "", result: "", comment: "" }].filter((x) => x.item) })}>+ пункт</button>}
 
       <h4>Испытания</h4>
       <table style={{ fontSize: 12 }}><tbody>{f.tests.map((x, i) => (onlyPrev && !(x.prev_fail || []).length) ? null : (
@@ -164,7 +165,7 @@ function UnitCard({ base, u, data, onSaved }: { base: string; u: Unit; data: Dat
           <td><input disabled={!edit} placeholder="показатель (давление, скорость…)" style={{ width: 200 }} value={x.value} onChange={(e) => set({ tests: f.tests.map((y, j) => (j === i ? { ...y, value: e.target.value } : y)) })} /></td>
           <td>{res(x.result, (v) => set({ tests: f.tests.map((y, j) => (j === i ? { ...y, result: v } : y)) }))}</td>
           <td><input disabled={!edit} placeholder="примечание" style={{ width: 180 }} value={x.note} onChange={(e) => set({ tests: f.tests.map((y, j) => (j === i ? { ...y, note: e.target.value } : y)) })} /></td></tr>))}</tbody></table>
-      {edit && <button className="btn ghost" onClick={() => { const n = prompt("Испытание"); if (n) set({ tests: [...f.tests, { name: n, result: "", value: "", note: "" }] }); }}>+ испытание</button>}
+      {edit && <button className="btn ghost" onClick={async () => { const n = (await askPrompt("Испытание")); if (n) set({ tests: [...f.tests, { name: n, result: "", value: "", note: "" }] }); }}>+ испытание</button>}
 
       <h4>Фото и видео осмотра</h4>
       <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
 import type { Deal, Me } from "../types";
+import { askConfirm } from "./Dialogs";
 
 type Doc = { id: string; category: string; category_title: string; legal: boolean; file_name: string; comment: string; size?: number; url: string;
   uploaded_by: string; uploaded_at: string | null; uploaded_by_id: string };
@@ -43,7 +44,7 @@ export default function DocumentsTab({ deal, me, onChanged }: { deal: Deal; me: 
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   }
   async function remove(doc: Doc) {
-    if (!window.confirm(`Убрать файл «${doc.file_name}» из документов сделки?`)) return;
+    if (!(await askConfirm(`Убрать файл «${doc.file_name}» из документов сделки?`))) return;
     try { await api.del(`${base}/documents/${doc.id}`); await load(); onChanged(); } catch (e) { setErr((e as Error).message); }
   }
   async function review() {

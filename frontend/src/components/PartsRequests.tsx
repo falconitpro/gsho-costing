@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
+import { askAlert, askConfirm, askPrompt } from "./Dialogs";
 
 // Заявки клиентов на запчасти: попозиционный учёт, подбор по каталогу, цена, маржа и визы (ТЗ запчастей, разделы 5–6).
 
@@ -119,7 +120,7 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
               <td>{l.no}{l.parent_line_id && <div className="muted" style={{ fontSize: 11 }}>часть строки</div>}
                 {!closed && r.lines.length > 1 && DELETABLE.includes(l.status) && (
                   <div><a href="#" style={{ fontSize: 11, color: "var(--bad)" }} title="Удалить ошибочно введённую позицию"
-                    onClick={(e) => { e.preventDefault(); if (confirm(`Удалить позицию ${l.no} «${l.raw_article || l.raw_name}»?`)) act(() => api.del<Req>(`${base}/lines/${l.id}`), "Позиция удалена"); }}>удалить</a></div>)}</td>
+                    onClick={async (e) => { e.preventDefault(); if ((await askConfirm(`Удалить позицию ${l.no} «${l.raw_article || l.raw_name}»?`))) act(() => api.del<Req>(`${base}/lines/${l.id}`), "Позиция удалена"); }}>удалить</a></div>)}</td>
               <td><b>{l.raw_article}</b><div className="muted" style={{ fontSize: 11 }}>{l.raw_name}</div></td>
               <td>{l.part ? <>{l.part.article} {l.part.name_ru}<div className="muted" style={{ fontSize: 11 }}>{MATCH[l.match_kind] || l.match_kind}{l.part.manufacturer && ` · ${l.part.manufacturer}`}</div></>
                 : <span className="badge bad">{l.candidates?.length ? `несколько вариантов (${l.candidates.length})` : "не найдено"}</span>}
@@ -134,7 +135,7 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
                 {l.available != null && <div style={{ fontSize: 11 }}><span className={`badge ${l.available >= l.qty ? "ok" : l.available > 0 ? "warn" : ""}`}>{l.available >= l.qty ? "есть на складах" : l.available > 0 ? `на складах ${l.available} из ${l.qty}` : "нет на складах"}</span>
                   {(l.warehouses || []).filter((w) => w.available > 0 || w.reserved > 0).map((w) => <div key={w.warehouse_id} className="muted">{w.warehouse}: <b style={{ color: "var(--ink)" }}>{w.available}</b>{w.reserved ? ` (резерв ${w.reserved})` : ""}</div>)}</div>}</td>
               <td><select value={l.source} disabled={closed || !l.part} onChange={(e) => patch(l, { source: e.target.value })}><option value="">—</option><option value="stock">со склада</option><option value="order">под заказ</option></select>
-                {!closed && l.qty > 1 && <div><a href="#" style={{ fontSize: 11 }} onClick={(e) => { e.preventDefault(); const v = prompt("Сколько отделить в новую строку?", "1"); if (v) act(() => api.post<Req>(`${base}/lines/${l.id}/split`, { qty: Number(v) })); }}>разделить</a></div>}</td>
+                {!closed && l.qty > 1 && <div><a href="#" style={{ fontSize: 11 }} onClick={async (e) => { e.preventDefault(); const v = (await askPrompt("Сколько отделить в новую строку?", "1")); if (v) act(() => api.post<Req>(`${base}/lines/${l.id}/split`, { qty: Number(v) })); }}>разделить</a></div>}</td>
               <td className="num"><input type="number" style={{ width: 60 }} defaultValue={l.lead_days ?? ""} disabled={closed} onBlur={(e) => patch(l, { lead_days: e.target.value ? Number(e.target.value) : null })} /></td>
               <td className="num"><input type="number" style={{ width: 90 }} defaultValue={l.price ?? ""} disabled={closed} key={`${l.id}-${l.price}`}
                 onBlur={(e) => { const v = e.target.value ? Number(e.target.value) : 0; if (v !== (l.price || 0)) patch(l, { price: v, currency: l.currency }); }} />
@@ -162,7 +163,7 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
       {!closed && (
         <div className="row" style={{ marginTop: 6, flexWrap: "wrap" }}>
           <button className="btn ghost" disabled={!sel.length} onClick={() => act(() => api.post<Req & { reserve_short?: number[] }>(`/api/parts/stock/requests/${r.id}/client-order`, { line_ids: sel })
-            .then((x) => { if (x.reserve_short?.length) alert(`Свободного остатка не хватило для строк: ${x.reserve_short.join(", ")}`); return x; }), "Заказ клиента отмечен, строки «со склада» в жёстком резерве")}>Клиент заказал отмеченные</button>
+            .then((x) => { if (x.reserve_short?.length) void askAlert(`Свободного остатка не хватило для строк: ${x.reserve_short.join(", ")}`); return x; }), "Заказ клиента отмечен, строки «со склада» в жёстком резерве")}>Клиент заказал отмеченные</button>
           <span className="muted" style={{ fontSize: 11 }}>строки «со склада» — жёсткий резерв; «под заказ» — в «Заказы поставщикам» → «К заказу»</span>
         </div>)}
       {!closed && <SupplierPanel r={r} sel={sel} act={act} />}
@@ -190,7 +191,7 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
           <label className="row">валюта КП<select value={kpCur} onChange={(e) => setKpCur(e.target.value)}>{["RUB", "EUR", "CNY", "USD"].map((c) => <option key={c}>{c}</option>)}</select></label>
           {approver && r.summary.handling_fee_rub > 0 && <label className="row"><input type="checkbox" checked={noFee} onChange={(e) => setNoFee(e.target.checked)} /> без «Обработки заказа» (ФД увидит)</label>}
           <button className="btn" disabled={!kpSel.length} onClick={() => act(() => api.post<Req & { reserve_short?: string[] }>(`${base}/kp`, { line_ids: kpSel, currency: kpCur, remove_handling_fee: noFee })
-            .then((x) => { if (x.reserve_short?.length) alert(`Свободного остатка не хватило для строк: ${x.reserve_short.join(", ")}`); return x; }), "КП сформировано, строки «со склада» в мягком резерве")}>Сформировать КП</button>
+            .then((x) => { if (x.reserve_short?.length) void askAlert(`Свободного остатка не хватило для строк: ${x.reserve_short.join(", ")}`); return x; }), "КП сформировано, строки «со склада» в мягком резерве")}>Сформировать КП</button>
         </div>)}
       {r.kps?.length > 0 && (
         <table style={{ marginTop: 6 }}>
@@ -486,7 +487,7 @@ export function PartsRequestView({ me, id }: { me: Me; id: string }) {
       <div className="page-head"><Link to="/deals?type=parts" className="muted">← Сделки</Link><h1 style={{ margin: 0 }}>Заявка на запчасти {cur?.number || ""}</h1>
         {cur && (has("cd", "gd") || (has("manager", "purchasing") && (cur as Req & { manager_id?: string }).manager_id === me.id)) && !cur.kps?.length && (
           <button className="btn ghost push" style={{ color: "var(--bad)" }} title="заявка заведена по ошибке — удалить; снимок останется в журнале"
-            onClick={() => { if (window.confirm(`Удалить заявку ${cur.number}${cur.client_name ? ` (${cur.client_name})` : ""}? Восстановить из системы нельзя, снимок останется в журнале.`))
+            onClick={async () => { if ((await askConfirm(`Удалить заявку ${cur.number}${cur.client_name ? ` (${cur.client_name})` : ""}? Восстановить из системы нельзя, снимок останется в журнале.`)))
               api.del<{ deleted: string }>(`/api/parts/requests/${cur.id}`).then(() => nav("/deals?type=parts")).catch((e) => setMsg((e as Error).message)); }}>Удалить заявку</button>)}</div>
       {msg && <div className="alert info" onClick={() => setMsg("")}>{msg}</div>}
       {cur && meta ? <RequestCard r={cur} meta={meta} seesCost={seesCost} approver={has("cd", "fd", "gd")} act={act} /> : !msg && <div className="card">Загрузка…</div>}

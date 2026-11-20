@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
+import { askConfirm } from "./Dialogs";
 
 // ЗИП позиции сделки и документы модели (руководства, чертежи, схемы, каталог запчастей) — в сделке и в каталоге.
 
@@ -134,7 +135,7 @@ export function ModelDocsBlock({ dealId, positionId, modelId, canUpload, canRemo
               <a href={d.url} target="_blank" rel="noreferrer">{d.title && d.title !== DOC_KINDS[k] ? d.title : d.file_name}</a>
               <span className="badge">{LANGS[d.language] || d.language}</span>{d.version && <span className="badge">версия {d.version}</span>}
               <span className="muted" style={{ fontSize: 11 }}>{fmtDate(d.uploaded_at)} · {d.uploaded_by_name}</span>
-              {canRemove && <a href="#" style={{ fontSize: 11 }} onClick={(e) => { e.preventDefault(); if (confirm("Убрать документ из модели?")) api.del(`/api/catalog/documents/${d.id}`).then(load).catch((x) => setMsg((x as Error).message)); }}>убрать</a>}
+              {canRemove && <a href="#" style={{ fontSize: 11 }} onClick={async (e) => { e.preventDefault(); if ((await askConfirm("Убрать документ из модели?"))) api.del(`/api/catalog/documents/${d.id}`).then(load).catch((x) => setMsg((x as Error).message)); }}>убрать</a>}
             </div>))}
         </div>))}
       {canUpload && (
