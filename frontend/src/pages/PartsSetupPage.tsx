@@ -76,7 +76,7 @@ export default function SupplyPage({ me }: { me: Me }) {
       {tab === "batches" && <PartsBatches />}
       {tab === "stock" && <PartsWarehouse />}
       {tab === "claims" && <PartsClaims me={me} />}
-      {tab === "reports" && <PartsReports />}
+      {tab === "reports" && <PartsReports finance={can(me, "finance_analytics")} />}
       {!tab && !overview && <div className="card muted">Нет доступа к разделу.</div>}
     </>
   );

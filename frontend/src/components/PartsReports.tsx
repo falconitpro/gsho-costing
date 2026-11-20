@@ -10,33 +10,43 @@ type Row = Record<string, unknown>;
 
 const yearAgo = () => { const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d.toISOString().slice(0, 10); };
 
-export default function PartsReports() {
-  const [kind, setKind] = useState<Kind>("sales");
+// отчёты с выручкой, себестоимостью и маржой сервер отдаёт только при праве «Финансовая аналитика» (ФД, КД, ЗГД; решение владельца 20.11.2026 — не расширять)
+const MONEY: Kind[] = ["sales", "warranty", "shipments"];
+
+export default function PartsReports({ finance = true }: { finance?: boolean }) {
+  const [kind, setKind] = useState<Kind>(finance ? "sales" : "service");
   const [by, setBy] = useState("client");
   const [from, setFrom] = useState(yearAgo());
   const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
   const [idle, setIdle] = useState(180);
-  const [data, setData] = useState<Row | null>(null);
+  // данные привязаны к виду отчёта: при переключении прежние данные не попадают в чужую таблицу (раньше страница падала при переходе, например, «Сервис» → «Продажи»)
+  const [loaded, setLoaded] = useState<{ kind: Kind; data: Row } | null>(null);
+  const data = loaded && loaded.kind === kind ? loaded.data : null;
+  const setData = (d: Row | null) => setLoaded(d ? { kind, data: d } : null);
   const [err, setErr] = useState("");
   useEffect(() => {
     const p = `date_from=${from}&date_to=${to}`;
     const url = { sales: `/api/parts/reports/sales?by=${by}&${p}`, service: `/api/parts/reports/service?${p}`, lead: `/api/parts/reports/lead-accuracy?${p}`,
       stock: `/api/parts/reports/stock?idle_days=${idle}`, missing: `/api/parts/reports/missing?${p}`, warranty: "/api/parts/reports/warranty", shipments: `/api/parts/reports/shipments?${p}` }[kind];
     setData(null); setErr("");
-    api.get<Row>(url).then(setData).catch((e) => setErr((e as Error).message));
+    if (!finance && MONEY.includes(kind)) return;     // без права запрос не делается — вместо ошибки сервера пояснение ниже
+    const k = kind;
+    api.get<Row>(url).then((d) => setLoaded({ kind: k, data: d })).catch((e) => setErr((e as Error).message));
   }, [kind, by, from, to, idle]);
   const rows = (k = "rows") => ((data?.[k] as Row[]) || []);
   const n = (v: unknown, d = 0) => (v == null ? "—" : fmtRub(Number(v), d));
   return (
     <div className="card">
-      <div className="row" style={{ flexWrap: "wrap" }}>{(Object.keys(TITLES) as Kind[]).map((k) => <button key={k} className={`btn ${kind === k ? "" : "ghost"}`} onClick={() => setKind(k)}>{TITLES[k]}</button>)}</div>
+      <div className="row" style={{ flexWrap: "wrap" }}>{(Object.keys(TITLES) as Kind[]).map((k) => <button key={k} className={`btn ${kind === k ? "" : "ghost"}`} onClick={() => setKind(k)}
+        title={!finance && MONEY.includes(k) ? "отчёт с выручкой и маржой — для ФД, КД и ЗГД" : undefined}>{TITLES[k]}{!finance && MONEY.includes(k) && <span className="muted" style={{ fontSize: 11 }}> · ФД, КД, ЗГД</span>}</button>)}</div>
+      {!finance && MONEY.includes(kind) && <div className="alert info" style={{ marginTop: 8 }}>«{TITLES[kind]}» показывает выручку, себестоимость и маржу — отчёт доступен ФД, КД и ЗГД. Остальные отчёты раздела доступны вам.</div>}
       <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
         {!["stock", "warranty"].includes(kind) && <><label className="row">с<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label><label className="row">по<input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label></>}
         {kind === "sales" && <select value={by} onChange={(e) => setBy(e.target.value)}><option value="client">по клиентам</option><option value="group">по группам товара</option><option value="supplier">по поставщикам</option></select>}
         {kind === "stock" && <label className="row">без движения дольше<input type="number" style={{ width: 70 }} value={idle} onChange={(e) => setIdle(Number(e.target.value))} />дн.</label>}
       </div>
       {err && <div className="alert info">{err}</div>}
-      {!data && !err && <div className="muted" style={{ marginTop: 8 }}>Загружаю…</div>}
+      {!data && !err && !(!finance && MONEY.includes(kind)) && <div className="muted" style={{ marginTop: 8 }}>Загружаю…</div>}
       {data && kind === "sales" && (() => { const t = data.total as Row; const cost = rows()[0] && "margin_pct" in rows()[0]; return (
         <table style={{ marginTop: 8 }}><thead><tr><th>{by === "client" ? "Клиент" : by === "group" ? "Группа" : "Поставщик"}</th><th className="num">Строк</th><th className="num">Выручка, ₽</th>{cost && <><th className="num">Себестоимость, ₽</th><th className="num">Маржа, ₽</th><th className="num">Маржа, %</th></>}</tr></thead>
           <tbody>{rows().map((r) => <tr key={String(r.key)}><td>{String(r.name)}</td><td className="num">{String(r.lines)}</td><td className="num">{n(r.revenue_rub)}</td>
