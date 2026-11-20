@@ -16,7 +16,7 @@ from ..core.roles import ROLE_TITLES, Role
 from ..core.workflow import OPEN_STATUSES, STATUS_TITLES, DealStatus
 from ..db import get_db
 from ..models import Contract, Deal, ExecutionStage, LegalPackage, NotificationLog, PowerOfAttorney, Task, User
-from ..services import settings_service
+from ..services import draft_watch, settings_service
 from ..services.deal_service import audit
 from .common import can_see_deal
 
@@ -104,7 +104,7 @@ def _my_tasks(db: Session, user: CurrentUser, today: date) -> list[dict]:
     return out
 
 
-def _todo(user: CurrentUser, today: date, tasks: list[dict], approvals: list[dict], open_deals: list[Deal], events: list[dict]) -> list[dict]:
+def _todo(user: CurrentUser, today: date, tasks: list[dict], approvals: list[dict], open_deals: list[Deal], events: list[dict], idle: dict[str, int] | None = None) -> list[dict]:
     """Лента «Что сделать»: решения, задачи, сроки и черновики без движения — без повторов, по срочности.
     Задача по сделке, которая уже ждёт решения (виза / утверждение), не дублируется; срок КП — только если по сделке нет задачи."""
     items: list[dict] = []
@@ -138,9 +138,12 @@ def _todo(user: CurrentUser, today: date, tasks: list[dict], approvals: list[dic
     for d in open_deals:
         if d.status != DealStatus.DRAFT or not d.updated_at or not (d.manager_id == user.id or d.manager_id in user.acting_for):
             continue
-        age = (today - d.updated_at.date()).days
+        # движение — по сделке, позициям, предложениям, файлам и ленте (то же правило, что у напоминаний и автоархива)
+        age = (idle or {}).get(d.id, (today - d.updated_at.date()).days)
         if age >= DRAFT_STALE_DAYS:
-            items.append({"kind": "draft", "title": f"Черновик {d.number} · {d.client.name if d.client else ''}", "sub": " · ".join(x for x in (_equipment(d), "отправьте на расчёт или в архив") if x),
+            left = draft_watch.WARN_DAYS + 1 - age
+            hint = "отправьте на расчёт или в архив" if left > 7 else f"через {left} дн. уйдёт в архив" if left > 1 else "завтра уйдёт в архив" if left == 1 else "уходит в архив"
+            items.append({"kind": "draft", "title": f"Черновик {d.number} · {d.client.name if d.client else ''}", "sub": " · ".join(x for x in (_equipment(d), hint) if x),
                           "url": f"/deals/{d.id}", "action": "Открыть", "tone": "warn" if age < 14 else "bad", "due": None, "days_left": None, "overdue": False,
                           "when": f"{age} дн. без движения", "task_id": None, "rank": 3})
     items.sort(key=lambda x: (x["rank"], x["days_left"] if x["days_left"] is not None else 99, x["title"]))
@@ -183,6 +186,9 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
     lead = user.has(Role.CD, Role.GD, Role.FD)
     deals = _deals(db, user)
     open_deals = [d for d in deals if d.status in OPEN_STATUSES]
+    _drafts = [d for d in open_deals if d.status == DealStatus.DRAFT]
+    _acts = draft_watch.last_activity(db, [d.id for d in _drafts])
+    idle = {d.id: draft_watch.idle_days(_acts[d.id], now) for d in _drafts if d.id in _acts}   # дни без движения черновика
     from ..services import parts_deals
     parts = parts_deals.rows(db, user)
     mine_parts = [p for p in parts if user.has(Role.CD, Role.GD, Role.FD, Role.OBSERVER) or p["manager_id"] == user.id or p["manager_id"] in user.acting_for]
@@ -347,7 +353,7 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
                 per[t.assignee_id] = per.get(t.assignee_id, 0) + 1
         if per:
             attention.append({"title": f"{len(all_over)} задач просрочено у {len(per)} сотрудников", "sub": ", ".join(f"{names.get(k, '?')} — {v}" for k, v in sorted(per.items(), key=lambda x: -x[1])[:4]), "url": "/tasks", "tone": "warn"})
-        stale = [d for d in open_deals if d.status == DealStatus.DRAFT and d.updated_at and (today - d.updated_at.date()).days >= DRAFT_STALE_LEAD_DAYS]
+        stale = [d for d in open_deals if d.status == DealStatus.DRAFT and d.updated_at and idle.get(d.id, (today - d.updated_at.date()).days) >= DRAFT_STALE_LEAD_DAYS]
         if stale:
             per_m: dict[str, int] = {}
             for d in stale:
@@ -453,7 +459,7 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
                  "claims_answer_overdue": sum(1 for cl in claims if cl.answer_due and cl.answer_due < today and cl.status in ("sent", "received"))}
 
     # ---------------- что сделать (D-097): одна лента вместо «Главное сейчас», задач, согласований и сроков; первая строка — главное
-    todo = _todo(user, today, tasks, approvals, open_deals, events)
+    todo = _todo(user, today, tasks, approvals, open_deals, events, idle)
 
     # ---------------- раскладка
     default_order = ROLE_BLOCKS.get(role, ROLE_BLOCKS["observer"])

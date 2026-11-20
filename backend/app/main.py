@@ -104,6 +104,13 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("overdue check failed: %s", e)
+        try:   # черновики сделок без движения: напоминание через 3 дня, предупреждение на 30-й, архив через сутки после него
+            from .services.draft_watch import check as check_drafts
+            with SessionLocal() as db:
+                if any(check_drafts(db).values()):
+                    db.commit()
+        except Exception as e:   # pragma: no cover
+            log.warning("draft watch failed: %s", e)
         try:   # доверенности компаний группы: напоминания за 30 и 7 дней до истечения, перевод в «срок истёк»
             from .services.legal_poa import check_expiring
             with SessionLocal() as db:
