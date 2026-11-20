@@ -35,6 +35,13 @@ async def _scanner_check(delay: float) -> None:
         await asyncio.to_thread(run)
     except Exception as e:   # pragma: no cover
         log.warning("scanner check failed: %s", e)
+        _bg_error("scanner check", e)
+
+
+def _bg_error(job: str, exc: BaseException) -> None:
+    """D-117: сбой фонового задания — в «Ошибки системы» (администратор и ЗГД получают уведомление)."""
+    from .services.app_errors import record_background
+    record_background(job, exc)
 
 
 async def _daily_jobs() -> None:
@@ -83,6 +90,7 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("daily job failed: %s", e)
+            _bg_error("daily job", e)
         try:   # запчасти: нормативные сроки (КП клиенту, ответ и подтверждение поставщика, просроченная поставка)
             from .services.parts_sla import check as check_parts_sla
             with SessionLocal() as db:
@@ -90,6 +98,7 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("parts SLA check failed: %s", e)
+            _bg_error("parts SLA check", e)
         try:   # запчасти: напоминания менеджерам о ТО машин клиентов
             from .api.parts_fleet import check_reminders
             with SessionLocal() as db:
@@ -97,6 +106,7 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("parts TO reminders failed: %s", e)
+            _bg_error("parts TO reminders", e)
         try:   # просроченные задачи — уведомления исполнителю и КД (раз в час, по одной на задачу)
             from .services.deal_service import check_overdue_tasks
             with SessionLocal() as db:
@@ -104,6 +114,7 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("overdue check failed: %s", e)
+            _bg_error("overdue check", e)
         try:   # D-101: уведомления о выполненных задачах — прочитаны (в том числе накопленные до этого правила)
             from .services.notification_kinds import close_done_task_notices
             with SessionLocal() as db:
@@ -111,12 +122,14 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("notification cleanup failed: %s", e)
+            _bg_error("notification cleanup", e)
         try:   # D-112: виза ФД без ответа N рабочих дней → ЗГД
             from .services.visa_watch import escalate_fd
             with SessionLocal() as db:
                 escalate_fd(db)
         except Exception as e:   # pragma: no cover
             log.warning("fd visa escalation failed: %s", e)
+            _bg_error("fd visa escalation", e)
         try:   # черновики сделок без движения: напоминание через 3 дня, предупреждение на 30-й, архив через сутки после него
             from .services.draft_watch import check as check_drafts
             with SessionLocal() as db:
@@ -124,6 +137,7 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("draft watch failed: %s", e)
+            _bg_error("draft watch", e)
         try:   # доверенности компаний группы: напоминания за 30 и 7 дней до истечения, перевод в «срок истёк»
             from .services.legal_poa import check_expiring
             with SessionLocal() as db:
@@ -131,6 +145,7 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("poa expiry check failed: %s", e)
+            _bg_error("poa expiry check", e)
         try:   # договоры: напоминания за 30 и 7 дней до окончания, автопролонгация, истечение срока
             from .services.legal_contracts import check_expiring as check_contracts
             with SessionLocal() as db:
@@ -138,6 +153,7 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("contracts expiry check failed: %s", e)
+            _bg_error("contracts expiry check", e)
         try:   # претензии: напоминание за 3 дня, уведомление в 1-й день просрочки, черновик претензии на 5-й день, истёк срок ответа
             from .services.legal_claims import ladder
             with SessionLocal() as db:
@@ -145,18 +161,21 @@ async def _daily_jobs() -> None:
                     db.commit()
         except Exception as e:   # pragma: no cover
             log.warning("claims ladder failed: %s", e)
+            _bg_error("claims ladder", e)
         try:   # пересмотр прав: напоминания в системе за 14/7/1 день и о просрочке (docs/operations/04 §6)
             from .services.access_review import remind as remind_reviews
             with SessionLocal() as db:
                 remind_reviews(db)
         except Exception as e:   # pragma: no cover
             log.warning("access review reminders failed: %s", e)
+            _bg_error("access review reminders", e)
         try:   # помощник CRM: стирание содержимого по сроку хранения и удалённых диалогов (docs/operations/06 §7)
             from .services import assistant as _ai
             with SessionLocal() as db:
                 _ai.purge(db, settings)
         except Exception as e:   # pragma: no cover
             log.warning("assistant purge failed: %s", e)
+            _bg_error("assistant purge", e)
         if not _first_done:
             try:   # D-104: разово после старта — цена утверждённой версии по изменению условий контракта → в предложение
                 from .services.contract_price import repair_existing
@@ -174,6 +193,7 @@ async def _daily_jobs() -> None:
                     log.info("task assignee repair: %s tasks", moved)
             except Exception as e:   # pragma: no cover
                 log.warning("contract price repair failed: %s", e)
+                _bg_error("contract price repair", e)
         asyncio.create_task(_scanner_check(0 if _first_done else SCANNER_START_GRACE_S))   # D-068: после старта — через 10 мин
         _first_done = True
         try:   # резервные копии: перенос статуса с хоста, «нет копии дольше 26 ч», уведомления в системе (docs/operations/03 §5)
@@ -182,6 +202,7 @@ async def _daily_jobs() -> None:
                 refresh_backups(db)
         except Exception as e:   # pragma: no cover
             log.warning("backup status refresh failed: %s", e)
+            _bg_error("backup status refresh", e)
         await asyncio.sleep(3600)
 
 
@@ -250,9 +271,16 @@ for r in (auth.router, deals.router, logistics.router, service.router, pricing.r
 
 
 @app.exception_handler(Exception)
-async def unhandled(request: Request, exc: Exception):   # pragma: no cover
+async def unhandled(request: Request, exc: Exception):
     log.exception("unhandled: %s", exc)
-    return JSONResponse(status_code=500, content={"detail": "Внутренняя ошибка сервера"})
+    # D-117: ошибка попадает в «Ошибки системы» и приходит администратору / ЗГД; номер запроса — в ответе (для поддержки)
+    from .services import app_errors
+    from .services.security_events import request_id
+    rid = request_id(request)
+    await asyncio.to_thread(app_errors.record_exception, exc, method=request.method, path=request.url.path,
+                            user_id=getattr(request.state, "audit_user_id", None), request_id=rid)
+    return JSONResponse(status_code=500, content={"detail": f"Внутренняя ошибка сервера. Номер ошибки: {rid[:8]} — администратор уже получил уведомление."},
+                        headers={"X-Request-ID": rid})
 
 
 @app.get("/api/health")

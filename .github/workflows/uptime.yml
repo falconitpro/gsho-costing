@@ -1,0 +1,46 @@
+name: Доступность crm.dobrov.pro
+# D-117: внешняя проверка рабочей системы каждые 15 минут с серверов GitHub (вне нашего сервера).
+# Недоступна 3 проверки подряд (≈ минута) → открывается задача (issue) «Рабочая система недоступна» — GitHub присылает письмо
+# владельцу репозитория и подписчикам. Снова доступна → задача закрывается с временем восстановления.
+on:
+  schedule: [{ cron: "*/15 * * * *" }]
+  workflow_dispatch: {}
+permissions:
+  issues: write
+concurrency: { group: uptime, cancel-in-progress: false }
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      URL: https://crm.dobrov.pro
+      GH_TOKEN: ${{ github.token }}
+      TITLE: "Рабочая система недоступна"
+    steps:
+      - name: Проверка (3 попытки по 20 с)
+        id: probe
+        run: |
+          ok=0
+          for i in 1 2 3; do
+            api=$(curl -s -m 15 -o /tmp/h.json -w "%{http_code}" "$URL/api/health" || echo 000)
+            web=$(curl -s -m 15 -o /dev/null -w "%{http_code}" "$URL/" || echo 000)
+            if [ "$api" = "200" ] && grep -q '"status":"ok"' /tmp/h.json && [ "$web" = "200" ]; then ok=1; break; fi
+            echo "попытка $i: API $api, страница $web"; sleep 20
+          done
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "detail=API $api, страница $web" >> "$GITHUB_OUTPUT"
+      - name: Задача о недоступности
+        run: |
+          num=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
+          now=$(TZ=Europe/Moscow date '+%d.%m.%Y %H:%M МСК')
+          if [ "${{ steps.probe.outputs.ok }}" = "1" ]; then
+            [ -n "$num" ] && gh issue close "$num" -R "$GITHUB_REPOSITORY" -c "Снова доступна: $now."
+            exit 0
+          fi
+          if [ -z "$num" ]; then
+            gh issue create -R "$GITHUB_REPOSITORY" -t "$TITLE" -b "Проверка $now: $URL не отвечает (${{ steps.probe.outputs.detail }}, 3 попытки за минуту).
+
+          Что проверить: сервер 217.198.9.112 включён; \`docker compose ps\` в /opt/gsho-costing; журнал \`docker compose logs --tail 100 backend caddy\`.
+          Задача закроется сама, когда система снова ответит."
+          fi
+          exit 1

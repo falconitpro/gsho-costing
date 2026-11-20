@@ -7,6 +7,7 @@ import TeamPage from "./TeamPage";
 import AccessPage from "./AccessPage";
 import AdminPage from "./AdminPage";
 import BackupStatusBlock from "../components/BackupStatusBlock";
+import AppErrorsPage from "../components/AppErrorsPage";
 import SecuritySettingsPage from "./SecuritySettingsPage";
 import SecurityAdminPage from "./SecurityAdminPage";
 import AccessReviewPage from "./AccessReviewPage";
@@ -17,7 +18,7 @@ import { Crumbs, EntryGrid, UiModeSwitch, useUiMode } from "../components/Levels
 // «Настройки» одним разделом: ставки и нормативы, сотрудники, уровни доступа, администрирование.
 // Доступ к каждому блоку — как и раньше (уровни доступа и администрирование — ЗГД / админ / ФД); блок виден только тем, кому он доступен.
 
-type Sec = "workplace" | "security" | "rates" | "team" | "access" | "admin" | "security_admin" | "access_review" | "security_audit" | "backup";
+type Sec = "workplace" | "security" | "rates" | "team" | "access" | "admin" | "security_admin" | "access_review" | "security_audit" | "backup" | "app_errors";
 
 const SEC_HINT: Record<Sec, string> = {
   workplace: "блоки главной страницы: порядок, видимость, обязательные по ролям",
@@ -30,6 +31,7 @@ const SEC_HINT: Record<Sec, string> = {
   access_review: "периодический пересмотр прав сотрудников",
   security_audit: "журнал безопасности и предупреждения",
   backup: "состояние резервных копий",
+  app_errors: "сбои сервера и страниц у сотрудников",
 };
 
 export default function SettingsHub({ me }: { me: Me }) {
@@ -48,6 +50,7 @@ export default function SettingsHub({ me }: { me: Me }) {
     ["access_review", "Пересмотр прав", perm("security_admin", 1)],
     ["security_audit", "Журнал и предупреждения", perm("security_audit", 1)],
     ["backup", "Резервные копии", perm("backup_status", 1)],
+    ["app_errors", "Ошибки системы", perm("security_audit", 1)],
   ];
   const visible = sections.filter(([, , ok]) => ok);
   const want = new URLSearchParams(loc.search).get("s") as Sec | null;
@@ -83,6 +86,7 @@ export default function SettingsHub({ me }: { me: Me }) {
       {cur === "access" && <AccessPage me={me} embedded />}
       {cur === "admin" && <AdminPage me={me} embedded />}
       {cur === "backup" && <BackupStatusBlock />}
+      {cur === "app_errors" && <AppErrorsPage />}
       {cur === "security" && <SecuritySettingsPage me={me} onChanged={() => window.dispatchEvent(new CustomEvent("gsho:security-gate"))} />}
       {cur === "security_admin" && <SecurityAdminPage meId={me.id} />}
       {cur === "access_review" && <AccessReviewPage />}
