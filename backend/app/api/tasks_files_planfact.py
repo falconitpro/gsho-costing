@@ -598,3 +598,21 @@ def estimate_accuracy(db: Session = Depends(get_db), user: CurrentUser = Depends
             if base.get(k):
                 acc.setdefault(k, []).append(abs(fact - base[k]) / base[k] * 100)
     return {"deals": len(deals), "mape_by_item": {k: round(sum(v) / len(v), 2) for k, v in acc.items()}}
+
+
+# ------------------------------------------------------------------ возвраты на доработку (D-100)
+_REWORKERS = require_roles(Role.CD, Role.FD, Role.GD)
+
+
+@router.get("/rework-reasons")
+def rework_reasons_catalog(db: Session = Depends(get_db), user: CurrentUser = Depends(_REWORKERS)):
+    """Справочник причин возврата — для экрана «Расчёт и утверждение» (возвращают КД, ФД, ЗГД)."""
+    from ..services import rework_reasons as rr
+    return {"items": rr.catalog(db), "other": rr.OTHER}
+
+
+@router.get("/reports/rework")
+def rework_report(date_from: Optional[date] = None, date_to: Optional[date] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(_REWORKERS)):
+    """Возвраты на доработку: по причинам, по блокам, сделки с повторными кругами, последние возвраты (КД, ФД, ЗГД)."""
+    from ..services import rework_reasons as rr
+    return rr.report(db, date_from, date_to)

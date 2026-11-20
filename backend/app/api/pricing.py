@@ -505,14 +505,24 @@ def _finalize_contract_change(db: Session, deal: Deal, user_id: str) -> None:
 
 class ReworkIn(BaseModel):
     block: str
-    reason: str
+    reason: str = ""          # прежний свободный текст (совместимость); новый экран присылает reason_code и comment
+    reason_code: str = ""     # D-100: причина из справочника «Возвраты на доработку»
+    comment: str = ""
 
 
 @router.post("/rework")
 def rework(deal_id: str, body: ReworkIn, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.CD, Role.GD, Role.FD))):
     deal = get_deal_or_404(db, deal_id, user)
+    from ..services import rework_reasons as rr
+    item = None
+    reason = body.reason.strip()
+    if body.reason_code:
+        try:
+            item, reason = rr.resolve(db, body.reason_code, body.comment)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
     try:
-        tr = wf_rework(DealState(status=deal.status, service_flag=deal.service_flag), body.block, body.reason, date.today(), sla(db))
+        tr = wf_rework(DealState(status=deal.status, service_flag=deal.service_flag), body.block, reason, date.today(), sla(db))
     except Exception as e:
         raise HTTPException(409, str(e))
     if body.block == "logistics":
@@ -523,6 +533,16 @@ def rework(deal_id: str, body: ReworkIn, db: Session = Depends(get_db), user: Cu
         a.reset_at = datetime.now(timezone.utc)
     create_version(db, deal, "rework", user.id)
     apply_transition(db, deal, tr, user.id)
+    if item is not None:   # код причины — для отчёта «Возвраты на доработку»
+        from ..models import AuditLog as _AL
+        # запись смены статуса этой транзакции знает, что причина — с кодом (в отчёте не будет дубля «без кода»).
+        # apply_transition мог уже сбросить её в базу, поэтому — запросом: та же сделка, тот же текст, время транзакции (now()).
+        from sqlalchemy import func as _f
+        db.flush()
+        for a in db.scalars(select(_AL).where(_AL.deal_id == deal.id, _AL.action == "status", _AL.comment == tr.audit, _AL.at == _f.now())).all():
+            a.after = {**(a.after or {}), "reason_code": item["code"]}
+        audit(db, user.id, deal.id, "deal", deal.id, "rework_reason", None,
+              {"code": item["code"], "title": item["title"], "block": body.block, "comment": body.comment.strip()}, reason)
     db.commit()
     return {"status": deal.status.value, "version_no": deal.current_version_no}
 

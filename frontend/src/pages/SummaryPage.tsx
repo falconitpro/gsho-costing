@@ -7,8 +7,8 @@ import type { Me } from "../types";
 
 // Сводные экраны по всем сделкам: Отгрузки (логист), Деньги (ФД), Сервис, Закупки. Один компонент, вкладка по роли.
 
-type Kind = "shipments" | "money" | "service" | "purchasing";
-const TITLES: Record<Kind, string> = { shipments: "Отгрузки", money: "Деньги", service: "Сервис", purchasing: "Закупки" };
+type Kind = "shipments" | "money" | "service" | "purchasing" | "rework";
+const TITLES: Record<Kind, string> = { shipments: "Отгрузки", money: "Деньги", service: "Сервис", purchasing: "Закупки", rework: "Возвраты на доработку" };
 const load = <T,>(k: string, d: T): T => { try { return (JSON.parse(localStorage.getItem(k) || "") as T) ?? d; } catch { return d; } };
 
 function Kpi({ v, l, bad }: { v: string | number; l: string; bad?: boolean }) {
@@ -26,6 +26,7 @@ export default function SummaryPage({ me }: { me: Me }) {
     fin && "money",
     has("service_head", "cd", "gd", "manager", "fd") && "service",
     has("purchasing", "cd", "gd", "service_head", "fd") && "purchasing",
+    has("cd", "gd", "fd") && "rework",   // D-100: возвраты по причинам из справочника
   ].filter(Boolean)) as Kind[];
   const pref = load<Kind>("gsho.summaryKind", has("logistician") ? "shipments" : has("fd") ? "money" : has("service_head") ? "service" : has("purchasing") ? "purchasing" : kinds[0]);
   // вид сводки — в адресе (?kind=…): «Назад» возвращает прежний вид, ссылка открывает нужный; без параметра — запомненный выбор
@@ -37,7 +38,7 @@ export default function SummaryPage({ me }: { me: Me }) {
   const [loaded, setLoaded] = useState<{ kind: Kind; data: Record<string, unknown> } | null>(null);
   const data = loaded && loaded.kind === kind ? loaded.data : null;
   const [err, setErr] = useState("");
-  useEffect(() => { setErr(""); if (kind) api.get<Record<string, unknown>>(`/api/summary/${kind}`).then((d) => setLoaded({ kind, data: d })).catch((e) => setErr((e as Error).message)); }, [kind]);
+  useEffect(() => { setErr(""); if (kind) api.get<Record<string, unknown>>(kind === "rework" ? "/api/reports/rework" : `/api/summary/${kind}`).then((d) => setLoaded({ kind, data: d })).catch((e) => setErr((e as Error).message)); }, [kind]);
   if (!kinds.length) return <div className="card muted">Сводные экраны для вашей роли не предусмотрены.</div>;
   // D-130: у кого открыт раздел «Финансы» — «Деньги» там; остальным (КД с финансовой аналитикой) — сводка на общем сервисе
   if (kind === "money" && (me.perms?.finance_section ?? 0) >= 1) return <Navigate to="/finance?tab=overview" replace />;
@@ -55,6 +56,7 @@ export default function SummaryPage({ me }: { me: Me }) {
       {data && kind === "money" && <Money data={data} t={t} />}
       {data && kind === "service" && <Service data={data} t={t} />}
       {data && kind === "purchasing" && <Purchasing data={data} t={t} />}
+      {data && kind === "rework" && <Rework data={data as unknown as ReworkData} />}
     </>
   );
 }
@@ -241,4 +243,42 @@ function Purchasing({ data, t }: { data: Record<string, unknown>; t: Record<stri
       </div>
     </>
   );
+}
+
+type ReworkData = { total: number; by_reason: { code: string; title: string; count: number }[]; by_block: { block: string; title: string; count: number }[];
+  by_deal: { deal_id: string; number: string; count: number }[];
+  rows: { at: string; deal_id: string; number: string; title: string; block: string; comment: string; by: string }[] };
+
+/** D-100: возвраты на доработку — по причинам из справочника, по блокам, сделки с повторными кругами, последние возвраты. */
+function Rework({ data }: { data: ReworkData }) {
+  if (!data.total) return <div className="card muted">Возвратов на доработку пока нет.</div>;
+  const max = Math.max(...data.by_reason.map((r) => r.count), 1);
+  return (
+    <>
+      <p className="muted" style={{ margin: "8px 0" }}>Всего возвратов: <b>{data.total}</b>. Причину выбирают из списка — его ведут КД и ЗГД в «Настройки → Ставки и нормативы → Возвраты на доработку». Возвраты до 20.11.2026 — «без кода», с исходным текстом; отказ ФД или ЗГД в визе — отдельной строкой.</p>
+      <div className="grid cols-2">
+        <div className="card">
+          <div className="section-head"><h2>По причинам</h2></div>
+          <table><tbody>{data.by_reason.map((r) => (
+            <tr key={r.code}><td>{r.title}</td><td style={{ width: "40%" }}><div style={{ background: "var(--accent-soft)", height: 10, borderRadius: 4, width: `${(r.count / max) * 100}%` }} /></td><td className="num"><b>{r.count}</b></td></tr>))}</tbody></table>
+        </div>
+        <div className="card">
+          <div className="section-head"><h2>Кому возвращали</h2></div>
+          <table><tbody>{data.by_block.map((r) => <tr key={r.block}><td>{r.title}</td><td className="num"><b>{r.count}</b></td></tr>)}</tbody></table>
+          {data.by_deal.length > 0 && <>
+            <div className="section-head" style={{ marginTop: 12 }}><h2>Сделки с повторными возвратами</h2></div>
+            <table><tbody>{data.by_deal.map((r) => <tr key={r.deal_id}><td><Link to={`/deals/${r.deal_id}?tab=pricing`}>{r.number || "сделка"}</Link></td><td className="num"><b>{r.count}</b> {r.count >= 3 ? <span className="badge bad">кругов</span> : "раза"}</td></tr>)}</tbody></table>
+          </>}
+        </div>
+      </div>
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="section-head"><h2>Последние возвраты</h2></div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ fontSize: 13 }}><thead><tr><th>Когда</th><th>Сделка</th><th>Причина</th><th>Кому</th><th>Уточнение</th><th>Кто вернул</th></tr></thead>
+            <tbody>{data.rows.map((r, i) => (
+              <tr key={i}><td style={{ whiteSpace: "nowrap" }}>{fmtDate(r.at)}</td><td>{r.deal_id ? <Link to={`/deals/${r.deal_id}?tab=pricing`}>{r.number}</Link> : "—"}</td>
+                <td>{r.title}</td><td>{r.block || "—"}</td><td className="muted">{r.comment || "—"}</td><td style={{ whiteSpace: "nowrap" }}>{r.by}</td></tr>))}</tbody></table>
+        </div>
+      </div>
+    </>);
 }
