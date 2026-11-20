@@ -43,13 +43,18 @@ def _last_rev(db: Session, deal: Deal, ver: DealVersion) -> Optional[KpRevision]
 
 def current(db: Session, deal: Deal, ver: DealVersion) -> dict:
     """Текущее состояние по предложениям: первая цена КП, текущая (последняя редакция), условия оплаты и срок."""
-    rev = _last_rev(db, deal, ver)
+    from . import offer_prices
     last = (steps(db, deal, ver) or [None])[-1]
     s = settings_service.get_all(db)
     out = {}
     for v in _variants(deal):
-        first = float(v.price_rub)
-        price = float((rev.prices or {}).get(v.id, first)) if rev else first
+        cur = offer_prices.current(db, deal, v) if ver.id == deal.approved_version_id else None    # D-109
+        first = float(cur["kd_rub"]) if cur and cur["kd_rub"] is not None else float(v.price_rub)
+        if cur is not None:
+            price = float(cur["revision"].total_rub) if cur["revision"] is not None else first
+        else:
+            rev = _last_rev(db, deal, ver)
+            price = float((rev.prices or {}).get(v.id, first)) if rev else first
         terms = ((last.terms or {}).get(v.id) if last else None) or {}
         pay = terms.get("client_payments") or v.client_payments or deal.client_payments or s.get("default_client_payment_scheme") or []
         from ..api.pricing import variant_units

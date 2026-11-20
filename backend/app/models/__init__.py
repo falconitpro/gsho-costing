@@ -741,6 +741,29 @@ class QuoteLink(Base):
     answers: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class OfferPrice(Base):
+    """Цены предложения (D-109): каждое назначение цены — запись; действующая цена берётся отсюда одной функцией
+    (services/offer_prices.py). Виды: kd — цена КД в предложении (в т. ч. после переноса при изменении условий контракта),
+    revision — итог редакции КП утверждённой версии (в т. ч. шаг торгов). Записи не меняются и не удаляются."""
+    __tablename__ = "offer_prices"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id"), index=True)
+    variant_id: Mapped[str] = mapped_column(String(36), index=True)
+    version_id: Mapped[Optional[str]] = mapped_column(String(36))          # для редакций — утверждённая версия
+    kind: Mapped[str] = mapped_column(String(16))                          # kd | revision
+    source_id: Mapped[str] = mapped_column(String(36), default="")         # редакция КП
+    revision_no: Mapped[Optional[int]] = mapped_column(Integer)
+    total_rub: Mapped[float] = mapped_column(Float)                        # итог без НДС, RUB (для редакции — с услугами КП)
+    extras_rub: Mapped[float] = mapped_column(Float, default=0)            # услуги, добавленные в КП (в расчёт маржи не входят)
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")        # валюта цены клиенту
+    fx_rate: Mapped[Optional[float]] = mapped_column(Float)                # RUB за единицу валюты цены
+    units: Mapped[int] = mapped_column(Integer, default=1)                 # машин в предложении
+    unit_amount: Mapped[Optional[float]] = mapped_column(Float)            # за 1 машину в валюте цены, без НДС
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    seq: Mapped[int] = mapped_column(BigInteger, default=0)                # порядок записей в одной транзакции
+
+
 class FileDownloadRequest(Base):
     """Запрос на скачивание файла сделки, когда скачивание закрыто для роли (D-077); одобрение действует 24 часа."""
     __tablename__ = "file_download_requests"
