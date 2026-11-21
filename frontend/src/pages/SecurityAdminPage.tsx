@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../api";
 import OffboardDialog from "../components/OffboardDialog";
 import SecurityModal from "../components/SecurityModal";
+import { LinkResultBox, type LinkResult } from "../components/PasswordLink";
 
 /** «Настройки → Безопасность сотрудников» (docs/operations/10 §7), право security_admin: входы, сброс TOTP, временный пароль,
  *  отключение и включение доступа. Каждое действие подтверждается (step-up) и проверяется на сервере. */
@@ -16,7 +17,10 @@ function UserCard({ u, canEdit, meId, onClose, onChanged }: { u: U; canEdit: boo
   const [sessions, setSessions] = useState<Sess[]>([]);
   const [msg, setMsg] = useState(""); const [err, setErr] = useState("");
   const [temp, setTemp] = useState("");
-  const [dlg, setDlg] = useState<"offboard" | "reactivate" | "mfa" | "temp" | null>(null);
+  const [dlg, setDlg] = useState<"offboard" | "reactivate" | "mfa" | "temp" | "link" | null>(null);
+  const [linkTo, setLinkTo] = useState(u.email);
+  const [linkReset, setLinkReset] = useState(true);
+  const [linkRes, setLinkRes] = useState<LinkResult | null>(null);
   const load = useCallback(async () => { try { setSessions((await api.get<{ items: Sess[] }>(`/api/security/users/${u.id}/sessions`)).items); } catch (x) { setErr(errText(x)); } }, [u.id]);
   useEffect(() => { load(); }, [load]);
   const act = async (fn: () => Promise<void>) => { setErr(""); setMsg(""); try { await fn(); } catch (x) { setErr(errText(x)); } };
@@ -42,6 +46,7 @@ function UserCard({ u, canEdit, meId, onClose, onChanged }: { u: U; canEdit: boo
         <div className="row">
           {sessions.length > 0 && <button className="btn secondary" onClick={() => act(async () => { const r = await api.post<{ revoked: number }>(`/api/security/users/${u.id}/sessions/revoke-all`); setMsg(`Завершено входов: ${r.revoked}`); load(); onChanged(); })}>Завершить все входы</button>}
           {u.mfa_enabled && !self && <button className="btn secondary" onClick={() => setDlg("mfa")}>Сбросить код из приложения</button>}
+          {u.is_active && !self && <button className="btn secondary" onClick={() => { setLinkRes(null); setLinkTo(u.email); setLinkReset(u.password_set); setDlg("link"); }}>{u.password_set ? "Сбросить пароль" : "Отправить ссылку «Задать пароль»"}</button>}
           {u.is_active && !self && <button className="btn secondary" onClick={() => setDlg("temp")}>Выдать временный пароль</button>}
           {u.is_active && !self && <button className="btn" onClick={() => setDlg("offboard")}>Отключить доступ</button>}
           {!u.is_active && <button className="btn secondary" onClick={() => setDlg("reactivate")}>Включить доступ</button>}
@@ -52,6 +57,15 @@ function UserCard({ u, canEdit, meId, onClose, onChanged }: { u: U; canEdit: boo
         <p>Используйте, если сотрудник потерял телефон. Все его входы завершатся; при следующем входе он настроит код заново.</p>
         <div className="row" style={{ justifyContent: "flex-end" }}><button className="btn secondary" onClick={() => setDlg(null)}>Отмена</button>
           <button className="btn" onClick={() => act(async () => { const r = await api.post<{ sessions_revoked: number }>(`/api/security/users/${u.id}/mfa/reset`); setDlg(null); setMsg(`Код сброшен, завершено входов: ${r.sessions_revoked}`); load(); onChanged(); })}>Сбросить</button></div>
+      </SecurityModal>}
+      {dlg === "link" && <SecurityModal title={u.password_set ? "Сбросить пароль" : "Ссылка «Задать пароль»"} onClose={() => setDlg(null)} width={520}>
+        {!linkRes ? <>
+          <p>На почту уйдёт одноразовая ссылка на 24 часа — сотрудник сам задаст новый пароль. Код из приложения при входе по-прежнему спрашивается.</p>
+          <label className="f">Куда отправить<input type="email" value={linkTo} onChange={(e) => setLinkTo(e.target.value)} /></label>
+          {u.password_set && <label className="row"><input type="checkbox" checked={linkReset} onChange={(e) => setLinkReset(e.target.checked)} /> сразу закрыть текущий пароль и все входы сотрудника</label>}
+          <div className="row pwlink-acts"><button className="btn secondary" onClick={() => setDlg(null)}>Отмена</button>
+            <button className="btn" disabled={!linkTo.includes("@")} onClick={() => act(async () => { setLinkRes(await api.post<LinkResult>(`/api/security/users/${u.id}/password-link`, { email: linkTo.trim(), reset: linkReset })); load(); onChanged(); })}>Отправить</button></div>
+        </> : <LinkResultBox r={linkRes} onClose={() => { setDlg(null); setLinkRes(null); }} />}
       </SecurityModal>}
       {dlg === "temp" && <SecurityModal title="Временный пароль" onClose={() => { setDlg(null); setTemp(""); }} width={460}>
         {!temp ? <>

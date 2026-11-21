@@ -5,6 +5,9 @@ import { api, ApiError } from "../api";
 // Страница входа CRM БЕРГ-ХАУС по утверждённому макету «Красный монолит / ПДМ».
 // Вход по логину (e-mail) и паролю — POST /api/auth/password-login; дополнительно Microsoft 365 (OIDC). На тестовом стенде вход — тестовой учётной записью, переключение ролей — в шапке.
 
+// токен ссылки «Задать пароль» читается один раз при загрузке страницы (дальше он убирается из адресной строки)
+const LINK_TOKEN = window.location.pathname === "/set-password" ? new URLSearchParams(window.location.search).get("t") || "" : "";
+
 type Providers = { password: boolean; m365: boolean; dev: boolean; support: string };
 
 const Ic = {
@@ -59,6 +62,38 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
     if (saved) document.querySelector<HTMLInputElement>("input[name=password]")?.focus(); else loginRef.current?.focus();   // логин запомнен — сразу к паролю
   }, [saved]);
 
+  // D-132: «Забыли пароль?» и ссылка «Задать пароль» из письма (/set-password?t=…; токен сразу убирается из адресной строки)
+  const [view, setView] = useState<"login" | "forgot" | "set">(() => (window.location.pathname === "/set-password" ? "set" : "login"));
+  const token = LINK_TOKEN;
+  useEffect(() => { if (token && window.location.search) { try { window.history.replaceState(null, "", "/set-password"); } catch { /* ignore */ } } }, [token]);
+  const [link, setLink] = useState<{ login: string; name: string; rules: string; purpose: string } | null>(null);
+  const [pw1, setPw1] = useState(""); const [pw2, setPw2] = useState("");
+  useEffect(() => {
+    if (view !== "set") return;
+    if (!token) { setError("Откройте ссылку из письма ещё раз — она действует 24 часа"); return; }
+    api.post<{ login: string; name: string; rules: string; purpose: string }>("/api/auth/link/check", { token }).then(setLink)
+      .catch((e) => setError(e instanceof ApiError ? e.message : "Ссылка недействительна"));
+  }, [view, token]);
+  const toLogin = (msg = "", who = "") => { setView("login"); setError(""); setInfo(msg); if (who) setLogin(who);
+    try { window.history.replaceState(null, "", "/login"); } catch { /* ignore */ } };
+  async function submitForgot(e: FormEvent) {
+    e.preventDefault();
+    if (busy || !login.includes("@")) { setTouched(true); return; }
+    setBusy(true); setError(""); setInfo("");
+    try { const r = await api.post<{ message: string }>("/api/auth/forgot", { email: login.trim() }); setInfo(r.message); }
+    catch (err) { setError(err instanceof ApiError ? err.message : "Не удалось отправить запрос"); }
+    setBusy(false);
+  }
+  async function submitSet(e: FormEvent) {
+    e.preventDefault();
+    if (busy || !pw1) return;
+    if (pw1 !== pw2) { setError("Пароли не совпадают"); return; }
+    setBusy(true); setError("");
+    try { const r = await api.post<{ login: string }>("/api/auth/link/set", { token, new_password: pw1 }); setPw1(""); setPw2(""); setBusy(false);
+      toLogin("Пароль задан. Войдите с новым паролем", r.login); }
+    catch (err) { setError(err instanceof ApiError ? err.message : "Не удалось задать пароль"); setBusy(false); }
+  }
+
   const loginEmpty = touched && !login.trim();
   const passEmpty = touched && !password;
 
@@ -112,8 +147,53 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
 
       <main className="bh-main">
         <section className="bh-card" aria-labelledby={`${uid}-h`}>
-          <h1 id={`${uid}-h`}>Вход</h1>
-          {mfa ? (
+          <h1 id={`${uid}-h`}>{view === "set" ? "Задать пароль" : view === "forgot" ? "Восстановить доступ" : "Вход"}</h1>
+          {view === "set" ? (
+          <form onSubmit={submitSet} noValidate aria-describedby={error ? ids.err : undefined}>
+            {error && <div className="bh-alert" role="alert" id={ids.err}>{Ic.warn}<span>{error}</span></div>}
+            {link && <div className="bh-alert info" role="status">{Ic.user}<span>{link.name ? `${link.name}, ` : ""}ваш логин: <b>{link.login}</b></span></div>}
+            {link && <>
+              <label className="bh-field" htmlFor={`${uid}-p1`}>
+                <span>Новый пароль</span>
+                <div className="bh-input"><span className="ic">{Ic.lock}</span>
+                  <input id={`${uid}-p1`} name="new-password" type={show ? "text" : "password"} autoComplete="new-password" autoFocus value={pw1} onChange={(e) => setPw1(e.target.value)} disabled={busy} />
+                  <button type="button" className="bh-eye" aria-label={show ? "Скрыть пароль" : "Показать пароль"} aria-pressed={show} onClick={() => setShow(!show)}>{show ? Ic.eyeOff : Ic.eye}</button>
+                </div>
+              </label>
+              <label className="bh-field" htmlFor={`${uid}-p2`}>
+                <span>Повторите пароль</span>
+                <div className="bh-input"><span className="ic">{Ic.lock}</span>
+                  <input id={`${uid}-p2`} name="confirm-password" type={show ? "text" : "password"} autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} disabled={busy} />
+                </div>
+              </label>
+              <div className="bh-hint">Пароль: {link.rules}.</div>
+              <button type="submit" className="bh-submit" disabled={busy || !pw1 || !pw2} aria-busy={busy}>
+                <span className="bh-submit-label">Сохранить пароль{busy && <span className="bh-spin" aria-hidden="true" />}</span>
+                <span className="arrow" aria-hidden="true">{Ic.arrow}</span>
+              </button>
+            </>}
+            <div className="bh-row"><button type="button" className="bh-link" onClick={() => toLogin()}>Ко входу</button>
+              {!link && <button type="button" className="bh-link" onClick={() => { setView("forgot"); setError(""); }}>Запросить новую ссылку</button>}</div>
+          </form>
+          ) : view === "forgot" ? (
+          <form onSubmit={submitForgot} noValidate aria-describedby={error ? ids.err : undefined}>
+            {error && <div className="bh-alert" role="alert" id={ids.err}>{Ic.warn}<span>{error}</span></div>}
+            {info ? <div className="bh-alert info" role="status">{Ic.warn}<span>{info}</span></div>
+              : <div className="bh-hint">Введите логин (e-mail) — пришлём ссылку «Задать пароль». Текущий пароль действует, пока вы не зададите новый.</div>}
+            <label className="bh-field" htmlFor={`${uid}-fe`}>
+              <span>Логин (e-mail)</span>
+              <div className={`bh-input${touched && !login.includes("@") ? " bad" : ""}`}><span className="ic">{Ic.user}</span>
+                <input id={`${uid}-fe`} name="username" type="email" inputMode="email" autoComplete="username" autoCapitalize="none" autoFocus value={login} onChange={(e) => setLogin(e.target.value)} disabled={busy} />
+              </div>
+            </label>
+            <button type="submit" className="bh-submit" disabled={busy || !!info} aria-busy={busy}>
+              <span className="bh-submit-label">Отправить ссылку{busy && <span className="bh-spin" aria-hidden="true" />}</span>
+              <span className="arrow" aria-hidden="true">{Ic.arrow}</span>
+            </button>
+            <div className="bh-row"><button type="button" className="bh-link" onClick={() => toLogin()}>Ко входу</button>
+              <button type="button" className="bh-link" onClick={() => setInfo(support)}>Нет доступа к почте</button></div>
+          </form>
+          ) : mfa ? (
           <form onSubmit={submitCode} noValidate aria-describedby={error ? ids.err : undefined}>
             {error && <div className="bh-alert" role="alert" id={ids.err}>{Ic.warn}<span>{error}</span></div>}
             <label className="bh-field" htmlFor={`${uid}-code`}>
@@ -159,7 +239,7 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
             </label>
             <div className="bh-row">
               <label className="bh-check"><input type="checkbox" name="remember" checked={remember} onChange={(e) => setRemember(e.target.checked)} /><span className="box">{Ic.check}</span><span>Запомнить логин</span></label>
-              <button type="button" className="bh-link" onClick={() => { setError(""); setInfo(support); }}>Забыли пароль?</button>
+              <button type="button" className="bh-link" onClick={() => { setError(""); setInfo(""); setTouched(false); setView("forgot"); }}>Забыли пароль?</button>
             </div>
             <button type="submit" className="bh-submit" disabled={busy} aria-busy={busy}>
               <span style={{ display: "inline-flex", alignItems: "center" }}>Войти в систему{busy && <span className="bh-spin" aria-hidden="true" />}</span>

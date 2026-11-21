@@ -56,6 +56,8 @@ class Settings:
     smtp_user: str = field(default_factory=lambda: _env("SMTP_USER", ""))
     smtp_password: str = field(default_factory=lambda: _env("SMTP_PASSWORD", ""))
     smtp_from: str = field(default_factory=lambda: _env("SMTP_FROM", ""))
+    # Адрес системы для ссылок в письмах (D-132: «Задать пароль»); пусто — первый адрес из CORS_ORIGINS
+    public_url: str = field(default_factory=lambda: _env("PUBLIC_URL", ""))
     # Мессенджер: console | wecom
     messenger_provider: str = field(default_factory=lambda: _env("MESSENGER_PROVIDER", "console"))
     moysklad_token: str = field(default_factory=lambda: _env("MOYSKLAD_TOKEN", ""))          # токен JSON API МойСклад — только в backend/.env

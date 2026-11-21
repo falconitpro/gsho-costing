@@ -3,6 +3,7 @@ import { api, fmtDate } from "../api";
 import type { Me } from "../types";
 import { DeputyBlock, ObserverScopeBlock } from "../components/TeamExtras";
 import { askConfirm } from "../components/Dialogs";
+import { InviteFields, LinkResultBox, type LinkResult } from "../components/PasswordLink";
 
 type Contacts = { position: string; department: string; mobile: string; work_phone: string; wechat: string; telegram: string; whatsapp: string; max: string; extra_email: string; note: string };
 type Card = { id: string; display_name: string; email: string; roles: string[]; role_titles: string[]; contacts: Contacts; wecom_user_id: string; can_manage?: boolean; pending_changes?: { fields?: Record<string, [string, string]>; requested_at?: string };
@@ -33,6 +34,8 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
   const [roles, setRoles] = useState<RoleT[]>([]);
   const [showNew, setShowNew] = useState(false);
   const [nu, setNu] = useState({ display_name: "", email: "", position: "", roles: [] as string[] });
+  const [inv, setInv] = useState({ on: true, email: "" });
+  const [linkRes, setLinkRes] = useState<LinkResult | null>(null);
   const [perms, setPerms] = useState<Perm[]>([]);
   const [overrides, setOverrides] = useState<Override[]>([]);
   const [ovr, setOvr] = useState({ group: "", level: 1, valid_to: "", comment: "" });
@@ -49,9 +52,9 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
   const open = (u: Card) => { setCur(JSON.parse(JSON.stringify(u))); setMsg(""); setErr(""); loadAccess(u.id); api.get<{ log: Log[] }>(`/api/team/${u.id}/notifications`).then((r) => setLog(r.log)).catch(() => setLog([])); };
   async function createUser() {
     try {
-      const u = await api.post<{ id: string }>("/api/admin/users", { display_name: nu.display_name.trim(), email: nu.email.trim(), roles: nu.roles,
-        contacts: nu.position ? { position: nu.position } : {}, notify_channels: ["app", "outlook"] });
-      setMsg(`Сотрудник «${nu.display_name}» добавлен. Вход — по корпоративной учётной записи с e-mail ${nu.email}.`); setErr("");
+      const u = await api.post<{ id: string; link: LinkResult | null }>("/api/admin/users", { display_name: nu.display_name.trim(), email: nu.email.trim(), roles: nu.roles,
+        contacts: nu.position ? { position: nu.position } : {}, notify_channels: ["app", "outlook"], send_link: inv.on, link_email: inv.email.trim() || null });
+      setMsg(`Сотрудник «${nu.display_name}» добавлен. Логин — ${nu.email}.`); setErr(""); setLinkRes(u.link); setInv({ on: true, email: "" });
       setShowNew(false); setNu({ display_name: "", email: "", position: "", roles: [] });
       await load();
       const r = await api.get<{ users: Card[] }>("/api/team?include_inactive=true"); const c = r.users.find((x) => x.id === u.id); if (c) open(c);
@@ -123,6 +126,7 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
           <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 4 }}>{roles.map((r) => (
             <label key={r.code} className="row" style={{ border: "1px solid " + (nu.roles.includes(r.code) ? "var(--accent)" : "var(--line)"), borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>
               <input type="checkbox" checked={nu.roles.includes(r.code)} onChange={() => setNu({ ...nu, roles: nu.roles.includes(r.code) ? nu.roles.filter((x) => x !== r.code) : [...nu.roles, r.code] })} /> {r.title}</label>))}</div>
+          <InviteFields login={nu.email} on={inv.on} email={inv.email} onChange={(on, email) => setInv({ on, email })} />
           {err && <div className="alert error">{err}</div>}
           <div className="row" style={{ marginTop: 10 }}>
             <button className="btn" disabled={!nu.display_name.trim() || !nu.email.includes("@") || nu.roles.length === 0} onClick={createUser}>Добавить</button>
@@ -131,6 +135,7 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
         </div>)}
       <p className="muted">При постановке задачи исполнитель сразу получает уведомление во все выбранные каналы. Каналы выбирают КД, ЗГД или администратор; контакты заполняет сам сотрудник. Каналы без подключённой интеграции отмечаются в журнале «ожидает подключения канала».</p>
       {msg && <div className="alert info">{msg}</div>}
+      {linkRes && <LinkResultBox r={linkRes} onClose={() => setLinkRes(null)} />}
       <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)" }}>
         <div className="card">
           <table><thead><tr><th>Сотрудник</th><th>Контакты</th><th>Уведомления</th></tr></thead>

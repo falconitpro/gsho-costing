@@ -22,6 +22,11 @@ from ..services.deal_service import audit
 from .common import serialize
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+def _user(u: User) -> dict:
+    """Карточка сотрудника без хэша пароля (D-132: хэш не уходит ни в ответ, ни в журнал изменений)."""
+    return {**serialize(u, exclude={"password_hash"}), "has_password": bool(u.password_hash)}
 ADMIN = require_roles(Role.ADMIN, Role.GD)
 FD_ADMIN = require_roles(Role.ADMIN, Role.FD, Role.GD)
 SETTINGS_READ = require_roles(Role.ADMIN, Role.FD, Role.GD, Role.CD)
@@ -114,15 +119,17 @@ class UserIn(BaseModel):
     notify_channels: list[str] = ["outlook", "wecom", "app"]
     contacts: dict = {}
     is_active: bool = True
+    send_link: bool = True                 # D-132: сразу отправить ссылку «Задать пароль»
+    link_email: Optional[str] = None       # куда отправить; пусто — на e-mail (логин) из профиля
 
 
 @router.get("/users")
 def users(db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN)):
-    return [serialize(u) for u in db.scalars(select(User).order_by(User.display_name)).all()]
+    return [_user(u) for u in db.scalars(select(User).order_by(User.display_name)).all()]
 
 
 @router.post("/users", status_code=201)
-def create_user(body: UserIn, db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN)):
+def create_user(body: UserIn, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN)):
     try:
         for r in body.roles:
             Role(r)
@@ -137,12 +144,32 @@ def create_user(body: UserIn, db: Session = Depends(get_db), user: CurrentUser =
     body.email = body.email.strip().lower()
     if db.scalar(select(User).where(User.email == body.email)):
         raise HTTPException(409, "Сотрудник с таким e-mail уже есть")
-    u = User(**body.model_dump(exclude={"external_id", "contacts"}), external_id=body.external_id or body.email, contacts=body.contacts or {})
+    u = User(**body.model_dump(exclude={"external_id", "contacts", "send_link", "link_email"}), external_id=body.external_id or body.email, contacts=body.contacts or {})
     db.add(u)
     db.flush()
-    audit(db, user.id, None, "user", u.id, "create", after=body.model_dump())
+    audit(db, user.id, None, "user", u.id, "create", after=body.model_dump(exclude={"send_link", "link_email"}))
+    link = _password_link(db, u, user, "invite", body.link_email or u.email, request) if body.send_link and u.is_active else None
     db.commit()
-    return serialize(u)
+    return {**_user(u), "link": link}
+
+
+def _password_link(db: Session, u: User, actor: CurrentUser, purpose: str, to: str, request: Request) -> dict:
+    """D-132: выдать ссылку «Задать пароль» и отправить её; если почта не подключена — вернуть ссылку администратору."""
+    from ..core.config import get_settings
+    from ..services import password_links as pl
+    from ..services import security_events as sev
+    to = (to or "").strip().lower()
+    if "@" not in to or len(to) > 255:
+        raise HTTPException(422, "Укажите e-mail, куда отправить ссылку")
+    s = get_settings()
+    row, token = pl.issue(db, u, purpose, to, actor.id)
+    url = pl.link_url(s, token)
+    sent, why = pl.send(s, u, to, url, purpose)
+    audit(db, actor.id, None, "user", u.id, "password_link", after={"purpose": purpose, "sent_to": to, "sent": sent})
+    sev.record(db, "password", f"link_{purpose}", actor_id=actor.id, subject_id=u.id, request=request, session_id=actor.sid,
+               meta={"sent": sent, "to_profile": to == (u.email or "").lower()})
+    return {"sent": sent, "to": to, "expires_at": row.expires_at.isoformat(), "reason": why, "url": None if sent else url}
+
 
 
 @router.patch("/users/{user_id}")
@@ -150,7 +177,7 @@ def update_user(user_id: str, body: dict, request: Request, db: Session = Depend
     u = db.get(User, user_id)
     if u is None:
         raise HTTPException(404)
-    before = serialize(u)
+    before = _user(u)
     if "roles" in body:
         try:
             body["roles"] = [Role(r).value for r in body["roles"]]
@@ -173,7 +200,7 @@ def update_user(user_id: str, body: dict, request: Request, db: Session = Depend
             offboarding.reactivate(db, user, u.id, request, require_name=False)
         db.refresh(u)
         if not body:
-            return serialize(u)
+            return _user(u)
     if "email" in body:
         email = str(body["email"] or "").strip().lower()
         if "@" not in email:
@@ -194,7 +221,7 @@ def update_user(user_id: str, body: dict, request: Request, db: Session = Depend
                    meta={"roles_added": sorted(set(u.roles or []) - set(before.get("roles") or [])),
                          "roles_removed": sorted(set(before.get("roles") or []) - set(u.roles or []))})
     db.commit()
-    return serialize(u)
+    return _user(u)
 
 
 @router.delete("/users/{user_id}")
@@ -212,7 +239,7 @@ def delete_user(user_id: str, request: Request, db: Session = Depends(get_db), u
     used = (db.scalar(select(Deal.id).where(Deal.manager_id == u.id).limit(1)) or db.scalar(select(Task.id).where(Task.assignee_id == u.id).limit(1))
             or db.scalar(select(Approval.id).where(Approval.user_id == u.id).limit(1)) or db.scalar(select(AuditLog.id).where(AuditLog.user_id == u.id).limit(1)))
     from ..services import offboarding
-    from ..models import AuthSession, MfaChallenge, MfaCredential, MfaRecoveryCode, PasswordHistory
+    from ..models import AuthSession, MfaChallenge, MfaCredential, MfaRecoveryCode, PasswordHistory, PasswordLink
     if used:
         if u.is_active:
             offboarding.offboard(db, user, u.id, request, require_name=False, reason="удаление сотрудника, на которого есть ссылки")
@@ -220,7 +247,7 @@ def delete_user(user_id: str, request: Request, db: Session = Depends(get_db), u
     if u.is_active:
         from ..core.auth import require_step_up
         require_step_up(user)
-    for model in (AuthSession, MfaChallenge, MfaCredential, MfaRecoveryCode, PasswordHistory):   # служебные записи входа удаляются вместе с учётной записью
+    for model in (AuthSession, MfaChallenge, MfaCredential, MfaRecoveryCode, PasswordHistory, PasswordLink):   # служебные записи входа удаляются вместе с учётной записью
         for row in db.scalars(select(model).where(model.user_id == u.id)).all():
             db.delete(row)
     db.flush()

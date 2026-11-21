@@ -100,11 +100,12 @@ export default function App() {
     return () => { window.removeEventListener("gsho:unauthorized", onUnauth); window.removeEventListener("gsho:security-gate", onGate); };
   }, []);
   if (!checked) return null;
-  if (!me) {
+  if (!me || window.location.pathname === "/set-password") {   // ссылка «Задать пароль» открывается и при выполненном входе (D-132)
     return (
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginRoute onLoggedIn={load} />} />
+          <Route path="/set-password" element={<LoginRoute onLoggedIn={load} />} />
           <Route path="*" element={<RequireLogin />} />
         </Routes>
       </BrowserRouter>);

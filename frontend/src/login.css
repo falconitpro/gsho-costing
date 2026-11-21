@@ -108,6 +108,8 @@
 @keyframes bh-spin { to { transform: rotate(360deg); } }
 
 .bh-alert { display: flex; gap: 10px; align-items: flex-start; background: rgba(239, 48, 53, 0.16); border-left: 3px solid var(--bh-red); color: #ffd6d7; padding: 10px 12px; font-size: 13px; margin-bottom: 16px; }
+.bh-submit-label { display: inline-flex; align-items: center; }
+.bh-hint { font-size: 13px; line-height: 1.4; opacity: 0.8; margin: 4px 0 12px; }
 .bh-alert.info { background: rgba(255, 255, 255, 0.08); border-left-color: var(--bh-text); color: var(--bh-text); }
 .bh-alert svg { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; }
 
