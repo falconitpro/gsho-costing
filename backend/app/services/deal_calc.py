@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..calc import calc_deal
-from ..calc.types import (
+from ..calc.types import (FreightTerms, 
     AdvanceGuarantee, AllocationMethod, BatchInput, DealCalcInput, DeliveryTerm, ExpertPoint, FinanceSettings, FxForecastSettings,
     FxRates, LocalOptionInput, Money, OverheadStep, PaymentLine, PositionInput, ProductionTerm, ScenarioName, ScenarioParams,
     ServiceSummary, Thresholds, VariantInput,
@@ -263,6 +263,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             intl_freight=Money(**it.get("intl_freight", {"amount": 0, "currency": "CNY"})),
             insurance_pct=it.get("insurance_pct"), insurance_amount=Money(**it.get("insurance_amount", {"amount": 0, "currency": "CNY"})),
             broker_rub=_br[0], rf_delivery_rub=_rf[0], broker_vat_rub=_br[1], rf_delivery_vat_rub=_rf[1],
+            freight_terms=FreightTerms(**it["freight_terms"]) if it.get("freight_terms") else None,
             door_to_door=Money(**it["door_to_door"]) if (it.get("door_to_door") or {}).get("amount") else None,
             door_to_door_border_pct=float(s.get("door_to_door_border_pct") or 10.0),
             allocation=AllocationMethod(b.allocation), transit_days=b.transit_days, customs_days=b.customs_days,
@@ -272,6 +273,16 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
         ))
     variants = []
     neg = negotiated(db, deal)
+    from ..api.competitors import contract_currency
+    c_ccy = (contract_currency(db, deal)[0] or "RUB").upper()
+
+    def _client_fx(v) -> dict:
+        """D-123: договор в валюте цены — оплаты клиента пересчитываются в рубли по прогнозу курса на даты оплат."""
+        pc = (v.price_currency or "RUB").upper()
+        if c_ccy != "RUB" and pc == c_ccy and v.price_fx_rate:
+            return {"client_currency": c_ccy, "client_fx_rate": float(v.price_fx_rate)}
+        return {}
+
     for v in deal.variants:
         nv = neg.get(v.id) or {}
         cp = _lines(nv.get("client_payments") or v.client_payments or deal.client_payments)
@@ -280,6 +291,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
             client_payments=cp or default_client or VariantInput.model_fields["client_payments"].default_factory(),
             client_payments_default=not cp,
             overhead_pct_override=v.overhead_pct_override, overhead_override_comment=v.overhead_override_comment or "",
+            **_client_fx(v),
         ))
 
     deal_actual = {}

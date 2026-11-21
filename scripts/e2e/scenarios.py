@@ -14,6 +14,7 @@ import json
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from docx import Document
@@ -148,6 +149,43 @@ def check_kp(scn: str, did: str, m: dict, rev_id: str | None = None, label: str 
     return rows
 
 
+# ---------- Excel расчёта ----------
+
+def check_excel(scn: str, did: str, vid: str, m: dict):
+    """D-125: выгрузка расчёта (последняя версия) — те же цифры, что на сервере и на экране: цена, курсовая разница, прибыль, НДС."""
+    from openpyxl import load_workbook
+    vers = api(CD, "GET", f"/api/deals/{did}/versions")
+    vers = vers.get("versions", vers) if isinstance(vers, dict) else vers
+    ver = max((v for v in vers if v.get("excel_path")), key=lambda v: v.get("version_no") or 0, default=None)
+    check_true(scn, "Excel: файл расчёта есть", ver is not None)
+    if not ver:
+        return
+    wb = load_workbook(io.BytesIO(api(CD, "GET", "/api/files/" + urllib.parse.quote(ver["excel_path"]), raw=True)))
+    calc = api(CD, "GET", f"/api/deals/{did}/calc")
+    base = calc["result"]["variants"][vid]["base"]
+    # столбцы сценариев: пессимистичный, базовый, оптимистичный — берём «Базовый»
+    rows = {str(r[0].value): r[2].value for r in wb["Сводка"].iter_rows(min_col=1, max_col=4) if r[0].value}
+    def get(prefix):
+        return next((v for k, v in rows.items() if k.startswith(prefix)), None)
+    check(scn, "Excel: цена продажи без НДС", get("Цена продажи без НДС"), base["price_rub"], tol=1)
+    check(scn, "Excel: курсовая разница по оплатам клиента", get("Курсовая разница по оплатам клиента") or 0, base.get("client_fx_diff_rub") or 0, tol=1)
+    check(scn, "Excel: прибыль с учётом стоимости денег", get("Прибыль с учётом стоимости денег"), base["profit_rub"], tol=1)
+    check(scn, "Excel: цена + курсовая разница − себестоимость = прибыль",
+          (get("Цена продажи без НДС") or 0) + (get("Курсовая разница по оплатам клиента") or 0) - base["cost_total_rub"], base["profit_rub"], tol=2)
+    ws = wb["Платежи и денежный поток"]
+    vat_rows, on = [], False
+    for r in ws.iter_rows(min_col=1, max_col=3):
+        t = str(r[0].value or "")
+        if t.endswith("НДС в денежном потоке (базовый сценарий)"):
+            on = True; continue
+        if on and t.startswith("Остаток после расчётов"):
+            break
+        if on and isinstance(r[2].value, (int, float)):
+            vat_rows.append(r[2].value)
+    check_true(scn, "Excel: блок «НДС в денежном потоке»", bool(vat_rows))
+    check(scn, "Excel: НДС за сделку сходится в 0", sum(vat_rows), 0, tol=2)
+
+
 # ---------- экран ----------
 
 async def screen(browser, did: str) -> dict:
@@ -210,10 +248,13 @@ async def s1_single(browser):
     # D-121: НДС в денежном потоке — от клиента 22 % от цены, в бюджет = НДС с цены − ввозной, каждый платёж 28-го числа
     vat = api(CD, "GET", f"/api/deals/{did}/calc")["result"]["variants"][var["id"]]["base"]["vat"]
     imp = sum(x["amount_rub"] for x in vat["import"])
-    check(scn, "НДС от клиента = 22 % от цены", vat["from_client_rub"], m["price_rub"] * m["vat"] / 100, tol=2)
+    fxd = api(CD, "GET", f"/api/deals/{did}/calc")["result"]["variants"][var["id"]]["base"].get("client_fx_diff_rub") or 0
+    # D-123: оплаты клиента в рублях — по прогнозу курса на даты оплат, НДС — 22 % от них
+    check(scn, "НДС от клиента = 22 % от оплат (₽ по прогнозу курса)", vat["from_client_rub"], (m["price_rub"] + fxd) * m["vat"] / 100, tol=2)
     check(scn, "НДС в бюджет = НДС с цены − ввозной", sum(q["amount_rub"] for q in vat["budget"]), vat["from_client_rub"] - imp, tol=2)
     check_true(scn, "платежи НДС — 28-го числа или следующий рабочий день", all(d[8:10] >= "28" or d[8:10] <= "03" for q in vat["budget"] for d in q["dates"]))
     check_kp(scn, did, m)
+    check_excel(scn, did, var["id"], m)
     check_screen(scn, await screen(browser, did), m)
 
 
@@ -244,6 +285,7 @@ async def s3_usd_rub_input(browser):
     check(scn, "сервер: введённые 40 000 000 ₽ за 1 шт. × 2", m["price_rub"], 80000000)
     check(scn, "сервер: цена в USD = рубли / курс", m["price"], m["price_rub"] / m["fx"])
     check_kp(scn, did, m)
+    check_excel(scn, did, var["id"], m)
     check_screen(scn, await screen(browser, did), m)
 
 

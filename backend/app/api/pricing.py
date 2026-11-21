@@ -258,6 +258,11 @@ def set_price(deal_id: str, body: PriceIn, db: Session = Depends(get_db), user: 
     in_rate = 1.0 if in_cur == "RUB" else (inp.fx.rates or {}).get(in_cur)
     if not rate or not in_rate:
         raise HTTPException(422, f"Нет курса ЦБ для валюты {cur if not rate else in_cur} на дату расчёта")
+    if body.mode in ("markup", "margin") and (v.price_currency != cur or v.price_fx_rate != rate):
+        # D-123: подбор цены по марже учитывает курсовую разницу по оплатам клиента — валюта и курс цены нужны до подбора
+        v.price_currency, v.price_fx_rate = cur, rate
+        db.flush()
+        inp = build_calc_input(db, deal)
     vat_pct = float(settings_service.get(db, "sales_vat_pct") or 22.0)
     vat_in = body.mode == "amount" and body.vat_included
     n = variant_units(deal, v) if body.per_unit else 1

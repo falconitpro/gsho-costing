@@ -1,4 +1,4 @@
-import { Crumbs, EntryGrid, useUiMode } from "../components/Levels";
+import { Crumbs, EntryGrid } from "../components/Levels";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
@@ -36,8 +36,7 @@ export default function CatalogHub({ me }: { me: Me }) {
   const visible = SECS.filter((x) => x[2]);
   const asked = qs.get("s") as Sec;
   // «Новый вид»: /catalog без ?s= — обзор: поиск и входы в разделы; ссылка на объект (?model=, ?part=) открывает раздел сразу
-  const [uiMode] = useUiMode();
-  const overview = uiMode !== "classic" && !asked && !qs.get("model") && !qs.get("part");
+  const overview = !asked && !qs.get("model") && !qs.get("part");
   const sec: Sec | "" = overview ? "" : visible.some(([k]) => k === asked) ? asked : "equipment";
   const HINTS: Record<Sec, string> = { equipment: "модели и исполнения ГШО, характеристики, цены, документы", parts: "артикулы, OEM и кросс-номера, остатки, цены", kits: "комплекты технического обслуживания по моделям",
     other: "техника других производителей для заявок на запчасти", warehouses: "склады компании", hs: "коды ТН ВЭД, ставки пошлин и НДС", entities: "компании группы для цепочек поставки", routes: "маршруты поставки и их параметры" };
@@ -72,7 +71,7 @@ export default function CatalogHub({ me }: { me: Me }) {
         </div>
       </div>
       <div className="row" style={{ gap: 2, borderBottom: "1px solid var(--line)", marginBottom: 12, flexWrap: "wrap" }}>
-        {uiMode !== "classic" && <button onClick={() => nav("/catalog")} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
+        {<button onClick={() => nav("/catalog")} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
           fontWeight: overview ? 700 : 500, color: overview ? "var(--ink)" : "var(--muted)", borderBottom: overview ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>Обзор</button>}
         {visible.map(([k, t]) => (
           <button key={k} onClick={() => go(k)} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 12px", fontSize: 14, fontFamily: "inherit",

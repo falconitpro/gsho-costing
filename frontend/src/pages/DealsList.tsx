@@ -1,4 +1,4 @@
-import { Crumbs, useUiMode } from "../components/Levels";
+import { Crumbs } from "../components/Levels";
 import { useEffect, useMemo, useState } from "react";
 import { PRIORITY_COLOR, toneOf } from "../colors";
 import { lbl, PRIORITY } from "../labels";
@@ -162,9 +162,8 @@ export default function DealsList({ me }: { me: Me }) {
   const [storedBlock] = useState<Block>(() => load<Block>("gsho.dealsBlock", "work"));
   const block: Block = urlBlock && ["work", "won", "lost", "archive"].includes(urlBlock) ? urlBlock : storedBlock;
   // «Новый вид»: в реестре — ключевые колонки; «Все колонки» открывает полный набор (выбор запоминается). «Прежний вид» — всегда полный набор.
-  const [uiMode] = useUiMode();
   const [wantAll, setWantAll] = useState<boolean>(() => load<boolean>("gsho.dealsAllCols", false));
-  const allCols = uiMode === "classic" || wantAll;
+  const allCols = wantAll;
   const setBlock = (b: Block) => { save("gsho.dealsBlock", b); setF({ ...f, statuses: [] }); const n = new URLSearchParams(sp); n.set("block", b); setSp(n); };
   const urlType = new URLSearchParams(window.location.search).get("type") as DealType | null;
   const [f, setFState] = useState<Filters>(() => ({ ...EMPTY_F, type: "gsho", ...load<Partial<Filters>>("gsho.dealsFilters", {}), ...(urlType === "gsho" || urlType === "parts" ? { type: urlType } : {}) }));
@@ -365,7 +364,7 @@ export default function DealsList({ me }: { me: Me }) {
             onClick={() => { const n = { key: k as SortKey, dir: (k === "date" ? -1 : 1) as 1 | -1 }; setSort(n); save("gsho.dealsSort2", n); }}>{t}</button>))}
         </div>
       </div>}
-      {uiMode !== "classic" && <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      {<div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <span className="muted">Колонки:</span>
         <div className="seg" role="group" aria-label="Набор колонок">
           <button type="button" className={!allCols ? "on" : ""} aria-pressed={!allCols} onClick={() => { setWantAll(false); save("gsho.dealsAllCols", false); }}>Основные</button>

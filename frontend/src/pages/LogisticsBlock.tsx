@@ -4,7 +4,7 @@ import { STATUS_TITLES, type Batch, type Deal, type Me } from "../types";
 import LogistRequests, { LogistAddresses, LogistFields, FieldsChooser, type Workspace, type Quote } from "../components/LogistWorkspace";
 import SpecTable from "../components/SpecTable";
 import { UndoButton, useUndoHistory } from "../undo";
-import { useQueryParam, useUiMode } from "../components/Levels";
+import { useQueryParam } from "../components/Levels";
 import { askConfirm } from "../components/Dialogs";
 
 type Money = { amount: number; currency: string };
@@ -37,7 +37,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   const savedHs = (p: { logistics?: unknown }) => !!((p.logistics || {}) as { hs_code?: string }).hs_code;
   const [openPos, setOpenPos] = useState<string[]>(() => positions.filter((p) => !savedHs(p)).map((p) => p.id));
   const emptyBatch = () => ({ name: `Партия ${batches.length + 1}`, route: "завод → Маньчжурия → Забайкальск → пункт поставки", transport_units: 1, transit_days: 14, customs_days: 5, rf_delivery_days: 5, border_planned: "", allocation: "cost",
-    intl_freight: 0, intl_currency: "CNY", insurance_pct: 0.3, broker_rub: 0, rf_delivery_rub: 0, broker_vat: false, rf_vat: false, comment_freight: "", comment_broker: "", comment_rf: "", d2d: true, d2d_amount: 0, d2d_currency: "CNY" });
+    intl_freight: 0, intl_currency: "CNY", insurance_pct: 0.3, broker_rub: 0, rf_delivery_rub: 0, broker_vat: false, rf_vat: false, ft: null as FreightTerms | null, comment_freight: "", comment_broker: "", comment_rf: "", d2d: true, d2d_amount: 0, d2d_currency: "CNY" });
   // правка сохранённой партии: значения — в ту же форму, сохранение обновляет партию
   // D-087: суммы партии — на 1 машину; прежние партии (без признака) хранили итог на партию — в форме делим на число машин
   const batchUnits = (ids: string[]) => positions.filter((p) => ids.includes(p.id)).reduce((a, p) => a + Math.max(1, p.qty || 1), 0) || 1;
@@ -55,6 +55,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
     return { name: b.name, route: b.route, transport_units: b.transport_units, transit_days: b.transit_days, customs_days: b.customs_days, rf_delivery_days: b.rf_delivery_days ?? 5,
       border_planned: b.border_planned || "", allocation: b.allocation || "cost", intl_freight: fr?.amount || 0, intl_currency: fr?.currency || "CNY",
       insurance_pct: (it.insurance_pct as number | null) ?? 0, broker_rub: Number(it.broker_rub || 0), rf_delivery_rub: Number(it.rf_delivery_rub || 0),
+      ft: (it.freight_terms as FreightTerms | undefined) || null,
       broker_vat: !!(it.vat_included as Record<string, boolean> | undefined)?.broker_rub, rf_vat: !!(it.vat_included as Record<string, boolean> | undefined)?.rf_delivery_rub,
       comment_freight: cm.intl_freight || cm.door_to_door || "", comment_broker: cm.broker_rub || "", comment_rf: cm.rf_delivery_rub || "",
       d2d: !!d?.amount || !(fr?.amount || it.rf_delivery_rub), d2d_amount: d?.amount || 0, d2d_currency: d?.currency || "CNY" };
@@ -125,7 +126,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
         items: { intl_freight: { amount: batch.d2d ? 0 : batch.intl_freight, currency: batch.intl_currency }, insurance_pct: batch.insurance_pct, broker_rub: batch.broker_rub,
           rf_delivery_rub: batch.d2d ? 0 : batch.rf_delivery_rub, door_to_door: batch.d2d ? { amount: batch.d2d_amount, currency: batch.d2d_currency } : null,
           comments: { ...bc, intl_freight: batch.comment_freight, door_to_door: batch.comment_freight, broker_rub: batch.comment_broker, rf_delivery_rub: batch.comment_rf }, per_unit: true,
-          vat_included: { broker_rub: batch.broker_vat, rf_delivery_rub: batch.rf_vat } },
+          vat_included: { broker_rub: batch.broker_vat, rf_delivery_rub: batch.rf_vat }, ...(batch.ft ? { freight_terms: batch.ft } : {}) },
         position_ids: posSel };
       if (editId) await api.patch(`/api/deals/${deal.id}/logistics/batches/${editId}`, body);
       else await api.post(`/api/deals/${deal.id}/logistics/batches`, body);
@@ -185,9 +186,8 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
   // Аудит 19.11.2026: «Новый вид» — мастер в три шага (в адресе ?lstep=1..3): 1 — адреса и маршрут, 2 — перевозка (партии и логистические
   // компании), 3 — таможня и сборы по позициям. Шаги не размонтируются, а скрываются: введённое, но не сохранённое не теряется.
   // «Все шаги на одной странице» и «Прежний вид» — как раньше.
-  const [uiMode] = useUiMode();
   const [lstep, setLstep] = useQueryParam("lstep");
-  const wizard = uiMode !== "classic" && lstep !== "all";
+  const wizard = lstep !== "all";
   const step = wizard ? (["1", "2", "3"].includes(lstep || "") ? Number(lstep) : 1) : 0;
   const show = (n: number) => !wizard || step === n;
   const stepDone = [!!ws?.addresses.delivery_address, batches.length > 0 && ws?.compare.chosen_status === "approved", positions.length > 0 && positions.every(savedHs)];
@@ -216,7 +216,7 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
           <span className="lb-links muted" style={{ fontSize: 12, alignSelf: "center" }}>
             <a href="#" onClick={(e) => { e.preventDefault(); setLstep("all"); }}>все шаги на одной странице</a> · <a href="?tab=positions">все характеристики позиций</a> · <a href="?tab=offers">ответы заводов</a></span>
         </div>}
-        {!wizard && uiMode !== "classic" && <div style={{ marginTop: 6 }}><a href="#" className="muted" style={{ fontSize: 12 }} onClick={(e) => { e.preventDefault(); setLstep("1"); }}>по шагам</a></div>}
+        {!wizard && <div style={{ marginTop: 6 }}><a href="#" className="muted" style={{ fontSize: 12 }} onClick={(e) => { e.preventDefault(); setLstep("1"); }}>по шагам</a></div>}
         {!wizard && <div className="lb-steps">
           <a href="#lb-adr" className={ws?.addresses.delivery_address ? "done" : ""}>Адреса</a>
           <a href="#lb-batches" className={batches.length ? "done" : ""}>Партии: {batches.length || "нет"}</a>
@@ -270,6 +270,11 @@ export default function LogisticsBlock({ deal, me, reload }: { deal: Deal; me: M
                   value: <input type="number" value={batch.intl_freight} onChange={(e) => setBatch({ ...batch, intl_freight: Number(e.target.value) })} />,
                   comment: <input value={batch.comment_freight} placeholder="комментарий" onChange={(e) => setBatch({ ...batch, comment_freight: e.target.value })} /> },
                 ]),
+                { key: "ft", name: "Условия оплаты перевозки", unit: <select className="vat-unit" value={batch.ft ? "terms" : "ship"} title="Когда платим перевозчику"
+                    onChange={(e) => setBatch({ ...batch, ft: e.target.value === "terms" ? { prepay_pct: 50, prepay_days_before: 0, post_event: "delivery", post_days: 0 } : null })}>
+                    <option value="ship">100 % при отгрузке</option><option value="terms">по условиям</option></select>,
+                  ref: <span className="muted">{batch.d2d ? "на всю сумму завод → клиент" : "на доставку до границы РФ"}; влияет на денежный поток</span>, filled: true,
+                  value: batch.ft ? <FreightTermsInput t={batch.ft} on={(ft) => setBatch({ ...batch, ft })} /> : <span className="muted">как раньше — в день отгрузки</span> },
                 { key: "ins", name: "Страхование", unit: "% от стоимости", filled: batch.insurance_pct > 0, value: <input type="number" step="0.01" value={batch.insurance_pct} onChange={(e) => setBatch({ ...batch, insurance_pct: Number(e.target.value) })} />, comment: bcc("insurance_pct") },
                 { key: "br", name: "Брокер и СВХ", unit: <VatUnit v={batch.broker_vat} on={(x) => setBatch({ ...batch, broker_vat: x })} />, filled: batch.broker_rub > 0, value: <input type="number" value={batch.broker_rub} onChange={(e) => setBatch({ ...batch, broker_rub: Number(e.target.value) })} />,
                   comment: <input value={batch.comment_broker} placeholder="комментарий" onChange={(e) => setBatch({ ...batch, comment_broker: e.target.value })} /> },
@@ -389,5 +394,21 @@ function VatUnit({ v, on, disabled = false }: { v: boolean; on: (x: boolean) => 
       <option value="net">RUB без НДС</option>
       <option value="gross">RUB с НДС</option>
     </select>
+  );
+}
+
+
+type FreightTerms = { prepay_pct: number; prepay_days_before: number; post_event: "border" | "declaration" | "delivery"; post_days: number };
+/** D-124: условия оплаты перевозки — предоплата (% и за сколько дней до отгрузки) и постоплата (после какого события и через сколько дней). */
+function FreightTermsInput({ t, on }: { t: FreightTerms; on: (t: FreightTerms) => void }) {
+  const n = (v: string, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
+  return (
+    <div className="ft-terms">
+      <label>Предоплата <input type="number" min={0} max={100} value={t.prepay_pct} onChange={(e) => on({ ...t, prepay_pct: n(e.target.value, 100) })} /> %</label>
+      <label>за <input type="number" min={0} max={365} value={t.prepay_days_before} onChange={(e) => on({ ...t, prepay_days_before: n(e.target.value, 365) })} /> дн. до отгрузки</label>
+      <label>Постоплата {Math.round((100 - t.prepay_pct) * 100) / 100} % через <input type="number" min={0} max={365} value={t.post_days} onChange={(e) => on({ ...t, post_days: n(e.target.value, 365) })} /> дн. после
+        <select value={t.post_event} onChange={(e) => on({ ...t, post_event: e.target.value as FreightTerms["post_event"] })}>
+          <option value="border">пересечения границы</option><option value="declaration">выпуска ДТ</option><option value="delivery">поставки клиенту</option></select></label>
+    </div>
   );
 }

@@ -118,11 +118,12 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
             );
           })}
         </div>}
-        <div className="card">
-          <h2 style={{ marginTop: 0 }}>Курс ЦБ на {fmtDate(calc.input.fx.as_of)}</h2>
+        {/* D-126: курсы на сегодня — в шапке; здесь — только если расчёт сделан на другую дату или не по курсу ЦБ */}
+        {(calc.input.fx.as_of !== new Date().toISOString().slice(0, 10) || calc.input.fx.source !== "cbr") && <div className="card">
+          <h2 style={{ marginTop: 0 }}>Курс расчёта на {fmtDate(calc.input.fx.as_of)}</h2>
           {Object.entries(calc.input.fx.rates).filter(([c]) => c !== "RUB").map(([c, r]) => <div key={c}>{c}: <b>{r.toFixed(4)}</b></div>)}
           {calc.input.fx.source !== "cbr" && <span className="badge warn">{lbl(FX_SOURCE, calc.input.fx.source)}</span>}
-        </div>
+        </div>}
         {isCD && deal.manager_id === me.id && !["approved", "kp_sent"].includes(deal.status) && (
           <div className="alert warn">Вы ведёте эту сделку как менеджер и сами её утверждаете. Правило «считал — не утверждает»: об утверждении будет уведомлён ЗГД, пометка останется в ленте и журнале.</div>)}
         {(calc.warnings.length > 0 || calc.result.approval.reasons.length > 0 || cdChecks.length > 0) && (
@@ -550,6 +551,10 @@ function CostBreakdown({ base, units, baseCcy, threshold, dealCur = "RUB", dealR
               <td>{`${sh.toFixed(1).replace(".", ",")} %`}</td>{many && fc && <td className="num">{cv(fxDiff)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(fxDiff)}</td>}</tr>); })()}
           <tr className="cb-total"><td>Себестоимость{many ? " 1 машины" : ""}</td>{fc && <td className="num">{cv(total / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub(total / u)}</td><td>100 %</td>{many && fc && <td className="num">{cv(total)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(total)}</td>}</tr>
           <tr className="cb-sub"><td>Цена продажи без НДС</td>{fc && <td className="num">{cv((base.price_rub || 0) / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub((base.price_rub || 0) / u)}</td><td />{many && fc && <td className="num">{cv(base.price_rub || 0)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(base.price_rub)}</td>}</tr>
+          {Math.abs(base.client_fx_diff_rub || 0) >= 1 && (() => { const d = base.client_fx_diff_rub || 0; return (   // D-123
+            <tr className="cb-sub" title="Клиент платит в валюте договора: рубли считаются по прогнозу курса на дату каждой оплаты, цена — по курсу фиксации цены. Разница входит в прибыль.">
+              <td>Курсовая разница по оплатам клиента <span className="muted">· прогноз курса на даты оплат</span></td>{fc && <td className="num">{d > 0 ? "+" : ""}{cv(d / u)}</td>}
+              <td className={"num" + (fc ? " cb-rubc" : "")}>{d > 0 ? "+" : ""}{fmtRub(d / u)}</td><td />{many && fc && <td className="num">{d > 0 ? "+" : ""}{cv(d)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{d > 0 ? "+" : ""}{fmtRub(d)}</td>}</tr>); })()}
           <tr className="cb-sub"><td>Прибыль</td>{fc && <td className="num">{cv((base.profit_rub || 0) / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub((base.profit_rub || 0) / u)}</td><td>{fmtPct(m)} маржи</td>{many && fc && <td className="num">{cv(base.profit_rub || 0)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(base.profit_rub)}</td>}</tr>
           {!!base.guarantee_cost_rub && <tr className="cb-sub"><td>Банковская гарантия на аванс</td>{fc && <td className="num">{cv(base.guarantee_cost_rub / u)}</td>}<td className={"num" + (fc ? " cb-rubc" : "")}>{fmtRub(base.guarantee_cost_rub / u)}</td><td />{many && fc && <td className="num">{cv(base.guarantee_cost_rub)}</td>}{many && <td className={"num" + (fc ? " cb-rubc" : " muted")}>{fmtRub(base.guarantee_cost_rub)}</td>}</tr>}
         </tbody>

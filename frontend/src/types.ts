@@ -103,6 +103,7 @@ export interface ScenarioResult {
   price_rub: number | null; margin_pct: number | null; markup_pct: number | null; profit_rub: number | null; profit_before_finance_rub: number | null;
   cash_gap: CashGap; cashflow: CashflowPoint[]; finance_breakdown: Record<string, number>; delivery_days: number; sensitivity?: Sensitivity | null;
   payment_dates?: { no: number; event: string; on: string; amount_rub: number; via: string; default: boolean }[];
+  client_fx_diff_rub?: number;
   vat?: { pct: number; from_client_rub: number; input_rub?: number; import_deducted: boolean; import: { on: string; amount_rub: number }[]; budget: { quarter: string; amount_rub: number; dates: string[] }[] }; guarantee_cost_rub?: number;
   defaults_used?: Record<string, boolean>;
   positions?: { position_id: string; items_rub: Record<string, number>; items_fx?: Record<string, { amount: number; currency: string }> }[];

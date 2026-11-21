@@ -220,11 +220,17 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
         st0 = by_key.get(key)
         fixed = st0 is not None and st0.actual_amount is not None
         if c_rate and not fixed:
-            gross = round(net * vat_k / c_rate, 2)
-            st = upsert(code, planned, amount=gross, currency=c_ccy)
-            # справочно: ₽ без НДС по прогнозу курса ЦБ на плановую дату оплаты (базовый сценарий)
-            k = fxc.rate(c_ccy, planned, ScenarioName.BASE, "_stage") if c_ccy != "RUB" and planned else 1.0
-            st.amount_rub_net = round(gross / vat_k * k, 2)
+            if all(l.get("currency") == c_ccy and l.get("amount_ccy") is not None for l in lines):
+                # D-123: расчёт уже ведёт оплату в валюте договора и рубли по прогнозу курса на дату оплаты
+                gross = round(sum(l["amount_ccy"] for l in lines) * vat_k, 2)
+                st = upsert(code, planned, amount=gross, currency=c_ccy)
+                st.amount_rub_net = net
+            else:
+                gross = round(net * vat_k / c_rate, 2)
+                st = upsert(code, planned, amount=gross, currency=c_ccy)
+                # справочно: ₽ без НДС по прогнозу курса ЦБ на плановую дату оплаты (базовый сценарий)
+                k = fxc.rate(c_ccy, planned, ScenarioName.BASE, "_stage") if c_ccy != "RUB" and planned else 1.0
+                st.amount_rub_net = round(gross / vat_k * k, 2)
         else:
             st = upsert(code, planned, amount=None if fixed else net)
             st.amount_rub_net = net

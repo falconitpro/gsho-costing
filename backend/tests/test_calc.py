@@ -274,3 +274,48 @@ def test_conversion_fee_only_on_fx_part_of_service():
     p = inp3.positions[0]
     p.service = ServiceSummary(cost_fx=Money(amount=p.service.cost_fx.amount * 2, currency="CNY"), cost_rub=p.service.cost_rub, show_in_kp=True)
     assert calc_deal(inp3).variants["V1"]["base"].finance_breakdown["conversion_fees"] > base["conversion_fees"]
+
+
+def test_client_payments_at_forecast_fx():
+    """D-123: договор в валюте — оплаты клиента в рублях по прогнозу курса на даты оплат; разница — в прибыли; цена по марже учитывает её."""
+    from app.calc import solve_price
+    inp = sample_deal(price_a=95_000_000)
+    inp.variants = inp.variants[:1]
+    v = inp.variants[0]
+    rate = inp.fx.rates["CNY"]
+    v.client_currency, v.client_fx_rate = "CNY", rate
+    res, cap = _flows(inp)
+    base = res.variants["V1"]["base"]
+    lines = base.payment_dates
+    assert all(l["currency"] == "CNY" for l in lines)
+    assert sum(l["amount_ccy"] for l in lines) == pytest.approx(95_000_000 / rate, rel=1e-6)
+    fxd = sum(l["amount_ccy"] * l["rate"] for l in lines) - 95_000_000
+    assert base.client_fx_diff_rub == pytest.approx(fxd, rel=1e-3)   # курс в строке округлён до 4 знаков
+    assert base.profit_rub == pytest.approx(95_000_000 + base.client_fx_diff_rub - base.cost_total_rub, abs=0.05)
+    # один из вызовов денежного потока — базовый сценарий (порядок сценариев не важен)
+    assert any(abs(sum(f.amount_rub for f in c if f.kind == "client") - (95_000_000 + base.client_fx_diff_rub)) < 1 for c in cap)
+    p = solve_price(inp, "V1", target_margin_pct=20)
+    v.price_rub = p
+    assert calc_deal(inp).variants["V1"]["base"].margin_pct == pytest.approx(20, abs=0.05)
+
+
+def test_freight_payment_terms():
+    """D-124: перевозка по условиям логиста — 30 % за 10 дней до отгрузки, 70 % через 5 дней после пересечения границы."""
+    from datetime import timedelta as _td
+    from app.calc.types import FreightTerms, PaymentEvent
+    inp = sample_deal(price_a=95_000_000)
+    inp.variants = inp.variants[:1]
+    b = inp.batches[0]
+    _, cap0 = _flows(inp)
+    before = sum(f.amount_rub for f in cap0[0] if f.kind == "logistics" and f.ref == "intl_freight")
+    b.freight_terms = FreightTerms(prepay_pct=30, prepay_days_before=10, post_event=PaymentEvent.BORDER, post_days=5)
+    res, cap = _flows(inp)
+    evs = [pc.events for sc in res.variants["V1"].values() for pc in sc.positions]     # все позиции во всех сценариях
+    fl = cap[0]
+    pre = [f for f in fl if f.ref == "freight/prepay"]
+    post = [f for f in fl if f.ref == "freight/post"]
+    assert pre and post and not [f for f in fl if f.ref == "intl_freight"]
+    assert sum(f.amount_rub for f in pre + post) == pytest.approx(before, rel=1e-9)
+    assert sum(f.amount_rub for f in pre) == pytest.approx(before * 0.3, rel=1e-9)
+    assert all(any(f.on == max(e["shipment"] - _td(days=10), e["contract"]) for e in evs) for f in pre)
+    assert all(any(f.on == e["border"] + _td(days=5) for e in evs) for f in post)

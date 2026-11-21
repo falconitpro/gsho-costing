@@ -279,6 +279,14 @@ class AllocationMethod(str, Enum):
     VOLUME = "volume"
 
 
+class FreightTerms(BaseModel):
+    """D-124: условия оплаты перевозки (вводит логист): предоплата — за N дней до отгрузки, остаток — через N дней после события."""
+    prepay_pct: float = 100.0
+    prepay_days_before: int = 0
+    post_event: PaymentEvent = PaymentEvent.DELIVERY     # border | declaration | delivery
+    post_days: int = 0
+
+
 class BatchInput(BaseModel):
     id: str
     route: str = "завод → Маньчжурия → Забайкальск → пункт поставки"
@@ -288,6 +296,7 @@ class BatchInput(BaseModel):
     insurance_amount: Money = Field(default_factory=lambda: Money(amount=0, currency="CNY"))
     broker_rub: float = 0.0
     rf_delivery_rub: float = 0.0
+    freight_terms: Optional[FreightTerms] = None   # D-124: нет — вся перевозка на дату отгрузки (как раньше)
     broker_vat_rub: float = 0.0              # D-122: входящий НДС брокера / доставки по РФ (суммы выше — без НДС)
     rf_delivery_vat_rub: float = 0.0
     door_to_door: Optional[Money] = None      # единая стоимость доставки завод → клиент (вместо перевозки до границы и доставки по РФ)
@@ -312,6 +321,9 @@ class VariantInput(BaseModel):
     client_payments_default: bool = False   # условия клиента взяты из типовой схемы (КД не задал)
     overhead_pct_override: Optional[float] = None   # КД переопределил с комментарием → виза ЗГД
     overhead_override_comment: str = ""
+    # D-123: клиент платит в валюте договора — рубли по прогнозу курса на дату оплаты; цена в рублях — по курсу фиксации цены
+    client_currency: str = "RUB"
+    client_fx_rate: Optional[float] = None     # ₽ за 1 ед. валюты договора, по которому цена переведена в рубли
 
 
 class DealCalcInput(BaseModel):
@@ -456,6 +468,7 @@ class VariantScenarioResult(BaseModel):
     positions: list[PositionCost]
     sensitivity: Optional[Sensitivity] = None
     payment_dates: list[dict] = Field(default_factory=list)   # график клиента: no, event, on, amount_rub, via
+    client_fx_diff_rub: float = 0.0          # D-123: курсовая разница по оплатам клиента (прогноз курса на даты оплат − курс цены)
     vat: dict = Field(default_factory=dict)                  # D-121: НДС в денежном потоке — от клиента, при ввозе, платежи в бюджет по кварталам
     guarantee_cost_rub: float = 0.0
     defaults_used: dict[str, bool] = Field(default_factory=dict)   # client_payments / factory_payments по типовой схеме

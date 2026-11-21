@@ -281,11 +281,22 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
             if d2d:   # остальное — от границы РФ до клиента, в рублях по курсу на дату поставки
                 rf_part = d2d.amount * (100.0 - batch.door_to_door_border_pct) / 100.0 * share
                 items["rf_delivery"] = rf_part * fx.rate(d2d.currency, ev[PaymentEvent.DELIVERY], s, f"{batch.id}/door_to_door", None, fx_mult)
+            ft = batch.freight_terms
             for key in ("intl_freight", "insurance"):
                 m = items_fx[key]
-                if m.amount:
+                if m.amount and not (ft and key == "intl_freight"):
                     flows.append(Flow(on=ship, amount_rub=-items[key], kind="logistics", ref=key, fx_amount=m.amount, currency=m.currency))
+            if ft:   # D-124: перевозка (при едином поле — вся сумма завод → клиент) по условиям оплаты перевозчику
+                fr_rub = items["intl_freight"] + (items["rf_delivery"] if d2d else 0.0)
+                fr_fx = items_fx["intl_freight"].amount + (rf_part if d2d else 0.0)
+                pre = max(0.0, min(100.0, ft.prepay_pct)) / 100.0
+                post_on = ev.get(ft.post_event, ev[PaymentEvent.DELIVERY]) + timedelta(days=max(ft.post_days, 0))
+                for part, on, ref in ((pre, ship - timedelta(days=max(ft.prepay_days_before, 0)), "freight/prepay"), (1 - pre, post_on, "freight/post")):
+                    if part > 0 and fr_rub:
+                        flows.append(Flow(on=max(on, ev[PaymentEvent.CONTRACT]), amount_rub=-fr_rub * part, kind="logistics", ref=ref,
+                                          fx_amount=fr_fx * part, currency=items_fx["intl_freight"].currency))
         else:
+            ft = None
             in_vat_broker = in_vat_rf = 0.0
         items["broker_util"] += p.util_fee_rub
 
@@ -310,7 +321,7 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
         items["certification"] = p.certification_rub
         if p.certification_rub:
             flows.append(Flow(on=ev[PaymentEvent.READINESS], amount_rub=-p.certification_rub, kind="other", ref="cert"))
-        if items["rf_delivery"]:
+        if items["rf_delivery"] and not (ft and batch and batch.door_to_door and batch.door_to_door.amount):
             flows.append(Flow(on=ev[PaymentEvent.DELIVERY], amount_rub=-items["rf_delivery"], kind="logistics", ref="rf"))
         if p.certification_vat_rub:
             flows.append(Flow(on=ev[PaymentEvent.READINESS], amount_rub=-p.certification_vat_rub, kind="input_vat", ref=f"{p.id}/cert/in_vat"))
@@ -367,17 +378,28 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
         e: max(ev[e] for ev in events_by_pos.values()) for e in PaymentEvent
     } if events_by_pos else {}
     guarantee_cost = 0.0
+    client_fx_diff = 0.0
     payment_dates: list[dict] = []
     if price is not None and var_events:
         ag = inp.finance.advance_guarantee
+        c_ccy = (variant.client_currency or "RUB").upper()
+        c_fx = c_ccy != "RUB" and bool(variant.client_fx_rate)
         for line in variant.client_payments:
             on = _payment_date(line, var_events, inp, cal)
             amt = _line_amount(line, price)
+            line_info: dict = {}
+            if c_fx:   # D-123: сумма в валюте договора по курсу цены → рубли по прогнозу курса на дату оплаты
+                amt_ccy = amt / variant.client_fx_rate
+                k = fx.rate(c_ccy, on, s, f"client/{line.no}", None, fx_mult)
+                client_fx_diff += amt_ccy * k - amt
+                line_info = {"amount_ccy": round(amt_ccy, 2), "currency": c_ccy, "rate": round(k, 4), "price_rate": variant.client_fx_rate,
+                             "amount_rub_at_price_rate": round(amt, 2)}
+                amt = amt_ccy * k
             flows.append(Flow(on=on, amount_rub=amt, kind="client", ref=f"client/{line.no}"))
             if inp.external_commission_pct and amt > 0:   # внешняя комиссия выплачивается вместе с оплатами клиента
                 flows.append(Flow(on=on, amount_rub=-amt * inp.external_commission_pct / 100.0, kind="other", ref=f"commission/{line.no}"))
             payment_dates.append({"no": line.no, "event": line.event.value, "on": on, "amount_rub": round(amt, 2), "via": line.via,
-                                  "default": variant.client_payments_default})
+                                  "default": variant.client_payments_default, **line_info})
             is_advance = line.event in ADVANCE_EVENTS or on < var_events[PaymentEvent.SHIPMENT]
             if line.guarantee.value != "none" and line.guarantee_pct:
                 # явная гарантия в строке графика (раздел 9): % годовых × срок гарантии
@@ -395,7 +417,7 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
         flows.append(Flow(on=var_events[PaymentEvent.CONTRACT], amount_rub=-guarantee_cost, kind="other", ref="guarantee"))
     vat_info: dict = {}
     if price is not None and var_events:
-        vat_flows = _vat_settlement(flows, payment_dates, price, inp, var_events[PaymentEvent.DELIVERY])
+        vat_flows = _vat_settlement(flows, payment_dates, price + client_fx_diff, inp, var_events[PaymentEvent.DELIVERY])
         imp = [f for f in flows if f.kind == "customs" and f.ref.endswith("/vat")]
         flows.extend(vat_flows)
         quarters: dict[str, dict] = {}
@@ -437,7 +459,7 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
 
     margin = markup = profit = profit_bf = None
     if price:
-        profit = price - cost_total
+        profit = price + client_fx_diff - cost_total     # D-123: выручка в рублях — по прогнозу курса на даты оплат клиента
         profit_bf = profit + direct["finance"]
         margin = profit / price * 100.0
         markup = profit / cost_total * 100.0 if cost_total else None
@@ -452,7 +474,7 @@ def _variant_scenario(inp: DealCalcInput, variant: VariantInput, scen: ScenarioP
         markup_pct=None if markup is None else round(markup, 3),
         profit_rub=None if profit is None else round(profit, 2),
         profit_before_finance_rub=None if profit_bf is None else round(profit_bf, 2),
-        cash_gap=cf.gap, cashflow=cf.points, finance_breakdown=cf.breakdown(), vat=vat_info,
+        cash_gap=cf.gap, cashflow=cf.points, finance_breakdown=cf.breakdown(), vat=vat_info, client_fx_diff_rub=round(client_fx_diff, 2),
         delivery_days=(max(delivery_dates) - inp.contract_date).days if delivery_dates else 0,
         positions=pos_costs, payment_dates=payment_dates, guarantee_cost_rub=round(guarantee_cost, 2),
         defaults_used={"client_payments": variant.client_payments_default,
@@ -539,11 +561,13 @@ def solve_price(inp: DealCalcInput, variant_id: str, target_margin_pct: Optional
     scen = next(s for s in inp.scenarios if s.name == ScenarioName.BASE)
     fx = _FxCache(inp)
     cost = _variant_scenario(inp, v, scen, fx, price_override=0.0).cost_total_rub
-    price = cost
+    price, r = cost, 0.0          # r — курсовая разница по оплатам клиента в долях цены (D-123)
     for _ in range(iterations):
         if target_margin_pct is not None:
-            price = cost / (1 - target_margin_pct / 100.0)
+            price = cost / (1 - target_margin_pct / 100.0 + r)
         elif target_markup_pct is not None:
-            price = cost * (1 + target_markup_pct / 100.0)
-        cost = _variant_scenario(inp, v, scen, fx, price_override=price).cost_total_rub
+            price = cost * (1 + target_markup_pct / 100.0) / (1 + r)
+        res = _variant_scenario(inp, v, scen, fx, price_override=price)
+        cost = res.cost_total_rub
+        r = res.client_fx_diff_rub / price if price else 0.0
     return round(price, 2)
