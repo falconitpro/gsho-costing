@@ -14,6 +14,7 @@ const ITEMS: Item[] = [
   { key: "summary", to: "/summary", label: "Сводка" },
   { key: "finance", to: "/finance", label: "Финансы" },
   { key: "legal", to: "/legal", label: "Юридический блок" },
+  { key: "office", to: "/office", label: "Канцелярия" },
   { key: "catalog", to: "/catalog", label: "Каталог" },
   { key: "supply", to: "/supply", label: "Снабжение и склад" },
   { key: "settings", to: "/settings", label: "Настройки" },
@@ -29,6 +30,7 @@ const PRIMARY: Record<string, string[]> = {
   lawyer: ["work", "legal", "deals", "tasks"],
   admin: ["work", "settings", "deals"],
   observer: ["work", "deals", "board"],
+  clerk: ["work", "office", "tasks"],
 };
 
 export default function RoleNav({ me }: { me: Me }) {
@@ -41,6 +43,7 @@ export default function RoleNav({ me }: { me: Me }) {
     summary: has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager"),
     finance: perm("finance_section"),
     supply: has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head"),
+    office: perm("office") || perm("office_hr"),   // D-128: исполнитель без права видит свои документы через «Что сделать»
   };
   const primary = new Set(codes.flatMap((c) => PRIMARY[c] || []));
   if (primary.size === 0) ["work", "deals", "tasks"].forEach((k) => primary.add(k));

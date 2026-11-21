@@ -29,6 +29,7 @@ import CounterpartiesRedirect from "./pages/CounterpartiesPage";
 import LegalPage from "./pages/LegalPage";
 import CatalogHub from "./pages/CatalogHub";
 import SupplyPage from "./pages/PartsSetupPage";
+import OfficePage from "./pages/OfficePage";
 import { PartsRequestView } from "./components/PartsRequests";
 import LoginPage from "./pages/LoginPage";
 
@@ -183,6 +184,7 @@ export default function App() {
             <Route path="/catalog" element={<CatalogHub me={me} />} />
             <Route path="/factories" element={<CounterpartiesRedirect type="suppliers" />} />
             <Route path="/supply" element={<SupplyPage me={me} />} />
+            <Route path="/office" element={<OfficePage me={me} />} />
             <Route path="/parts/setup" element={<Navigate to="/supply" replace />} />
             <Route path="/access" element={<Navigate to="/settings?s=access" replace />} />
             <Route path="/admin" element={<Navigate to="/settings?s=admin" replace />} />

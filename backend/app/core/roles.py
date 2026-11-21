@@ -26,6 +26,7 @@ class Role(str, Enum):
     OBSERVER = "observer"
     PURCHASING = "purchasing"      # закупки (заготовка роли, задача 6)
     LAWYER = "lawyer"              # юрист: тендерная документация, договор, протокол разногласий
+    CLERK = "clerk"                # делопроизводитель (офис-менеджер): Канцелярия — регистрация писем и документов, исполнители, сроки (D-128)
 
 
 ROLE_TITLES = {
@@ -39,6 +40,7 @@ ROLE_TITLES = {
     Role.OBSERVER: "Наблюдатель",
     Role.PURCHASING: "Закупки",
     Role.LAWYER: "Юрист",
+    Role.CLERK: "Делопроизводитель (офис-менеджер)",
 }
 
 NONE, READ, EDIT = 0, 1, 2
@@ -108,6 +110,10 @@ FIELD_GROUPS: dict[str, tuple[str, set[str]]] = {
     "assistant_admin": ("Помощник CRM: настройки, лимиты и счётчики без содержимого диалогов", set()),
     "legal_docs": ("Документы клиента и юридические (тендерная документация, договор, протокол разногласий)", set()),
     "legal_profiles": ("Юридические профили контрагентов и БЕРГ-ХАУС, банковские реквизиты", set()),
+    # Канцелярия (D-128): READ — видеть журналы, EDIT — регистрировать, назначать исполнителей, подписывать от имени подписанта
+    "office": ("Канцелярия: журналы писем, приказов, распоряжений и внутренних документов", set()),
+    "office_hr": ("Канцелярия: приказы по личному составу", set()),
+    "office_signers": ("Канцелярия: подписанты, факсимиле, коды юр. лиц", set()),
 }
 
 # Стартовая матрица: роль → {группа: уровень}. Не перечисленные группы = 0.
@@ -127,12 +133,14 @@ DEFAULT_MATRIX: dict[Role, dict[str, int]] = {
               "client_price_history": READ, "finance_analytics": READ, "finance_section": READ, "payment_terms": EDIT, "local_options": EDIT, "tech_params": EDIT, "images": EDIT,
               "kp_images_select": EDIT, "catalog": EDIT, "glossary": EDIT, "factory_offers": EDIT, "cost_files": READ, "intragroup_chain": EDIT,
               "execution": EDIT, "execution_payments": EDIT, "execution_close": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_docs": EDIT, "legal_profiles": EDIT, "backup_status": READ,
-              "security_admin": EDIT, "security_audit": READ, "support_admin": EDIT},
+              "security_admin": EDIT, "security_audit": READ, "support_admin": EDIT, "office": EDIT, "office_hr": EDIT, "office_signers": EDIT},
     Role.ADMIN: {"tech_params": READ, "images": READ, "catalog": READ, "glossary": EDIT, "settings": EDIT, "access_admin": EDIT, "legal_profiles": EDIT,
                  "backup_status": READ, "security_admin": EDIT, "security_audit": READ},
     Role.OBSERVER: {"price": READ, "payment_terms": READ, "tech_params": READ, "images": READ, "execution": READ},
     Role.PURCHASING: {"local_options": EDIT, "tech_params": READ, "images": READ, "execution": READ, "legal_profiles": READ},
-    Role.LAWYER: {"price": READ, "payment_terms": READ, "tech_params": READ, "images": READ, "execution": READ, "legal_docs": EDIT, "legal_profiles": EDIT},
+    Role.LAWYER: {"price": READ, "payment_terms": READ, "tech_params": READ, "images": READ, "execution": READ, "legal_docs": EDIT, "legal_profiles": EDIT,
+                  "office": READ},
+    Role.CLERK: {"office": EDIT, "office_hr": EDIT, "legal_profiles": READ, "assistant_use": READ},
 }
 
 # Группы, которые нельзя закрыть для ЗГД и администратора (защита от потери доступа)
@@ -141,6 +149,9 @@ for _r in Role:
     DEFAULT_MATRIX.setdefault(_r, {}).setdefault("assistant_use", READ)
     DEFAULT_MATRIX[_r].setdefault("file_download", READ)   # по умолчанию скачивание открыто всем; закрывается в «Уровнях доступа»
 DEFAULT_MATRIX[Role.GD]["assistant_admin"] = EDIT
+# Канцелярия (D-128): КД и ФД видят журналы
+for _r in (Role.CD, Role.FD):
+    DEFAULT_MATRIX[_r].setdefault("office", READ)
 
 PROTECTED = {Role.GD: {"access_admin", "security_admin"}, Role.ADMIN: {"access_admin"}}
 

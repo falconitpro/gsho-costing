@@ -110,7 +110,7 @@ def _my_tasks(db: Session, user: CurrentUser, today: date) -> list[dict]:
 
 
 def _todo(user: CurrentUser, today: date, tasks: list[dict], approvals: list[dict], open_deals: list[Deal], events: list[dict], idle: dict[str, int] | None = None,
-          questions: list[dict] | None = None) -> list[dict]:
+          questions: list[dict] | None = None, office: list[dict] | None = None) -> list[dict]:
     """Лента «Что сделать»: решения, задачи, сроки и черновики без движения — без повторов, по срочности.
     Задача по сделке, которая уже ждёт решения (виза / утверждение), не дублируется; срок КП — только если по сделке нет задачи."""
     items: list[dict] = []
@@ -158,6 +158,13 @@ def _todo(user: CurrentUser, today: date, tasks: list[dict], approvals: list[dic
         items.append({"kind": "question", "title": f"Ждём ответа: {q['body'][:80]}", "sub": f"{q['deal_number']} · {q['section_title']}",
                       "url": f"/deals/{q['deal_id']}?tab=feed", "action": "Открыть", "tone": "bad" if dl is not None and dl < 0 else "info",
                       "due": q["due_on"].isoformat() if q["due_on"] else None, "days_left": dl, "overdue": bool(dl is not None and dl < 0), "when": when,
+                      "task_id": None, "rank": 0 if dl is not None and dl < 0 else 2})
+    for o in office or []:   # D-128: документы Канцелярии, где я исполнитель
+        dl = (o["due_on"] - today).days if o["due_on"] else None
+        when = "" if dl is None else f"просрочено {-dl} дн." if dl < 0 else "сегодня" if dl == 0 else "завтра" if dl == 1 else f"до {o['due_on']:%d.%m}"
+        items.append({"kind": "office", "title": f"{o['verb']}: {o['subject'][:80]}", "sub": " · ".join(x for x in (o["number"], o["counterparty"]) if x),
+                      "url": f"/office?doc={o['id']}", "action": "Открыть", "tone": "bad" if dl is not None and dl < 0 else "warn" if dl is not None and dl <= 1 else "info",
+                      "due": o["due_on"].isoformat() if o["due_on"] else None, "days_left": dl, "overdue": bool(dl is not None and dl < 0), "when": when,
                       "task_id": None, "rank": 0 if dl is not None and dl < 0 else 2})
     items.sort(key=lambda x: (x["rank"], x["days_left"] if x["days_left"] is not None else 99, x["title"]))
     for x in items:
@@ -478,7 +485,20 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
         FeedEntry.user_id == user.id, FeedEntry.awaiting.is_(True), FeedEntry.resolved_at.is_(None), FeedEntry.deleted_at.is_(None),
         Deal.deleted_at.is_(None)).order_by(FeedEntry.due_on).limit(50)).all()
     questions = [{"deal_id": e.deal_id, "deal_number": num, "body": e.body, "due_on": e.due_on, "section_title": SECTIONS.get(e.section, "")} for e, num in qrows]
-    todo = _todo(user, today, tasks, approvals, open_deals, events, idle, questions)
+    from ..models import OfficeDoc
+    orows = db.scalars(select(OfficeDoc).where(OfficeDoc.status.in_(("registered", "assigned", "in_work"))).order_by(OfficeDoc.due_on)).all()
+    office_items = [{"id": d.id, "number": d.number, "subject": d.subject, "counterparty": d.counterparty, "due_on": d.due_on,
+                     "verb": "Ответить на письмо" if d.kind == "in" else "Исполнить"}
+                    for d in orows if d.executor_id == user.id or user.id in (d.co_executor_ids or [])][:50]
+    from ..services import office as office_svc   # D-129: документы, ждущие моего согласования
+    for d in db.scalars(select(OfficeDoc).where(OfficeDoc.status == "review", OfficeDoc.reviewer_id == user.id)).all():   # D-130
+        office_items.append({"id": d.id, "number": d.number, "subject": d.subject, "counterparty": d.counterparty, "due_on": d.due_on,
+                             "verb": "Рассмотреть, наложить резолюцию"})
+    for d in db.scalars(select(OfficeDoc).where(OfficeDoc.status == "approval")).all():
+        if office_svc.is_approver(db, d, user):
+            office_items.append({"id": d.id, "number": "", "subject": d.subject, "counterparty": office_svc.KINDS.get(d.kind, ""), "due_on": None,
+                                 "verb": "Согласовать"})
+    todo = _todo(user, today, tasks, approvals, open_deals, events, idle, questions, office_items)
 
     # ---------------- раскладка
     default_order = ROLE_BLOCKS.get(role, ROLE_BLOCKS["observer"])

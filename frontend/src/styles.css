@@ -956,3 +956,37 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .feed-replylink { font-size: 12px; margin-left: 24px; }
 .feed-card .feed-toggle { font-weight: 600; display: inline-flex; gap: 8px; align-items: center; }
 .feed-tools select, .feed-filters select, .feed-filters input:not([type="checkbox"]) { width: auto; max-width: 260px; }
+/* D-128: Канцелярия */
+.txt-bad { color: var(--bad); }
+.nowrap { white-space: nowrap; }
+.office-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
+.office-bar .push { margin-left: auto; gap: 8px; }
+.office-table { width: 100%; }
+.office-table tbody tr { cursor: pointer; }
+.office-table tbody tr.sel { background: var(--accent-soft); }
+.office-table tbody tr.late td { background: var(--bad-bg); }
+.office-form .grid2, .office-card .office-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 8px 0; }
+.office-form label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.office-form .span2, .office-grid .span2 { grid-column: 1 / -1; }
+.office-form textarea, .office-form input, .office-form select { width: 100%; box-sizing: border-box; }
+.office-card .row h2 { margin: 0; }
+.office-card .row .push { margin-left: auto; }
+.office-body { white-space: pre-wrap; border-left: 3px solid var(--line); padding-left: 10px; }
+.office-files { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 6px 0; }
+.office-acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
+.office-box { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+.office-res { border-left: 3px solid var(--accent); padding-left: 10px; margin: 8px 0; display: grid; gap: 4px; }
+.office-steps { margin: 6px 0; padding-left: 20px; }
+.office-steps li.approved b { color: var(--ok); }
+.office-steps li.rejected b { color: var(--bad); }
+.office-steps li.waiting { color: var(--muted); }
+.office-steps-ed { display: grid; gap: 6px; margin: 6px 0; }
+.office-steps-ed .row { flex-wrap: nowrap; }
+.office-steps-ed .row select, .office-steps-ed .row input { width: auto; flex: 1; min-width: 0; }
+.office-comments { display: grid; gap: 4px; margin: 10px 0; }
+.office-comments .row input { flex: 1; }
+.office-form select.need { border-color: var(--bad); }
+.office-form label.row { flex-direction: row; align-items: center; gap: 6px; }
+.office-form label.row input[type=checkbox] { width: auto; }
+.office-form .row input:not([type=checkbox]) { width: auto; flex: 1; min-width: 0; }
+@media (max-width: 760px) { .office-form .grid2, .office-card .office-grid { grid-template-columns: 1fr; } }
