@@ -3,7 +3,14 @@ import { ActionMenu, Crumbs, EntryGrid, type Entry } from "../components/Levels"
 import { toneOf } from "../colors";
 import ChecksPanel from "../components/ChecksPanel";
 import { NowLine, POST_WIN_STATUSES, SaleSummary, StageStrip, dealPhase } from "../components/DealHeader";
-import { lbl, FEED_KIND } from "../labels";
+import { DealFeed, SectionFeed } from "../components/DealFeed";
+
+// D-127: вкладка сделки → раздел обсуждения (внизу вкладки — свёрнутое обсуждение раздела)
+const FEED_SECTION: Partial<Record<string, string>> = { main: "sale", positions: "sale", offers: "sale", logistics: "logistics", service: "service",
+  pricing: "pricing", documents: "legal", legal: "legal", execution: "execution", acceptance: "execution", planfact: "finance" };
+const FEED_TITLE: Record<string, string> = { sale: "Продажа", logistics: "Логистика", service: "Сервис", pricing: "Расчёт и утверждение",
+  legal: "Договор и юр.", execution: "Исполнение", finance: "Финансы" };
+import { lbl } from "../labels";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
 import { DELIVERY_START, PRODUCTION_START, STATUS_TITLES, TERM_UNITS, can, type Deal, type Me, type Position } from "../types";
@@ -35,13 +42,13 @@ const SALE_TABS: Tab[] = ["main", "positions", "offers", "logistics", "service",
 const CONTRACT_TABS: Tab[] = ["execution", "acceptance", "planfact", "documents", "legal"];
 const TAB_TITLES: Record<Tab, string> = { main: "Шапка и условия", positions: "Позиции и характеристики", offers: "Заводы и ответы", logistics: "Логистика и таможня",
   service: "Сервис", pricing: "Расчёт и утверждение", catalog: "В каталог", execution: "Контракт, этапы и даты", acceptance: "Приёмка машин",
-  planfact: "Платежи и план/факт", documents: "Документы", legal: "Юридические документы", feed: "Лента", versions: "Версии и файлы", overview: "Обзор" };
+  planfact: "Платежи и план/факт", documents: "Документы", legal: "Юридические документы", feed: "Лента и обсуждения", versions: "Версии и файлы", overview: "Обзор" };
 // что внутри раздела — видно на обзоре сразу, не во всплывающей подсказке
 const TAB_HINTS: Partial<Record<Tab, string>> = { main: "клиент, контакт, валюта, сервис, альтернативы, условия оплаты", positions: "техника, количество, сроки производства, технические характеристики, фото, опции, ЗИП",
   offers: "ответы заводов, цены, выбор предложения", logistics: "маршрут, перевозка, таможня, утилизационный сбор", service: "расчёт сервиса до наработки",
   pricing: "себестоимость, цена, условия оплаты, визы, КП и торги", catalog: "перенос моделей и характеристик сделки в каталог", execution: "реквизиты контрактов, сканы, этапы, ключевые сроки",
   acceptance: "готовность, предварительная и окончательная приёмка", planfact: "график платежей, поступления, отклонения", documents: "файлы клиента, проверка юриста, пакеты документов",
-  legal: "договоры, спецификации, доверенности по сделке", feed: "переписка, события и комментарии по сделке", versions: "версии расчёта, Excel, КП" };
+  legal: "договоры, спецификации, доверенности по сделке", feed: "обсуждения по разделам, вопросы и ответы, письма, события", versions: "версии расчёта, Excel, КП" };
 
 export default function DealCard({ me }: { me: Me }) {
   const { id } = useParams();
@@ -69,7 +76,6 @@ export default function DealCard({ me }: { me: Me }) {
   const [altChoice, setAltChoice] = useState<{ id: string; name: string; price_rub: number | null; positions: number }[] | null>(null);
   const [altKeep, setAltKeep] = useState("");
   useEffect(() => { api.get<{ id: string; name: string }[]>("/api/refs/factories").then((fs) => setFactories(Object.fromEntries(fs.map((f) => [f.id, f.name])))); }, [posForm]);
-  const [feed, setFeed] = useState<{ id: string; kind: string; subject: string; body: string; at: string; counterparty: string }[]>([]);
   const [versions, setVersions] = useState<{ id: string; version_no: number; reason: string; created_at: string; excel_path?: string; excel_manager_path: string; kp_path: string; kp_meta?: Record<string, unknown> }[]>([]);
   const [cand, setCand] = useState<{ position_id: string; model: string; model_exists: boolean; execution_exists: boolean; pending_execution_id: string | null; params_filled: number; params_total: number }[]>([]);
   const [candSel, setCandSel] = useState<Record<string, boolean>>({});
@@ -101,9 +107,8 @@ export default function DealCard({ me }: { me: Me }) {
       if (wantTab && ([...SALE_TABS, ...CONTRACT_TABS, "feed", "versions"] as string[]).includes(wantTab) && (wantTab !== "pricing" || isMgmt)) setTab(wantTab);
     }
   }).catch((e) => setErr(e.message));
-  useEffect(() => { setDeal(null); setFeed([]); setVersions([]); load(); }, [id, me.id]);
+  useEffect(() => { setDeal(null); setVersions([]); load(); }, [id, me.id]);
   useEffect(() => {
-    if (tab === "feed") api.get<typeof feed>(`/api/deals/${id}/feed`).then(setFeed);
     if (tab === "versions") api.get<typeof versions>(`/api/deals/${id}/versions`).then(setVersions);
     if (tab === "catalog") api.get<typeof cand>(`/api/deals/${id}/catalog/candidates`).then(setCand);
   }, [tab, id, me.id]);
@@ -441,12 +446,8 @@ export default function DealCard({ me }: { me: Me }) {
         </div>
       )}
 
-      {tab === "feed" && (
-        <div className="card">
-          {feed.length === 0 && <div className="muted">Переписка с заводом (WeCom) и клиентом (Outlook), системные события появятся здесь</div>}
-          {feed.map((f) => <div key={f.id} style={{ borderBottom: "1px solid var(--line)", padding: "6px 0" }}><span className="badge">{lbl(FEED_KIND, f.kind)}</span> <b>{f.subject}</b> <span className="muted">{f.counterparty} · {new Date(f.at).toLocaleString("ru-RU")}</span><div>{f.body}</div></div>)}
-        </div>
-      )}
+      {tab === "feed" && <div className="card"><DealFeed dealId={deal.id} full /></div>}
+      {FEED_SECTION[tab] !== undefined && <SectionFeed key={deal.id + tab} dealId={deal.id} section={FEED_SECTION[tab]!} title={FEED_TITLE[FEED_SECTION[tab]!]} />}
       {tab === "versions" && (
         <div className="card">
           <table><thead><tr><th>Версия</th><th>Причина</th><th>Дата</th><th>Excel-расчёт</th><th>КП</th></tr></thead>

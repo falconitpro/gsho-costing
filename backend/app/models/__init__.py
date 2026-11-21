@@ -927,6 +927,20 @@ class FeedEntry(Base):
     external_id: Mapped[Optional[str]] = mapped_column(String(255), index=True)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    # D-127: обсуждения сделки — сообщения (kind="comment"), загруженные письма (mail_in / mail_out) и события в одной ленте
+    section: Mapped[str] = mapped_column(String(16), default="", server_default="")    # sale | logistics | service | pricing | legal | execution | finance | "" — общее
+    parent_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)          # ответ на сообщение
+    tags: Mapped[list[str]] = mapped_column(JSONType, default=list)                     # q_client | a_client | q_factory | a_factory | internal
+    mentions: Mapped[list[str]] = mapped_column(JSONType, default=list)                 # id сотрудников
+    awaiting: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")   # «ждём ответа»
+    due_on: Mapped[Optional[date]] = mapped_column(Date)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    resolved_by: Mapped[Optional[str]] = mapped_column(String(36))                      # сотрудник или ответное сообщение
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    pinned_by: Mapped[Optional[str]] = mapped_column(String(36))
+    edited_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    edit_history: Mapped[list[dict]] = mapped_column(JSONType, default=list)             # прежние тексты после правки
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class PlanFactEntry(Base):
