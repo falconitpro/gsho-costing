@@ -123,6 +123,14 @@ async def _daily_jobs() -> None:
         except Exception as e:   # pragma: no cover
             log.warning("notification cleanup failed: %s", e)
             _bg_error("notification cleanup", e)
+        try:   # D-133: Канцелярия — напоминания о сроках писем и эскалация после срока
+            from .services.office_watch import check as check_office
+            with SessionLocal() as db:
+                check_office(db)
+                db.commit()
+        except Exception as e:   # pragma: no cover
+            log.warning("office due watch failed: %s", e)
+            _bg_error("office due watch", e)
         try:   # D-112: виза ФД без ответа N рабочих дней → ЗГД
             from .services.visa_watch import escalate_fd
             with SessionLocal() as db:

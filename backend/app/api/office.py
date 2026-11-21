@@ -25,6 +25,7 @@ from ..db import get_db
 from ..models import Deal, LegalEntity, OfficeDoc, OfficeRoute, OfficeSigner, User
 from ..services import office as svc
 from ..services.deal_service import notify
+from ..services.office_ai import state as office_ai_state
 
 router = APIRouter(prefix="/api/office", tags=["office"])
 
@@ -192,6 +193,7 @@ def meta(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_
                      "valid_from": s.valid_from.isoformat() if s.valid_from else None, "valid_to": s.valid_to.isoformat() if s.valid_to else None,
                      "methods": s.methods or [], "is_active": s.is_active, "valid_today": svc.signer_ok(s, date.today())} for s in signers],
         "users": [{"id": u.id, "name": u.display_name} for u in users],
+        "ai": office_ai_state(),
         "routes": [_route_view(r) for r in db.scalars(select(OfficeRoute).order_by(OfficeRoute.name)).all()],
         "roles": {r.value: t for r, t in ROLE_TITLES.items()},
         "can_edit": user.can("office", 2), "can_hr": user.can("office_hr"), "can_signers": user.can("office_signers", 2),
@@ -812,3 +814,176 @@ def return_to_review(did: str, body: ReturnIn, db: Session = Depends(get_db), us
         notify(db, deal, t, "office_review", None, f"Канцелярия: {user.display_name} вернул {doc.number} «{doc.subject}» — {note[:160]}")
     db.commit()
     return svc.serialize(db, doc, user, full=True)
+
+
+
+# ---------------------------------------------------------------- контроль сроков и выгрузка журнала (D-133)
+
+@router.get("/control")
+def control(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Панель «на контроле»: по исполнителям — в работе, срок сегодня, просрочено; за 30 дней — закрыто и сколько в срок."""
+    _need_any(user)
+    from ..services.office_watch import control as build
+    data = build(db)
+    for r in data["items"]:   # конфиденциальные и приказы по ЛС — без темы, если их не видно этому сотруднику
+        r["late_docs"] = [x if svc.can_see(user, db.get(OfficeDoc, x["id"])) else {**x, "subject": "(конфиденциально)"} for x in r["late_docs"]]
+    return data
+
+
+EXPORT_COLS = [("number", "№"), ("reg_date", "Дата регистрации"), ("entity", "Юр. лицо"), ("kind_title", "Вид"), ("letter_type", "Вид письма"),
+               ("channel", "Источник / способ"), ("tracking", "Реквизит источника"), ("counterparty", "Контрагент"), ("sender_number", "Исх. № отправителя"),
+               ("sender_date", "от"), ("subject", "Тема"), ("summary", "Кратко"), ("reviewer", "Рассматривает"), ("executor", "Исполнитель"),
+               ("due_on", "Срок"), ("status_title", "Статус"), ("overdue", "Просрочено"), ("signer", "Подписал"), ("signed_on", "Дата подписи"),
+               ("sent_on", "Отправлено"), ("closed_on", "Закрыто"), ("close_note", "Исполнение"), ("deals", "Сделки"), ("urgent", "Срочно")]
+
+
+@router.get("/export")
+def export_journal(kind: Optional[str] = None, date_from: Optional[date] = None, date_to: Optional[date] = None, status: Optional[str] = None,
+                   entity_id: Optional[str] = None, q: Optional[str] = None, overdue: bool = False,
+                   db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Журнал в Excel с теми же правами, что и экран: конфиденциальные и приказы по ЛС — только тем, кому они видны. Выгрузка — в журнале."""
+    import io
+    from urllib.parse import quote
+    from fastapi.responses import Response
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    _need_any(user)
+    stmt = select(OfficeDoc)
+    kinds = [k for k in (kind or "").split(",") if k]
+    if kinds:
+        if any(k not in svc.KINDS for k in kinds):
+            raise HTTPException(422, "Неизвестный вид документа")
+        stmt = stmt.where(OfficeDoc.kind.in_(kinds))
+    if entity_id:
+        stmt = stmt.where(OfficeDoc.entity_id == entity_id)
+    if status:
+        stmt = stmt.where(OfficeDoc.status.in_(status.split(",")))
+    if date_from:
+        stmt = stmt.where(or_(OfficeDoc.reg_date >= date_from, OfficeDoc.reg_date.is_(None) & (OfficeDoc.created_at >= datetime.combine(date_from, datetime.min.time(), timezone.utc))))
+    if date_to:
+        stmt = stmt.where(or_(OfficeDoc.reg_date <= date_to, OfficeDoc.reg_date.is_(None)))
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(or_(OfficeDoc.number.ilike(like), OfficeDoc.subject.ilike(like), OfficeDoc.counterparty.ilike(like)))
+    rows = [d for d in db.scalars(stmt.order_by(OfficeDoc.reg_date.asc().nulls_last(), OfficeDoc.number)).all() if svc.can_see(user, d)]
+    if overdue:
+        rows = [d for d in rows if d.due_on and d.due_on < date.today() and d.status in svc.OPEN]
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Журнал"
+    title = "Журнал Канцелярии" + (f": {', '.join(svc.KINDS[k].lower() for k in kinds)}" if kinds else "")
+    period = f"{date_from:%d.%m.%Y} — {date_to:%d.%m.%Y}" if date_from and date_to else (f"с {date_from:%d.%m.%Y}" if date_from else f"по {date_to:%d.%m.%Y}" if date_to else "за всё время")
+    ws.append([title, "", "", f"Период: {period}", "", "", f"Выгружено {datetime.now():%d.%m.%Y %H:%M}, {user.display_name}"])
+    ws["A1"].font = Font(bold=True, size=13)
+    ws.append([])
+    ws.append([t for _, t in EXPORT_COLS])
+    for c in ws[3]:
+        c.font = Font(bold=True)
+        c.fill = PatternFill("solid", fgColor="EEEEEE")
+        c.alignment = Alignment(wrap_text=True, vertical="top")
+    rev = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    for d in rows:
+        v = svc.serialize(db, d, user)
+        v["letter_type"] = svc.LETTER_TYPES.get(d.letter_type, "") if d.letter_type else (svc.ORDER_CATEGORIES.get(d.category, "") if d.kind == "order" else "")
+        v["channel"] = svc.CHANNELS.get(d.channel, d.channel) if d.channel else ""
+        v["reviewer"] = rev.get(d.reviewer_id or "", "")
+        v["deals"] = ", ".join(x.number for x in (db.get(Deal, i) for i in d.deal_ids or []) if x is not None)
+        v["overdue"] = "да" if v["overdue"] else ""
+        v["urgent"] = "да" if d.urgent else ""
+        out = []
+        for k, _ in EXPORT_COLS:
+            x = v.get(k)
+            if k in ("reg_date", "sender_date", "due_on", "signed_on", "sent_on", "closed_on") and x:
+                x = date.fromisoformat(x)
+            out.append(x if x not in (None,) else "")
+        ws.append(out)
+        if v["overdue"]:
+            for c in ws[ws.max_row]:
+                c.fill = PatternFill("solid", fgColor="FDECEC")
+    for i, (k, t) in enumerate(EXPORT_COLS, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = 40 if k in ("subject", "summary", "close_note") else 16
+        for row in ws.iter_rows(min_row=4, min_col=i, max_col=i):
+            for c in row:
+                if k in ("reg_date", "sender_date", "due_on", "signed_on", "sent_on", "closed_on"):
+                    c.number_format = "DD.MM.YYYY"
+                c.alignment = Alignment(wrap_text=k in ("subject", "summary", "close_note"), vertical="top")
+    ws.freeze_panes = "B4"
+    ws.auto_filter.ref = f"A3:{get_column_letter(len(EXPORT_COLS))}{max(ws.max_row, 3)}"
+    buf = io.BytesIO()
+    wb.save(buf)
+    filters = {k: (v.isoformat() if isinstance(v, date) else v) for k, v in
+               {"kind": kind, "date_from": date_from, "date_to": date_to, "status": status, "entity_id": entity_id, "q": q, "overdue": overdue}.items() if v}
+    from ..core.download_audit import note
+    note(kind="export", entity_type="office_journal", row_count=len(rows), filters=filters)
+    from ..services.deal_service import audit as _audit
+    _audit(db, user.id, None, "office_export", "journal", "export", after={"rows": len(rows), "filters": filters})
+    db.commit()
+    name = f"Журнал_Канцелярии_{date.today():%Y-%m-%d}.xlsx"
+    return Response(buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
+
+
+# ---------------------------------------------------------------- ИИ для писем (D-134)
+
+class AiIn(BaseModel):
+    action: str                         # analyze | edit | check | translate
+    mode: str = "business"              # edit: business | softer | firmer | shorter | grammar
+    lang: str = "en"                    # translate: en | zh
+    text: Optional[str] = Field(None, max_length=60000)   # свой текст (например выделенный фрагмент); пусто — текст документа
+
+
+@router.post("/docs/{did}/ai")
+def ai(did: str, body: AiIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """ИИ предлагает — человек принимает. Ничего в документе не меняется, пока пользователь не нажмёт «Применить»."""
+    import time
+    from ..adapters.llm import LLMNotConfigured, LLMProviderError
+    from ..services import office_ai as oa
+    doc = _get(db, did, user)
+    if not (svc.is_editor(user, doc) or user.id in (doc.created_by, doc.executor_id, doc.reviewer_id) or user.id in (doc.co_executor_ids or [])
+            or svc.in_route(doc, user)):
+        raise HTTPException(403, "ИИ доступен делопроизводителю, автору, исполнителю, руководителю и согласующим документа")
+    oa._guard(db, doc, user.id)
+    started, llm = time.monotonic(), None
+    try:
+        if body.action == "analyze":
+            if doc.kind != "in":
+                raise HTTPException(409, "Разбор — для входящих писем")
+            text = (body.text or "").strip() or "\n\n".join(x for x in (doc.body, oa.file_text(doc, _files_dir(doc.id))) if x).strip()
+            if len(text) < 40:
+                raise HTTPException(409, "Нет текста письма: скан без текстового слоя. Вставьте текст письма в поле «Текст письма» или приложите PDF с текстом / .eml")
+            res, llm = oa.analyze(text[:oa.MAX_CHARS], {"counterparty": doc.counterparty, "subject": doc.subject, "reg_date": str(doc.reg_date or "")})
+            out = {"action": "analyze", **res}
+        elif body.action == "edit":
+            text = (body.text or doc.body or "").strip()
+            if len(text) < 20:
+                raise HTTPException(409, "Нет текста для правки")
+            new, warn, llm = oa.edit(text[:oa.MAX_CHARS], body.mode, svc.KINDS.get(doc.kind, ""))
+            out = {"action": "edit", "mode": body.mode, "before": text, "after": new, "warnings": warn}
+        elif body.action == "check":
+            if doc.kind not in svc.APPROVABLE or not (doc.body or "").strip():
+                raise HTTPException(409, "Проверка — для проекта исходящего с текстом")
+            parent = db.get(OfficeDoc, doc.reply_to_id) if doc.reply_to_id else None
+            ptext = ""
+            if parent is not None and not parent.confidential:
+                ptext = "\n\n".join(x for x in (parent.summary, parent.body, oa.file_text(parent, _files_dir(parent.id))) if x)
+            res, llm = oa.check(db, doc, ptext)
+            out = {"action": "check", "with_parent": bool(ptext), **res}
+        elif body.action == "translate":
+            text = (body.text or doc.body or "").strip()
+            if len(text) < 5:
+                raise HTTPException(409, "Нет текста для перевода")
+            new, warn, llm = oa.translate(text[:oa.MAX_CHARS], body.lang)
+            out = {"action": "translate", "lang": body.lang, "before": text, "after": new, "warnings": warn}
+        else:
+            raise HTTPException(422, "Действие: analyze, edit, check, translate")
+    except (LLMProviderError, LLMNotConfigured, ValueError) as e:
+        oa.log_call(db, user.id, doc, body.action, llm, started, False, type(e).__name__)
+        db.commit()
+        raise HTTPException(502, f"ИИ не ответил: {str(e)[:300]}")
+    oa.log_call(db, user.id, doc, body.action, llm, started, True)
+    db.commit()
+    out["model"] = getattr(llm, "model", "")
+    out["note"] = "Предложение ИИ — проверьте перед применением"
+    return out
