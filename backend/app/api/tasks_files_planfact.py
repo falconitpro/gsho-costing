@@ -572,6 +572,8 @@ def _fact_fx(facts) -> Optional[float]:
 def close_plan_fact(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.FD))):
     deal = get_deal_or_404(db, deal_id, user)
     deal.plan_fact_closed = True
+    from ..services.deal_service import complete_tasks
+    complete_tasks(db, deal, block="plan_fact")   # D-147: задача ФД после закрытия сделки
     audit(db, user.id, deal.id, "deal", deal.id, "plan_fact_close")
     db.commit()
     return {"closed": True}

@@ -369,7 +369,7 @@ def pull_terms(cid: str, db: Session = Depends(get_db), user: CurrentUser = Depe
         raise HTTPException(409, "Договор не привязан к сделке")
     deal = db.get(Deal, c.deal_id)
     if c.direction == "income":
-        lines, amount, cur = svc.deal_client_terms(deal)
+        lines, amount, cur = svc.deal_client_terms(deal, db)
     else:
         lines, amount, cur = svc.deal_factory_terms(deal, c.cp_id or "")
     c.payment_terms, c.amount, c.currency = lines, amount, cur

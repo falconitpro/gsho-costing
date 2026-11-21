@@ -24,7 +24,7 @@ from playwright.async_api import async_playwright
 FE, BE = sys.argv[1].rstrip("/"), sys.argv[2].rstrip("/")
 CHROME = sys.argv[3] if len(sys.argv) > 3 else None
 MGR, LOG, CD, GD = "manager@example.com", "logist@example.com", "cd@example.com", "evgeniy@dobrov.pro"
-CLERK, LAW, FD = "office@example.com", "lawyer@example.com", "fd@example.com"
+CLERK, LAW, FD, SVC = "office@example.com", "lawyer@example.com", "fd@example.com", "service@example.com"
 ROLE_USER = {"lawyer": LAW, "fd": FD, "cd": CD, "gd": GD, "manager": MGR, "logistician": LOG, "clerk": CLERK}
 
 fails: list[str] = []
@@ -489,11 +489,92 @@ async def s7_execution(browser):
     check_true(scn, "закрытие запланировано не раньше финального платежа и ПНР", closing["planned_on"] >= max(finals), f"{closing['planned_on']} / {finals}")
     fact("delivery", LOG)
     fact("client_final", FD, True)
-    fact("commissioning", "service@example.com")
+    fact("commissioning", SVC)
     check_true(scn, "сделка закрыта без причины, когда всё выполнено", api(CD, "POST", f"{base}/close", {"reason": ""})["status"] == "closed")
 
 
-SCENARIOS = [s1_single, s2_two_models, s3_usd_rub_input, s4_rework_qty, s5_bargain_contract, s6_office, s7_execution]
+async def s8_execution_branches(browser):
+    """8. Исполнение: две партии, аккредитив, опция РФ, изменение условий контракта, договор с НДС в «Финансах», задача ФД после закрытия"""
+    import uuid as _uuid
+    from datetime import date as _d
+    scn, today, run = "s8", _d.today(), _uuid.uuid4().hex[:4]
+    client = api(MGR, "GET", "/api/refs/clients")[0]
+    factory = api(MGR, "GET", "/api/refs/factories")[0]
+    did = api(MGR, "POST", "/api/deals", {"client_id": client["id"], "site": "E2E: ветки исполнения"})["id"]
+    pos = [api(MGR, "POST", f"/api/deals/{did}/positions", {"factory_id": factory["id"], "machine_type": "ПДМ", "currency": "CNY", "model": f"E2E-{x}{run}",
+                                                             "qty": 1, "unit_price": 1000000}) for x in "AB"]
+    var = api(MGR, "GET", f"/api/deals/{did}")["offer"]
+    opt = api(MGR, "POST", f"/api/deals/{did}/positions/{pos[0]['id']}/local-options", {"name": "Пожаротушение", "cost": 150000, "currency": "RUB",
+              "supplier_lead_days": 20, "needs_install": True, "install_stage": "before_handover", "install_days": 3, "install_cost_rub": 30000})
+    check_true(scn, "сервис открывает черновик с опцией РФ (у него задача оценить установку)",
+               not refused(SVC, "GET", f"/api/deals/{did}"))
+    api(CD, "PATCH", f"/api/deals/{did}/positions/{pos[0]['id']}/local-options/{opt['id']}", {"approve": True})
+    api(MGR, "POST", f"/api/deals/{did}/send-to-calc")
+    items = {"door_to_door": {"amount": 80000, "currency": "CNY"}, "broker_rub": 80000, "comments": {"door_to_door": "e2e", "broker_rub": "e2e"}}
+    names = []
+    for p in pos:   # без названия — сервер даёт следующий свободный номер
+        names.append(api(LOG, "POST", f"/api/deals/{did}/logistics/batches", {"name": "", "items": items, "position_ids": [p["id"]]})["name"])
+        api(LOG, "PUT", f"/api/deals/{did}/logistics/positions/{p['id']}", {"hs_code": "8429519000", "util_applies": False})
+    check_true(scn, "названия партий различаются", names == ["Партия 1", "Партия 2"], str(names))
+    api(LOG, "POST", f"/api/deals/{did}/logistics/complete")
+    calc = api(CD, "GET", f"/api/deals/{did}/calc")
+    lines = [{"no": 1, "event": "lc_opened", "share_pct": 30, "offset_days": 5, "via": "lc"}, {"no": 2, "event": "delivery", "share_pct": 70, "offset_days": 10, "via": "lc"}]
+    api(CD, "POST", f"/api/deals/{did}/payment-terms", {"client_payments": lines, "factory_payments": {p["id"]: calc["payment_terms"]["default_factory"] for p in pos}})
+    api(CD, "POST", f"/api/deals/{did}/price", {"variant_id": var["id"], "mode": "margin", "value": 20})
+    api(CD, "POST", f"/api/deals/{did}/submit")
+    api(MGR, "POST", f"/api/deals/{did}/kp-sent", {"recipients": ["e2e@example.com"]})
+    api(CD, "POST", f"/api/deals/{did}/outcome", {"outcome": "won", "reason": "e2e"})
+    base = f"/api/deals/{did}/execution"
+    for code, u in {"draft": MGR, "legal_review": LAW, "client_review": MGR, "internal_approval": CD}.items():
+        api(u, "POST", f"{base}/contract-step", {"code": code, "done": True, "on": str(today)})
+    tc = api(MGR, "POST", f"{base}/terms-changed", {"reason": "клиент просит отсрочку"})
+    check_true(scn, "условия отличаются от КП → новая версия на утверждении", tc["version_no"] == 2 and tc["status"] == "cd_approval", str(tc))
+    check_true(scn, "после повторного утверждения — снова «Заключение контракта»", api(CD, "POST", f"/api/deals/{did}/submit")["status"] == "contract")
+    for code in ("client_signed", "factory_signed"):
+        api(MGR, "POST", f"{base}/contract-step", {"code": code, "done": True, "on": str(today), "contract_number": f"E2E-K-{run}", "factory_contract_number": f"E2E-F-{run}"})
+    api(MGR, "POST", f"{base}/start")
+    rows = api(CD, "GET", f"{base}/stages")["stages"]
+    codes = [x["code"] for x in rows]
+    check_true(scn, "этапы: аккредитив, 2 доставки, заказ и установка опции РФ",
+               "lc_opened" in codes and codes.count("delivery") == 2 and "local_option_order" in codes and "local_option_install" in codes)
+    inst = next(x for x in rows if x["code"] == "local_option_install")
+    check_true(scn, "установка опции «до передачи» — раньше доставки", inst["planned_on"] <= min(x["planned_on"] for x in rows if x["code"] == "delivery"))
+    stage_in = sum(x["amount"] for x in rows if x["code"] in ("client_advance", "client_final"))
+    ob = api(FD, "GET", f"/api/finance/obligations?deal_id={did}")["items"]
+    check(scn, "«Финансы»: поступления по договору = платежи клиента с НДС", sum(float(i["amount"]) for i in ob if i["direction"] == "in"), stage_in, 1)
+
+    def by(code):
+        return [x for x in api(CD, "GET", f"{base}/stages")["stages"] if x["code"] == code]
+
+    def fact(code, user, amount=False):
+        for x in by(code):
+            b = {"actual_on": str(today)}
+            if amount:
+                b["actual_amount"] = x["amount"]
+            api(user, "POST", f"{base}/stages/{x['id']}/actual", b)
+
+    adv = by("client_advance")[0]
+    err = refused(FD, "POST", f"{base}/stages/{adv['id']}/actual", {"actual_on": str(today), "actual_amount": adv["amount"]})
+    check_true(scn, "аванс по аккредитиву — только после открытия аккредитива", "аккредитив" in err, err[-120:])
+    for code, u, a in (("lc_opened", FD, False), ("client_advance", FD, True), ("factory_advance", FD, True), ("production", MGR, False),
+                       ("readiness", LOG, False), ("local_option_order", MGR, False)):
+        fact(code, u, a)
+    acc = api(MGR, "POST", f"/api/deals/{did}/acceptance/init")
+    for un in acc.get("units") or []:
+        full = api(MGR, "GET", f"/api/deals/{did}/acceptance/{un['id']}")
+        api(MGR, "PUT", f"/api/deals/{did}/acceptance/{un['id']}", {"serial": f"SN-{un['id'][:6]}",
+            "checklist": [{**x, "result": "ok"} for x in full.get("checklist", [])], "tests": [{**x, "result": "ok"} for x in full.get("tests", [])]})
+        api(MGR, "POST", f"/api/deals/{did}/acceptance/{un['id']}/decision", {"decision": "accepted"})
+    for code, u, a in (("factory_final", FD, True), ("shipment", LOG, False), ("border", LOG, False), ("declaration", LOG, False), ("delivery", LOG, False),
+                       ("local_option_install", SVC, False), ("client_final", FD, True), ("commissioning", SVC, False)):
+        fact(code, u, a)
+    check_true(scn, "сделка закрыта", api(CD, "POST", f"{base}/close", {"reason": ""})["status"] == "closed")
+    todo = api(FD, "GET", "/api/tasks/my")
+    todo = todo if isinstance(todo, list) else todo.get("items", [])
+    check_true(scn, "ФД получил задачу закрыть план/факт", any(t.get("deal_id") == did and "план/факт" in t.get("title", "") for t in todo))
+
+
+SCENARIOS = [s1_single, s2_two_models, s3_usd_rub_input, s4_rework_qty, s5_bargain_contract, s6_office, s7_execution, s8_execution_branches]
 
 
 async def main():

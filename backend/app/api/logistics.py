@@ -83,12 +83,28 @@ def _history(db: Session, item: str, route: str = "", machine_type: str = "", re
     return [{"amount": r.amount, "currency": r.currency, "on": r.on, "deal_id": r.deal_id} for s, r in scored if s == best][:20]
 
 
+def _batch_name(deal: Deal, name: str, own_id: str = "") -> str:
+    """Название партии в сделке уникально (D-147): иначе этапы исполнения двух партий неразличимы. «Партия N» (подставляется экраном
+    по числу партий — после удаления может совпасть) → следующий свободный номер; своё название-дубль — отказ."""
+    import re
+    taken = {b.name.strip().lower() for b in deal.batches if b.id != own_id and b.name}
+    if name and name.lower() not in taken:
+        return name
+    if name and not re.fullmatch(r"партия\s*\d+", name.lower()):
+        raise HTTPException(409, f"Партия «{name}» в сделке уже есть — назовите иначе")
+    n = 1
+    while f"партия {n}" in taken:
+        n += 1
+    return f"Партия {n}"
+
+
 @router.post("/batches", status_code=201)
 def create_batch(deal_id: str, body: BatchIn, db: Session = Depends(get_db), user: CurrentUser = Depends(LOGIST)):
     deal = get_deal_or_404(db, deal_id, user)
     _ensure_logistics_stage(deal)
     data = body.model_dump()
     pos_ids = data.pop("position_ids")
+    data["name"] = _batch_name(deal, (data.get("name") or "").strip())
     b = Batch(deal_id=deal.id, **data)
     db.add(b)
     db.flush()
@@ -159,6 +175,7 @@ def update_batch(deal_id: str, batch_id: str, body: BatchIn, db: Session = Depen
     before = serialize(b)
     data = body.model_dump()
     pos_ids = data.pop("position_ids")
+    data["name"] = _batch_name(deal, (data.get("name") or "").strip(), own_id=b.id)
     for k, v in data.items():
         setattr(b, k, v)
     b.items = _check_batch_items(db, deal, b, body.items)

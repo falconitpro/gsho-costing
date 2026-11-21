@@ -341,14 +341,26 @@ CHAINS = {"readiness": ("production", "position"), "border": ("shipment", "batch
           "delivery": ("declaration", "batch")}
 
 
+def _advance_via_lc(deal: Deal) -> bool:
+    from .legal_contracts import _client_terms_net
+    lines = _client_terms_net(deal)[0]
+    adv = [x for x in lines if x.get("event") in ADVANCE_EVENTS]
+    return bool(adv) and all(x.get("via") == "lc" for x in adv)
+
+
 def previous_open(db: Session, deal: Deal, stage: ExecutionStage, on: date) -> Optional[str]:
     """Почему факт этапа нельзя поставить (предыдущий этап не отмечен или отмечен позже), иначе None."""
     rule = CHAINS.get(stage.code)
+    if stage.code == "client_advance" and _advance_via_lc(deal):
+        rule = ("lc_opened", "deal")     # D-147: аванс по аккредитиву — после его открытия
     if not rule:
         return None
     prev_code, level = rule
     q = select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.code == prev_code)
-    q = q.where(ExecutionStage.position_id == stage.position_id) if level == "position" else q.where(ExecutionStage.batch_id == stage.batch_id)
+    if level == "position":
+        q = q.where(ExecutionStage.position_id == stage.position_id)
+    elif level == "batch":
+        q = q.where(ExecutionStage.batch_id == stage.batch_id)
     prev = db.scalars(q).first()
     if prev is None:
         return None
