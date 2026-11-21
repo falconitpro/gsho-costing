@@ -112,7 +112,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
                   <td style={{ textAlign: "center", fontSize: 18 }}>{c.state === "done" ? "✅" : c.state === "current" ? "▶" : i + 1}</td>
                   <td><b>{c.title}</b><div className="muted" style={{ fontSize: 12 }}>{c.hint}</div></td>
                   <td style={{ fontSize: 12 }}>{c.roles.map((r) => ROLE_T[r] || r).join(", ")}</td>
-                  <td>{c.state === "done" ? fmtDate(c.on) : editable ? <input type="date" value={v.on} onChange={(e) => setStep({ ...step, [c.code]: { ...v, on: e.target.value } })} /> : "—"}</td>
+                  <td>{c.state === "done" ? fmtDate(c.on) : editable ? <input type="date" value={v.on} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setStep({ ...step, [c.code]: { ...v, on: e.target.value } })} /> : "—"}</td>
                   <td style={{ fontSize: 12 }}>{c.state === "done" ? <>{c.code === "client_signed" && data.contract_number && <div>№ {data.contract_number}</div>}{c.code === "factory_signed" && data.factory_contract_number && <div>№ {data.factory_contract_number}</div>}{c.by}{c.comment && <div className="muted">{c.comment}</div>}
                     {(c.code === "client_signed" || c.code === "factory_signed") && <ContractScans dealId={deal.id} meId={me.id} canRemoveAll={isCdGd} version={ver} only={c.code === "client_signed" ? "client" : "factory"} />}</> : editable && <>
                     {c.code === "client_signed" && <input placeholder="номер контракта *" value={v.number} onChange={(e) => setStep({ ...step, [c.code]: { ...v, number: e.target.value } })} style={{ width: 150, marginRight: 4 }} />}
@@ -233,7 +233,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
                   <td className="muted">{s.responsible_roles.map((r) => ROLE_T[r] || r).join(", ")}</td>
                   <td>{s.code === "factory_acceptance" ? <span className="muted" style={{ fontSize: 11 }}>факт — по решению приёмки всех машин (вкладка «Приёмка на заводе»)</span> : s.can_set && deal.status !== "closed" ? (
                     <div className="row">
-                      <input type="date" value={a.actual_on} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, actual_on: e.target.value } })} />
+                      <input type="date" value={a.actual_on} max={new Date().toISOString().slice(0, 10)} title="факт — не позже сегодняшнего дня; ожидаемую дату — «уточнить»" onChange={(e) => setActual({ ...actual, [s.id]: { ...a, actual_on: e.target.value } })} />
                       {(s.kind === "payment_in" || s.kind === "payment_out") && <input type="number" placeholder={`сумма, ${s.currency}${s.with_vat ? " с НДС" : ""}`} title={`Сумма, ${s.currency}${s.with_vat ? " с НДС" : ""}`} value={a.actual_amount} style={{ width: 120 }} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, actual_amount: e.target.value } })} />}
                       <input placeholder="примечание" value={a.note} style={{ width: 120 }} onChange={(e) => setActual({ ...actual, [s.id]: { ...a, note: e.target.value } })} />
                       <button className="btn ghost" style={{ padding: "3px 8px" }} onClick={() => act(() => api.post(`/api/deals/${deal.id}/execution/stages/${s.id}/actual`, { actual_on: a.actual_on || null, actual_amount: a.actual_amount ? Number(a.actual_amount) : null, note: a.note }))}>{s.done ? "изменить" : "отметить"}</button>

@@ -19,6 +19,6 @@ def test_client_stages_gross_in_contract_currency(client):
     # факт вносится в валюте этапа (с НДС) и после этого этап не пересчитывается
     adv = next(s for s in pay if s["code"] == "client_advance")
     _ok(client.post(f"/api/deals/{did}/execution/stages/{adv['id']}/actual", headers=H("fd@example.com"),
-                    json={"actual_on": "2026-12-14", "actual_amount": adv["amount"], "note": ""}))
+                    json={"actual_on": __import__("datetime").date.today().isoformat(), "actual_amount": adv["amount"], "note": ""}))
     adv2 = next(s for s in _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(CD)))["stages"] if s["code"] == "client_advance")
     assert adv2["actual_amount"] == adv["amount"] and adv2["currency"] == adv["currency"]

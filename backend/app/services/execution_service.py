@@ -283,7 +283,10 @@ def rebuild_stages(db: Session, deal: Deal) -> list[ExecutionStage]:
         for code in ("shipment", "border", "declaration", "delivery"):
             planned = max((pc.events.get(code) for pc in members if pc.events.get(code)), default=None)
             upsert(code, planned, batch_id=b.id, title=f"{TITLES[code]} — {b.name}")
-    upsert("closing", ev_deal.get("commissioning"))
+    # закрытие — после последнего события исполнения: ПНР и окончательного расчёта клиента (раньше — только по ПНР, и закрытие
+    # в плане стояло раньше окончательной оплаты клиента)
+    last = [d for d in (ev_deal.get("commissioning"), *(st.planned_on for k, st in by_key.items() if k[0] in ("client_final", "commissioning") and id(st) in keep)) if d]
+    upsert("closing", max(last) if last else None)
     # устаревшие этапы (позиция удалена и т. п.) без факта — убираем
     for st in existing:
         if id(st) not in keep and st.actual_on is None:
@@ -331,6 +334,29 @@ def stage_rows(db: Session, deal: Deal) -> list[dict]:
                     "deviation_days": ((s.actual_on or s.refined_on or s.planned_on) - s.baseline_on).days
                     if s.baseline_on and (s.actual_on or s.refined_on or s.planned_on) else None})
     return out
+
+
+# Порядок событий: факт этапа — только после факта предыдущего (того же объекта) и не раньше его даты
+CHAINS = {"readiness": ("production", "position"), "border": ("shipment", "batch"), "declaration": ("border", "batch"),
+          "delivery": ("declaration", "batch")}
+
+
+def previous_open(db: Session, deal: Deal, stage: ExecutionStage, on: date) -> Optional[str]:
+    """Почему факт этапа нельзя поставить (предыдущий этап не отмечен или отмечен позже), иначе None."""
+    rule = CHAINS.get(stage.code)
+    if not rule:
+        return None
+    prev_code, level = rule
+    q = select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.code == prev_code)
+    q = q.where(ExecutionStage.position_id == stage.position_id) if level == "position" else q.where(ExecutionStage.batch_id == stage.batch_id)
+    prev = db.scalars(q).first()
+    if prev is None:
+        return None
+    if prev.actual_on is None:
+        return f"Сначала отметьте «{prev.title}» — этапы отмечаются по порядку"
+    if on < prev.actual_on:
+        return f"Дата раньше, чем «{prev.title}» ({prev.actual_on:%d.%m.%Y})"
+    return None
 
 
 def can_set(user, stage: ExecutionStage) -> bool:

@@ -192,6 +192,8 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
     if not allowed:
         raise HTTPException(403, f"Подэтап «{step['title']}» отмечают: {', '.join(role_title(r) for r in step['roles'])}")
     on = body.on or date.today()
+    if on > date.today():
+        raise HTTPException(422, "Дата подэтапа не может быть в будущем")
     steps = dict(deal.contract_steps or {})
     signed = {"client_signed": ex.client_signed(deal), "factory_signed": ex.factory_signed(deal)}
     if body.code in signed and signed[body.code]:
@@ -226,6 +228,9 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
         if body.code == "factory_signed":
             deal.factory_contract_signed_at = None
     deal.contract_steps = steps
+    if body.done and body.code in signed:
+        from ..services.legal_contracts import sync_deal_signing
+        sync_deal_signing(db, deal, user.id)    # D-146: договор в реестре и график в «Финансах» — сразу
     audit(db, user.id, deal.id, "deal", deal.id, "contract_step", None, {"step": step["title"], "done": body.done, "on": on.isoformat(), "comment": body.comment})
     db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"Заключение контракта: {step['title']}" + ("" if body.done else " — отметка снята"),
                      body=body.comment, user_id=user.id))
@@ -289,9 +294,18 @@ def set_actual(deal_id: str, stage_id: str, body: ActualIn, db: Session = Depend
             raise HTTPException(409, "Окончательный расчёт с заводом — после приёмки всех машин позиции на заводе (вкладка «Исполнение» → «Приёмка на заводе»)")
     if st.code == "factory_acceptance":
         raise HTTPException(409, "Приёмка на заводе отмечается сама, когда приняты все машины позиции")
+    if body.actual_on and body.actual_on > date.today():
+        raise HTTPException(422, "Фактическая дата не может быть в будущем — для ожидаемой даты используйте «Уточнить дату»")
+    if body.actual_on:
+        prev = ex.previous_open(db, deal, st, body.actual_on)
+        if prev:
+            raise HTTPException(409, prev)
     if ex.STAGE_DEFS[st.code]["kind"] in ("payment_in", "payment_out") and body.actual_on and body.actual_amount is None:
         raise HTTPException(422, "Укажите фактическую сумму платежа")
     ex.set_actual(db, deal, st, body.actual_on, body.actual_amount, body.note, user)
+    if body.actual_on and st.code in ("contract_signed", "factory_contract"):
+        from ..services.legal_contracts import sync_deal_signing
+        sync_deal_signing(db, deal, user.id)    # D-146
     ex.push_history(st, "actual", body.actual_on, body.note or ("" if body.actual_on else "факт снят"), user.id)
     fin = None
     kind = ex.STAGE_DEFS[st.code]["kind"]
@@ -372,8 +386,15 @@ def close(deal_id: str, body: CloseIn, db: Session = Depends(get_db), user: Curr
     deal = get_deal_or_404(db, deal_id, user)
     if not user.can("execution_close", 2):
         raise HTTPException(403, "Сделку закрывает коммерческий директор")
+    # незавершённые этапы (кроме необязательной онлайн-приёмки) — закрыть можно только с причиной; список — в журнал
+    open_st = [s for s in db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.actual_on.is_(None))).all()
+               if s.code not in ("closing", "factory_preacceptance")]
+    if open_st and len(body.reason.strip()) < 3:
+        raise HTTPException(409, "Не завершены этапы: " + "; ".join(s.title for s in sorted(open_st, key=lambda x: x.sort)[:8])
+                            + (" …" if len(open_st) > 8 else "") + ". Отметьте их или укажите причину закрытия без них")
     try:
-        tr = close_execution(DealState(status=deal.status, service_flag=deal.service_flag), body.reason)
+        tr = close_execution(DealState(status=deal.status, service_flag=deal.service_flag),
+                             body.reason + (f" (не завершены: {', '.join(s.title for s in open_st)})" if open_st else ""))
     except Exception as e:
         raise HTTPException(409, str(e))
     deal.execution_closed_at = date.today()
