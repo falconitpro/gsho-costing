@@ -3,6 +3,7 @@ import FilePreviewHost from "./components/FilePreview";
 import AssistantDrawer from "./components/AssistantDrawer";
 import { SupportAdmin, SupportList, SupportTicketRoute } from "./pages/SupportPage";
 import { HelpMenu, UserMenu } from "./components/HeaderMenus";
+import WhatsNewPage from "./pages/WhatsNewPage";
 import RoleNav from "./components/RoleNav";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useEffect, useState } from "react";
@@ -148,7 +149,7 @@ export default function App() {
               </label>
             )}
             {me && <NotificationBell />}
-            {me && <HelpMenu canAssistant={perm("assistant_use")} onAssistant={() => setAiOpen(true)} />}
+            {me && <HelpMenu userId={me.id} canAssistant={perm("assistant_use")} onAssistant={() => setAiOpen(true)} />}
             {me && <UserMenu me={me} onLogout={logout} />}
           </div>
         </div>
@@ -180,6 +181,7 @@ export default function App() {
             <Route path="/team" element={<Navigate to="/settings?s=team" replace />} />
             <Route path="/settings" element={<SettingsHub me={me} />} />
             <Route path="/support" element={<SupportList />} />
+            <Route path="/whats-new" element={<WhatsNewPage me={me} />} />
             <Route path="/support/admin" element={<SupportAdmin />} />
             <Route path="/support/:id" element={<SupportTicketRoute />} />
             <Route path="/catalog" element={<CatalogHub me={me} />} />

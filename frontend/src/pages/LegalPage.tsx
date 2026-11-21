@@ -38,7 +38,7 @@ export default function LegalPage({ me }: { me: Me }) {
   const entryOf = ([k, t]: [Tab, string, boolean]): Entry => {
     const c = sum("contracts"), cl = sum("claims"), p = sum("poa");
     const stats: NonNullable<Entry["stats"]> = [];
-    if (k === "contracts" && c) stats.push({ value: c.active ?? 0, label: "действующих" }, { value: c.overdue ?? 0, label: "с просрочкой", tone: c.overdue ? "bad" : "" }, { value: c.no_scan ?? 0, label: "без скана", tone: c.no_scan ? "bad" : "" }, { value: c.expiring ?? 0, label: "истекают", tone: c.expiring ? "warn" : "" });
+    if (k === "contracts" && c) stats.push({ value: c.active ?? 0, label: "действующих" }, { value: c.overdue ?? 0, label: "с просрочкой", tone: c.overdue ? "bad" : "" }, { value: c.no_scan ?? 0, label: "без скана", tone: c.no_scan ? "warn" : "" }, { value: c.expiring ?? 0, label: "истекают", tone: c.expiring ? "warn" : "" });
     if (k === "claims" && cl) stats.push({ value: cl.open ?? 0, label: "в работе" }, { value: cl.signing ?? 0, label: "на подписи", tone: cl.signing ? "warn" : "" }, { value: cl.answer_overdue ?? 0, label: "истёк срок ответа", tone: cl.answer_overdue ? "bad" : "" });
     if (k === "poa" && p) stats.push({ value: p.active ?? 0, label: "действующих" }, { value: p.expiring ?? 0, label: "истекают", tone: p.expiring ? "warn" : "" });
     if (k === "counterparties" && own) stats.push({ value: own.items.length, label: "компаний группы" });
