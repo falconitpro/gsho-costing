@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActionMenu, Crumbs, EntryGrid, useUiMode, type Entry } from "../components/Levels";
+import { ActionMenu, Crumbs, EntryGrid, type Entry } from "../components/Levels";
 import { toneOf } from "../colors";
 import ChecksPanel from "../components/ChecksPanel";
 import { NowLine, POST_WIN_STATUSES, SaleSummary, StageStrip, dealPhase } from "../components/DealHeader";
@@ -80,12 +80,10 @@ export default function DealCard({ me }: { me: Me }) {
   const urlTab = sp.get("tab") as Tab | null;
   const tabOk = (t: string | null): t is Tab => !!t && ([...SALE_TABS, ...CONTRACT_TABS, "feed", "versions"] as string[]).includes(t) && (t !== "pricing" || isMgmt);
   // «Новый вид»: /deals/:id без ?tab= — обзор сделки (крупные входы в рабочие разделы); «прежний вид» — сразу вкладка по статусу
-  const [uiMode] = useUiMode();
-  const classic = uiMode === "classic";
   useEffect(() => {     // адрес → вкладка (назад / вперёд / ссылка на ту же сделку)
     if (!deal) return;
     if (tabOk(urlTab)) { if (urlTab !== tab) { if (urlTab === "feed" || urlTab === "versions") setTabState(urlTab); else setTab(urlTab); } return; }
-    if (!classic && !urlTab && tab !== "overview") setTabState("overview");     // «Назад» из раздела — к обзору
+    if (!urlTab && tab !== "overview") setTabState("overview");     // «Назад» из раздела — к обзору
   }, [urlTab]);
   useEffect(() => {     // вкладка → адрес; первый выбор по статусу не плодит лишнюю запись в истории
     if (!deal) return;
@@ -93,16 +91,13 @@ export default function DealCard({ me }: { me: Me }) {
     if (tab === "overview") { if (sp.has("tab")) { n.delete("tab"); setSp(n, { replace: !tabOk(urlTab) }); } return; }
     if (urlTab === tab) return;
     n.set("tab", tab);
-    setSp(n, { replace: classic && !tabOk(urlTab) });
+    setSp(n, { replace: false });
   }, [tab, !!deal]);
-  useEffect(() => {     // переключили на «прежний вид», стоя на обзоре, — открыть вкладку по статусу, как раньше
-    if (deal && classic && tab === "overview") setTabState(dealPhase(deal) === "sale" ? "main" : "execution");
-  }, [classic, !!deal]);
 
   const load = () => api.get<Deal>(`/api/deals/${id}`).then((d) => {
     setDeal(d); setWishes(d.client_payment_wishes || "");
     if (!deal) {   // первое открытие — фаза по статусу; ?tab=… из ссылок («Финансы», задачи, уведомления) открывает нужную вкладку
-      const p = dealPhase(d); setPhaseState(p); setTabState(classic ? (p === "sale" ? "main" : "execution") : "overview");
+      const p = dealPhase(d); setPhaseState(p); setTabState("overview");
       if (wantTab && ([...SALE_TABS, ...CONTRACT_TABS, "feed", "versions"] as string[]).includes(wantTab) && (wantTab !== "pricing" || isMgmt)) setTab(wantTab);
     }
   }).catch((e) => setErr(e.message));
@@ -206,7 +201,7 @@ export default function DealCard({ me }: { me: Me }) {
   return (
     <>
       <Crumbs items={tab === "overview" ? [{ label: "Рабочее место", to: "/" }, { label: "Сделки", to: "/deals" }, { label: deal.number }]
-        : [{ label: "Рабочее место", to: "/" }, { label: "Сделки", to: "/deals" }, { label: deal.number, to: classic ? `/deals/${deal.id}?tab=${phaseStart}` : `/deals/${deal.id}` },
+        : [{ label: "Рабочее место", to: "/" }, { label: "Сделки", to: "/deals" }, { label: deal.number, to: `/deals/${deal.id}` },
           ...(POST_WIN_STATUSES.includes(deal.status) && tab !== "feed" && tab !== "versions" ? [{ label: phase === "sale" ? "Продажа" : "Контракт и исполнение", to: `/deals/${deal.id}?tab=${phaseStart}` }] : []),
           { label: TAB_TITLES[tab] }]} />
       <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -279,7 +274,7 @@ export default function DealCard({ me }: { me: Me }) {
           {phase === "sale" && <span className="muted" style={{ fontSize: 12 }}>фаза продажи закрыта — данные только для чтения</span>}
         </div>)}
       <div className="tabs">
-        {!classic && <button className={tab === "overview" ? "active" : ""} onClick={() => setTabState("overview")}>Обзор</button>}
+        {<button className={tab === "overview" ? "active" : ""} onClick={() => setTabState("overview")}>Обзор</button>}
         {(phase === "sale" ? saleTabs : contractTabs).map((t) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{TAB_TITLES[t]}</button>)}
       </div>
       {tab === "overview" && (

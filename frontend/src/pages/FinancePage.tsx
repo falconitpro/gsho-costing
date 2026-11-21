@@ -1,4 +1,4 @@
-import { Crumbs, EntryGrid, useUiMode, type Entry } from "../components/Levels";
+import { Crumbs, EntryGrid, type Entry } from "../components/Levels";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtMoney, newKey } from "../api";
@@ -122,8 +122,6 @@ const FIN_HINTS: Record<string, string> = { calendar: "все обязатель
 
 function Overview({ stamp, go, tabs }: { stamp: number; go: (p: Record<string, string | null>) => void; tabs: string[][] }) {
   // «Новый вид»: показатели → крупные входы в подразделы (со счётчиками) → подробные списки по клику; «прежний вид» — всё сразу, как раньше
-  const [uiMode] = useUiMode();
-  const classic = uiMode === "classic";
   const [d, setD] = useState<OverviewData | null>(null);
   const [err, setErr] = useState("");
   useEffect(() => { setErr(""); api.get<OverviewData>("/api/finance/overview").then(setD).catch((e) => setErr(errText(e))); }, [stamp]);
@@ -164,7 +162,7 @@ function Overview({ stamp, go, tabs }: { stamp: number; go: (p: Record<string, s
           {rec.transactions_needs_reconciliation > 0 && <button className="btn ghost" style={{ padding: "2px 8px", marginTop: 4, fontSize: 12 }} onClick={() => go({ tab: "liquidity", tx_status: "needs_reconciliation" })}>Открыть записи на сверке</button>}
         </Kpi>
       </div>
-      {!classic && <EntryGrid entries={tabs.filter(([k]) => k !== "overview").map(([k, t]): Entry => {
+      {<EntryGrid entries={tabs.filter(([k]) => k !== "overview").map(([k, t]): Entry => {
         const stats: NonNullable<Entry["stats"]> = [];
         if (k === "calendar") stats.push({ value: d.upcoming.count, label: `платежей за ${d.horizon_days} дн.`, to: "/finance?tab=calendar&status=open" },
           { value: d.overdue.count, label: "просрочено", tone: d.overdue.count ? "bad" : "", to: "/finance?tab=calendar&status=overdue" },
@@ -174,11 +172,10 @@ function Overview({ stamp, go, tabs }: { stamp: number; go: (p: Record<string, s
         if (k === "reconciliation") stats.push({ value: recCount, label: "требует сверки", tone: recCount ? "bad" : "" });
         return { key: k, title: t, to: `/finance?tab=${k}`, hint: FIN_HINTS[k], stats, attention: k === "calendar" && d.overdue.count ? `${d.overdue.count} просрочено` : undefined };
       })} />}
-      {!classic && <details className="card" style={{ padding: "10px 16px" }}>
+      {<details className="card" style={{ padding: "10px 16px" }}>
         <summary style={{ cursor: "pointer", fontWeight: 600 }}>Списки: ближайшие платежи ({d.upcoming.count}), просрочено ({d.overdue.count}), неразнесённые операции, без согласованной даты ({d.no_date_count})</summary>
         <div style={{ marginTop: 10 }}><OverviewLists d={d} stamp={stamp} go={go} /></div>
       </details>}
-      {classic && <OverviewLists d={d} stamp={stamp} go={go} />}
     </>
   );
 }

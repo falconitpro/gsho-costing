@@ -13,7 +13,7 @@ import SecurityAdminPage from "./SecurityAdminPage";
 import AccessReviewPage from "./AccessReviewPage";
 import SecurityAuditPage from "./SecurityAuditPage";
 import { WorkplaceSettings } from "./WorkplacePage";
-import { Crumbs, EntryGrid, UiModeSwitch, useUiMode } from "../components/Levels";
+import { Crumbs, EntryGrid } from "../components/Levels";
 
 // «Настройки» одним разделом: ставки и нормативы, сотрудники, уровни доступа, администрирование.
 // Доступ к каждому блоку — как и раньше (уровни доступа и администрирование — ЗГД / админ / ФД); блок виден только тем, кому он доступен.
@@ -55,13 +55,11 @@ export default function SettingsHub({ me }: { me: Me }) {
   const visible = sections.filter(([, , ok]) => ok);
   const want = new URLSearchParams(loc.search).get("s") as Sec | null;
   // «Матрёшка»: /settings без ?s= — первый уровень, крупные категории, доступные пользователю; ?s=… — выбранная секция (как раньше)
-  const [uiMode] = useUiMode();
-  const classic = uiMode === "classic";   // «прежний вид»: без ?s= сразу первая секция, как в основной версии
-  if (!classic && (!want || !visible.some(([k]) => k === want))) {
+  if ((!want || !visible.some(([k]) => k === want))) {
     return (
       <>
         <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Настройки" }]} />
-        <div className="page-head"><h1>Настройки</h1>{want && <span className="badge warn">секция «{want}» недоступна — выберите другую</span>}<div className="push"><UiModeSwitch /></div></div>
+        <div className="page-head"><h1>Настройки</h1>{want && <span className="badge warn">секция «{want}» недоступна — выберите другую</span>}</div>
         <EntryGrid entries={visible.map(([k, t]) => ({ key: k, title: t, to: `/settings?s=${k}`, hint: SEC_HINT[k] }))} />
       </>);
   }
@@ -69,7 +67,7 @@ export default function SettingsHub({ me }: { me: Me }) {
   const curTitle = visible.find(([k]) => k === cur)?.[1] || "";
   return (
     <>
-      {!classic && <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Настройки", to: "/settings" }, { label: curTitle }]} />}
+      {<Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Настройки", to: "/settings" }, { label: curTitle }]} />}
       <div className="row" style={{ alignItems: "baseline", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
         <h1 style={{ margin: 0 }}>Настройки</h1>
         <div className="row" style={{ gap: 2, borderBottom: "1px solid var(--line)" }}>
@@ -77,7 +75,6 @@ export default function SettingsHub({ me }: { me: Me }) {
             <button key={k} onClick={() => nav(`/settings?s=${k}`)} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
               fontWeight: cur === k ? 700 : 500, color: cur === k ? "var(--ink)" : "var(--muted)", borderBottom: cur === k ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>{t}</button>))}
         </div>
-        <div style={{ marginLeft: "auto" }}><UiModeSwitch /></div>
       </div>
       {cur === "workplace" && <WorkplaceSettings />}
       {cur === "rates" && <><SettingsPage me={me} embedded />{has("cd", "fd", "gd") && <div className="card"><h2 style={{ marginTop: 0 }}>Наценки между компаниями группы</h2><MarkupsBlock me={me} /></div>}

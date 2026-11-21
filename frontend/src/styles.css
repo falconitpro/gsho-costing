@@ -929,3 +929,12 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .vat-cf h2 { margin: 0 0 4px; }
 .vat-cf .vat-sum td { font-weight: 600; border-top: 1px solid var(--line); }
 .vat-unit { min-width: 128px; }   /* D-122: «RUB с НДС / без НДС» у логиста */
+.ft-terms { display: flex; flex-direction: column; gap: 4px; }   /* D-124: условия оплаты перевозки */
+.ft-terms label { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; white-space: nowrap; }
+.ft-terms input[type="number"] { width: 64px !important; flex: none; }   /* в таблице поля растягиваются на всю ширину */
+.ft-terms select { width: auto !important; flex: none; }
+/* D-126: этапы и «Сейчас» — одной строкой; на узком экране «Сейчас» переносится под этапы */
+.dh-box { display: flex; flex-wrap: wrap; align-items: center; }
+.dh-box .dh-strip { flex: 0 1 auto; }
+.dh-box .dh-now { flex: 1 1 380px; border-top: 0; border-left: 4px solid var(--accent); margin: 6px 0; padding: 2px 12px; }
+@media (max-width: 760px) { .dh-box .dh-now { border-left: 0; border-top: 1px solid var(--line); margin: 0; padding: 7px 12px; } }

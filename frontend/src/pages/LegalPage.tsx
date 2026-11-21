@@ -9,7 +9,7 @@ import PoaBlock from "../components/PoaBlock";
 import ContractsBlock from "../components/ContractsBlock";
 import ClaimsBlock from "../components/ClaimsBlock";
 import { CounterpartiesBlock } from "./CounterpartiesPage";
-import { Crumbs, EntryGrid, useFetched, useUiMode, type Entry } from "../components/Levels";
+import { Crumbs, EntryGrid, useFetched, type Entry } from "../components/Levels";
 
 // Юридический блок: договоры, претензии, контрагенты (клиенты и поставщики) с закреплёнными реквизитами БЕРГ-ХАУС
 // (компании группы с юридическими и банковскими профилями — D-067), доверенности, шаблоны и правила.
@@ -28,8 +28,7 @@ export default function LegalPage({ me }: { me: Me }) {
   const raw = new URLSearchParams(loc.search).get("tab");
   const asked = (raw === "own" ? "counterparties" : raw) as Tab;   // старая вкладка «Карточка БЕРГ-ХАУС» — теперь вверху «Контрагентов»
   // «Новый вид»: /legal без ?tab= — обзор: основные юридические статусы и входы в подразделы; «прежний вид» — сразу первая вкладка
-  const [uiMode] = useUiMode();
-  const overview = uiMode !== "classic" && !raw;
+  const overview = !raw;
   const tab: Tab | "" = overview ? "" : tabs.some(([k]) => k === asked) ? asked : tabs[0][0];
   const can = (k: Tab) => tabs.some(([x]) => x === k);
   const ov = useFetched({ contracts: can("contracts") ? "/api/legal/contracts" : null, claims: can("claims") ? "/api/legal/claims" : null, poa: can("poa") ? "/api/legal/poa?entity_id=&status=&q=" : null }, overview);
@@ -56,11 +55,11 @@ export default function LegalPage({ me }: { me: Me }) {
   const ownCard = own ? <OwnCompanies own={own} cur={cur} setCur={setCur} /> : null;
   return (
     <>
-      <Crumbs items={overview ? [{ label: "Рабочее место", to: "/" }, { label: "Юридический блок" }] : [{ label: "Рабочее место", to: "/" }, { label: "Юридический блок", to: uiMode === "classic" ? `/legal?tab=${tabs[0][0]}` : "/legal" }, { label: tabs.find(([k]) => k === tab)?.[1] }]} />
+      <Crumbs items={overview ? [{ label: "Рабочее место", to: "/" }, { label: "Юридический блок" }] : [{ label: "Рабочее место", to: "/" }, { label: "Юридический блок", to: "/legal" }, { label: tabs.find(([k]) => k === tab)?.[1] }]} />
       <div className="row" style={{ alignItems: "baseline", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
         <h1 style={{ margin: 0 }}>Юридический блок</h1>
         <div className="row" style={{ gap: 2, borderBottom: "1px solid var(--line)" }}>
-          {uiMode !== "classic" && <button onClick={() => nav("/legal")} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
+          {<button onClick={() => nav("/legal")} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
             fontWeight: overview ? 700 : 500, color: overview ? "var(--ink)" : "var(--muted)", borderBottom: overview ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>Обзор</button>}
           {tabs.map(([k, t, ready]) => (
             <button key={k} disabled={!ready} title={ready ? "" : "появится на следующих этапах"} onClick={() => nav(`/legal?tab=${k}`)} style={{ border: 0, background: "transparent", cursor: ready ? "pointer" : "default", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",

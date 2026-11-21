@@ -1,4 +1,4 @@
-import { Crumbs, EntryGrid, useFetched, useUiMode, type Entry } from "../components/Levels";
+import { Crumbs, EntryGrid, useFetched, type Entry } from "../components/Levels";
 import { useEffect, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
@@ -47,8 +47,7 @@ export default function SupplyPage({ me }: { me: Me }) {
   const visible = TABS.filter((t) => t[2]);
   const asked = new URLSearchParams(loc.search).get("tab") as T;
   // «Новый вид»: /supply без ?tab= — обзор: ключевые счётчики и входы в подразделы; «прежний вид» — сразу первая вкладка
-  const [uiMode] = useUiMode();
-  const overview = uiMode !== "classic" && !asked && visible.length > 0;
+  const overview = !asked && visible.length > 0;
   const tab: T | undefined = overview ? undefined : visible.some(([k]) => k === asked) ? asked : visible[0]?.[0];
   const ov = useFetched({ po: poReader ? "/api/parts/po?open_only=true" : null, batches: poReader ? "/api/parts/batches" : null, recv: poReader ? "/api/parts/stock/receivable" : null,
     dev: poReader ? "/api/parts/stock/deviations?open_only=true" : null, claims: fleetReader ? "/api/parts/claims?open_only=true" : null }, overview);
@@ -68,7 +67,7 @@ export default function SupplyPage({ me }: { me: Me }) {
     <>
       <Crumbs items={overview ? [{ label: "Рабочее место", to: "/" }, { label: "Снабжение и склад" }] : [{ label: "Рабочее место", to: "/" }, { label: "Снабжение и склад", to: "/supply" }, { label: visible.find(([k]) => k === tab)?.[1] }]} />
       <div className="page-head"><h1>Снабжение и склад</h1>
-        <div className="tabs" style={{ margin: 0 }}>{uiMode !== "classic" && visible.length > 0 && <button className={overview ? "active" : ""} onClick={() => nav("/supply")}>Обзор</button>}{visible.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => nav(`/supply?tab=${k}`)}>{t}</button>)}</div>
+        <div className="tabs" style={{ margin: 0 }}>{visible.length > 0 && <button className={overview ? "active" : ""} onClick={() => nav("/supply")}>Обзор</button>}{visible.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => nav(`/supply?tab=${k}`)}>{t}</button>)}</div>
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Заявки клиентов на запчасти — в <Link to="/deals?type=parts">Сделках</Link>, каталог запчастей и справочники — в <Link to="/catalog?s=parts">Каталоге</Link>, парк машин — в карточке клиента.</div>
       {overview && <EntryGrid entries={visible.map(entryOf)} />}

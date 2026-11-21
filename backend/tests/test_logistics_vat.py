@@ -27,3 +27,20 @@ def test_rub_items_with_vat_go_to_cost_net(client):
     assert abs(v["input_rub"] - 33000) < 0.01                                       # 22 000 + 11 000 — к вычету
     imp = sum(x["amount_rub"] for x in v["import"])
     assert abs(v["from_client_rub"] - imp - v["input_rub"] - sum(q["amount_rub"] for q in v["budget"])) < 0.05
+
+
+def test_freight_terms_saved_and_validated(client):
+    """D-124: условия оплаты перевозки сохраняются в партии и проверяются."""
+    cl = _ok(client.get("/api/refs/clients", headers=H(MGR)))[0]
+    fac = _ok(client.get("/api/refs/factories", headers=H(MGR)))[0]
+    did = _ok(client.post("/api/deals", headers=H(MGR), json={"client_id": cl["id"], "site": "Условия перевозки"}), 201)["id"]
+    pos = _ok(client.post(f"/api/deals/{did}/positions", headers=H(MGR), json={"factory_id": fac["id"], "model": "FT-1", "machine_type": "ПДМ", "qty": 1,
+                                                                             "unit_price": 1500000, "currency": "CNY"}), 201)
+    _ok(client.post(f"/api/deals/{did}/send-to-calc", headers=H(MGR)))
+    items = {"door_to_door": {"amount": 100000, "currency": "CNY"}, "comments": {"door_to_door": "x"},
+             "freight_terms": {"prepay_pct": 30, "prepay_days_before": 5, "post_event": "border", "post_days": 10}}
+    b = _ok(client.post(f"/api/deals/{did}/logistics/batches", headers=H(LOG), json={"items": items, "position_ids": [pos["id"]]}), 201)
+    assert b["items"]["freight_terms"] == {"prepay_pct": 30.0, "prepay_days_before": 5, "post_event": "border", "post_days": 10}
+    bad = {**items, "freight_terms": {"prepay_pct": 130, "post_event": "border"}}
+    r = client.patch(f"/api/deals/{did}/logistics/batches/{b['id']}", headers=H(LOG), json={"items": bad, "position_ids": [pos["id"]]})
+    assert r.status_code == 422

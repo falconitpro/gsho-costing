@@ -108,13 +108,9 @@ export function ActionMenu({ label, items, onPick }: { label: string; items: { t
     </div>);
 }
 
-// ---------- вариант интерфейса: с 21.11.2026 — только «новый вид» (D-115, решение владельца). Переключатель убран;
-// полные виды остаются по ссылкам на самих экранах («все блоки в полном виде», «все шаги на одной странице», «Все колонки»).
-export type UiMode = "new" | "classic";
+// ---------- с 21.11.2026 — один вид интерфейса (D-115); код «прежнего вида» удалён (D-126). Полные виды — по ссылкам на экранах
+// («все блоки в полном виде», «все шаги на одной странице», «Все колонки»).
 try { localStorage.removeItem("gsho.uiMode"); } catch { /* приватный режим */ }
-const UI_NEW: [UiMode, (m: UiMode) => void] = ["new", () => undefined];
-export function useUiMode(): [UiMode, (m: UiMode) => void] { return UI_NEW; }
-export function UiModeSwitch() { return null; }
 
 /**
  * Данные для счётчиков обзора: те же существующие запросы, что делают сами подразделы. Ошибка или отказ в доступе —
@@ -136,15 +132,14 @@ export function useFetched(urls: Record<string, string | null>, enabled = true):
 
 /**
  * «Основные / Все колонки» для реестра. В «Новом виде» реестр показывает ключевые колонки, полный набор — по кнопке
- * (выбор запоминается в браузере, ключ `storageKey`). В «Прежнем виде» — всегда все колонки, переключателя нет.
+ * (выбор запоминается в браузере, ключ `storageKey`).
  * Данные и запросы не меняются: скрытые колонки просто не рисуются.
  */
 export function useAllColumns(storageKey: string, hidden: string[]): [boolean, ReactNode] {
-  const [mode] = useUiMode();
   const [want, setWant] = useState<boolean>(() => { try { return JSON.parse(localStorage.getItem(storageKey) || "false") === true; } catch { return false; } });
-  const all = mode === "classic" || want || hidden.length === 0;
+  const all = want || hidden.length === 0;
   const set = (v: boolean) => { setWant(v); try { localStorage.setItem(storageKey, JSON.stringify(v)); } catch { /* хранилище недоступно */ } };
-  const el = mode === "classic" || hidden.length === 0 ? null : (
+  const el = hidden.length === 0 ? null : (
     <div className="row" style={{ gap: 8, margin: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
       <span className="muted">Колонки:</span>
       <div className="seg" role="group" aria-label="Набор колонок">

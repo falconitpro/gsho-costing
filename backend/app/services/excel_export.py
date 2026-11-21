@@ -206,21 +206,27 @@ class ExcelExporter:
             for j, s in enumerate(SCEN_ORDER):
                 ws.cell(row, 2 + j, f"={self.cost_total_ref[(v.id, s)]}").number_format = NUM
             row += 1
+            # D-123: курсовая разница по оплатам клиента (договор в валюте: рубли по прогнозу курса на даты оплат) — входит в прибыль
+            fxd_row = row
+            ws.cell(row, 1, "Курсовая разница по оплатам клиента (прогноз курса на даты оплат), RUB")
+            for j, s in enumerate(SCEN_ORDER):
+                ws.cell(row, 2 + j, self.res.variants[v.id][s].client_fx_diff_rub or 0).number_format = NUM
+            row += 1
             ws.cell(row, 1, "Прибыль, RUB")
             for j in range(3):
                 col = get_column_letter(2 + j)
-                ws.cell(row, 2 + j, f"={col}{price_row}-{col}{cost_row}").number_format = NUM
+                ws.cell(row, 2 + j, f"={col}{price_row}+{col}{fxd_row}-{col}{cost_row}").number_format = NUM
             row += 1
             ws.cell(row, 1, "Маржа от выручки, %")
             for j in range(3):
                 col = get_column_letter(2 + j)
-                c = ws.cell(row, 2 + j, f"=IF({col}{price_row}=0,\"\",({col}{price_row}-{col}{cost_row})/{col}{price_row}*100)")
+                c = ws.cell(row, 2 + j, f"=IF({col}{price_row}=0,\"\",({col}{price_row}+{col}{fxd_row}-{col}{cost_row})/{col}{price_row}*100)")
                 c.number_format = PCT
             row += 1
             ws.cell(row, 1, "Наценка от себестоимости, % (справочно)")
             for j in range(3):
                 col = get_column_letter(2 + j)
-                ws.cell(row, 2 + j, f"=IF({col}{cost_row}=0,\"\",({col}{price_row}-{col}{cost_row})/{col}{cost_row}*100)").number_format = PCT
+                ws.cell(row, 2 + j, f"=IF({col}{cost_row}=0,\"\",({col}{price_row}+{col}{fxd_row}-{col}{cost_row})/{col}{cost_row}*100)").number_format = PCT
             row += 1
             ws.cell(row, 1, "Прибыль с учётом стоимости денег, RUB (чистая прибыльность)")
             for j, s in enumerate(SCEN_ORDER):
@@ -277,25 +283,32 @@ class ExcelExporter:
         ws["A1"].font = Font(bold=True, size=13)
         row = 3
         _hdr(ws, row, ["Партия", "Маршрут", "Транспортных единиц", "Транзит, дн", "Оформление, дн", "Доставка до границы РФ",
-                       "Валюта", "Страхование, %", "Брокер и СВХ, RUB", "Доставка по РФ", "Распределение общих статей"])
+                       "Валюта", "Страхование, %", "Брокер и СВХ, RUB без НДС", "Доставка по РФ (RUB без НДС)", "Распределение общих статей",
+                       "Входящий НДС брокера, RUB", "Входящий НДС доставки по РФ, RUB", "Условия оплаты перевозки"])
         row += 1
         for b in self.inp.batches:
             d2d = b.door_to_door if b.door_to_door and b.door_to_door.amount else None
             fr_amount, fr_cur = ((d2d.amount * b.door_to_door_border_pct / 100, d2d.currency) if d2d else (b.intl_freight.amount, b.intl_freight.currency))
             rf = (f"{d2d.amount * (100 - b.door_to_door_border_pct) / 100:,.2f} {d2d.currency}".replace(",", " ") if d2d else b.rf_delivery_rub)
+            ft = b.freight_terms
+            ft_txt = (f"предоплата {ft.prepay_pct:g} % за {ft.prepay_days_before} дн. до отгрузки; постоплата {100 - ft.prepay_pct:g} % через {ft.post_days} дн. после "
+                      + {"border": "пересечения границы", "declaration": "выпуска ДТ", "delivery": "поставки клиенту"}.get(ft.post_event.value, ft.post_event.value)
+                      if ft else "100 % при отгрузке")
             vals = [self._n(b.id), b.route, b.transport_units, b.transit_days, b.customs_days, fr_amount, fr_cur,
-                    b.insurance_pct, b.broker_rub, rf, ALLOC_RU.get(b.allocation.value, b.allocation.value)]
+                    b.insurance_pct, b.broker_rub, rf, ALLOC_RU.get(b.allocation.value, b.allocation.value),
+                    b.broker_vat_rub, b.rf_delivery_vat_rub, ft_txt]
             for j, v in enumerate(vals):
                 ws.cell(row, 1 + j, v)
             row += 1
         row += 1
         _hdr(ws, row, ["Тип машины", "Завод", "Модель", "Кол-во", "Партия", "Вес, кг", "Объём, м³", "Внутрикитайская логистика", "Валюта",
-                       "Экспортные формальности", "Валюта", "Код ТН ВЭД", "Пошлина, %", "НДС, %", "Утильсбор, RUB", "Сертификация, RUB"])
+                       "Экспортные формальности", "Валюта", "Код ТН ВЭД", "Пошлина, %", "НДС, %", "Утильсбор, RUB", "Сертификация, RUB без НДС",
+                       "Входящий НДС сертификации, RUB"])
         row += 1
         for p in self.inp.positions:
             vals = [p.machine_type, self._n(p.factory), p.model, p.qty, self._n(p.batch_id) if p.batch_id else "—", p.weight_kg, p.volume_m3,
                     p.domestic_logistics.amount, p.domestic_logistics.currency, p.export_formalities.amount, p.export_formalities.currency,
-                    p.hs_code, p.duty_pct, p.vat_pct, p.util_fee_rub, p.certification_rub]
+                    p.hs_code, p.duty_pct, p.vat_pct, p.util_fee_rub, p.certification_rub, p.certification_vat_rub]
             for j, v in enumerate(vals):
                 ws.cell(row, 1 + j, v)
             row += 1
@@ -371,11 +384,13 @@ class ExcelExporter:
                     ws.cell(row, 1 + j, val)
                 row += 1
         row += 1
-        _hdr(ws, row, ["Предложение — даты оплат клиента (базовый сценарий)", "№", "Событие-основание", "Дата", "Сумма, RUB", "Аккредитив"])
+        _hdr(ws, row, ["Предложение — даты оплат клиента (базовый сценарий)", "№", "Событие-основание", "Дата", "Сумма, RUB без НДС", "Аккредитив",
+                       "Сумма в валюте договора без НДС", "Валюта", "Курс (прогноз на дату)", "Курс цены"])
         row += 1
         for v in self.inp.variants:
             for pd in self.res.variants[v.id]["base"].payment_dates:
-                for j, val in enumerate([v.name, pd["no"], EVENT_RU.get(pd["event"], pd["event"]), pd["on"], pd["amount_rub"], "да" if pd.get("via") == "lc" else "нет"]):
+                for j, val in enumerate([v.name, pd["no"], EVENT_RU.get(pd["event"], pd["event"]), pd["on"], pd["amount_rub"], "да" if pd.get("via") == "lc" else "нет",
+                                         pd.get("amount_ccy"), pd.get("currency", "RUB"), pd.get("rate"), pd.get("price_rate")]):
                     c = ws.cell(row, 1 + j, val)
                     if j == 3:
                         c.number_format = "DD.MM.YYYY"
@@ -383,6 +398,34 @@ class ExcelExporter:
                         c.number_format = NUM
                 row += 1
         row += 1
+        # D-121, D-122: НДС в денежном потоке (базовый сценарий)
+        for v in self.inp.variants:
+            vt = self.res.variants[v.id]["base"].vat or {}
+            if not vt:
+                continue
+            ws.cell(row, 1, f"{v.name} — НДС в денежном потоке (базовый сценарий)").font = BOLD
+            row += 1
+            _hdr(ws, row, ["Строка", "Дата", "Сумма, RUB", "Примечание"])
+            row += 1
+            first = row
+            lines = [(f"НДС {vt.get('pct', 0):g} % в оплатах клиента", None, vt.get("from_client_rub", 0.0), "приходит вместе с каждой оплатой")]
+            lines += [("Ввозной НДС", i["on"], -i["amount_rub"], "к вычету в квартале ввоза" if vt.get("import_deducted") else "расход, к вычету не принимается")
+                      for i in vt.get("import", [])]
+            if vt.get("input_rub"):
+                lines.append(("Входящий НДС: брокер, доставка по РФ, сертификация", None, -vt["input_rub"], "к вычету в квартале оплаты"))
+            for q in vt.get("budget", []):
+                lines.append((f"В бюджет за квартал с {q['quarter']}", ", ".join(f"{d:%d.%m.%Y}" for d in q["dates"]), -q["amount_rub"], "тремя равными долями"))
+            for t, d, a, note in lines:
+                ws.cell(row, 1, t)
+                c = ws.cell(row, 2, d)
+                if hasattr(d, "year"):
+                    c.number_format = "DD.MM.YYYY"
+                ws.cell(row, 3, round(a, 2)).number_format = NUM
+                ws.cell(row, 4, note)
+                row += 1
+            ws.cell(row, 1, "Остаток после расчётов с бюджетом (должен быть 0)").font = BOLD
+            ws.cell(row, 3, f"=SUM(C{first}:C{row - 1})").number_format = NUM
+            row += 2
         for v in self.inp.variants:
             for s in SCEN_ORDER:
                 r = self.res.variants[v.id][s]
@@ -401,7 +444,7 @@ class ExcelExporter:
                     ws.cell(row, 4, f).number_format = NUM
                     row += 1
                 row += 1
-        _widths(ws, {1: 40, 2: 18, 3: 18, 4: 22, 5: 16, 6: 14, 7: 16})
+        _widths(ws, {1: 40, 2: 18, 3: 18, 4: 22, 5: 16, 6: 14, 7: 16, 8: 10, 9: 14, 10: 12})
 
     # ------------------------------------------------------------------ «Курсы»
     def _sheet_fx(self) -> None:

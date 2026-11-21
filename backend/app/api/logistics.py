@@ -121,6 +121,18 @@ def _check_batch_items(db: Session, deal: Deal, b: Batch, items: dict) -> dict:
     from ..services import logistics_vat as lv
     vat_pct = float(settings_service.get(db, "sales_vat_pct") or 22.0)
     items["vat_included"] = {k: bool(v) for k, v in (items.get("vat_included") or {}).items() if k in lv.BATCH_ITEMS}
+    ft = items.get("freight_terms")
+    if ft:   # D-124: условия оплаты перевозки — проверка и нормализация
+        try:
+            pre = float(ft.get("prepay_pct", 100)); bd = int(ft.get("prepay_days_before") or 0); pd_ = int(ft.get("post_days") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(422, "Условия оплаты перевозки: проценты и дни — числа")
+        ev = str(ft.get("post_event") or "delivery")
+        if not (0 <= pre <= 100) or not (0 <= bd <= 365) or not (0 <= pd_ <= 365) or ev not in ("border", "declaration", "delivery"):
+            raise HTTPException(422, "Условия оплаты перевозки: предоплата 0–100 %, дни 0–365, постоплата — после границы, выпуска ДТ или поставки клиенту")
+        items["freight_terms"] = {"prepay_pct": pre, "prepay_days_before": bd, "post_event": ev, "post_days": pd_}
+    else:
+        items.pop("freight_terms", None)
     for key in ("intl_freight", "broker_rub", "rf_delivery_rub"):
         val = items.get(key)
         amount = val.get("amount") if isinstance(val, dict) else val
