@@ -211,7 +211,8 @@ def create_client(body: ClientIn, db: Session = Depends(get_db), user: CurrentUs
         raise HTTPException(422, "ИНН неверный: проверьте контрольные цифры")
     if db.scalar(select(Client).where(Client.inn == body.inn)):
         raise HTTPException(409, "Клиент с таким ИНН уже есть")
-    c = Client(manager_id=user.id, **body.model_dump())
+    data = body.model_dump()
+    c = Client(manager_id=user.id, registry_data=data.pop("registry") or {}, **data)
     if body.registry:
         c.registry_checked_at = datetime.now(timezone.utc)
     db.add(c)
@@ -409,7 +410,7 @@ def client_refresh_registry(client_id: str, db: Session = Depends(get_db), user:
                          ("status", "legal_status"), ("okved", "okved")):
         if main.get(k_src):
             setattr(c, k_dst, main[k_src])
-    c.registry, c.registry_checked_at = main, datetime.now(timezone.utc)
+    c.registry_data, c.registry_checked_at = main, datetime.now(timezone.utc)
     audit(db, user.id, None, "client", c.id, "registry_refresh", {k: before.get(k) for k in ("name", "kpp", "address", "director")}, {"source": main.get("source")})
     db.commit()
     return serialize(c)

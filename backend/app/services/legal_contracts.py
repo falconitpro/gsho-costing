@@ -305,7 +305,27 @@ def _won_variant(deal: Deal):
     return won_variant(deal) if deal.variants else None
 
 
-def deal_client_terms(deal: Deal) -> tuple[list[dict], Optional[float], str]:
+def deal_client_terms(deal: Deal, db: Optional[Session] = None) -> tuple[list[dict], Optional[float], str]:
+    """Условия договора с клиентом из выигранного предложения. Сумма — к оплате клиентом, с НДС (договор «НДС включён»), как в графике
+    исполнения (D-120): при наличии этапов «Аванс» и «Окончательный расчёт» — их сумма в валюте договора (D-147)."""
+    lines, amount, cur = _client_terms_net(deal)
+    if db is None or amount is None:
+        return lines, amount, cur
+    from ..models import ExecutionStage
+    st = db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.code.in_(("client_advance", "client_final")))).all()
+    if st and all(x.amount is not None and x.currency for x in st) and len({x.currency for x in st}) == 1:
+        return lines, round(sum(float(x.amount) for x in st), 2), st[0].currency.upper()
+    from . import settings_service
+    return lines, round(amount * (1 + float(settings_service.get(db, "sales_vat_pct") or 22.0) / 100.0), 2), cur
+
+
+def sales_vat(db: Session) -> float:
+    from . import settings_service
+    return float(settings_service.get(db, "sales_vat_pct") or 22.0)
+
+
+def _client_terms_net(deal: Deal) -> tuple[list[dict], Optional[float], str]:
+    """Условия и цена выигранного предложения без НДС (как в КП)."""
     v = _won_variant(deal)
     from .deal_calc import actual_offer
     ao = actual_offer(deal, v) if v is not None else {}     # D-093: цена и условия после торгов
@@ -354,10 +374,8 @@ def upsert_from_package(db: Session, pkg: LegalPackage, deal: Deal, user_id: Opt
     c = db.scalars(select(Contract).where(Contract.deal_id == deal.id, Contract.cp_id == pkg.counterparty_id, Contract.doc_type == "contract",
                                           Contract.direction == ("income" if income else "expense"))).first()
     totals = snap.get("totals") or {}
-    if income:
-        lines, amount, cur = deal_client_terms(deal)
-        if totals.get("amount") is not None:
-            amount, cur = float(totals["amount"]), totals.get("currency") or cur
+    if income:   # D-147: в пакете — цена без НДС (как в КП); в реестре и «Финансах» — к оплате клиентом, с НДС
+        lines, amount, cur = deal_client_terms(deal, db)
     else:
         lines, amount, cur = deal_factory_terms(deal, pkg.counterparty_id)
         if totals.get("amount") is not None:
@@ -381,6 +399,8 @@ def upsert_from_package(db: Session, pkg: LegalPackage, deal: Deal, user_id: Opt
         return c
     c.package_id, c.own_profile_id, c.own_bank_id, c.cp_profile_id = pkg.id, pkg.own_profile_id, pkg.own_bank_id, pkg.cp_profile_id
     c.amount, c.currency, c.payment_terms = amount, (cur or "RUB").upper(), lines
+    if income:
+        c.vat_mode, c.vat_rate = "included", sales_vat(db)     # D-147: сумма из расчёта — с НДС
     if not c.performance_terms:
         c.performance_terms = [{"code": "delivery" if income else "readiness", "title": "", "event": "contract", "offset_days": 0, "offset_kind": "calendar", "fixed_on": None,
                                 "note": (snap.get("contract") or {}).get("delivery_term" if income else "production_term") or ""}]
@@ -400,11 +420,11 @@ def import_from_deals(db: Session, only: Optional[Deal] = None) -> int:
     for deal in deals:
         ent = _default_entity(db, True)
         if (deal.contract_number or deal.contract_signed_at) and (deal.id, "income") not in known:
-            lines, amount, cur = deal_client_terms(deal)
+            lines, amount, cur = deal_client_terms(deal, db)
             pens, cap = default_penalties(db, "income")
             db.add(Contract(doc_type="contract", kind="client_supply", direction="income", number=deal.contract_number or deal.number, cp_number=deal.contract_number or "",
                             own_entity_id=ent.id if ent else None, cp_kind="client", cp_id=deal.client_id, deal_id=deal.id, deal_ids=[deal.id], subject="поставка горно-шахтного оборудования",
-                            amount=amount, currency=cur, payment_terms=lines, penalties=pens, liability_cap_pct=cap, signed_on=deal.contract_signed_at,
+                            amount=amount, currency=cur, vat_mode="included", vat_rate=sales_vat(db), payment_terms=lines, penalties=pens, liability_cap_pct=cap, signed_on=deal.contract_signed_at,
                             status="active" if deal.contract_signed_at else "draft", curator_id=deal.manager_id, source="deal_import", law={"claim_days": 30, "pre_trial": True},
                             history=[{"at": datetime.now(timezone.utc).isoformat(), "by": None, "action": "imported", "comment": f"из реквизитов контракта сделки {deal.number}"}]))
             n += 1
@@ -414,7 +434,7 @@ def import_from_deals(db: Session, only: Optional[Deal] = None) -> int:
             pens, cap = default_penalties(db, "expense")
             db.add(Contract(doc_type="contract", kind="supplier", direction="expense", number=deal.factory_contract_number or f"{deal.number}-З", cp_number=deal.factory_contract_number or "",
                             own_entity_id=ent.id if ent else None, cp_kind="factory", cp_id=fid, deal_id=deal.id, deal_ids=[deal.id], subject="поставка горно-шахтного оборудования",
-                            amount=amount, currency=cur, payment_terms=lines, penalties=pens, liability_cap_pct=cap, signed_on=deal.factory_contract_signed_at,
+                            amount=amount, currency=cur, vat_mode="none", payment_terms=lines, penalties=pens, liability_cap_pct=cap, signed_on=deal.factory_contract_signed_at,
                             status="active" if deal.factory_contract_signed_at else "draft", curator_id=deal.manager_id, source="deal_import", law={"claim_days": 30, "pre_trial": True},
                             history=[{"at": datetime.now(timezone.utc).isoformat(), "by": None, "action": "imported", "comment": f"из реквизитов контракта с заводом сделки {deal.number}"}]))
             n += 1
@@ -430,6 +450,35 @@ def sync_deal_signing(db: Session, deal: Deal, user_id: Optional[str]) -> int:
     for c in db.scalars(select(Contract).where(Contract.deal_id == deal.id, Contract.doc_type == "contract")).all():
         if eligible(c):
             sync_contract(db, c, user_id)
+    return n
+
+
+def repair_client_vat(db: Session) -> int:
+    """Разово (D-147): договоры с клиентом, созданные из сделки или пакета с ценой без НДС, — сумма к оплате с НДС, как в графике исполнения.
+    Меняем только договоры, сумма которых в точности равна цене предложения без НДС (вписанную вручную сумму не трогаем); строки в «Финансах»
+    пересобираются — где уже есть разнесения, строка встаёт на сверку. Повтор ничего не меняет."""
+    from .finance.obligations import eligible, sync_contract
+    n = 0
+    rows = db.scalars(select(Contract).where(Contract.direction == "income", Contract.deal_id.is_not(None), Contract.source.in_(("deal_import", "package")),
+                                             Contract.doc_type.in_(("contract", "specification")), Contract.amount.is_not(None))).all()
+    for c in rows:
+        deal = db.get(Deal, c.deal_id)
+        if deal is None:
+            continue
+        _, net, net_cur = _client_terms_net(deal)
+        if net is None or (net_cur or "").upper() != (c.currency or "").upper() or abs(float(c.amount) - float(net)) > 0.005:
+            continue
+        _, gross, cur = deal_client_terms(deal, db)
+        if gross is None or (cur or "").upper() != (c.currency or "").upper() or abs(gross - float(net)) < 0.005:
+            continue
+        old = c.amount
+        c.amount, c.vat_mode, c.vat_rate = gross, "included", sales_vat(db)
+        sp = lambda x: f"{x:,.2f}".replace(",", " ")   # noqa: E731
+        hist(c, None, "vat_fix", f"сумма {sp(old)} → {sp(gross)} {c.currency}: цена из сделки была без НДС, клиент платит с НДС (D-147)")
+        if eligible(c):
+            sync_contract(db, c, None)
+        n += 1
+    db.commit()
     return n
 
 
@@ -995,8 +1044,8 @@ def _upsert_spec(db: Session, pkg: LegalPackage, deal: Deal, fw: Optional[Contra
     income = pkg.kind == "sale"
     snap = pkg.snapshot or {}
     totals = snap.get("totals") or {}
-    lines, amount, cur = deal_client_terms(deal) if income else deal_factory_terms(deal, pkg.counterparty_id)
-    if totals.get("amount") is not None:
+    lines, amount, cur = deal_client_terms(deal, db) if income else deal_factory_terms(deal, pkg.counterparty_id)
+    if totals.get("amount") is not None and not income:
         amount, cur = float(totals["amount"]), totals.get("currency") or cur
     c = spec_for_deal(db, fw, deal.id)
     fresh = c is None
@@ -1015,6 +1064,8 @@ def _upsert_spec(db: Session, pkg: LegalPackage, deal: Deal, fw: Optional[Contra
         return c
     c.package_id = pkg.id
     c.amount, c.currency, c.payment_terms = amount, (cur or "RUB").upper(), lines
+    if income:
+        c.vat_mode, c.vat_rate = "included", sales_vat(db)     # D-147: сумма из расчёта — с НДС
     if not c.performance_terms:
         c.performance_terms = [{"code": "delivery" if income else "readiness", "title": "", "event": "contract", "offset_days": 0, "offset_kind": "calendar", "fixed_on": None,
                                 "note": (snap.get("contract") or {}).get("delivery_term" if income else "production_term") or ""}]

@@ -1,7 +1,7 @@
 """Стадия контракта и исполнения (задача 2): реквизиты контракта, этапы, фактические даты и платежи, закрытие."""
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,7 +13,7 @@ from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
 from ..core.workflow import DealState, DealStatus, close_execution, contract_terms_changed, role_title, start_execution
 from ..db import get_db
-from ..models import Approval, Client, Deal, ExecutionStage
+from ..models import Approval, Client, Deal, ExecutionStage, Task
 from ..services import execution_service as ex
 from ..services.deal_service import apply_transition, audit, complete_tasks, create_version, sla
 from .common import deal_payload, get_deal_or_404
@@ -180,7 +180,7 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
     from datetime import timedelta
     from ..core.roles import Role as _R
     from ..core.workflow import add_business_days
-    from ..models import FeedEntry, Task
+    from ..models import FeedEntry
     deal = get_deal_or_404(db, deal_id, user)
     if deal.status != DealStatus.CONTRACT:
         raise HTTPException(409, "Подэтапы отмечаются на стадии «Заключение контракта»")
@@ -403,6 +403,9 @@ def close(deal_id: str, body: CloseIn, db: Session = Depends(get_db), user: Curr
         closing.actual_on, closing.done_by = date.today(), user.id
     complete_tasks(db, deal)
     apply_transition(db, deal, tr, user.id)
+    if not deal.plan_fact_closed:   # D-147: поздние счета (логистика, таможня, ПНР) приходят после закрытия — ФД вносит их и закрывает план/факт
+        db.add(Task(deal_id=deal.id, role="fd", title="Сделка закрыта — внести последние расходы и закрыть план/факт", block="plan_fact",
+                    due=date.today() + timedelta(days=30)))
     try:   # машины сделки — в парк клиента (запчасти, раздел 9)
         from .parts_fleet import sync_from_deals
         sync_from_deals(db, deal.id, user.id)

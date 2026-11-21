@@ -116,7 +116,7 @@ class Client(TimestampMixin, Base):
     director: Mapped[str] = mapped_column(String(255), default="")
     legal_status: Mapped[str] = mapped_column(String(32), default="")          # ACTIVE | LIQUIDATING | LIQUIDATED …
     okved: Mapped[str] = mapped_column(String(255), default="")
-    registry: Mapped[dict] = mapped_column(JSONType, default=dict)             # ответ источника (сокращённо)
+    registry_data: Mapped[dict] = mapped_column(JSONType, default=dict)        # ответ реестра (сокращённо); «registry» занято SQLAlchemy (D-148)
     registry_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     manager_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     default_payment_scheme_id: Mapped[Optional[str]] = mapped_column(ForeignKey("payment_schemes.id"))
