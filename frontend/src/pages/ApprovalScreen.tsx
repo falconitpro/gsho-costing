@@ -155,7 +155,14 @@ export default function ApprovalScreen({ deal, me, reload }: { deal: Deal; me: M
               <div className="dp-act">
                 {canSubmit && <button className="btn" disabled={busy || cdChecks.length > 0 || base?.price_rub == null} title={cdChecks.length ? cdChecks.join("\n") : base?.price_rub == null ? "сначала назначьте цену" : ""}
                   onClick={() => act(`/api/deals/${deal.id}/submit`)}>Утвердить / отправить на визу</button>}
-                {onVisa && <button className="btn" onClick={toActions}>К визе ↓</button>}
+                {onVisa && <div className="dp-visa">
+                  {/* виза — прямо на панели решения: на телефоне не листать до «Действий» в конце экрана */}
+                  <input placeholder="комментарий к визе (для отказа — обязательно)" value={visaComment} onChange={(e) => setVisaComment(e.target.value)} />
+                  <div className="row">
+                    <button className="btn" disabled={busy} onClick={() => act(`/api/deals/${deal.id}/visa`, { approved: true, comment: visaComment })}>Согласовать</button>
+                    <button className="btn ghost" disabled={busy || !visaComment.trim()} onClick={() => act(`/api/deals/${deal.id}/visa`, { approved: false, comment: visaComment })}>Отказать</button>
+                    <a href="#" onClick={(e) => { e.preventDefault(); toActions(); }}>вернуть на доработку ↓</a>
+                  </div></div>}
                 {isCD && ["approved", "kp_sent"].includes(deal.status) && <button className="btn" onClick={() => nav(`/deals/${deal.id}/negotiation`)} title="снижение цены и изменение условий после КП — шагами торгов">Торги →</button>}
                 {!canSubmit && !onVisa && !(isCD && ["approved", "kp_sent"].includes(deal.status)) && <span className="muted" style={{ fontSize: 12 }}>{lbl(STATUS, deal.status)}</span>}
               </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, fmtDate } from "../api";
 import { Crumbs, useQueryParam } from "../components/Levels";
 import { askPrompt } from "../components/Dialogs";
@@ -111,7 +111,7 @@ export default function OfficePage({ me }: { me: Me }) {
           </div>
           {creating && <NewDoc meta={meta} kind={creating} onCancel={() => setCreating(null)} onDone={(d) => { setCreating(null); setDocId(d.id); load(); }} />}
           {docId && <DocCard id={docId} meta={meta} me={me} onClose={() => setDocId("")} onChanged={load} onOpen={setDocId} />}
-          <table className="office-table">
+          <table className="office-table office-journal">
             <thead><tr><th>№</th><th>Дата</th><th>Вид</th><th>Тема</th><th>Контрагент</th><th>Исполнитель / подписант</th><th>Срок</th><th>Статус</th></tr></thead>
             <tbody>
               {rows.length === 0 && <tr><td colSpan={8} className="muted">Документов нет</td></tr>}
@@ -227,7 +227,9 @@ function DocCard({ id, meta, me, onClose, onChanged, onOpen }: { id: string; met
   const [reviewer, setReviewer] = useState(meta.users.find((u) => u.name.startsWith("Добров"))?.id || "");
   const [sendCh, setSendCh] = useState("");
   const [reply, setReply] = useState(false);
-  useEffect(() => { api.get<Doc>(`/api/office/docs/${id}`).then((x) => { setD(x); setExec(x.executor_id || ""); setDue(x.due_on || ""); setSendCh(x.channel || ""); }); }, [id]);
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { api.get<Doc>(`/api/office/docs/${id}`).then((x) => { setD(x); setExec(x.executor_id || ""); setDue(x.due_on || ""); setSendCh(x.channel || "");
+    if (window.matchMedia?.("(max-width: 760px)").matches) setTimeout(() => cardRef.current?.scrollIntoView({ block: "start" }), 50); }); }, [id]);   // телефон: сразу к карточке
   if (!d) return null;
   const upd = (x: Doc) => { setD(x); onChanged(); };
   const act = (action: string, note = "", extra: Record<string, unknown> = {}) => api.post<Doc>(`/api/office/docs/${d.id}/action`, { action, note, ...extra }).then(upd);
@@ -237,14 +239,23 @@ function DocCard({ id, meta, me, onClose, onChanged, onOpen }: { id: string; met
   const needRoute = !isIn && routesFor(meta, d).some((r) => r.required);
   const canSign = (d.status === "approved" || (d.status === "draft" && !needRoute)) && (ed || d.can_edit) && !isIn;
   const executorMain = d.executor_id === me.id;
+  const myRes = isIn && d.is_reviewer && d.status === "review";
+  const myAppr = !!d.approval?.my_step && d.status === "approval";
+  const myAck = !!d.my_ack && !d.my_ack.acked_at;
   return (
-    <div className="card office-card">
+    <div className="card office-card" ref={cardRef}>
       <div className="row">
         <h2>{d.number || "Черновик"} · {d.kind_title}{d.kind === "order" && d.category ? ` ${meta.order_categories[d.category]}` : ""}</h2>
         <span className={"badge" + (d.overdue ? " bad" : "")}>{d.status_title}</span>
         {d.urgent && <span className="badge bad">срочно</span>}{d.confidential && <span className="badge">конфиденциально</span>}
         <a href="#" className="push" onClick={(e) => { e.preventDefault(); onClose(); }}>закрыть ✕</a>
       </div>
+      {(myRes || myAppr || myAck) && <div className="office-brief"><b>{d.subject}</b>{d.counterparty ? ` · ${d.counterparty}` : ""}{d.due_on ? ` · срок ${fmtDate(d.due_on)}` : ""}
+        {d.files.filter((f) => ["scan", "original", "draft"].includes(f.kind)).slice(0, 2).map((f) => <a key={f.id} href={`/api/office/docs/${d.id}/files/${f.id}`} target="_blank" rel="noreferrer"> 📎 {f.name}</a>)}</div>}
+      {/* Моё действие — сразу под заголовком (на телефоне не листать до конца карточки): резолюция, согласование, ознакомление */}
+      {myRes && <ResolutionForm d={d} meta={meta} onDone={upd} />}
+      {myAppr && <ApprovalView d={d} onDone={upd} />}
+      {myAck && <Acks d={d} meta={meta} ed={ed} onDone={upd} />}
       <div className="office-grid">
         <div><span className="muted">Юр. лицо</span> {d.entity_prefix} · {d.entity}</div>
         {d.reg_date && <div><span className="muted">Дата</span> {fmtDate(d.reg_date)}</div>}
@@ -290,8 +301,8 @@ function DocCard({ id, meta, me, onClose, onChanged, onOpen }: { id: string; met
           ))}
         </div>
       )}
-      {d.is_reviewer || (meta.can_signers && isIn && OPEN_IN.includes(d.status)) ? <ResolutionForm d={d} meta={meta} onDone={upd} /> : null}
-      {d.approval && <ApprovalView d={d} onDone={upd} />}
+      {!myRes && (d.is_reviewer || (meta.can_signers && isIn && OPEN_IN.includes(d.status))) ? <ResolutionForm d={d} meta={meta} onDone={upd} /> : null}
+      {d.approval && !myAppr && <ApprovalView d={d} onDone={upd} />}
       {!isIn && d.status === "draft" && (ed || d.can_edit) && <ApprovalStart d={d} meta={meta} onDone={upd} />}
       <div className="office-acts">
         {ed && isIn && ["registered", "assigned"].includes(d.status) && (
@@ -336,7 +347,7 @@ function DocCard({ id, meta, me, onClose, onChanged, onOpen }: { id: string; met
       </div>
       {(isIn || d.kind === "out") && (ed || d.can_edit) && !["closed", "cancelled"].includes(d.status) &&
         <LinkPicker d={d} onPick={(b) => api.patch<Doc>(`/api/office/docs/${d.id}`, b).then(upd)} />}
-      {["order", "directive", "internal", "memo"].includes(d.kind) && ["signed", "in_force", "closed"].includes(d.status) && <Acks d={d} meta={meta} ed={ed} onDone={upd} />}
+      {!myAck && ["order", "directive", "internal", "memo"].includes(d.kind) && ["signed", "in_force", "closed"].includes(d.status) && <Acks d={d} meta={meta} ed={ed} onDone={upd} />}
       {reply && <NewReply parent={d} meta={meta} onDone={(x) => { setReply(false); onOpen(x.id); onChanged(); }} onCancel={() => setReply(false)} />}
       {isIn && (ed || d.body) && <InText d={d} ed={ed} onSave={(body) => api.patch<Doc>(`/api/office/docs/${d.id}`, { body }).then(upd)} />}
       {meta.ai.enabled && <OfficeAi d={d} letterTypes={meta.letter_types} roles={meta.roles} onPatch={(b) => api.patch<Doc>(`/api/office/docs/${d.id}`, b).then(upd)} />}

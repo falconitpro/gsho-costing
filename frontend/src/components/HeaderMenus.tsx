@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { LATEST, seenNews } from "../whatsNew";
 import { api } from "../api";
 import type { Me } from "../types";
 
@@ -24,8 +25,10 @@ function Dropdown({ button, label, children, className = "" }: { button: ReactNo
 }
 
 /** «?» в шапке: «Помощник» и «Поддержка» в одном месте; точка — есть новые ответы поддержки. */
-export function HelpMenu({ canAssistant, onAssistant }: { canAssistant: boolean; onAssistant: () => void }) {
+export function HelpMenu({ userId, canAssistant, onAssistant }: { userId: string; canAssistant: boolean; onAssistant: () => void }) {
   const [n, setN] = useState(0);
+  const [fresh, setFresh] = useState(() => seenNews(userId) < LATEST);   // D-141: непрочитанные заметки к обновлению
+  useEffect(() => { const f = () => setFresh(seenNews(userId) < LATEST); window.addEventListener("gsho:news-seen", f); return () => window.removeEventListener("gsho:news-seen", f); }, [userId]);
   const nav = useNavigate();
   useEffect(() => {
     const poll = () => api.bg<{ unread: number }>("/api/support/meta").then((r) => setN(r.unread)).catch(() => undefined);
@@ -35,8 +38,9 @@ export function HelpMenu({ canAssistant, onAssistant }: { canAssistant: boolean;
   }, []);
   return (
     <Dropdown label={`Помощь${n ? `, новых ответов поддержки: ${n}` : ""}`} className="hm-help"
-      button={<><span className="hm-q" aria-hidden>?</span>{n > 0 && <span className="hm-dot">{n > 99 ? "99+" : n}</span>}</>}>
+      button={<><span className="hm-q" aria-hidden>?</span>{n > 0 ? <span className="hm-dot">{n > 99 ? "99+" : n}</span> : fresh && <span className="hm-dot">•</span>}</>}>
       {(close) => <>
+        <button type="button" role="menuitem" onClick={() => { close(); nav("/whats-new"); }}>Что изменилось{fresh && <span className="badge accent hm-new">новое</span>}<small>заметки к обновлениям системы</small></button>
         {canAssistant && <button type="button" role="menuitem" onClick={() => { close(); onAssistant(); }}>Помощник<small>вопрос по CRM, поиск по сделкам</small></button>}
         <button type="button" role="menuitem" onClick={() => { close(); nav(`/support?from=${encodeURIComponent(window.location.pathname + window.location.search)}`); }}>
           Поддержка{n > 0 && <span className="badge accent" style={{ marginLeft: 6 }}>{n}</span>}<small>сообщить о проблеме, мои обращения</small></button>

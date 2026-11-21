@@ -141,7 +141,7 @@ export default function TechParamsTable({ dealId, position, canEdit, canDelete =
     <div>
       <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
         <span className="muted"><b>{designation(position)}</b> · {fname(factories.find((f) => f.id === position.factory_id))} · Технические характеристики: заполнено значений {filled} из {rows.length}
-          {missing.length > 0 && <> · <span className="badge bad">не заполнены обязательные: {missing.slice(0, 4).join(", ")}{missing.length > 4 ? " …" : ""}</span></>}
+          {missing.length > 0 && <> · <span className="badge warn">не заполнены обязательные: {missing.slice(0, 4).join(", ")}{missing.length > 4 ? " …" : ""}</span></>}
           {rows.some((r) => r.translation_status === "machine") && <> · <span className="badge warn">машинный перевод — проверьте</span></>}
           {rows.some((r) => r.req_status === "mismatch") && <> · <span className="badge" style={{ background: "#ffe3e3" }}>не соответствует требованию: {rows.filter((r) => r.req_status === "mismatch").length}</span></>}</span>
         {canEdit && (

@@ -307,7 +307,7 @@ export function SupportAdmin() {
     api.get<Record<string, number | string>>("/api/support/admin/metrics").then(setM).catch(() => undefined);
   }, [f]);
   useEffect(() => { if (!open) load(); }, [load, open]);
-  if (meta && !meta.is_admin) return <div className="card"><div className="alert error">Очередь поддержки доступна специалистам поддержки.</div></div>;
+  if (meta && !meta.is_admin) return <div className="card"><div className="alert info">Очередь поддержки доступна специалистам поддержки.</div></div>;
   if (open) return <TicketView id={open} admin onBack={() => nav("/support/admin")} />;
   return (
     <div className="card">

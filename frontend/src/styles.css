@@ -330,7 +330,7 @@ details.poa-section summary::-webkit-details-marker { color: var(--muted); }
 .deals-kind { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "t c" "s c"; align-items: center; text-align: left; padding: 12px 14px;
   border: 1px solid var(--line); border-left: 4px solid transparent; border-radius: 10px; background: #fff; cursor: pointer; color: var(--ink); }
 .deals-kind:hover { border-color: var(--accent); }
-.deals-kind.active { border-left-color: var(--accent); background: var(--accent-soft, #fff1f1); }
+.deals-kind.active { border-left-color: var(--accent); background: var(--accent-soft); }
 .deals-kind-title { grid-area: t; font-size: 17px; font-weight: 700; }
 .deals-kind-sub { grid-area: s; font-size: 12px; color: var(--muted); }
 .deals-kind-count { grid-area: c; font-size: 20px; font-weight: 700; color: var(--accent); padding-left: 8px; }
@@ -1010,3 +1010,45 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .office-guide h3 { margin: 12px 0 4px; }
 .linked-letters { margin-top: 14px; }
 .office-pick { display: grid; gap: 4px; margin-top: 6px; max-height: 220px; overflow: auto; }
+/* Телефон: Канцелярия без горизонтальной прокрутки страницы — журнал карточками, прочие таблицы прокручиваются внутри себя */
+@media (max-width: 760px) {
+  .office-table { display: block; overflow-x: auto; max-width: 100%; }
+  .office-journal, .office-journal tbody { display: block; overflow: visible; }
+  .office-journal thead { display: none; }
+  .office-journal tr { display: flex; flex-wrap: wrap; gap: 2px 10px; padding: 10px 4px; border-bottom: 1px solid var(--line); }
+  .office-journal td { display: block; border: 0; padding: 0; font-size: 13px; }
+  .office-journal td:nth-child(4) { order: -1; flex-basis: 100%; font-size: 15px; }
+  .office-journal td:nth-child(3), .office-journal td:nth-child(6) { color: var(--muted); }
+  .office-journal td:nth-child(7):not(:empty)::before { content: "срок "; color: var(--muted); }
+  .office-journal tr.late td, .office-journal tr.sel td { background: none; }
+  .office-journal tr.late { background: var(--accent-soft); }
+  .office-bar { flex-wrap: wrap; }
+  .office-export { flex-wrap: wrap; }
+  .office-card .row, .office-acts { flex-wrap: wrap; }
+  .office-card a, .office-card .office-body { overflow-wrap: anywhere; }
+}
+/* Телефон: показатели рабочего места — в две колонки, компактно (5 карточек занимали полэкрана) */
+@media (max-width: 760px) {
+  .wp-kpis { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .wp-kpi { padding: 8px 10px; border-radius: 10px; }
+  .wp-kpi b { font-size: 20px; }
+  .wp-kpi small, .wp-kpi span { font-size: 11px; }
+}
+.office-brief { margin: 4px 0 8px; overflow-wrap: anywhere; }
+.office-brief a { margin-left: 6px; }
+.dp-visa { display: grid; gap: 6px; width: 100%; box-sizing: border-box; min-width: 0; }
+.dp-visa input { width: 100%; box-sizing: border-box; min-width: 0; }
+.dp-visa .row { gap: 8px; align-items: center; flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .dp-act:has(.dp-visa) { width: auto; margin-left: 0; display: block; }
+  .dp-act .dp-visa { background: #fff; padding: 8px; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+  .dp-act .dp-visa .btn { width: auto; flex: 1; min-height: 42px; box-shadow: none; }
+  .dp-act .dp-visa a { flex-basis: 100%; text-align: center; font-size: 13px; }
+}
+/* D-141: «Что изменилось» */
+.news-entry h2 { margin-top: 0; font-size: 17px; }
+.news-entry ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.news-strip { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--accent-soft); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 8px 0 12px; font-size: 13px; }
+.news-strip span { flex: 1; min-width: 200px; }
+.news-x { background: none; border: 0; cursor: pointer; font-size: 14px; color: var(--muted); }
+.hm-new { margin-left: 6px; }

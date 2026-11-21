@@ -6,6 +6,7 @@ import { ActionMenu, Crumbs, EntryGrid, useQueryParam, type Entry } from "../com
 import { api } from "../api";
 import type { Me } from "../types";
 import { askConfirm } from "../components/Dialogs";
+import { LATEST, NEWS, markNewsSeen, seenNews } from "../whatsNew";
 
 // Рабочее место — главная страница под роль. Каркас «командный центр»: показатели → «главное сейчас» → три колонки
 // (сегодня и задачи · сделки, согласования, деньги · внимание, уведомления, сроки, команда). Набор блоков — по роли,
@@ -388,7 +389,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
     entries.push({ key: "legal", title: "Юридический блок", to: "/legal",
       stats: [
         { value: L.contracts_visas, label: "ждут вашей визы", tone: L.contracts_visas ? "warn" : "", to: "/legal?tab=contracts" },
-        { value: L.contracts_no_scan, label: "договоров без скана", tone: L.contracts_no_scan ? "bad" : "", to: "/legal?tab=contracts" },
+        { value: L.contracts_no_scan, label: "договоров без скана", tone: L.contracts_no_scan ? "warn" : "", to: "/legal?tab=contracts" },
         { value: L.claims_open ?? 0, label: "претензий в работе", to: "/legal?tab=claims" },
         ...(L.claims_answer_overdue ? [{ value: L.claims_answer_overdue, label: "истёк срок ответа", tone: "bad" as const, to: "/legal?tab=claims" }] : []),
       ],
@@ -400,17 +401,19 @@ export default function WorkplacePage({ me }: { me: Me }) {
   // вход без видимых данных (блоки направления скрыты в настройках) — с пояснением, что внутри
   const HINTS: Record<string, string> = { deals: "реестр сделок и заявок на запчасти, карточки, расчёты и исполнение", tasks: "задачи и поручения по сделкам, сроки" };
   mainEntries.forEach((e) => { if (!e.stats?.length && !e.top) e.hint = HINTS[e.key]; });
+  const narrow = typeof window !== "undefined" && window.matchMedia?.("(max-width: 760px)").matches;   // телефон: «Задачи» (что сделать) — первыми
   return (
     <div className="wp" ref={rootRef}>
       {head}
       {me.roles.some((r) => r.code === "gd") && <DownloadRequests />}
+      <NewsStrip me={me} />
       {kpiRow}
       {on("focus") && d.focus && (
         <div className="lv-alert" style={{ borderLeftColor: TONE_DOT[d.focus.tone] || "var(--accent)" }}>
           <div style={{ minWidth: 0 }}><div className="wp-h" style={{ color: "var(--accent)" }}>Главное сейчас</div><div className="t">{d.focus.title}</div><div className="muted" style={{ fontSize: 13 }}>{d.focus.text}</div></div>
           <button className="btn" onClick={() => nav(d.focus!.url)}>{d.focus.action}</button>
         </div>)}
-      {mainEntries.length > 0 && <EntryGrid className="main" entries={mainEntries} />}
+      {mainEntries.length > 0 && <EntryGrid className="main" entries={narrow ? [...mainEntries].sort((a) => (a.key === "tasks" ? -1 : 0)) : mainEntries} />}
       <EntryGrid entries={entries} />
       <div className="lv-views"><Link to="/?w=all">Все блоки рабочего места в полном виде</Link><Link to="/settings?s=workplace">Настроить блоки</Link></div>
     </div>
@@ -480,4 +483,19 @@ function Setup({ d, onClose, onSaved }: { d: Data; onClose?: () => void; onSaved
           </div>)}
       </div>
     </div>);
+}
+
+
+/** D-141: после обновления — одна строка «Обновление от …» со ссылкой на «Что изменилось»; закрывается крестиком или переходом. */
+function NewsStrip({ me }: { me: Me }) {
+  const [show, setShow] = useState(() => seenNews(me.id) < LATEST);
+  if (!show) return null;
+  const n = NEWS[0];
+  return (
+    <div className="news-strip" role="status">
+      <span><b>Обновление от {new Date(n.date).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}:</b> {n.lead}</span>
+      <Link to="/whats-new" onClick={() => markNewsSeen(me.id)}>Что изменилось →</Link>
+      <button type="button" className="news-x" aria-label="Скрыть" onClick={() => { markNewsSeen(me.id); setShow(false); }}>✕</button>
+    </div>
+  );
 }
