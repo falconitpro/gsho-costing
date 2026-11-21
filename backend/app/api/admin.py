@@ -722,6 +722,13 @@ def app_errors_list(status: str = "open", db: Session = Depends(get_db), user: C
             "open": db.scalar(select(func.count()).select_from(AppError).where(AppError.resolved_at.is_(None))) or 0}
 
 
+@router.get("/jobs")
+def jobs_status(user: CurrentUser = Depends(_errors_viewer)):
+    """D-143: фоновые задания — кто выполняет (worker / процесс API), последний цикл, задания с ошибкой."""
+    from .. import jobs
+    return jobs.status()
+
+
 @router.post("/app-errors/{error_id}/resolve")
 def app_error_resolve(error_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_errors_viewer)):
     """«Исправлено»: запись уходит в исправленные; если ошибка повторится — откроется снова и придёт уведомление."""

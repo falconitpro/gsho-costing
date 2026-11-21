@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import date
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,200 +17,24 @@ log = logging.getLogger("gsho")
 settings = get_settings()
 
 
-SCANNER_START_GRACE_S = 600   # после старта антивирус 1–2 мин загружает базы; раньше проверять — ложная тревога (D-068)
-
-
-async def _scanner_check(delay: float) -> None:
-    """Доступность и свежесть баз антивируса (docs/operations/04 §8.2); сетевой опрос и перепроверка файлов — в отдельном потоке."""
-    if delay:
-        await asyncio.sleep(delay)
-
-    def run() -> None:
-        from .db import SessionLocal
-        from .services import scanner_status
-        with SessionLocal() as db:
-            scanner_status.hourly(db, settings)
-    try:
-        await asyncio.to_thread(run)
-    except Exception as e:   # pragma: no cover
-        log.warning("scanner check failed: %s", e)
-        _bg_error("scanner check", e)
-
-
 def _bg_error(job: str, exc: BaseException) -> None:
     """D-117: сбой фонового задания — в «Ошибки системы» (администратор и ЗГД получают уведомление)."""
     from .services.app_errors import record_background
     record_background(job, exc)
 
 
-async def _daily_jobs() -> None:
-    """Фоновые задания: курс ЦБ ежедневно, проверка просрочек раз в час.
-
-    В проде — отдельный воркер очереди (arq/Celery) и cron; здесь — простой цикл в процессе API.
-    """
-    from sqlalchemy import select
-    from . import adapters
-    from .db import SessionLocal
-    from .models import FxRate, IntegrationLog
-    _first_done = False
+async def _jobs_loop() -> None:
+    """D-143: фоновые задания выполняет отдельный процесс (app/worker.py). Пока он не отмечается (старый сервер,
+    worker не запущен) — цикл выполняет процесс API; блокировка в базе не даёт выполнить цикл дважды."""
+    from . import jobs
     while True:
         try:
-            with SessionLocal() as db:
-                today = date.today()
-                have_today = set(db.scalars(select(FxRate.currency).where(FxRate.on == today, FxRate.source == "cbr")).all())
-                from .adapters.fx_source import SUPPORTED as FX_CODES
-                if not set(FX_CODES) <= have_today:
-                    try:
-                        rates = await asyncio.to_thread(adapters.fx_source().daily, today)
-                        for cur, rate in rates.items():
-                            if cur != "RUB" and cur not in have_today:
-                                db.add(FxRate(on=today, currency=cur, rate=rate, source="cbr"))
-                        db.add(IntegrationLog(system="cbr", operation="daily", ok=True, details={"on": str(today)}))
-                    except Exception as e:
-                        db.add(IntegrationLog(system="cbr", operation="daily", ok=False, details={"error": str(e)[:300]}))
-                    db.commit()
-                # история курсов ЦБ для тренда и сезонности прогноза: если её почти нет — догружаем за 5 лет (один раз)
-                import sys
-                from datetime import timedelta
-                for cur in (() if "pytest" in sys.modules else FX_CODES):   # в тестах — без сети
-                    n = len(db.scalars(select(FxRate.id).where(FxRate.currency == cur, FxRate.source == "cbr",
-                                                              FxRate.on >= today - timedelta(days=365 * 5))).all())
-                    if n >= 200:
-                        continue
-                    try:
-                        pts = await asyncio.to_thread(adapters.fx_source().history, cur, today - timedelta(days=365 * 5), today)
-                        have = {r for r in db.scalars(select(FxRate.on).where(FxRate.currency == cur, FxRate.source == "cbr")).all()}
-                        for d, r in pts:
-                            if d not in have:
-                                db.add(FxRate(on=d, currency=cur, rate=r, source="cbr"))
-                        db.add(IntegrationLog(system="cbr", operation="history", ok=True, details={"currency": cur, "points": len(pts)}))
-                    except Exception as e:
-                        db.add(IntegrationLog(system="cbr", operation="history", ok=False, details={"currency": cur, "error": str(e)[:300]}))
-                    db.commit()
+            if not await asyncio.to_thread(jobs.worker_alive):
+                await asyncio.to_thread(jobs.run_cycle, "api")
         except Exception as e:   # pragma: no cover
-            log.warning("daily job failed: %s", e)
-            _bg_error("daily job", e)
-        try:   # запчасти: нормативные сроки (КП клиенту, ответ и подтверждение поставщика, просроченная поставка)
-            from .services.parts_sla import check as check_parts_sla
-            with SessionLocal() as db:
-                if check_parts_sla(db):
-                    db.commit()
-        except Exception as e:   # pragma: no cover
-            log.warning("parts SLA check failed: %s", e)
-            _bg_error("parts SLA check", e)
-        try:   # запчасти: напоминания менеджерам о ТО машин клиентов
-            from .api.parts_fleet import check_reminders
-            with SessionLocal() as db:
-                if check_reminders(db):
-                    db.commit()
-        except Exception as e:   # pragma: no cover
-            log.warning("parts TO reminders failed: %s", e)
-            _bg_error("parts TO reminders", e)
-        try:   # просроченные задачи — уведомления исполнителю и КД (раз в час, по одной на задачу)
-            from .services.deal_service import check_overdue_tasks
-            with SessionLocal() as db:
-                if check_overdue_tasks(db):
-                    db.commit()
-        except Exception as e:   # pragma: no cover
-            log.warning("overdue check failed: %s", e)
-            _bg_error("overdue check", e)
-        try:   # D-101: уведомления о выполненных задачах — прочитаны (в том числе накопленные до этого правила)
-            from .services.notification_kinds import close_done_task_notices
-            with SessionLocal() as db:
-                if close_done_task_notices(db):
-                    db.commit()
-        except Exception as e:   # pragma: no cover
-            log.warning("notification cleanup failed: %s", e)
-            _bg_error("notification cleanup", e)
-        try:   # D-133: Канцелярия — напоминания о сроках писем и эскалация после срока
-            from .services.office_watch import check as check_office
-            with SessionLocal() as db:
-                check_office(db)
-                db.commit()
-        except Exception as e:   # pragma: no cover
-            log.warning("office due watch failed: %s", e)
-            _bg_error("office due watch", e)
-        try:   # D-112: виза ФД без ответа N рабочих дней → ЗГД
-            from .services.visa_watch import escalate_fd
-            with SessionLocal() as db:
-                escalate_fd(db)
-        except Exception as e:   # pragma: no cover
-            log.warning("fd visa escalation failed: %s", e)
-            _bg_error("fd visa escalation", e)
-        try:   # черновики сделок без движения: напоминание через 3 дня, предупреждение на 30-й, архив через сутки после него
-            from .services.draft_watch import check as check_drafts
-            with SessionLocal() as db:
-                if any(check_drafts(db).values()):
-                    db.commit()
-        except Exception as e:   # pragma: no cover
-            log.warning("draft watch failed: %s", e)
-            _bg_error("draft watch", e)
-        try:   # доверенности компаний группы: напоминания за 30 и 7 дней до истечения, перевод в «срок истёк»
-            from .services.legal_poa import check_expiring
-            with SessionLocal() as db:
-                if check_expiring(db):
-                    db.commit()
-        except Exception as e:   # pragma: no cover
-            log.warning("poa expiry check failed: %s", e)
-            _bg_error("poa expiry check", e)
-        try:   # договоры: напоминания за 30 и 7 дней до окончания, автопролонгация, истечение срока
-            from .services.legal_contracts import check_expiring as check_contracts
-            with SessionLocal() as db:
-                if check_contracts(db):
-                    db.commit()
-        except Exception as e:   # pragma: no cover
-            log.warning("contracts expiry check failed: %s", e)
-            _bg_error("contracts expiry check", e)
-        try:   # претензии: напоминание за 3 дня, уведомление в 1-й день просрочки, черновик претензии на 5-й день, истёк срок ответа
-            from .services.legal_claims import ladder
-            with SessionLocal() as db:
-                if ladder(db):
-                    db.commit()
-        except Exception as e:   # pragma: no cover
-            log.warning("claims ladder failed: %s", e)
-            _bg_error("claims ladder", e)
-        try:   # пересмотр прав: напоминания в системе за 14/7/1 день и о просрочке (docs/operations/04 §6)
-            from .services.access_review import remind as remind_reviews
-            with SessionLocal() as db:
-                remind_reviews(db)
-        except Exception as e:   # pragma: no cover
-            log.warning("access review reminders failed: %s", e)
-            _bg_error("access review reminders", e)
-        try:   # помощник CRM: стирание содержимого по сроку хранения и удалённых диалогов (docs/operations/06 §7)
-            from .services import assistant as _ai
-            with SessionLocal() as db:
-                _ai.purge(db, settings)
-        except Exception as e:   # pragma: no cover
-            log.warning("assistant purge failed: %s", e)
-            _bg_error("assistant purge", e)
-        if not _first_done:
-            try:   # D-104: разово после старта — цена утверждённой версии по изменению условий контракта → в предложение
-                from .services.contract_price import repair_existing
-                with SessionLocal() as db:
-                    fixed = repair_existing(db)
-                if fixed:
-                    log.info("contract price repair: %s offers", fixed)
-                from .services.logistics_history import rebuild_once
-                with SessionLocal() as db:
-                    rebuild_once(db)
-                from .services.deal_service import repair_task_assignees
-                with SessionLocal() as db:
-                    moved = repair_task_assignees(db)
-                if moved:
-                    log.info("task assignee repair: %s tasks", moved)
-            except Exception as e:   # pragma: no cover
-                log.warning("contract price repair failed: %s", e)
-                _bg_error("contract price repair", e)
-        asyncio.create_task(_scanner_check(0 if _first_done else SCANNER_START_GRACE_S))   # D-068: после старта — через 10 мин
-        _first_done = True
-        try:   # резервные копии: перенос статуса с хоста, «нет копии дольше 26 ч», уведомления в системе (docs/operations/03 §5)
-            from .services.backup_status import refresh as refresh_backups
-            with SessionLocal() as db:
-                refresh_backups(db)
-        except Exception as e:   # pragma: no cover
-            log.warning("backup status refresh failed: %s", e)
-            _bg_error("backup status refresh", e)
-        await asyncio.sleep(3600)
+            log.warning("jobs loop failed: %s", e)
+            _bg_error("jobs loop", e)
+        await asyncio.sleep(300)
 
 
 @asynccontextmanager
@@ -227,7 +50,7 @@ async def lifespan(app: FastAPI):
     # в тестах фоновый цикл не запускается: его шаги проверяются напрямую, а запуск при каждом TestClient(app)
     # гонялся с тестами (напоминания о доверенностях успевали уйти до проверки)
     import sys
-    task = asyncio.create_task(_daily_jobs()) if settings.env != "recovery" and "pytest" not in sys.modules else None
+    task = asyncio.create_task(_jobs_loop()) if settings.env != "recovery" and "pytest" not in sys.modules else None
     yield
     if task:
         task.cancel()
@@ -293,5 +116,12 @@ async def unhandled(request: Request, exc: Exception):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "env": settings.env, "auth": settings.auth_provider, "storage": settings.storage_provider, "file_scan": settings.file_scan}
+    out = {"status": "ok", "env": settings.env, "auth": settings.auth_provider, "storage": settings.storage_provider, "file_scan": settings.file_scan}
+    try:   # D-143: фоновые задания — кто выполняет и не застряли ли (без подробностей: адрес открыт без входа)
+        from . import jobs
+        st = jobs.status()
+        out["jobs"] = {"runner": "worker" if st["worker_alive"] else "api", "stale": st["stale"], "failing": len(st["failing"])}
+    except Exception:   # noqa: BLE001 — таблицы ещё нет (до миграции 044)
+        out["jobs"] = {"runner": "unknown"}
+    return out
 

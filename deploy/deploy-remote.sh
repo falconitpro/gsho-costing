@@ -29,7 +29,7 @@ fi
 
 timeout 120 git fetch -q origin main && git reset -q --hard origin/main
 # антивирус (deploy/clamav): если владелец его уже запустил — пересобираем вместе с остальными; сам деплой его не включает
-SERVICES=(backend frontend caddy); PROFILE=()
+SERVICES=(backend worker frontend caddy); PROFILE=()   # worker — фоновые задания (D-143)
 if [ -n "$(docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile scanner ps -q clamav 2>/dev/null)" ]; then
   SERVICES+=(clamav); PROFILE=(--profile scanner)
 fi

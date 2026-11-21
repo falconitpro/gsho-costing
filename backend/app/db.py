@@ -19,6 +19,8 @@ _settings = get_settings()
 engine = create_engine(_settings.database_url, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
+from .core import money_json as _money_json  # noqa: E402,F401 — D-145: суммы в JSON-полях без «хвостов» двоичной дроби
+
 
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()

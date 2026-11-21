@@ -7,8 +7,8 @@ import type { Me } from "../types";
 
 // Сводные экраны по всем сделкам: Отгрузки (логист), Деньги (ФД), Сервис, Закупки. Один компонент, вкладка по роли.
 
-type Kind = "shipments" | "money" | "service" | "purchasing" | "rework";
-const TITLES: Record<Kind, string> = { shipments: "Отгрузки", money: "Деньги", service: "Сервис", purchasing: "Закупки", rework: "Возвраты на доработку" };
+type Kind = "shipments" | "money" | "service" | "purchasing" | "rework" | "speed";
+const TITLES: Record<Kind, string> = { shipments: "Отгрузки", money: "Деньги", service: "Сервис", purchasing: "Закупки", rework: "Возвраты на доработку", speed: "Скорость процесса" };
 const load = <T,>(k: string, d: T): T => { try { return (JSON.parse(localStorage.getItem(k) || "") as T) ?? d; } catch { return d; } };
 
 function Kpi({ v, l, bad }: { v: string | number; l: string; bad?: boolean }) {
@@ -27,6 +27,7 @@ export default function SummaryPage({ me }: { me: Me }) {
     has("service_head", "cd", "gd", "manager", "fd") && "service",
     has("purchasing", "cd", "gd", "service_head", "fd") && "purchasing",
     has("cd", "gd", "fd") && "rework",   // D-100: возвраты по причинам из справочника
+    has("cd", "gd", "fd") && "speed",    // D-144: время на этапах сделки
   ].filter(Boolean)) as Kind[];
   const pref = load<Kind>("gsho.summaryKind", has("logistician") ? "shipments" : has("fd") ? "money" : has("service_head") ? "service" : has("purchasing") ? "purchasing" : kinds[0]);
   // вид сводки — в адресе (?kind=…): «Назад» возвращает прежний вид, ссылка открывает нужный; без параметра — запомненный выбор
@@ -38,7 +39,7 @@ export default function SummaryPage({ me }: { me: Me }) {
   const [loaded, setLoaded] = useState<{ kind: Kind; data: Record<string, unknown> } | null>(null);
   const data = loaded && loaded.kind === kind ? loaded.data : null;
   const [err, setErr] = useState("");
-  useEffect(() => { setErr(""); if (kind) api.get<Record<string, unknown>>(kind === "rework" ? "/api/reports/rework" : `/api/summary/${kind}`).then((d) => setLoaded({ kind, data: d })).catch((e) => setErr((e as Error).message)); }, [kind]);
+  useEffect(() => { setErr(""); if (kind && kind !== "speed") api.get<Record<string, unknown>>(kind === "rework" ? "/api/reports/rework" : `/api/summary/${kind}`).then((d) => setLoaded({ kind, data: d })).catch((e) => setErr((e as Error).message)); }, [kind]);
   if (!kinds.length) return <div className="card muted">Сводные экраны для вашей роли не предусмотрены.</div>;
   // D-130: у кого открыт раздел «Финансы» — «Деньги» там; остальным (КД с финансовой аналитикой) — сводка на общем сервисе
   if (kind === "money" && (me.perms?.finance_section ?? 0) >= 1) return <Navigate to="/finance?tab=overview" replace />;
@@ -51,7 +52,8 @@ export default function SummaryPage({ me }: { me: Me }) {
         {kinds.length > 1 && <div className="tabs" style={{ margin: 0 }}>{kinds.map((k) => <button key={k} className={kind === k ? "active" : ""} onClick={() => setKind(k)}>{TITLES[k]}</button>)}</div>}
       </div>
       {err && <div className="alert error">{err}</div>}
-      {!data && !err && <div className="muted">Загружаю…</div>}
+      {kind === "speed" && <Speed />}
+      {!data && !err && kind !== "speed" && <div className="muted">Загружаю…</div>}
       {data && kind === "shipments" && <Shipments data={data} t={t} />}
       {data && kind === "money" && <Money data={data} t={t} />}
       {data && kind === "service" && <Service data={data} t={t} />}
@@ -281,4 +283,63 @@ function Rework({ data }: { data: ReworkData }) {
         </div>
       </div>
     </>);
+}
+
+
+type SpeedStage = { status: string; title: string; who: string; passes: number; median_h: number | null; p80_h: number | null; total_h: number; now: number;
+  now_longest: { deal_id: string; number: string; hours: number }[] };
+type SpeedData = { days: number; since: string; stages: SpeedStage[]; bottleneck: string | null; rework_deals: number; rework_rounds: number;
+  end_to_end: { key: string; title: string; deals: number; median_h: number | null; p80_h: number | null }[];
+  people: { user_id: string; name: string; done: number; median_h: number | null; on_time_pct: number | null; open: number; overdue: number }[] };
+
+const dur = (h: number | null | undefined) => (h == null ? "—" : h < 1 ? "< 1 ч" : h < 48 ? `${Math.round(h)} ч` : `${(h / 24).toFixed(h < 240 ? 1 : 0).replace(".", ",")} дн.`);
+
+/** D-144: «Скорость процесса» — где сделки ждут дольше всего и у кого (КД, ФД, ЗГД). */
+function Speed() {
+  const [days, setDays] = useState(90);
+  const [d, setD] = useState<SpeedData | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => { setD(null); api.get<SpeedData>(`/api/reports/speed?days=${days}`).then(setD).catch((e) => setErr((e as Error).message)); }, [days]);
+  if (err) return <div className="alert error">{err}</div>;
+  if (!d) return <div className="muted">Считаю…</div>;
+  const max = Math.max(1, ...d.stages.map((s) => s.p80_h || 0));
+  const bn = d.stages.find((s) => s.status === d.bottleneck);
+  return (
+    <div className="speed">
+      <div className="row speed-head">
+        <span className="muted">Время на этапах сделки по истории смен статуса; период — этапы, завершённые за последние</span>
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))}>{[30, 90, 180, 365].map((x) => <option key={x} value={x}>{x} дней</option>)}</select>
+      </div>
+      {bn && bn.total_h > 0 && <div className="alert warn">Дольше всего сделки ждут на этапе <b>«{bn.title}»</b> ({bn.who}): обычно {dur(bn.median_h)}, у каждой пятой — дольше {dur(bn.p80_h)}; за период — {dur(bn.total_h)} суммарно по {bn.passes} проходам.</div>}
+      <div className="speed-e2e">{d.end_to_end.map((e) => (
+        <div key={e.key} className="speed-kpi"><b>{dur(e.median_h)}</b><span>{e.title}</span><small>обычно · у 80 % — до {dur(e.p80_h)} · сделок: {e.deals}</small></div>))}
+        <div className="speed-kpi"><b>{d.rework_rounds}</b><span>возвратов на доработку</span><small>в {d.rework_deals} сделках</small></div>
+      </div>
+      <div className="card">
+        <h2>Этапы</h2>
+        <table className="tbl speed-tbl">
+          <thead><tr><th>Этап</th><th>Кто</th><th className="num">Проходов</th><th className="num">Обычно</th><th className="num">У 80 % — до</th><th>Распределение</th><th>Сейчас на этапе</th></tr></thead>
+          <tbody>{d.stages.map((s) => (
+            <tr key={s.status} className={s.status === d.bottleneck ? "speed-bn" : ""}>
+              <td><b>{s.title}</b></td><td className="muted">{s.who}</td><td className="num">{s.passes || ""}</td>
+              <td className="num">{dur(s.median_h)}</td><td className="num">{dur(s.p80_h)}</td>
+              <td><svg className="speed-bar" viewBox="0 0 100 10" preserveAspectRatio="none" aria-hidden><rect className="bg" width="100" height="10" rx="5" />
+                <rect className="p80" width={((s.p80_h || 0) / max) * 100} height="10" rx="5" /><rect className="med" width={((s.median_h || 0) / max) * 100} height="10" rx="5" /></svg></td>
+              <td>{s.now > 0 && <>{s.now}{s.now_longest.length > 0 && <span className="muted"> · дольше всех: {s.now_longest.slice(0, 3).map((x, i) => <span key={x.deal_id}>{i ? ", " : ""}<Link to={`/deals/${x.deal_id}`}>{x.number}</Link> {dur(x.hours)}</span>)}</span>}</>}</td>
+            </tr>))}</tbody>
+        </table>
+        <p className="muted speed-note">«Обычно» — медиана: половина сделок проходит этап быстрее. «КП отправлено» — время решения клиента, в узкое место не входит. Исполнение контракта не учитывается.</p>
+      </div>
+      <div className="card">
+        <h2>Задачи по сотрудникам</h2>
+        <table className="tbl">
+          <thead><tr><th>Сотрудник</th><th className="num">Выполнено</th><th className="num">Обычно на задачу</th><th className="num">В срок</th><th className="num">Открыто</th><th className="num">Просрочено</th></tr></thead>
+          <tbody>{d.people.map((p) => (
+            <tr key={p.user_id}><td>{p.name}</td><td className="num">{p.done || ""}</td><td className="num">{dur(p.median_h)}</td>
+              <td className="num">{p.on_time_pct != null ? `${p.on_time_pct} %` : "—"}</td><td className="num">{p.open || ""}</td>
+              <td className={"num" + (p.overdue ? " txt-bad" : "")}>{p.overdue || ""}</td></tr>))}</tbody>
+        </table>
+      </div>
+    </div>
+  );
 }

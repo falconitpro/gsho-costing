@@ -6,6 +6,34 @@ type Row = { id: string; source: string; kind: string; message: string; where: s
   release: string; first_seen: string | null; last_seen: string | null; resolved_at: string | null; resolved_by: string };
 
 /** D-117: «Настройки → Ошибки системы» — необработанные ошибки сервера и страниц. Видят администратор и ЗГД. */
+type Jobs = { worker_alive: boolean; last_cycle_ok: string | null; stale: boolean; failing: string[];
+  jobs: { job: string; last_ok: string | null; last_error: string; error_at: string | null; duration_ms: number | null }[] };
+const JOB_TITLES: Record<string, string> = { "fx rates": "курсы ЦБ", "parts SLA check": "запчасти: сроки", "parts TO reminders": "запчасти: ТО машин",
+  "overdue check": "просроченные задачи", "notification cleanup": "уведомления", "office due watch": "Канцелярия: сроки и ознакомление",
+  "fd visa escalation": "виза ФД → ЗГД", "draft watch": "черновики сделок", "poa expiry check": "доверенности", "contracts expiry check": "договоры: сроки",
+  "claims ladder": "претензии", "access review reminders": "пересмотр прав", "assistant purge": "помощник: срок хранения",
+  "backup status refresh": "резервные копии", "one-time data repairs": "разовые исправления данных", "scanner check": "антивирус" };
+
+/** D-143: состояние фоновых заданий — над списком ошибок. */
+function JobsBox() {
+  const [j, setJ] = useState<Jobs | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { api.get<Jobs>("/api/admin/jobs").then(setJ).catch(() => setJ(null)); }, []);
+  if (!j) return null;
+  const dt = (s: string | null) => (s ? new Date(s).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
+  return (
+    <div className={"alert " + (j.stale ? "error" : j.failing.length ? "warn" : "ok") + " jobs-box"}>
+      <div><b>Фоновые задания</b> (напоминания, курсы ЦБ, сроки писем, визы): {j.stale ? "не выполнялись больше 2 часов" : `последний цикл ${dt(j.last_cycle_ok)}`}
+        {" · "}{j.worker_alive ? "выполняет отдельный процесс" : "выполняет основной процесс (отдельный не запущен)"}
+        {j.failing.length > 0 && <> · с ошибкой: {j.failing.map((x) => JOB_TITLES[x] || x).join(", ")}</>}
+        {" "}<a href="#" onClick={(e) => { e.preventDefault(); setOpen(!open); }}>{open ? "скрыть" : "по заданиям"}</a></div>
+      {open && <table className="tbl jobs-tbl"><tbody>{j.jobs.map((x) => (
+        <tr key={x.job}><td>{JOB_TITLES[x.job] || x.job}</td><td>{dt(x.last_ok)}</td><td className="muted">{x.duration_ms != null ? `${(x.duration_ms / 1000).toFixed(1)} с` : ""}</td>
+          <td className={x.last_error ? "txt-bad" : "muted"}>{x.last_error ? `${dt(x.error_at)}: ${x.last_error}` : "ок"}</td></tr>))}</tbody></table>}
+    </div>
+  );
+}
+
 export default function AppErrorsPage() {
   const [status, setStatus] = useState<"open" | "resolved">("open");
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -20,6 +48,7 @@ export default function AppErrorsPage() {
   }
   return (
     <div className="card">
+      <JobsBox />
       <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div className="seg" role="group" aria-label="Ошибки">
           <button type="button" className={status === "open" ? "on" : ""} onClick={() => setStatus("open")}>Открытые</button>

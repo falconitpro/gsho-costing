@@ -616,3 +616,13 @@ def rework_report(date_from: Optional[date] = None, date_to: Optional[date] = No
     """Возвраты на доработку: по причинам, по блокам, сделки с повторными кругами, последние возвраты (КД, ФД, ЗГД)."""
     from ..services import rework_reasons as rr
     return rr.report(db, date_from, date_to)
+
+
+
+@router.get("/reports/speed")
+def speed_report(days: int = 90, db: Session = Depends(get_db), user: CurrentUser = Depends(_REWORKERS)):
+    """D-144: «Скорость процесса» — время на этапах сделки, узкое место, сквозные сроки, задачи по сотрудникам (КД, ФД, ЗГД)."""
+    from ..services import process_speed
+    if days not in (30, 90, 180, 365):
+        days = 90
+    return process_speed.report(db, days)
