@@ -490,6 +490,14 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
     office_items = [{"id": d.id, "number": d.number, "subject": d.subject, "counterparty": d.counterparty, "due_on": d.due_on,
                      "verb": "Ответить на письмо" if d.kind == "in" else "Исполнить"}
                     for d in orows if d.executor_id == user.id or user.id in (d.co_executor_ids or [])][:50]
+    from ..services import office as office_svc   # D-129: документы, ждущие моего согласования
+    for d in db.scalars(select(OfficeDoc).where(OfficeDoc.status == "review", OfficeDoc.reviewer_id == user.id)).all():   # D-130
+        office_items.append({"id": d.id, "number": d.number, "subject": d.subject, "counterparty": d.counterparty, "due_on": d.due_on,
+                             "verb": "Рассмотреть, наложить резолюцию"})
+    for d in db.scalars(select(OfficeDoc).where(OfficeDoc.status == "approval")).all():
+        if office_svc.is_approver(db, d, user):
+            office_items.append({"id": d.id, "number": "", "subject": d.subject, "counterparty": office_svc.KINDS.get(d.kind, ""), "due_on": None,
+                                 "verb": "Согласовать"})
     todo = _todo(user, today, tasks, approvals, open_deals, events, idle, questions, office_items)
 
     # ---------------- раскладка

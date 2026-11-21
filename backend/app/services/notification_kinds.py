@@ -19,7 +19,7 @@ from ..models import NotificationLog, Task
 INFO_EVENTS = frozenset({"visa_escalated", 
     "approved", "won", "execution", "offers_selected", "deal_archived", "deal_deleted", "draft_auto_archived", "legal_doc",
     "mirror_offer", "mirror_changed", "parts_eta", "parts_receipt", "parts_margin", "markup_policy", "file_download_decision",
-    "support_resolved", "security", "factory_decision", "user_change_decision", "test", "task_overdue_team", "feed_answer",
+    "support_resolved", "security", "factory_decision", "user_change_decision", "test", "task_overdue_team", "feed_answer", "office_approval_result",
 })
 TASK_EVENTS = ("task", "task_new", "task_overdue", "task_overdue_team", "rework")
 STAGE_EVENTS = ("visa_required", "calc_ready", "rework", "draft_stale", "draft_archive_warn", "self_approval", "negotiation_below_threshold")

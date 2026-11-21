@@ -2467,3 +2467,35 @@ class OfficeDoc(TimestampMixin, Base):
     files: Mapped[list[dict]] = mapped_column(JSONType, default=list)  # {id, name, size, sha256, kind: original | scan | attachment | draft, at, by}
     history: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     created_by: Mapped[Optional[str]] = mapped_column(String(36))
+    # D-129: согласование перед подписанием — {route_id, name, mode: seq | par, round, started_at, started_by, steps: [{id, user_id, role, title,
+    # status: waiting | pending | approved | rejected, by, comment, at}]}
+    approval: Mapped[dict] = mapped_column(JSONType, default=dict)
+    # D-129: реквизиты и комментарии
+    comments: Mapped[list[dict]] = mapped_column(JSONType, default=list)      # [{id, by, text, at}] — обсуждение документа
+    note: Mapped[str] = mapped_column(Text, default="")                      # примечание делопроизводителя (видно в журнале)
+    urgent: Mapped[bool] = mapped_column(Boolean, default=False)
+    confidential: Mapped[bool] = mapped_column(Boolean, default=False)     # видят делопроизводитель, ЗГД, исполнитель, согласующие
+    needs_reply: Mapped[bool] = mapped_column(Boolean, default=True)       # входящее: требует ответа
+    pages: Mapped[Optional[int]] = mapped_column(Integer)                    # листов в основном документе
+    attachments_count: Mapped[Optional[int]] = mapped_column(Integer)        # приложений (листов / документов)
+    address: Mapped[str] = mapped_column(String(512), default="")            # адрес или email адресата / отправителя
+    tracking: Mapped[str] = mapped_column(String(128), default="")           # реквизит источника / отправки: трек, № накладной, № в ЭДО, e-mail, кто передал (D-131)
+    delivered_on: Mapped[Optional[date]] = mapped_column(Date)               # исходящее: вручено адресату
+    # D-130: рассмотрение — руководитель накладывает резолюцию (исполнитель, соисполнители, срок, указание) или «к сведению» / «в дело»
+    reviewer_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    resolutions: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # [{id, by, at, kind: execute | info | file, text, executor_id, co, due_on}]
+
+
+class OfficeRoute(TimestampMixin, Base):
+    """Типовая схема согласования (ведёт ЗГД): для каких документов, порядок, шаги (сотрудник или роль)."""
+    __tablename__ = "office_routes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    kinds: Mapped[list[str]] = mapped_column(JSONType, default=list)        # out | order | directive | memo | internal
+    categories: Mapped[list[str]] = mapped_column(JSONType, default=list)   # приказ: od | hr | ah; пусто — любые
+    entity_id: Mapped[Optional[str]] = mapped_column(ForeignKey("legal_entities.id"))   # пусто — все юр. лица
+    mode: Mapped[str] = mapped_column(String(8), default="seq")              # seq — по очереди | par — одновременно
+    steps: Mapped[list[dict]] = mapped_column(JSONType, default=list)       # [{user_id | role, title}]
+    required: Mapped[bool] = mapped_column(Boolean, default=False)          # без согласования не подписать
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))

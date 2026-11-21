@@ -23,13 +23,18 @@ def test_office_incoming_outgoing_flow(client):
         "entity_id": ru["id"], "kind": "in", "letter_type": "request", "channel": "email", "subject": "Запрос по высоте выработки",
         "counterparty": cl["name"], "sender_number": "15/11", "executor_id": mgr["id"], "deal_ids": [did], "deal_section": "sale"}), 201)
     y = date.today().year
-    assert d["number"] == f"РФ-ВХ-{y}-0001" and d["status"] == "assigned"
+    # D-129: без скана исполнитель не назначается — письмо ждёт файла
+    assert d["number"] == f"РФ-ВХ-{y}-0001" and d["status"] == "registered" and not d["has_scan"]
+    d = _ok(client.post(f"/api/office/docs/{d['id']}/files", headers=H(CLERK), files={"file": ("вх.pdf", b"%PDF-1.4 in", "application/pdf")}, data={"kind": "original"}), 201)
+    assert d["status"] == "assigned" and d["has_scan"]
     assert d["due_on"] == add_business_days(date.today(), 2).isoformat()
     # второе входящее — следующий номер; претензия — 5 рабочих дней
-    d2 = _ok(client.post("/api/office/docs", headers=H(CLERK), json={"entity_id": ru["id"], "kind": "in", "letter_type": "claim", "subject": "Претензия"}), 201)
+    d2 = _ok(client.post("/api/office/docs", headers=H(CLERK), json={"entity_id": ru["id"], "kind": "in", "letter_type": "claim", "channel": "post_reg", "tracking": "80085012345678", "subject": "Претензия"}), 201)
     assert d2["number"] == f"РФ-ВХ-{y}-0002" and d2["due_on"] == add_business_days(date.today(), 5).isoformat()
     # запрос госоргана без срока — нельзя
-    assert client.post("/api/office/docs", headers=H(CLERK), json={"entity_id": ru["id"], "kind": "in", "letter_type": "gov", "subject": "ФНС"}).status_code == 422
+    assert client.post("/api/office/docs", headers=H(CLERK), json={"entity_id": ru["id"], "kind": "in", "letter_type": "gov", "channel": "edo", "subject": "ФНС"}).status_code == 422
+    # D-131: источник поступления обязателен
+    assert client.post("/api/office/docs", headers=H(CLERK), json={"entity_id": ru["id"], "kind": "in", "letter_type": "request", "subject": "Без источника"}).status_code == 422
     # письмо — в ленте сделки, раздел «Продажа»
     feed = _ok(client.get(f"/api/deals/{did}/feed", headers=H(MGR), params={"section": "sale"}))
     assert any(i["kind"] == "office_in" and d["number"] in i["subject"] for i in feed["items"])

@@ -974,4 +974,19 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .office-body { white-space: pre-wrap; border-left: 3px solid var(--line); padding-left: 10px; }
 .office-files { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 6px 0; }
 .office-acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
+.office-box { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+.office-res { border-left: 3px solid var(--accent); padding-left: 10px; margin: 8px 0; display: grid; gap: 4px; }
+.office-steps { margin: 6px 0; padding-left: 20px; }
+.office-steps li.approved b { color: var(--ok); }
+.office-steps li.rejected b { color: var(--bad); }
+.office-steps li.waiting { color: var(--muted); }
+.office-steps-ed { display: grid; gap: 6px; margin: 6px 0; }
+.office-steps-ed .row { flex-wrap: nowrap; }
+.office-steps-ed .row select, .office-steps-ed .row input { width: auto; flex: 1; min-width: 0; }
+.office-comments { display: grid; gap: 4px; margin: 10px 0; }
+.office-comments .row input { flex: 1; }
+.office-form select.need { border-color: var(--bad); }
+.office-form label.row { flex-direction: row; align-items: center; gap: 6px; }
+.office-form label.row input[type=checkbox] { width: auto; }
+.office-form .row input:not([type=checkbox]) { width: auto; flex: 1; min-width: 0; }
 @media (max-width: 760px) { .office-form .grid2, .office-card .office-grid { grid-template-columns: 1fr; } }

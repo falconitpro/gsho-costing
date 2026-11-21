@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from ..core.auth import CurrentUser
 from ..core.roles import Role
 from ..core.workflow import add_business_days
-from ..models import Deal, FeedEntry, LegalEntity, OfficeCounter, OfficeDoc, OfficeSigner, User
+from ..models import Deal, FeedEntry, LegalEntity, OfficeCounter, OfficeDoc, OfficeRoute, OfficeSigner, User
 
 KINDS = {"in": "Входящее письмо", "out": "Исходящее письмо", "order": "Приказ", "directive": "Распоряжение",
          "memo": "Служебная записка", "internal": "Внутренний документ"}
@@ -23,14 +23,22 @@ ORDER_CATEGORIES = {"od": "по основной деятельности", "hr"
 INTERNAL_CATEGORIES = {"regulation": "положение", "instruction": "инструкция", "act": "акт", "protocol": "протокол", "other": "другое"}
 LETTER_TYPES = {"request": "запрос", "claim": "претензия", "complaint": "рекламация", "gov": "запрос госоргана", "notice": "уведомление",
                 "other": "прочее"}
-CHANNELS = {"email": "email", "post": "почта", "courier": "курьер", "edo": "ЭДО", "portal": "портал заказчика", "hand": "нарочно"}
-STATUSES = {"draft": "черновик", "registered": "зарегистрировано", "assigned": "назначен исполнитель", "in_work": "в работе",
+# Источник поступления (входящее) / способ отправки (исходящее) — обязательный реквизит регистрации (D-131).
+CHANNELS = {"email": "электронная почта", "edo": "ЭДО (Диадок, СБИС…)", "post": "Почта России — простое", "post_reg": "Почта России — заказное / с уведомлением",
+            "courier": "курьер / экспресс-доставка", "hand": "нарочно (лично)", "portal": "портал / личный кабинет заказчика",
+            "messenger": "мессенджер (WeCom, WhatsApp, Telegram)", "fax": "факс", "phone": "телефонограмма"}
+# Какой уточняющий реквизит просим для источника: адрес отправителя, трек-номер, номер в ЭДО и т. п.
+CHANNEL_DETAIL = {"email": "адрес e-mail отправителя", "edo": "оператор и № документа в ЭДО", "post": "", "post_reg": "почтовый идентификатор (трек)",
+                  "courier": "служба и № накладной", "hand": "кто передал", "portal": "портал / № обращения", "messenger": "мессенджер и отправитель",
+                  "fax": "номер факса", "phone": "кто передал, телефон"}
+STATUSES = {"draft": "черновик", "review": "на рассмотрении", "approval": "на согласовании", "approved": "согласовано", "registered": "зарегистрировано", "assigned": "назначен исполнитель", "in_work": "в работе",
             "signed": "подписано", "sent": "отправлено", "in_force": "действует", "closed": "закрыто", "cancelled": "отменено"}
 SIGN_METHODS = {"manual": "собственноручно", "facsimile": "факсимиле", "eds": "электронная подпись"}
+RESOLUTION_KINDS = {"execute": "к исполнению", "info": "к сведению", "file": "в дело"}
 # Сроки ответа по умолчанию (решение владельца 21.11.2026), рабочие дни по производственному календарю РФ
 DUE_DAYS = {"request": 2, "claim": 5, "complaint": 5}
 DEFAULT_PREFIX = {"ru": "РФ", "kg": "КГ", "cn": "КН"}
-OPEN = ("registered", "assigned", "in_work")
+OPEN = ("registered", "review", "assigned", "in_work")
 
 
 def journal_of(kind: str, category: str = "") -> str:
@@ -88,12 +96,26 @@ def is_editor(user: CurrentUser, doc: Optional[OfficeDoc] = None) -> bool:
     return user.can("office", 2)
 
 
+def in_route(doc: OfficeDoc, user: CurrentUser) -> bool:
+    """Согласующий (сотрудник или по роли) — видит документ, пока он в маршруте и после."""
+    roles = {r.value for r in user.roles}
+    return any(st.get("user_id") == user.id or (st.get("role") in roles) or st.get("by") == user.id for st in (doc.approval or {}).get("steps", []))
+
+
+def has_scan(doc: OfficeDoc) -> bool:
+    """D-129: у письма есть скан или исходный файл (обязателен: входящее — до назначения исполнителя, исходящее — до отправки)."""
+    return any(f.get("kind") in ("scan", "original") for f in (doc.files or []))
+
+
 def can_see(user: CurrentUser, doc: OfficeDoc) -> bool:
+    if doc.confidential and not (user.can("office", 2) or user.id in (doc.executor_id, doc.created_by) or user.id in (doc.co_executor_ids or [])
+                                 or in_route(doc, user)):
+        return False
     if doc.kind == "order" and doc.category == "hr":
-        return user.can("office_hr") or user.id in (doc.executor_id, doc.created_by)
+        return user.can("office_hr") or user.id in (doc.executor_id, doc.created_by) or in_route(doc, user)
     if user.can("office"):
         return True
-    return user.id in (doc.executor_id, doc.created_by) or user.id in (doc.co_executor_ids or [])
+    return user.id in (doc.executor_id, doc.created_by, doc.reviewer_id) or user.id in (doc.co_executor_ids or []) or in_route(doc, user)
 
 
 def signer_ok(s: OfficeSigner, on: date) -> bool:
@@ -114,10 +136,25 @@ def post_to_deals(db: Session, doc: OfficeDoc, user_id: Optional[str]) -> None:
                          external_id=f"office:{doc.id}", user_id=user_id, at=datetime.now(timezone.utc)))
 
 
+def _approval_view(db: Session, doc: OfficeDoc, user: CurrentUser) -> Optional[dict]:
+    a = doc.approval or {}
+    if not a.get("steps"):
+        return None
+    from ..core.roles import ROLE_TITLES
+    names = {u.id: u.display_name for u in db.scalars(select(User).where(User.id.in_(
+        [x for st in a["steps"] for x in (st.get("user_id"), st.get("by")) if x]))).all()} if a["steps"] else {}
+    mine = is_approver(db, doc, user)
+    return {"name": a.get("name", ""), "mode": a.get("mode", "seq"), "round": a.get("round", 1), "started_at": a.get("started_at"),
+            "my_step": mine["id"] if mine else None,
+            "steps": [{**st, "who": names.get(st.get("user_id") or "", "") or (f"любой: {ROLE_TITLES.get(Role(st['role']), st['role'])}" if st.get("role") else ""),
+                       "by_name": names.get(st.get("by") or "", ""), "status_title": STEP_STATUS.get(st["status"], st["status"])} for st in a["steps"]]}
+
+
 def serialize(db: Session, doc: OfficeDoc, user: CurrentUser, users: Optional[dict[str, User]] = None, full: bool = False) -> dict:
     users = users or {}
     ex = users.get(doc.executor_id or "") or (db.get(User, doc.executor_id) if doc.executor_id else None)
     sg = db.get(OfficeSigner, doc.signer_id) if doc.signer_id else None
+    rv = db.get(User, doc.reviewer_id) if doc.reviewer_id else None
     ent = db.get(LegalEntity, doc.entity_id)
     today = date.today()
     out = {
@@ -128,6 +165,12 @@ def serialize(db: Session, doc: OfficeDoc, user: CurrentUser, users: Optional[di
         "counterparty": doc.counterparty, "contact": doc.contact, "sender_number": doc.sender_number,
         "sender_date": doc.sender_date.isoformat() if doc.sender_date else None, "due_on": doc.due_on.isoformat() if doc.due_on else None,
         "overdue": bool(doc.due_on and doc.due_on < today and doc.status in OPEN),
+        "urgent": doc.urgent, "confidential": doc.confidential, "needs_reply": doc.needs_reply, "has_scan": has_scan(doc),
+        "pages": doc.pages, "attachments_count": doc.attachments_count, "address": doc.address, "tracking": doc.tracking,
+        "delivered_on": doc.delivered_on.isoformat() if doc.delivered_on else None, "note": doc.note,
+        "comments_count": len(doc.comments or []),
+        "reviewer_id": doc.reviewer_id, "reviewer": rv.display_name if rv else "",
+        "is_reviewer": doc.status == "review" and user.id == doc.reviewer_id,
         "executor_id": doc.executor_id, "executor": ex.display_name if ex else "", "co_executor_ids": doc.co_executor_ids or [],
         "deal_ids": doc.deal_ids or [], "deal_section": doc.deal_section, "contract_id": doc.contract_id, "claim_id": doc.claim_id,
         "reply_to_id": doc.reply_to_id, "signer_id": doc.signer_id, "signer": f"{sg.position} {sg.full_name}".strip() if sg else "",
@@ -136,6 +179,7 @@ def serialize(db: Session, doc: OfficeDoc, user: CurrentUser, users: Optional[di
         "closed_on": doc.closed_on.isoformat() if doc.closed_on else None, "close_note": doc.close_note,
         "files": [{k: f.get(k) for k in ("id", "name", "size", "kind", "at")} for f in (doc.files or [])],
         "can_edit": is_editor(user, doc) or (user.id == doc.created_by and doc.status == "draft"),
+        "approval": _approval_view(db, doc, user),
         "is_executor": user.id == doc.executor_id or user.id in (doc.co_executor_ids or []),
     }
     if full:
@@ -143,8 +187,96 @@ def serialize(db: Session, doc: OfficeDoc, user: CurrentUser, users: Optional[di
         out["deals"] = [{"id": d.id, "number": d.number} for d in deals if d is not None]
         out["body"] = doc.body
         out["history"] = doc.history or []
+        cu = {u.id: u.display_name for u in db.scalars(select(User).where(User.id.in_([c.get("by") for c in doc.comments or [] if c.get("by")]))).all()} if doc.comments else {}
+        out["comments"] = [{**c, "author": cu.get(c.get("by"), "")} for c in doc.comments or []]
+        ru = {u.id: u.display_name for u in db.scalars(select(User).where(User.id.in_(
+            [x for r in doc.resolutions or [] for x in (r.get("by"), r.get("executor_id"), *(r.get("co") or [])) if x]))).all()} if doc.resolutions else {}
+        out["resolutions"] = [{**r, "author": ru.get(r.get("by"), ""), "executor": ru.get(r.get("executor_id") or "", ""),
+                               "co_names": [ru.get(x, "") for x in r.get("co") or []], "kind_title": RESOLUTION_KINDS.get(r.get("kind"), "")}
+                              for r in doc.resolutions or []]
         replies = db.scalars(select(OfficeDoc).where(OfficeDoc.reply_to_id == doc.id)).all()
         out["replies"] = [{"id": r.id, "number": r.number, "status": r.status, "subject": r.subject} for r in replies]
         parent = db.get(OfficeDoc, doc.reply_to_id) if doc.reply_to_id else None
         out["reply_to"] = {"id": parent.id, "number": parent.number, "subject": parent.subject} if parent else None
     return out
+
+
+
+# ---------------------------------------------------------------- согласование (D-129)
+
+APPROVABLE = ("out", "order", "directive", "memo", "internal")
+STEP_STATUS = {"waiting": "ожидает очереди", "pending": "на согласовании", "approved": "согласовано", "rejected": "отклонено"}
+
+
+def routes_for(db: Session, doc: OfficeDoc) -> list[OfficeRoute]:
+    """Типовые схемы, подходящие документу: вид, вид приказа, юр. лицо."""
+    out = []
+    for r in db.scalars(select(OfficeRoute).where(OfficeRoute.is_active.is_(True)).order_by(OfficeRoute.name)).all():
+        if r.kinds and doc.kind not in r.kinds:
+            continue
+        if r.categories and doc.category not in r.categories:
+            continue
+        if r.entity_id and r.entity_id != doc.entity_id:
+            continue
+        out.append(r)
+    return out
+
+
+def approval_required(db: Session, doc: OfficeDoc) -> bool:
+    return any(r.required for r in routes_for(db, doc))
+
+
+def user_has_role(db: Session, user_id: str, role: str) -> bool:
+    u = db.get(User, user_id)
+    return bool(u and u.is_active and role in (u.roles or []))
+
+
+def active_steps(doc: OfficeDoc) -> list[dict]:
+    return [s for s in (doc.approval or {}).get("steps", []) if s.get("status") == "pending"]
+
+
+def is_approver(db: Session, doc: OfficeDoc, user: CurrentUser) -> Optional[dict]:
+    """Шаг, который этот сотрудник может согласовать сейчас (сам или по роли; ЗГД — за отсутствующего по замещению — нет, только своё)."""
+    if doc.status != "approval":
+        return None
+    for st in active_steps(doc):
+        role = st.get("role")
+        if st.get("user_id") == user.id or (role and any(r.value == role for r in user.roles)):
+            return st
+    return None
+
+
+def start_steps(steps: list[dict], mode: str) -> list[dict]:
+    import uuid as _u
+    out = []
+    for i, st in enumerate(steps):
+        out.append({"id": _u.uuid4().hex[:12], "user_id": st.get("user_id") or None, "role": st.get("role") or None,
+                    "title": (st.get("title") or "").strip()[:120], "status": "pending" if (mode == "par" or i == 0) else "waiting",
+                    "by": None, "comment": "", "at": None})
+    return out
+
+
+def advance(doc: OfficeDoc) -> bool:
+    """После решения: в последовательном порядке открыть следующий шаг; True — все согласовали."""
+    a = dict(doc.approval or {})
+    steps = [dict(x) for x in a.get("steps", [])]
+    if all(x["status"] == "approved" for x in steps):
+        a["steps"] = steps
+        doc.approval = a
+        return True
+    if a.get("mode", "seq") == "seq" and not any(x["status"] == "pending" for x in steps):
+        nxt = next((x for x in steps if x["status"] == "waiting"), None)
+        if nxt:
+            nxt["status"] = "pending"
+    a["steps"] = steps
+    doc.approval = a
+    return False
+
+
+def step_people(db: Session, st: dict) -> list[str]:
+    """Кого уведомить по шагу: сотрудник или все активные с ролью."""
+    if st.get("user_id"):
+        return [st["user_id"]]
+    if st.get("role"):
+        return [u.id for u in db.scalars(select(User).where(User.is_active.is_(True))).all() if st["role"] in (u.roles or [])]
+    return []
