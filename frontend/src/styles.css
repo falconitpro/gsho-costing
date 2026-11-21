@@ -997,3 +997,14 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .pwlink-result { display: grid; gap: 8px; }
 .pwlink-url { word-break: break-all; font-size: 12px; flex: 1; }
 .pwlink-acts { justify-content: flex-end; margin-top: 10px; }
+/* D-133/D-134: контроль сроков и ИИ Канцелярии */
+.office-ai .row { flex-wrap: wrap; gap: 8px; align-items: center; }
+.office-ai-res { display: grid; gap: 6px; margin-top: 8px; }
+.office-ai-res ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.office-ai-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.office-ai-diff pre { white-space: pre-wrap; font-family: inherit; margin: 4px 0 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; max-height: 360px; overflow: auto; }
+.office-control td.num, .office-control th.num { text-align: right; }
+.office-export { display: flex; gap: 6px; align-items: center; }
+@media (max-width: 760px) { .office-ai-diff { grid-template-columns: 1fr; } }
+.office-guide section ul { margin: 4px 0 10px; padding-left: 20px; display: grid; gap: 4px; }
+.office-guide h3 { margin: 12px 0 4px; }

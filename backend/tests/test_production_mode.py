@@ -229,7 +229,7 @@ def test_update_asks_and_cancels(box):
 @pytest.mark.skipif(not shutil.which("shellcheck"), reason="shellcheck не установлен")
 def test_production_scripts_pass_shellcheck():
     files = sorted((ROOT / "deploy/production").glob("*.sh"))
-    assert len(files) == 5
+    assert len(files) == 6
     for f in files:
         assert subprocess.run(["bash", "-n", str(f)]).returncode == 0, f
     p = subprocess.run(["shellcheck", "-f", "gcc", *map(str, files)], capture_output=True, text=True, env={**os.environ, "LC_ALL": "C.UTF-8"})

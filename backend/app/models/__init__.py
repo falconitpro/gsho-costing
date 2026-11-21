@@ -2499,6 +2499,7 @@ class OfficeDoc(TimestampMixin, Base):
     # D-130: рассмотрение — руководитель накладывает резолюцию (исполнитель, соисполнители, срок, указание) или «к сведению» / «в дело»
     reviewer_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     resolutions: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # [{id, by, at, kind: execute | info | file, text, executor_id, co, due_on}]
+    alerts: Mapped[dict] = mapped_column(JSONType, default=dict)            # D-133: отправленные напоминания о сроке {ключ: дата} — без повторов
 
 
 class OfficeRoute(TimestampMixin, Base):

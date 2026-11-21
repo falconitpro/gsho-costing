@@ -3,6 +3,8 @@ import { api, fmtDate } from "../api";
 import { Crumbs, useQueryParam } from "../components/Levels";
 import { askPrompt } from "../components/Dialogs";
 import type { Me } from "../types";
+import OfficeAi from "../components/OfficeAi";
+import OfficeGuide from "../components/OfficeGuide";
 
 /** Канцелярия (D-128): журналы входящих и исходящих писем, приказов, распоряжений, служебных записок и внутренних документов.
  *  Регистрирует делопроизводитель (офис-менеджер) или ЗГД; исполнитель видит свои документы; подписантов ведёт ЗГД. */
@@ -13,7 +15,7 @@ type Meta = {
   letter_types: Record<string, string>; channels: Record<string, string>; statuses: Record<string, string>; sign_methods: Record<string, string>;
   signers: { id: string; entity_id: string; full_name: string; position: string; basis: string; valid_from: string | null; valid_to: string | null; methods: string[]; is_active: boolean; valid_today: boolean }[];
   users: { id: string; name: string }[]; can_edit: boolean; can_hr: boolean; can_signers: boolean;
-  channel_detail: Record<string, string>; routes: Route[]; roles: Record<string, string>;
+  channel_detail: Record<string, string>; routes: Route[]; roles: Record<string, string>; ai: { enabled: boolean; configured: boolean };
 };
 type Step = { id?: string; user_id?: string | null; role?: string | null; title?: string; status?: string; status_title?: string; who?: string; by_name?: string; comment?: string; at?: string };
 type Route = { id: string; name: string; kinds: string[]; categories: string[]; entity_id: string | null; mode: string; steps: Step[]; required: boolean; is_active: boolean };
@@ -57,6 +59,8 @@ export default function OfficePage({ me }: { me: Me }) {
   const [counts, setCounts] = useState<{ in_open: number; overdue: number; drafts: number }>({ in_open: 0, overdue: 0, drafts: 0 });
   const [q, setQ] = useState("");
   const [onlyOpen, setOnlyOpen] = useState(false);
+  const [exFrom, setExFrom] = useState(() => `${new Date().getFullYear()}-01-01`);
+  const [exTo, setExTo] = useState("");
   const [creating, setCreating] = useState<string | null>(null);
   const [err, setErr] = useState("");
   const journal = (me.perms?.office ?? 0) >= 1 || (me.perms?.office_hr ?? 0) >= 1;
@@ -80,14 +84,20 @@ export default function OfficePage({ me }: { me: Me }) {
       {journal ? (
         <div className="tabs">
           {TABS.map((t) => <button key={t.key} className={tab === t.key ? "active" : ""} onClick={() => { setTab(t.key); setDocId(""); setCreating(null); }}>{t.label}</button>)}
+          <button className={tab === "control" ? "active" : ""} onClick={() => { setTab("control"); setDocId(""); setCreating(null); }}>На контроле{counts.overdue ? ` · ${counts.overdue}` : ""}</button>
+          <button className={tab === "guide" ? "active" : ""} onClick={() => { setTab("guide"); setDocId(""); setCreating(null); }}>Как работать</button>
           {meta.can_signers && <button className={tab === "signers" ? "active" : ""} onClick={() => { setTab("signers"); setDocId(""); }}>Подписанты и схемы согласования</button>}
         </div>
-      ) : <div className="muted">Документы, где вы исполнитель или автор. Журналы ведёт делопроизводитель.</div>}
-      {tab === "signers" && meta.can_signers ? <><Signers meta={meta} onChange={setMeta} /><Routes meta={meta} onChange={setMeta} /></> : (
+      ) : <div className="muted">Документы, где вы исполнитель или автор. Журналы ведёт делопроизводитель. <a href="#" onClick={(e) => { e.preventDefault(); setTab(tab === "guide" ? "in" : "guide"); }}>{tab === "guide" ? "К документам" : "Как работать"}</a></div>}
+      {tab === "guide" ? <OfficeGuide /> : tab === "control" && journal ? <>{docId && <DocCard id={docId} meta={meta} me={me} onClose={() => setDocId("")} onChanged={load} onOpen={setDocId} />}<Control onOpen={setDocId} /></> : tab === "signers" && meta.can_signers ? <><Signers meta={meta} onChange={setMeta} /><Routes meta={meta} onChange={setMeta} /></> : (
         <>
           <div className="office-bar">
             <input placeholder="№, тема, контрагент" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} />
             <label><input type="checkbox" checked={onlyOpen} onChange={(e) => setOnlyOpen(e.target.checked)} /> только в работе и черновики</label>
+            {journal && <span className="office-export">
+              <input type="date" value={exFrom} onChange={(e) => setExFrom(e.target.value)} aria-label="Выгрузка с" />—<input type="date" value={exTo} onChange={(e) => setExTo(e.target.value)} aria-label="по" />
+              <a className="btn ghost" href={`/api/office/export?${new URLSearchParams({ kind: cur.kinds, ...(exFrom ? { date_from: exFrom } : {}), ...(exTo ? { date_to: exTo } : {}), ...(q.trim() ? { q: q.trim() } : {}), ...(onlyOpen ? { status: "registered,review,assigned,in_work,draft,approval,approved" } : {}) })}`}>В Excel</a>
+            </span>}
             {journal && (meta.can_edit || meta.can_hr) && !creating && (
               <span className="push row">
                 {cur.kinds.split(",").filter((k) => meta.can_edit || k === "order").map((k) => (
@@ -252,7 +262,7 @@ function DocCard({ id, meta, me, onClose, onChanged, onOpen }: { id: string; met
         {d.close_note && <div className="span2"><span className="muted">Исполнение</span> {d.close_note}</div>}
         {d.summary && <div className="span2"><span className="muted">Кратко</span> {d.summary}</div>}
         {d.note && <div className="span2"><span className="muted">Отметка Канцелярии</span> {d.note}</div>}
-        {d.body && <div className="span2 office-body">{d.body}</div>}
+        {d.body && !isIn && <div className="span2 office-body">{d.body}</div>}
       </div>
       <div className="office-files">
         {isIn && !d.has_scan && <span className="badge warn">нет скана — без него письмо не уйдёт на рассмотрение и исполнителю</span>}
@@ -318,6 +328,8 @@ function DocCard({ id, meta, me, onClose, onChanged, onOpen }: { id: string; met
           <button className="btn ghost" onClick={async () => { const n = await askPrompt("Причина отмены (номер останется в журнале с отметкой)"); if (n) act("cancel", n); }}>Отменить</button>)}
       </div>
       {reply && <NewReply parent={d} meta={meta} onDone={(x) => { setReply(false); onOpen(x.id); onChanged(); }} onCancel={() => setReply(false)} />}
+      {isIn && (ed || d.body) && <InText d={d} ed={ed} onSave={(body) => api.patch<Doc>(`/api/office/docs/${d.id}`, { body }).then(upd)} />}
+      {meta.ai.enabled && <OfficeAi d={d} letterTypes={meta.letter_types} roles={meta.roles} onPatch={(b) => api.patch<Doc>(`/api/office/docs/${d.id}`, b).then(upd)} />}
       <Comments d={d} onDone={upd} />
       {d.history && d.history.length > 0 && (
         <details><summary className="muted">История ({d.history.length})</summary>
@@ -542,6 +554,52 @@ function Routes({ meta, onChange }: { meta: Meta; onChange: (m: Meta) => void })
         <div className="row"><button className="btn" disabled={f.name.trim().length < 2 || !f.steps.length || !f.steps.every((s) => s.user_id || s.role)} onClick={save}>{f.id ? "Сохранить" : "Добавить схему"}</button>
           {f.id && <button className="btn ghost" onClick={() => setF(empty)}>Отмена</button>}</div>
       </div>
+    </div>
+  );
+}
+
+
+/** Текст входящего (D-134): для поиска и ИИ, если скан без текстового слоя — делопроизводитель вставляет текст письма. */
+function InText({ d, ed, onSave }: { d: Doc; ed: boolean; onSave: (body: string) => Promise<unknown> }) {
+  const [t, setT] = useState(d.body || "");
+  const [open, setOpen] = useState(false);
+  return (
+    <details className="office-box" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary><b>Текст письма</b> <span className="muted">{d.body ? `${d.body.length} знаков` : "не внесён — нужен для поиска и ИИ, если скан без текстового слоя"}</span></summary>
+      {ed ? <div className="office-form"><textarea rows={8} value={t} onChange={(e) => setT(e.target.value)} placeholder="Скопируйте текст из письма или PDF" />
+        <div className="row"><button className="btn ghost" disabled={t === (d.body || "")} onClick={() => onSave(t)}>Сохранить текст</button></div></div>
+        : <div className="office-body">{d.body}</div>}
+    </details>
+  );
+}
+
+type CtlRow = { user_id: string | null; name: string; open: number; today: number; overdue: number; closed_30: number; on_time_30: number;
+  late_docs: { id: string; number: string; subject: string; due_on: string; days: number }[] };
+
+/** Панель «на контроле» (D-133): у кого сколько документов в работе, срок сегодня, просрочено; за 30 дней — закрыто и в срок. */
+function Control({ onOpen }: { onOpen: (id: string) => void }) {
+  const [data, setData] = useState<{ as_of: string; items: CtlRow[]; total: Omit<CtlRow, "user_id" | "name" | "late_docs"> } | null>(null);
+  useEffect(() => { api.get<typeof data>("/api/office/control").then(setData); }, []);
+  if (!data) return <div className="muted">Загрузка…</div>;
+  const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "—");
+  return (
+    <div>
+      <p className="muted">Напоминания уходят сами: исполнителю — за рабочий день до срока и в день срока; после срока — исполнителю, руководителю, наложившему резолюцию, и делопроизводителю, дальше раз в 3 рабочих дня.</p>
+      <table className="office-table office-control">
+        <thead><tr><th>Исполнитель</th><th className="num">В работе</th><th className="num">Срок сегодня</th><th className="num">Просрочено</th><th className="num">Закрыто за 30 дней</th><th className="num">В срок</th><th>Просроченные</th></tr></thead>
+        <tbody>
+          {data.items.length === 0 && <tr><td colSpan={7} className="muted">Документов в работе нет</td></tr>}
+          {data.items.map((r) => (
+            <tr key={r.user_id || "none"} className={r.overdue ? "late" : ""}>
+              <td><b>{r.name}</b></td><td className="num">{r.open}</td><td className="num">{r.today || ""}</td><td className={"num" + (r.overdue ? " txt-bad" : "")}>{r.overdue || ""}</td>
+              <td className="num">{r.closed_30 || ""}</td><td className="num">{pct(r.on_time_30, r.closed_30)}</td>
+              <td>{r.late_docs.map((x) => <div key={x.id}><a href="#" onClick={(e) => { e.preventDefault(); onOpen(x.id); }}>{x.number}</a> {x.subject} <span className="txt-bad">· {x.days} р. д.</span></div>)}</td>
+            </tr>
+          ))}
+          <tr><td><b>Итого</b></td><td className="num"><b>{data.total.open}</b></td><td className="num">{data.total.today}</td><td className="num txt-bad">{data.total.overdue}</td>
+            <td className="num">{data.total.closed_30}</td><td className="num">{pct(data.total.on_time_30, data.total.closed_30)}</td><td /></tr>
+        </tbody>
+      </table>
     </div>
   );
 }
