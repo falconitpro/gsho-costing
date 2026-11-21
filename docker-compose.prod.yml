@@ -25,6 +25,26 @@ services:
     volumes:
       - ${BACKUP_STATUS_HOST_DIR:-/var/lib/gsho-backup/status}:/backup-status:ro
     restart: unless-stopped
+  worker:
+    # D-143: фоновые задания (напоминания, курсы ЦБ, сроки писем, визы) — отдельным процессом из того же образа, что backend.
+    # Пока worker не запущен, задания выполняет backend; блокировка в базе не даёт выполнить их дважды.
+    build:
+      context: ./backend
+      args:
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-http://mirror.yandex.ru/debian}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    command: ["python", "-m", "app.worker"]
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://gsho:${POSTGRES_PASSWORD:-gsho}@db:5432/gsho
+      BACKUP_STATUS_DIR: /backup-status
+    volumes:
+      - storage:/app/data/storage
+      - ${BACKUP_STATUS_HOST_DIR:-/var/lib/gsho-backup/status}:/backup-status:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
   db:
     restart: unless-stopped
   caddy:

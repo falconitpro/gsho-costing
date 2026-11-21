@@ -1052,3 +1052,20 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .news-strip span { flex: 1; min-width: 200px; }
 .news-x { background: none; border: 0; cursor: pointer; font-size: 14px; color: var(--muted); }
 .hm-new { margin-left: 6px; }
+.jobs-box { display: grid; gap: 8px; margin-bottom: 12px; }
+.jobs-tbl td { padding: 4px 8px; font-size: 13px; }
+/* D-144: «Скорость процесса» */
+.speed { display: grid; gap: 12px; margin-top: 10px; }
+.speed-head { gap: 8px; align-items: center; flex-wrap: wrap; }
+.speed-e2e { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.speed-kpi { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 2px; }
+.speed-kpi b { font-size: 22px; }
+.speed-kpi span { font-size: 13px; }
+.speed-kpi small { font-size: 11px; color: var(--muted); }
+.speed-tbl tr.speed-bn td { background: var(--warn-bg); }
+.speed-bar { display: block; width: 160px; height: 10px; }
+.speed-bar .bg { fill: var(--line); }
+.speed-bar .p80 { fill: var(--accent); opacity: .35; }
+.speed-bar .med { fill: var(--accent); }
+.speed-note { font-size: 12px; }
+@media (max-width: 760px) { .speed-tbl { display: block; overflow-x: auto; } }

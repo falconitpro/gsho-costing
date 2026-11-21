@@ -95,4 +95,4 @@ def test_scanner_rebuilt_only_if_owner_started_it(sandbox):
     log.unlink()
     assert _deploy(env, STUB_CLAMAV_ID="abc123").returncode == 0
     up = [x for x in _calls(log) if " up -d " in x]
-    assert up[-1].endswith("backend frontend caddy clamav") and "--profile scanner" in up[-1]
+    assert up[-1].endswith("backend worker frontend caddy clamav") and "--profile scanner" in up[-1]

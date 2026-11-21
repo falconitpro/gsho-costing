@@ -1063,6 +1063,19 @@ class PasswordHistory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class JobRun(Base):
+    """D-143: отметки фоновых заданий (последний запуск, успех, ошибка); строки heartbeat:* — «процесс жив»."""
+    __tablename__ = "job_runs"
+    job: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_start: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_ok: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str] = mapped_column(Text, default="", server_default="")
+    error_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    runs: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer)
+    host: Mapped[str] = mapped_column(String(64), default="", server_default="")
+
+
 class PasswordLink(Base):
     """D-132: одноразовая ссылка «Задать пароль» (приглашение нового сотрудника или сброс). В базе — только хэш токена."""
     __tablename__ = "password_links"
