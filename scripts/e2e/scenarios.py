@@ -1,4 +1,5 @@
-"""Сквозные сценарии с проверкой цифр (D-119): заявка → расчёт → утверждение → КП → торги → договор.
+"""Сквозные сценарии с проверкой цифр (D-119): заявка → расчёт → утверждение → КП → торги → договор;
+сценарий 6 — Канцелярия (D-139): входящее → рассмотрение → резолюция → ответ → согласование → подпись → отправка → закрытие.
 
 Каждый сценарий создаёт свою синтетическую сделку через API, а затем сверяет одни и те же деньги в трёх местах:
   1) ответ сервера (расчёт), 2) экран «Расчёт и утверждение» в браузере (панель решения, история КП),
@@ -23,6 +24,8 @@ from playwright.async_api import async_playwright
 FE, BE = sys.argv[1].rstrip("/"), sys.argv[2].rstrip("/")
 CHROME = sys.argv[3] if len(sys.argv) > 3 else None
 MGR, LOG, CD, GD = "manager@example.com", "logist@example.com", "cd@example.com", "evgeniy@dobrov.pro"
+CLERK, LAW, FD = "office@example.com", "lawyer@example.com", "fd@example.com"
+ROLE_USER = {"lawyer": LAW, "fd": FD, "cd": CD, "gd": GD, "manager": MGR, "logistician": LOG, "clerk": CLERK}
 
 fails: list[str] = []
 checks = 0
@@ -345,7 +348,76 @@ async def s5_bargain_contract(browser):
         check(scn, "платежи клиента = «Итого с НДС» в КП", sum(s["amount"] for s in pay_in), num(rows.get(gross_key, "")), tol=2)
 
 
-SCENARIOS = [s1_single, s2_two_models, s3_usd_rub_input, s4_rework_qty, s5_bargain_contract]
+def upload(user, path, name, data: bytes, kind: str):
+    bd = "e2eboundary7d1f"
+    body = (f'--{bd}\r\nContent-Disposition: form-data; name="kind"\r\n\r\n{kind}\r\n--{bd}\r\nContent-Disposition: form-data; name="file"; '
+            f'filename="{name}"\r\nContent-Type: application/pdf\r\n\r\n').encode() + data + f"\r\n--{bd}--\r\n".encode()
+    req = urllib.request.Request(BE + path, method="POST", data=body, headers={"X-Dev-User": user, "Content-Type": f"multipart/form-data; boundary={bd}"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"POST {path} → {e.code}: {e.read()[:400]!r}")
+
+
+async def s6_office(browser):
+    """6. Канцелярия: входящее → резолюция → ответ → согласование → подпись → отправка → закрыто"""
+    scn = "6. Канцелярия: полный путь письма"
+    pdf = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF"
+    meta = api(CLERK, "GET", "/api/office/meta")
+    ru = next(e for e in meta["entities"] if e["code"] == "ru")
+    uid = lambda pre: next(u["id"] for u in meta["users"] if u["name"].startswith(pre))   # noqa: E731
+    did, _, _ = new_deal("E2E: письмо по сделке", [{"model": "E2E-L", "qty": 1, "unit_price": 1000000}])
+    d = api(CLERK, "POST", "/api/office/docs", {"entity_id": ru["id"], "kind": "in", "letter_type": "request", "channel": "post_reg", "tracking": "80000000000001",
+                                                 "subject": "E2E: запрос сроков поставки", "counterparty": "АО «E2E»", "deal_ids": [did], "deal_section": "sale"})
+    check_true(scn, "номер входящего присвоен при регистрации", bool(d["number"]) and "-ВХ-" in d["number"], d["number"])
+    check_true(scn, "без скана — не на рассмотрение", d["status"] == "registered" and not d["has_scan"])
+    upload(CLERK, f"/api/office/docs/{d['id']}/files", "e2e_вх.pdf", pdf, "scan")
+    d = api(CLERK, "POST", f"/api/office/docs/{d['id']}/review", {"reviewer_id": uid("Добров")})
+    check_true(scn, "на рассмотрении у ЗГД", d["status"] == "review")
+    d = api(GD, "POST", f"/api/office/docs/{d['id']}/resolution", {"kind": "execute", "executor_id": uid("Бочаров"), "text": "e2e: ответить"})
+    check_true(scn, "резолюция → исполнитель", d["status"] == "assigned" and d["executor_id"] == uid("Бочаров"))
+    api(MGR, "POST", f"/api/office/docs/{d['id']}/action", {"action": "take"})
+    o = api(MGR, "POST", "/api/office/docs", {"entity_id": ru["id"], "kind": "out", "subject": "E2E: ответ о сроках", "reply_to_id": d["id"],
+                                               "body": "Сообщаем: отгрузка 05.12.2026."})
+    check_true(scn, "ответ унаследовал адресата и сделку", o["counterparty"] == "АО «E2E»" and o["deal_ids"] == [did])
+    routes = [r for r in meta["routes"] if r["is_active"] and (not r["kinds"] or "out" in r["kinds"]) and (not r["entity_id"] or r["entity_id"] == ru["id"])]
+    req = next((r for r in routes if r["required"]), None)
+    o = api(MGR, "POST", f"/api/office/docs/{o['id']}/approval", {"route_id": req["id"]} if req else {"mode": "seq", "steps": [{"role": "lawyer"}]})
+    check_true(scn, "черновик на согласовании", o["status"] == "approval")
+    for _ in range(10):   # каждый согласующий в свою очередь
+        o = api(CLERK, "GET", f"/api/office/docs/{o['id']}")
+        if o["status"] != "approval":
+            break
+        st = next(s_ for s_ in o["approval"]["steps"] if s_["status"] == "pending")
+        who = ROLE_USER.get(st.get("role") or "", GD)
+        if st.get("user_id"):
+            who = next((em for em in ROLE_USER.values() if api(em, "GET", "/api/auth/me")["id"] == st["user_id"]), GD)
+        api(who, "POST", f"/api/office/docs/{o['id']}/approval/decide", {"decision": "approve", "comment": "e2e"})
+    check_true(scn, "согласовано", o["status"] == "approved", o["status"])
+    sg = next((x for x in meta["signers"] if x["entity_id"] == ru["id"] and x["valid_today"]), None)
+    if sg is None:
+        sg = next(x for x in api(GD, "POST", "/api/office/signers", {"entity_id": ru["id"], "full_name": "E2E Подписант", "position": "ГД"})["signers"]
+                  if x["full_name"] == "E2E Подписант")
+    o = api(CLERK, "POST", f"/api/office/docs/{o['id']}/sign", {"signer_id": sg["id"], "method": "manual"})
+    check_true(scn, "подписано, номер исходящего", o["status"] == "signed" and "-ИСХ-" in (o["number"] or ""), o["number"] or "")
+    upload(CLERK, f"/api/office/docs/{o['id']}/files", "e2e_исх_подписано.pdf", pdf, "scan")
+    o = api(CLERK, "POST", f"/api/office/docs/{o['id']}/action", {"action": "sent", "channel": "email"})
+    check_true(scn, "отправлено", o["status"] == "sent")
+    d = api(CLERK, "GET", f"/api/office/docs/{d['id']}")
+    check_true(scn, "входящее закрыто ответом", d["status"] == "closed", d["status"])
+    feed = api(MGR, "GET", f"/api/deals/{did}/feed?messages=true")
+    nums = " ".join(i.get("subject", "") + " " + i.get("body", "") for i in feed["items"])
+    check_true(scn, "оба письма — в ленте сделки", d["number"] in nums and o["number"] in nums)
+    page = await browser.new_page(extra_http_headers={"X-Dev-User": CLERK})
+    await page.goto(f"{FE}/office?t=out&doc={o['id']}")
+    await page.wait_for_selector(".office-card", timeout=20000)
+    txt = await page.inner_text(".office-card")
+    check_true(scn, "экран: карточка исходящего — номер и «отправлено»", o["number"] in txt and "тправлен" in txt)
+    await page.close()
+
+
+SCENARIOS = [s1_single, s2_two_models, s3_usd_rub_input, s4_rework_qty, s5_bargain_contract, s6_office]
 
 
 async def main():

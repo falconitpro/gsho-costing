@@ -32,7 +32,11 @@ type Doc = {
   address: string; tracking: string; delivered_on: string | null; note: string; comments_count: number;
   reviewer_id: string | null; reviewer: string; is_reviewer: boolean; approval: Approval | null;
   comments?: { id: string; text: string; at: string; author: string }[]; resolutions?: Resolution[];
-  deals?: { id: string; number: string }[]; body?: string; history?: { at: string; by: string; action: string; note: string }[];
+  deals?: { id: string; number: string }[]; body?: string;
+  contract_id: string | null; claim_id: string | null; contract?: { id: string; number: string; title: string; cp_name: string } | null;
+  claim?: { id: string; number: string; direction: string; contract_id: string } | null;
+  acks_total: number; acks_done: number; my_ack: { acked_at: string | null } | null;
+  acks?: { user_id: string; name: string; at: string; acked_at: string | null }[]; history?: { at: string; by: string; action: string; note: string }[];
   replies?: { id: string; number: string; status: string; subject: string }[]; reply_to?: { id: string; number: string; subject: string } | null;
 };
 
@@ -116,7 +120,8 @@ export default function OfficePage({ me }: { me: Me }) {
                   <td className="nowrap"><b>{d.number || "черновик"}</b></td><td className="nowrap">{fmtDate(d.reg_date)}</td>
                   <td>{d.kind_title}{d.kind === "order" && d.category ? ` ${meta.order_categories[d.category]}` : ""}{d.letter_type ? ` · ${meta.letter_types[d.letter_type]}` : ""}</td>
                   <td>{d.urgent && <span className="badge bad">срочно</span>} {d.confidential && <span className="badge">конф.</span>} {d.subject}
-                    {d.kind === "in" && !d.has_scan && <span className="muted"> · нет скана</span>}{d.comments_count > 0 && <span className="muted"> · 💬 {d.comments_count}</span>}</td><td>{d.counterparty}</td><td>{d.kind === "in" ? (d.status === "review" ? `на рассмотрении: ${d.reviewer}` : d.executor) : d.signer || d.executor}</td>
+                    {d.kind === "in" && !d.has_scan && <span className="muted"> · нет скана</span>}{d.comments_count > 0 && <span className="muted"> · 💬 {d.comments_count}</span>}
+                    {d.acks_total > 0 && <span className={d.acks_done < d.acks_total ? "txt-bad" : "muted"}> · ознакомлено {d.acks_done}/{d.acks_total}</span>}</td><td>{d.counterparty}</td><td>{d.kind === "in" ? (d.status === "review" ? `на рассмотрении: ${d.reviewer}` : d.executor) : d.signer || d.executor}</td>
                   <td className={"nowrap" + (d.overdue ? " txt-bad" : "")}>{fmtDate(d.due_on)}</td>
                   <td><span className={"badge" + (d.overdue ? " bad" : d.status === "draft" ? " warn" : ["closed", "sent", "in_force"].includes(d.status) ? " ok" : "")}>{d.status_title}</span></td>
                 </tr>
@@ -257,6 +262,8 @@ function DocCard({ id, meta, me, onClose, onChanged, onOpen }: { id: string; met
         {d.sent_on && <div><span className="muted">Отправлено</span> {fmtDate(d.sent_on)}{d.delivered_on ? ` · вручено ${fmtDate(d.delivered_on)}` : ""}</div>}
         {d.effective_on && <div><span className="muted">Вступает в силу</span> {fmtDate(d.effective_on)}</div>}
         {d.deals && d.deals.length > 0 && <div><span className="muted">Сделка</span> {d.deals.map((x) => <a key={x.id} href={`/deals/${x.id}?tab=feed`}>{x.number} </a>)}</div>}
+        {d.contract && <div><span className="muted">Договор</span> <a href={`/legal?tab=contracts&open=${d.contract.id}`}>{d.contract.number || "проект"}</a> {d.contract.cp_name}</div>}
+        {d.claim && <div><span className="muted">Претензия</span> <a href={`/legal?tab=claims&open=${d.claim.id}`}>{d.claim.number}</a></div>}
         {d.reply_to && <div><span className="muted">В ответ на</span> <a href="#" onClick={(e) => { e.preventDefault(); onOpen(d.reply_to!.id); }}>{d.reply_to.number}</a></div>}
         {d.replies && d.replies.length > 0 && <div><span className="muted">Ответ</span> {d.replies.map((r) => <a key={r.id} href="#" onClick={(e) => { e.preventDefault(); onOpen(r.id); }}>{r.number || "черновик"} </a>)}</div>}
         {d.close_note && <div className="span2"><span className="muted">Исполнение</span> {d.close_note}</div>}
@@ -327,6 +334,9 @@ function DocCard({ id, meta, me, onClose, onChanged, onOpen }: { id: string; met
         {ed && !["closed", "cancelled"].includes(d.status) && (
           <button className="btn ghost" onClick={async () => { const n = await askPrompt("Причина отмены (номер останется в журнале с отметкой)"); if (n) act("cancel", n); }}>Отменить</button>)}
       </div>
+      {(isIn || d.kind === "out") && (ed || d.can_edit) && !["closed", "cancelled"].includes(d.status) &&
+        <LinkPicker d={d} onPick={(b) => api.patch<Doc>(`/api/office/docs/${d.id}`, b).then(upd)} />}
+      {["order", "directive", "internal", "memo"].includes(d.kind) && ["signed", "in_force", "closed"].includes(d.status) && <Acks d={d} meta={meta} ed={ed} onDone={upd} />}
       {reply && <NewReply parent={d} meta={meta} onDone={(x) => { setReply(false); onOpen(x.id); onChanged(); }} onCancel={() => setReply(false)} />}
       {isIn && (ed || d.body) && <InText d={d} ed={ed} onSave={(body) => api.patch<Doc>(`/api/office/docs/${d.id}`, { body }).then(upd)} />}
       {meta.ai.enabled && <OfficeAi d={d} letterTypes={meta.letter_types} roles={meta.roles} onPatch={(b) => api.patch<Doc>(`/api/office/docs/${d.id}`, b).then(upd)} />}
@@ -600,6 +610,70 @@ function Control({ onOpen }: { onOpen: (id: string) => void }) {
             <td className="num">{data.total.closed_30}</td><td className="num">{pct(data.total.on_time_30, data.total.closed_30)}</td><td /></tr>
         </tbody>
       </table>
+    </div>
+  );
+}
+
+
+/** D-136: привязка письма к договору или претензии юр. блока. */
+function LinkPicker({ d, onPick }: { d: Doc; onPick: (b: Record<string, string | null>) => Promise<unknown> }) {
+  const [open, setOpen] = useState(false);
+  const [what, setWhat] = useState<"contract" | "claim">("contract");
+  const [q, setQ] = useState("");
+  const [res, setRes] = useState<{ id: string; label: string }[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => api.get<{ id: string; label: string }[]>(`/api/office/lookup?what=${what}&q=${encodeURIComponent(q)}`).then(setRes).catch(() => setRes([])), 250);
+    return () => clearTimeout(t);
+  }, [open, what, q]);
+  if (!open) return (
+    <div className="office-acts">
+      <button className="btn ghost" onClick={() => setOpen(true)}>{d.contract || d.claim ? "Изменить привязку к договору / претензии" : "Привязать к договору / претензии"}</button>
+      {(d.contract || d.claim) && <button className="btn ghost" onClick={() => onPick({ contract_id: null, claim_id: null })}>Отвязать</button>}
+    </div>);
+  return (
+    <div className="office-box office-form">
+      <div className="row">
+        <select value={what} onChange={(e) => setWhat(e.target.value as "contract" | "claim")}><option value="contract">договор</option><option value="claim">претензия</option></select>
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="номер, контрагент, предмет" />
+        <button className="btn ghost" onClick={() => setOpen(false)}>Отмена</button>
+      </div>
+      <div className="office-pick">{res.length === 0 ? <span className="muted">ничего не найдено</span> : res.map((r) => (
+        <a key={r.id} href="#" onClick={(e) => { e.preventDefault(); onPick(what === "claim" ? { claim_id: r.id } : { contract_id: r.id }).then(() => setOpen(false)); }}>{r.label}</a>))}</div>
+    </div>
+  );
+}
+
+/** D-140: ознакомление с приказом / распоряжением — лист ознакомления, назначение, отметка «Ознакомлен». */
+function Acks({ d, meta, ed, onDone }: { d: Doc; meta: Meta; ed: boolean; onDone: (d: Doc) => void }) {
+  const [open, setOpen] = useState(false);
+  const [users, setUsers] = useState<string[]>([]);
+  const [roles, setRoles] = useState<string[]>([]);
+  const [all, setAll] = useState(false);
+  const list = d.acks || [];
+  return (
+    <div className="office-box">
+      <b>Ознакомление</b> {d.acks_total > 0 && <span className="muted">ознакомлено {d.acks_done} из {d.acks_total}</span>}
+      {d.my_ack && (d.my_ack.acked_at
+        ? <div className="alert ok">Вы ознакомились {new Date(d.my_ack.acked_at).toLocaleString("ru-RU")}</div>
+        : <div className="alert warn row">Ознакомьтесь с документом и подтвердите.
+            <button className="btn" onClick={() => api.post<Doc>(`/api/office/docs/${d.id}/ack`, {}).then(onDone)}>Ознакомлен(а)</button></div>)}
+      {list.length > 0 && <table className="office-table"><tbody>{list.map((a) => (
+        <tr key={a.user_id}><td>{a.name}</td><td className={a.acked_at ? "" : "txt-bad"}>{a.acked_at ? `ознакомлен(а) ${new Date(a.acked_at).toLocaleString("ru-RU")}` : "не ознакомлен(а)"}</td>
+          <td className="muted">назначено {new Date(a.at).toLocaleDateString("ru-RU")}</td>
+          <td>{ed && !a.acked_at && <a href="#" onClick={(e) => { e.preventDefault(); api.del<Doc>(`/api/office/docs/${d.id}/acks/${a.user_id}`).then(onDone); }}>убрать</a>}</td></tr>))}</tbody></table>}
+      {ed && d.status !== "closed" && (!open ? <div className="office-acts"><button className="btn ghost" onClick={() => setOpen(true)}>{list.length ? "Добавить сотрудников" : "Назначить ознакомление"}</button>
+        <span className="muted">сотрудник получит задачу «Ознакомиться»; не ознакомился за 3 рабочих дня — напоминание</span></div> : (
+        <div className="office-form grid2">
+          <label className="row span2"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> все сотрудники</label>
+          {!all && <label>Роли<select multiple value={roles} onChange={(e) => setRoles(Array.from(e.target.selectedOptions).map((o) => o.value))}>
+            {Object.entries(meta.roles).filter(([k]) => !["admin", "observer"].includes(k)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>}
+          {!all && <label>Сотрудники<select multiple value={users} onChange={(e) => setUsers(Array.from(e.target.selectedOptions).map((o) => o.value))}>
+            {meta.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>}
+          <div className="row span2"><button className="btn" disabled={!all && !users.length && !roles.length}
+            onClick={() => api.post<Doc>(`/api/office/docs/${d.id}/acks`, { everyone: all, roles, user_ids: users }).then((x) => { setOpen(false); setUsers([]); setRoles([]); setAll(false); onDone(x); })}>Назначить</button>
+            <button className="btn ghost" onClick={() => setOpen(false)}>Отмена</button></div>
+        </div>))}
     </div>
   );
 }
