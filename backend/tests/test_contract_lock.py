@@ -52,6 +52,13 @@ def test_signed_contract_is_locked():
         assert r.status_code == 200, r.text
         st = c.get(f"{base}/stages", headers=H(MGR)).json()
         assert st["client_locked"] and not st["factory_locked"] and not st["can_amend"]
+        # D-146: подписанный договор сразу в реестре (не ждём открытия реестра после перезапуска)
+        from sqlalchemy import select
+
+        from app.models import Contract
+        with SessionLocal() as db:
+            rows = db.scalars(select(Contract).where(Contract.deal_id == d["id"])).all()
+            assert [(x.direction, x.status, x.number) for x in rows] == [("income", "active", "K-2")]
 
         # менеджер (и даже КД через обычное сохранение) номер и дату не меняет; те же значения — можно (форма отправляет всё)
         assert c.patch(f"{base}/contract", headers=H(MGR), json={"contract_number": "K-3"}).status_code == 409

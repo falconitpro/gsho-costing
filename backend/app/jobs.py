@@ -125,6 +125,9 @@ def _one_time_repairs() -> None:
         rebuild_once(db)
     with SessionLocal() as db:
         repair_task_assignees(db)
+    from .services.legal_contracts import repair_unprojected
+    with SessionLocal() as db:
+        repair_unprojected(db)                 # D-146: подписанные в сделке договоры без строк в «Финансах»
 
 
 def _scanner() -> None:

@@ -388,11 +388,16 @@ def upsert_from_package(db: Session, pkg: LegalPackage, deal: Deal, user_id: Opt
     return c
 
 
-def import_from_deals(db: Session) -> int:
-    """Договоры, уже подписанные в сделках (номер и дата контракта), — в реестр. Идемпотентно."""
+def import_from_deals(db: Session, only: Optional[Deal] = None) -> int:
+    """Договоры, уже подписанные в сделках (номер и дата контракта), — в реестр. Идемпотентно.
+    only — одна сделка (сразу после отметки подписания на стадии «Заключение контракта»)."""
     n = 0
-    known = {(x.deal_id, x.direction) for x in db.scalars(select(Contract).where(Contract.deal_id.is_not(None), Contract.doc_type == "contract")).all()}
-    for deal in db.scalars(select(Deal).where(Deal.deleted_at.is_(None))).all():
+    q = select(Contract).where(Contract.deal_id.is_not(None), Contract.doc_type == "contract")
+    if only is not None:
+        q = q.where(Contract.deal_id == only.id)
+    known = {(x.deal_id, x.direction) for x in db.scalars(q).all()}
+    deals = [only] if only is not None else db.scalars(select(Deal).where(Deal.deleted_at.is_(None))).all()
+    for deal in deals:
         ent = _default_entity(db, True)
         if (deal.contract_number or deal.contract_signed_at) and (deal.id, "income") not in known:
             lines, amount, cur = deal_client_terms(deal)
@@ -413,6 +418,32 @@ def import_from_deals(db: Session) -> int:
                             status="active" if deal.factory_contract_signed_at else "draft", curator_id=deal.manager_id, source="deal_import", law={"claim_days": 30, "pre_trial": True},
                             history=[{"at": datetime.now(timezone.utc).isoformat(), "by": None, "action": "imported", "comment": f"из реквизитов контракта с заводом сделки {deal.number}"}]))
             n += 1
+    return n
+
+
+def sync_deal_signing(db: Session, deal: Deal, user_id: Optional[str]) -> int:
+    """Подписание отмечено в сделке → договор в реестре и строки графика в «Финансах» сразу, без перезапуска и ручной пересборки (D-146).
+    Договор, оформляемый через юридический пакет (проект, согласование), не трогаем: он подписывается в своей карточке."""
+    from .finance.obligations import eligible, sync_contract
+    n = import_from_deals(db, deal)
+    db.flush()
+    for c in db.scalars(select(Contract).where(Contract.deal_id == deal.id, Contract.doc_type == "contract")).all():
+        if eligible(c):
+            sync_contract(db, c, user_id)
+    return n
+
+
+def repair_unprojected(db: Session) -> int:
+    """Разово (D-146): подписанные договоры из сделок, у которых нет ни одной строки в «Финансах», — проецируем график. Повтор ничего не меняет."""
+    from ..models.finance import FinanceObligation
+    from .finance.obligations import PROJECTED_STATUSES, eligible, sync_contract
+    has = select(FinanceObligation.id).where(FinanceObligation.source_type == "contract", FinanceObligation.source_id == Contract.id).exists()
+    n = 0
+    for c in db.scalars(select(Contract).where(Contract.status.in_(PROJECTED_STATUSES), Contract.deal_id.is_not(None), ~has)).all():
+        if eligible(c):
+            sync_contract(db, c, None)
+            n += 1
+    db.commit()
     return n
 
 

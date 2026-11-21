@@ -417,7 +417,83 @@ async def s6_office(browser):
     await page.close()
 
 
-SCENARIOS = [s1_single, s2_two_models, s3_usd_rub_input, s4_rework_qty, s5_bargain_contract, s6_office]
+def refused(user, method, path, body=None) -> str:
+    """Запрос, который система должна отклонить: текст ошибки или пустая строка, если принят."""
+    req = urllib.request.Request(BE + path, method=method, data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"X-Dev-User": user, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120):
+            return ""
+    except urllib.error.HTTPError as e:
+        return f"{e.code}: {e.read().decode('utf-8', 'replace')}"
+
+
+async def s7_execution(browser):
+    """7. Контракт → исполнение → закрытие: порядок этапов, даты, договоры в реестре и «Финансах», суммы платежей"""
+    from datetime import date as _d, timedelta as _td
+    scn = "s7"
+    today = _d.today()
+    did, var, pos = new_deal("E2E: исполнение", [{"model": "E2E-X", "qty": 2, "unit_price": 1500000}])
+    logistics(did, pos)
+    api(CD, "POST", f"/api/deals/{did}/price", {"variant_id": var["id"], "mode": "margin", "value": 20})
+    terms_and_submit(did, pos)
+    m = money(did, var["id"])
+    api(MGR, "POST", f"/api/deals/{did}/kp-sent", {"recipients": ["e2e@example.com"]})
+    api(CD, "POST", f"/api/deals/{did}/outcome", {"outcome": "won", "reason": "e2e"})
+    base = f"/api/deals/{did}/execution"
+    check_true(scn, "подэтап контракта будущей датой не принят",
+               bool(refused(MGR, "POST", f"{base}/contract-step", {"code": "draft", "done": True, "on": str(today + _td(days=3))})))
+    who = {"draft": MGR, "legal_review": LAW, "client_review": MGR, "internal_approval": CD, "client_signed": MGR, "factory_signed": MGR}
+    for code, u in who.items():
+        b = {"code": code, "done": True, "on": str(today), "contract_number": "E2E-K-1", "factory_contract_number": "E2E-F-1"}
+        if refused(u, "POST", f"{base}/contract-step", b):
+            api(GD, "POST", f"{base}/contract-step", b)
+    ob = api(FD, "GET", f"/api/finance/obligations?deal_id={did}")
+    dirs = sorted({i["direction"] for i in ob["items"]})
+    check_true(scn, "подписанные договоры сразу в «Финансах» (поступления и выплаты)", dirs == ["in", "out"], str(dirs))
+    api(MGR, "POST", f"{base}/start")
+
+    def by(code):
+        return [x for x in api(CD, "GET", f"{base}/stages")["stages"] if x["code"] == code]
+
+    def fact(code, user, amount=False):
+        for x in by(code):
+            b = {"actual_on": str(today)}
+            if amount:
+                b["actual_amount"] = x["amount"]
+            api(user, "POST", f"{base}/stages/{x['id']}/actual", b)
+
+    rows = api(CD, "GET", f"{base}/stages")["stages"]
+    cin = sum(x["amount"] for x in rows if x["code"] in ("client_advance", "client_final"))
+    check(scn, "платежи клиента = цена с НДС", cin, m["price"] * (1 + m["vat"] / 100), 2)
+    cout = sum(x["amount"] or 0 for x in rows if x["code"] in ("factory_advance", "factory_final"))
+    check(scn, "платежи заводу = 2 × 1 500 000 CNY", cout, 3000000, 2)
+    check_true(scn, "фактическая дата в будущем не принята",
+               bool(refused(LOG, "POST", f"{base}/stages/{by('readiness')[0]['id']}/actual", {"actual_on": str(today + _td(days=5))})))
+    for code, u, a in (("client_advance", FD, True), ("factory_advance", FD, True), ("production", MGR, False), ("readiness", LOG, False)):
+        fact(code, u, a)
+    acc = api(MGR, "POST", f"/api/deals/{did}/acceptance/init")
+    for un in acc.get("units") or []:
+        full = api(MGR, "GET", f"/api/deals/{did}/acceptance/{un['id']}")
+        api(MGR, "PUT", f"/api/deals/{did}/acceptance/{un['id']}", {"serial": f"SN-{un['id'][:6]}",
+            "checklist": [{**x, "result": "ok"} for x in full.get("checklist", [])], "tests": [{**x, "result": "ok"} for x in full.get("tests", [])]})
+        api(MGR, "POST", f"/api/deals/{did}/acceptance/{un['id']}/decision", {"decision": "accepted"})
+    fact("factory_final", FD, True)
+    err = refused(LOG, "POST", f"{base}/stages/{by('delivery')[0]['id']}/actual", {"actual_on": str(today)})
+    check_true(scn, "доставку раньше отгрузки отметить нельзя", "по порядку" in err, err[-120:])
+    for code in ("shipment", "border", "declaration"):
+        fact(code, LOG)
+    err = refused(CD, "POST", f"{base}/close", {"reason": ""})
+    check_true(scn, "закрыть с незавершёнными этапами без причины нельзя", "Не завершены" in err, err[-120:])
+    closing, finals = by("closing")[0], [x["planned_on"] for x in by("client_final") + by("commissioning")]
+    check_true(scn, "закрытие запланировано не раньше финального платежа и ПНР", closing["planned_on"] >= max(finals), f"{closing['planned_on']} / {finals}")
+    fact("delivery", LOG)
+    fact("client_final", FD, True)
+    fact("commissioning", "service@example.com")
+    check_true(scn, "сделка закрыта без причины, когда всё выполнено", api(CD, "POST", f"{base}/close", {"reason": ""})["status"] == "closed")
+
+
+SCENARIOS = [s1_single, s2_two_models, s3_usd_rub_input, s4_rework_qty, s5_bargain_contract, s6_office, s7_execution]
 
 
 async def main():

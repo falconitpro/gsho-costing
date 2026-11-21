@@ -4,6 +4,11 @@
 """
 from __future__ import annotations
 
+
+def _P(n: int) -> str:   # факт и даты подписания — не в будущем (D-146): дата n дней назад
+    from datetime import date as _dd, timedelta as _tt
+    return (_dd.today() - _tt(days=n)).isoformat()
+
 import os
 import tempfile
 
@@ -265,10 +270,10 @@ def test_full_flow(client, tmp_path):
     assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "client_signed"}).status_code == 422   # нужен номер
     assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "nope"}).status_code == 404
     assert client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "factory_signed"}).status_code == 422   # нужен номер с заводом
-    fs = _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "factory_signed", "factory_contract_number": "F-77", "on": "2026-12-02"}))
+    fs = _ok(client.post(f"/api/deals/{did}/execution/contract-step", headers=H(MGR), json={"code": "factory_signed", "factory_contract_number": "F-77", "on": _P(2)}))
     assert next(c for c in fs["contract_steps"] if c["code"] == "factory_signed")["state"] == "done"
     st0 = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(MGR)))
-    assert st0["factory_contract_number"] == "F-77" and str(st0["factory_contract_signed_at"]) == "2026-12-02"
+    assert st0["factory_contract_number"] == "F-77" and str(st0["factory_contract_signed_at"]) == _P(2)
     assert next(x for x in _ok(client.get("/api/deals", headers=H(MGR))) if x["id"] == did)["status_detail"].startswith("Заключение контракта")
     st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(MGR)))
     codes = {s["code"] for s in st["stages"]}
@@ -316,8 +321,8 @@ def test_full_flow(client, tmp_path):
     st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(FD)))
     adv = next(s for s in st["stages"] if s["code"] == "client_advance")
     assert adv["can_set"] and adv["amount"] > 0
-    assert client.post(f"/api/deals/{did}/execution/stages/{adv['id']}/actual", headers=H(MGR), json={"actual_on": "2026-12-10", "actual_amount": 1}).status_code == 403
-    r = _ok(client.post(f"/api/deals/{did}/execution/stages/{adv['id']}/actual", headers=H(FD), json={"actual_on": "2026-12-10", "actual_amount": adv["amount"]}))
+    assert client.post(f"/api/deals/{did}/execution/stages/{adv['id']}/actual", headers=H(MGR), json={"actual_on": _P(1), "actual_amount": 1}).status_code == 403
+    r = _ok(client.post(f"/api/deals/{did}/execution/stages/{adv['id']}/actual", headers=H(FD), json={"actual_on": _P(1), "actual_amount": adv["amount"]}))
     assert next(s for s in r["stages"] if s["code"] == "client_advance")["done"]
     # контроль сроков: базовый план зафиксирован, уточнённая дата готовности сдвигает прогноз поставки, отклонение в днях
     rd = next(s for s in r["stages"] if s["code"] == "readiness")
