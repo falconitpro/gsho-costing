@@ -1020,6 +1020,8 @@ a.lv-stat:hover { background: var(--accent-soft); }
   .office-journal td:nth-child(4) { order: -1; flex-basis: 100%; font-size: 15px; }
   .office-journal td:nth-child(3), .office-journal td:nth-child(6) { color: var(--muted); }
   .office-journal td:nth-child(7):not(:empty)::before { content: "срок "; color: var(--muted); }
+  .office-journal tr.late td, .office-journal tr.sel td { background: none; }
+  .office-journal tr.late { background: var(--accent-soft); }
   .office-bar { flex-wrap: wrap; }
   .office-export { flex-wrap: wrap; }
   .office-card .row, .office-acts { flex-wrap: wrap; }
