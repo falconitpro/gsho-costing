@@ -1438,6 +1438,7 @@ class LegalEntity(TimestampMixin, Base):
     channels: Mapped[dict] = mapped_column(JSONType, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str] = mapped_column(Text, default="")
+    doc_prefix: Mapped[str] = mapped_column(String(8), default="", server_default="")   # код в номерах Канцелярии: РФ / КГ / КН (D-128)
 
 
 class LegalProfile(TimestampMixin, Base):
@@ -2392,3 +2393,77 @@ class CompetitorOffer(TimestampMixin, Base):
 from .finance import (  # noqa: E402,F401
     FinanceAccount, FinanceAllocation, FinanceBalanceSnapshot, FinanceFxOperation, FinanceImportBatch, FinanceObligation, FinanceQuestion, FinanceRecognitionEvent, FinanceTransaction,
 )
+
+
+
+# ---------------------------------------------------------------- Канцелярия (D-128)
+
+class OfficeSigner(TimestampMixin, Base):
+    """Подписант документов юр. лица группы: ведёт ЗГД. Факсимиле и ЭЦП — отдельными этапами."""
+    __tablename__ = "office_signers"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    entity_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    full_name: Mapped[str] = mapped_column(String(255))
+    position: Mapped[str] = mapped_column(String(255), default="")
+    basis: Mapped[str] = mapped_column(String(255), default="")          # «Устав» / «Доверенность № … от …»
+    poa_id: Mapped[Optional[str]] = mapped_column(String(36))             # доверенность юр. блока
+    valid_from: Mapped[Optional[date]] = mapped_column(Date)
+    valid_to: Mapped[Optional[date]] = mapped_column(Date)
+    methods: Mapped[list[str]] = mapped_column(JSONType, default=list)  # manual | facsimile | eds
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+
+class OfficeCounter(Base):
+    """Счётчик номеров: юр. лицо × журнал × год; номер выдаётся под блокировкой строки и не повторяется."""
+    __tablename__ = "office_counters"
+    __table_args__ = (UniqueConstraint("entity_id", "journal", "year", name="uq_office_counter"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    entity_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id"))
+    journal: Mapped[str] = mapped_column(String(16))     # ВХ | ИСХ | ПР-ОД | ПР-К | ПР-АХ | РП | СЗ | ВН
+    year: Mapped[int] = mapped_column(Integer)
+    seq: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class OfficeDoc(TimestampMixin, Base):
+    """Документ Канцелярии: входящее и исходящее письмо, приказ, распоряжение, служебная записка, другой внутренний документ."""
+    __tablename__ = "office_docs"
+    __table_args__ = (Index("ix_office_docs_kind_status", "kind", "status"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    entity_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))                        # in | out | order | directive | memo | internal
+    category: Mapped[str] = mapped_column(String(16), default="")      # приказ: od | hr | ah; внутренний: вид документа
+    journal: Mapped[str] = mapped_column(String(16), default="")
+    number: Mapped[str] = mapped_column(String(48), default="", index=True)
+    seq: Mapped[Optional[int]] = mapped_column(Integer)
+    year: Mapped[Optional[int]] = mapped_column(Integer)
+    reg_date: Mapped[Optional[date]] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(16), default="draft")   # draft | registered | assigned | in_work | signed | sent | in_force | closed | cancelled
+    subject: Mapped[str] = mapped_column(String(512), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    letter_type: Mapped[str] = mapped_column(String(16), default="")   # request | claim | complaint | gov | notice | other
+    channel: Mapped[str] = mapped_column(String(16), default="")       # email | post | courier | edo | portal | hand
+    counterparty: Mapped[str] = mapped_column(String(255), default="")
+    contact: Mapped[str] = mapped_column(String(255), default="")
+    sender_number: Mapped[str] = mapped_column(String(64), default="")
+    sender_date: Mapped[Optional[date]] = mapped_column(Date)
+    due_on: Mapped[Optional[date]] = mapped_column(Date)
+    executor_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    co_executor_ids: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    deal_ids: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    deal_section: Mapped[str] = mapped_column(String(16), default="")
+    contract_id: Mapped[Optional[str]] = mapped_column(String(36))
+    claim_id: Mapped[Optional[str]] = mapped_column(String(36))
+    reply_to_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    signer_id: Mapped[Optional[str]] = mapped_column(ForeignKey("office_signers.id"))
+    signed_on: Mapped[Optional[date]] = mapped_column(Date)
+    sign_method: Mapped[str] = mapped_column(String(16), default="")  # manual | facsimile | eds
+    sent_on: Mapped[Optional[date]] = mapped_column(Date)
+    effective_on: Mapped[Optional[date]] = mapped_column(Date)          # приказ / распоряжение — дата вступления в силу
+    closed_on: Mapped[Optional[date]] = mapped_column(Date)
+    close_note: Mapped[str] = mapped_column(Text, default="")
+    files: Mapped[list[dict]] = mapped_column(JSONType, default=list)  # {id, name, size, sha256, kind: original | scan | attachment | draft, at, by}
+    history: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))

@@ -33,7 +33,7 @@ TAGS = {"q_client": "вопрос клиенту", "a_client": "ответ кл�
         "q_carrier": "вопрос перевозчику", "a_carrier": "ответ перевозчика", "internal": "внутреннее"}
 ANSWER_OF = {"q_client": "a_client", "q_factory": "a_factory", "q_carrier": "a_carrier"}
 EDIT_FREE = timedelta(minutes=15)
-MESSAGE_KINDS = ("comment", "mail_in", "mail_out")
+MESSAGE_KINDS = ("comment", "mail_in", "mail_out", "office_in", "office_out")   # office_* — письма Канцелярии по сделке (D-128)
 
 
 def visible_sections(user: CurrentUser) -> set[str]:
