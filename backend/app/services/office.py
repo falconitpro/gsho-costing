@@ -107,7 +107,13 @@ def has_scan(doc: OfficeDoc) -> bool:
     return any(f.get("kind") in ("scan", "original") for f in (doc.files or []))
 
 
+def acked_by(doc: OfficeDoc, user_id: str) -> Optional[dict]:
+    return next((a for a in doc.acks or [] if a.get("user_id") == user_id), None)
+
+
 def can_see(user: CurrentUser, doc: OfficeDoc) -> bool:
+    if acked_by(doc, user.id) is not None and doc.status in ("signed", "in_force", "closed"):   # D-140: кого ознакомить — видит документ
+        return True
     if doc.confidential and not (user.can("office", 2) or user.id in (doc.executor_id, doc.created_by) or user.id in (doc.co_executor_ids or [])
                                  or in_route(doc, user)):
         return False
@@ -181,6 +187,8 @@ def serialize(db: Session, doc: OfficeDoc, user: CurrentUser, users: Optional[di
         "can_edit": is_editor(user, doc) or (user.id == doc.created_by and doc.status == "draft"),
         "approval": _approval_view(db, doc, user),
         "is_executor": user.id == doc.executor_id or user.id in (doc.co_executor_ids or []),
+        "acks_total": len(doc.acks or []), "acks_done": sum(1 for a in doc.acks or [] if a.get("acked_at")),
+        "my_ack": (lambda a: None if a is None else {"acked_at": a.get("acked_at")})(acked_by(doc, user.id)),
     }
     if full:
         deals = [db.get(Deal, d) for d in doc.deal_ids or []]
@@ -198,7 +206,20 @@ def serialize(db: Session, doc: OfficeDoc, user: CurrentUser, users: Optional[di
         out["replies"] = [{"id": r.id, "number": r.number, "status": r.status, "subject": r.subject} for r in replies]
         parent = db.get(OfficeDoc, doc.reply_to_id) if doc.reply_to_id else None
         out["reply_to"] = {"id": parent.id, "number": parent.number, "subject": parent.subject} if parent else None
+        out["contract"], out["claim"] = links_view(db, doc)
+        au = {u.id: u.display_name for u in db.scalars(select(User).where(User.id.in_([a["user_id"] for a in doc.acks or []]))).all()} if doc.acks else {}
+        out["acks"] = sorted([{"user_id": a["user_id"], "name": au.get(a["user_id"], ""), "at": a.get("at"), "acked_at": a.get("acked_at")} for a in doc.acks or []],
+                             key=lambda a: (a["acked_at"] is not None, a["name"]))
     return out
+
+
+def links_view(db: Session, doc: OfficeDoc) -> tuple[Optional[dict], Optional[dict]]:
+    """D-136: договор и претензия юр. блока — номер и наименование (открывать — по правам юр. блока)."""
+    from ..models import Contract, ContractClaim
+    c = db.get(Contract, doc.contract_id) if doc.contract_id else None
+    cl = db.get(ContractClaim, doc.claim_id) if doc.claim_id else None
+    return ({"id": c.id, "number": c.number, "title": c.title, "cp_name": c.cp_name} if c else None,
+            {"id": cl.id, "number": cl.number or "черновик", "direction": cl.direction, "contract_id": cl.contract_id} if cl else None)
 
 
 

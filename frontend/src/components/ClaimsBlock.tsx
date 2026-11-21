@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import LinkedLetters from "./LinkedLetters";
 import { api } from "../api";
 
 // Претензии по договорам: реестр, карточка (строки требований, подпись КД / ЗГД, отправка, ответ, суд / закрытие), печатная форма.
@@ -193,6 +194,7 @@ export function ClaimCard({ id, onClose }: { id: string; onClose: () => void }) 
           {["sent", "received", "answered", "court"].includes(c.status) && c.can_work && <button className="btn ghost" onClick={() => step("status", { status: "closed" })}>Закрыть</button>}
           {["draft", "signing", "signed", "received"].includes(c.status) && c.can_work && <button className="btn ghost" onClick={() => step("status", { status: "cancelled" })}>Отменить</button>}
         </div>
+        <LinkedLetters claimId={c.id} />
         <a className="muted" href={`/legal?tab=contracts&open=${c.contract_id}`}>договор {c.contract_number} →</a>
       </div>
     </Modal>);

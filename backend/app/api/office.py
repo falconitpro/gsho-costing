@@ -12,9 +12,9 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import String, cast, or_, select
 from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser, get_current_user
@@ -25,6 +25,7 @@ from ..db import get_db
 from ..models import Deal, LegalEntity, OfficeDoc, OfficeRoute, OfficeSigner, User
 from ..services import office as svc
 from ..services.deal_service import notify
+from .common import get_deal_or_404
 from ..services.office_ai import state as office_ai_state
 
 router = APIRouter(prefix="/api/office", tags=["office"])
@@ -156,6 +157,19 @@ def _check_refs(db: Session, body) -> None:
         raise HTTPException(422, "Неизвестный вид письма")
     if getattr(body, "channel", None) and body.channel not in svc.CHANNELS:
         raise HTTPException(422, "Неизвестный способ поступления / отправки")
+    from ..models import Contract, ContractClaim
+    if getattr(body, "claim_id", None):
+        cl = db.get(ContractClaim, body.claim_id)
+        if cl is None:
+            raise HTTPException(422, "Претензия не найдена")
+        if not getattr(body, "contract_id", None):
+            body.contract_id = cl.contract_id          # D-136: претензия → её договор
+    if getattr(body, "contract_id", None):
+        c = db.get(Contract, body.contract_id)
+        if c is None:
+            raise HTTPException(422, "Договор не найден")
+        if hasattr(body, "deal_ids") and not (body.deal_ids or []) and (c.deal_id or c.deal_ids):
+            body.deal_ids = [x for x in [c.deal_id, *(c.deal_ids or [])] if x][:1]   # договор → его сделка, если сделка не выбрана
 
 
 def _assign_task(db: Session, doc: OfficeDoc, user: CurrentUser) -> None:
@@ -218,7 +232,8 @@ def list_docs(kind: Optional[str] = None, entity_id: Optional[str] = None, statu
     if q and q.strip():
         like = f"%{q.strip()}%"
         stmt = stmt.where(or_(OfficeDoc.number.ilike(like), OfficeDoc.subject.ilike(like), OfficeDoc.counterparty.ilike(like),
-                              OfficeDoc.summary.ilike(like), OfficeDoc.sender_number.ilike(like)))
+                              OfficeDoc.summary.ilike(like), OfficeDoc.sender_number.ilike(like), OfficeDoc.body.ilike(like),   # D-138: текст письма
+                              OfficeDoc.tracking.ilike(like), OfficeDoc.note.ilike(like), cast(OfficeDoc.files, String).ilike(like)))   # реквизит, отметка, имена вложений
     rows = db.scalars(stmt.order_by(OfficeDoc.created_at.desc()).limit(500)).all()
     rows = [d for d in rows if svc.can_see(user, d)]
     if mine:
@@ -987,3 +1002,171 @@ def ai(did: str, body: AiIn, db: Session = Depends(get_db), user: CurrentUser = 
     out["model"] = getattr(llm, "model", "")
     out["note"] = "Предложение ИИ — проверьте перед применением"
     return out
+
+
+
+# ---------------------------------------------------------------- связи с юр. блоком, «Оформить письмом» (D-136, D-137)
+
+@router.get("/lookup")
+def lookup(q: str = "", what: str = "contract", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Подбор договора или претензии для письма: номер, наименование, контрагент. Только для сотрудников Канцелярии."""
+    _need_any(user)
+    from ..models import Contract, ContractClaim
+    like = f"%{q.strip()}%"
+    if what == "claim":
+        rows = db.scalars(select(ContractClaim).where(or_(ContractClaim.number.ilike(like), ContractClaim.demand.ilike(like)) if q.strip() else True)
+                          .order_by(ContractClaim.created_at.desc()).limit(20)).all()
+        out = []
+        for cl in rows:
+            c = db.get(Contract, cl.contract_id)
+            out.append({"id": cl.id, "label": f"{cl.number or 'черновик'} · {'исходящая' if cl.direction == 'outgoing' else 'входящая'} · по договору {c.number if c else '—'}",
+                        "contract_id": cl.contract_id})
+        return out
+    rows = db.scalars(select(Contract).where(Contract.deleted_at.is_(None) if hasattr(Contract, "deleted_at") else True)
+                      .where(or_(Contract.number.ilike(like), Contract.title.ilike(like), Contract.cp_name.ilike(like), Contract.cp_number.ilike(like)) if q.strip() else True)
+                      .order_by(Contract.created_at.desc()).limit(20)).all()
+    return [{"id": c.id, "label": f"{c.number or 'проект'} · {c.cp_name or ''} · {c.title or ''}".strip(" ·"), "deal_id": c.deal_id} for c in rows]
+
+
+@router.get("/linked")
+def linked(contract_id: Optional[str] = None, claim_id: Optional[str] = None, deal_id: Optional[str] = None,
+           db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Письма, привязанные к договору, претензии или сделке — для карточек юр. блока. Видны только документы, доступные сотруднику."""
+    if not (contract_id or claim_id or deal_id):
+        raise HTTPException(422, "Укажите договор, претензию или сделку")
+    stmt = select(OfficeDoc).where(OfficeDoc.kind.in_(("in", "out")))
+    if claim_id:
+        stmt = stmt.where(OfficeDoc.claim_id == claim_id)
+    elif contract_id:
+        stmt = stmt.where(OfficeDoc.contract_id == contract_id)
+    rows = db.scalars(stmt.order_by(OfficeDoc.created_at.desc())).all()
+    if deal_id:
+        rows = [d for d in db.scalars(select(OfficeDoc).where(OfficeDoc.kind.in_(("in", "out")))).all() if deal_id in (d.deal_ids or [])]
+    return [{"id": d.id, "kind": d.kind, "number": d.number, "reg_date": d.reg_date.isoformat() if d.reg_date else None, "subject": d.subject,
+             "counterparty": d.counterparty, "status": d.status, "status_title": svc.STATUSES.get(d.status, d.status)}
+            for d in rows if svc.can_see(user, d) and d.status != "cancelled"]
+
+
+class FromFeedIn(BaseModel):
+    message_id: str
+    entity_id: Optional[str] = None
+
+
+@router.post("/docs/from-feed", status_code=201)
+def from_feed(body: FromFeedIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """«Оформить письмом»: из сообщения в ленте сделки — черновик исходящего: текст, сделка и раздел, адресат, договор, вложения.
+    Черновик видит автор; номер присваивается при подписании, как у любого исходящего."""
+    import shutil
+    from ..adapters import storage
+    from ..core.config import get_settings
+    from ..models import Attachment, Contract, FeedEntry
+    from ..services import deal_feed
+    e = db.get(FeedEntry, body.message_id)
+    if e is None or e.deleted_at or e.kind not in deal_feed.MESSAGE_KINDS:
+        raise HTTPException(404, "Сообщение не найдено")
+    deal = get_deal_or_404(db, e.deal_id, user)      # видимость сделки — по общим правилам
+    if deal_feed.entry_section(e) not in deal_feed.visible_sections(user):
+        raise HTTPException(404, "Сообщение не найдено")
+    if not (user.can("office", 2) or deal_feed.can_write(user, deal_feed.entry_section(e))):
+        raise HTTPException(403, "Оформить письмом может участник сделки с правом писать в этот раздел")
+    ent = db.get(LegalEntity, body.entity_id) if body.entity_id else None
+    if ent is None:
+        ent = db.scalar(select(LegalEntity).where(LegalEntity.code == "ru")) or db.scalar(select(LegalEntity))
+    contract = db.scalar(select(Contract).where(Contract.deal_id == deal.id, Contract.kind == "client").order_by(Contract.created_at.desc())) \
+        if hasattr(Contract, "kind") else None
+    client = getattr(deal, "client", None)
+    text = (e.body or "").strip()
+    subject = (e.subject or "").strip() or (text.split("\n", 1)[0][:120] if text else f"Письмо по сделке {deal.number}")
+    doc = OfficeDoc(entity_id=ent.id, kind="out", subject=subject, body=text, counterparty=e.counterparty or (client.name if client else ""),
+                    deal_ids=[deal.id], deal_section=deal_feed.entry_section(e) if deal_feed.entry_section(e) != "pricing" else "",
+                    contract_id=contract.id if contract else None, status="draft", created_by=user.id, files=[], history=[], comments=[],
+                    note=f"Из ленты сделки {deal.number}, сообщение от {e.at:%d.%m.%Y %H:%M}" if e.at else f"Из ленты сделки {deal.number}")
+    db.add(doc)
+    db.flush()
+    st = storage(get_settings())
+    for aid in e.attachment_ids or []:
+        a = db.get(Attachment, aid)
+        if a is None:
+            continue
+        fid = uuid.uuid4().hex
+        dst = os.path.join(_files_dir(doc.id), f"{fid}{os.path.splitext(a.file_name)[1].lower()}")
+        try:
+            st.download(a.storage_path, dst)
+        except Exception:   # noqa: BLE001 — файл недоступен: письмо создаётся без него, в комментарии отметка
+            doc.comments = [*(doc.comments or []), {"id": uuid.uuid4().hex[:12], "by": user.id, "text": f"Вложение «{a.file_name}» не скопировано — приложите вручную",
+                                                    "at": datetime.now(timezone.utc).isoformat()}]
+            continue
+        doc.files = [*(doc.files or []), {"id": fid, "name": a.file_name, "size": os.path.getsize(dst), "kind": "attachment", "by": user.id,
+                                          "at": datetime.now(timezone.utc).isoformat()}]
+    svc.hist(doc, user.id, "from_feed", f"сделка {deal.number}")
+    db.commit()
+    return svc.serialize(db, doc, user, full=True)
+
+
+# ---------------------------------------------------------------- ознакомление с приказами (D-140)
+
+ACKABLE = ("order", "directive", "internal", "memo")
+
+
+class AckAssignIn(BaseModel):
+    user_ids: list[str] = Field(default_factory=list)
+    roles: list[str] = Field(default_factory=list)
+    everyone: bool = False
+
+
+@router.post("/docs/{did}/acks")
+def assign_acks(did: str, body: AckAssignIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Назначить ознакомление: сотрудники, роли или все. Сотрудник получает задачу «Ознакомиться» и видит документ."""
+    doc = _get(db, did, user)
+    if doc.kind not in ACKABLE:
+        raise HTTPException(409, "Ознакомление — для приказов, распоряжений и внутренних документов")
+    if not svc.is_editor(user, doc):
+        raise HTTPException(403, "Назначает делопроизводитель или ЗГД")
+    if doc.status not in ("signed", "in_force"):
+        raise HTTPException(409, "Ознакомить можно с подписанным документом")
+    people = db.scalars(select(User).where(User.is_active.is_(True))).all()
+    ids = {u.id for u in people if body.everyone or u.id in body.user_ids or set(u.roles or []) & set(body.roles)}
+    ids -= {"system"}
+    if not ids:
+        raise HTTPException(422, "Выберите сотрудников, роли или «все сотрудники»")
+    have = {a["user_id"] for a in doc.acks or []}
+    now = datetime.now(timezone.utc).isoformat()
+    new = [{"user_id": i, "by": user.id, "at": now, "acked_at": None, "reminded": []} for i in sorted(ids - have)]
+    doc.acks = [*(doc.acks or []), *new]
+    deal = db.get(Deal, doc.deal_ids[0]) if doc.deal_ids else None
+    for a in new:
+        notify(db, deal, a["user_id"], "office_ack", None, f"Канцелярия: ознакомьтесь — {doc.number} «{doc.subject}»")
+    svc.hist(doc, user.id, "acks_assigned", f"+{len(new)}")
+    db.commit()
+    return svc.serialize(db, doc, user, full=True)
+
+
+@router.delete("/docs/{did}/acks/{uid}")
+def remove_ack(did: str, uid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    doc = _get(db, did, user)
+    if not svc.is_editor(user, doc):
+        raise HTTPException(403)
+    a = svc.acked_by(doc, uid)
+    if a is None:
+        raise HTTPException(404)
+    if a.get("acked_at"):
+        raise HTTPException(409, "Сотрудник уже ознакомился — отметку не снять")
+    doc.acks = [x for x in doc.acks or [] if x["user_id"] != uid]
+    svc.hist(doc, user.id, "ack_removed", uid)
+    db.commit()
+    return svc.serialize(db, doc, user, full=True)
+
+
+@router.post("/docs/{did}/ack")
+def acknowledge(did: str, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """«Ознакомлен»: отметка с датой и временем; снять её нельзя."""
+    doc = db.get(OfficeDoc, did)
+    a = svc.acked_by(doc, user.id) if doc is not None else None
+    if doc is None or a is None:
+        raise HTTPException(404, "Ознакомление вам не назначено")
+    if not a.get("acked_at"):
+        doc.acks = [{**x, "acked_at": datetime.now(timezone.utc).isoformat(), "ip": request.client.host if request.client else ""}
+                    if x["user_id"] == user.id else x for x in doc.acks or []]
+        svc.hist(doc, user.id, "acked", user.display_name)
+        db.commit()
+    return svc.serialize(db, doc, user, full=True)

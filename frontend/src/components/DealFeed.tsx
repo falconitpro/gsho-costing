@@ -118,6 +118,9 @@ function Msg({ m, dealId, feed, showSection, onDone }: { m: FeedItem; dealId: st
           {m.awaiting && !m.resolved_at && <a href="#" onClick={(e) => { e.preventDefault(); api.post<Feed>(`${url}/resolve`).then(onDone); }}>вопрос снят</a>}
           {m.can_edit && <a href="#" onClick={(e) => { e.preventDefault(); setEdit(m.body); }}>исправить</a>}
           {m.can_delete && <a href="#" onClick={async (e) => { e.preventDefault(); if (await askConfirm("Удалить сообщение?")) api.del<Feed>(url).then(onDone); }}>удалить</a>}
+          {["comment", "mail_in"].includes(m.kind) && <a href="#" title="Черновик исходящего письма в Канцелярии: текст, сделка, адресат и вложения"
+            onClick={async (e) => { e.preventDefault(); if (!(await askConfirm("Создать черновик официального письма из этого сообщения? Номер присвоится при подписании."))) return;
+              const d = await api.post<{ id: string }>("/api/office/docs/from-feed", { message_id: m.id }); window.location.assign(`/office?t=out&doc=${d.id}`); }}>оформить письмом</a>}
         </div>
       )}
     </div>

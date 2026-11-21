@@ -80,6 +80,36 @@ def check(db: Session, now: Optional[datetime] = None) -> int:
             sent += 1
         marks[key] = today.isoformat()
         doc.alerts = marks
+    sent += _ack_reminders(db, today)
+    return sent
+
+
+ACK_REMIND_WD = 3
+
+
+def _ack_reminders(db: Session, today: date) -> int:
+    """D-140: не ознакомился за 3 рабочих дня — напоминание сотруднику, дальше раз в 3 рабочих дня."""
+    from sqlalchemy import String, cast
+    from .deal_service import notify
+    sent = 0
+    for doc in db.scalars(select(OfficeDoc).where(OfficeDoc.status.in_(("signed", "in_force")), cast(OfficeDoc.acks, String) != "[]")).all():
+        changed = False
+        acks = []
+        for a in doc.acks or []:
+            if a.get("acked_at") or not a.get("at"):
+                acks.append(a)
+                continue
+            given = datetime.fromisoformat(a["at"]).astimezone(MSK).date()
+            wd = CAL.working_days_between(given, today)
+            key = today.isoformat()
+            if wd >= ACK_REMIND_WD and wd % ACK_REMIND_WD == 0 and key not in (a.get("reminded") or []):
+                notify(db, None, a["user_id"], "office_ack", None, f"Канцелярия: напоминание — ознакомьтесь с {_title(doc)}")
+                a = {**a, "reminded": [*(a.get("reminded") or []), key]}
+                sent += 1
+                changed = True
+            acks.append(a)
+        if changed:
+            doc.acks = acks
     return sent
 
 

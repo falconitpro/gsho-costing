@@ -2500,6 +2500,7 @@ class OfficeDoc(TimestampMixin, Base):
     reviewer_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     resolutions: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # [{id, by, at, kind: execute | info | file, text, executor_id, co, due_on}]
     alerts: Mapped[dict] = mapped_column(JSONType, default=dict)            # D-133: отправленные напоминания о сроке {ключ: дата} — без повторов
+    acks: Mapped[list[dict]] = mapped_column(JSONType, default=list)        # D-140: лист ознакомления [{user_id, by, at, acked_at, reminded}]
 
 
 class OfficeRoute(TimestampMixin, Base):

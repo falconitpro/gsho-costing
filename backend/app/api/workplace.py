@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser, get_current_user
@@ -494,6 +494,11 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
     for d in db.scalars(select(OfficeDoc).where(OfficeDoc.status == "review", OfficeDoc.reviewer_id == user.id)).all():   # D-130
         office_items.append({"id": d.id, "number": d.number, "subject": d.subject, "counterparty": d.counterparty, "due_on": d.due_on,
                              "verb": "Рассмотреть, наложить резолюцию"})
+    for d in db.scalars(select(OfficeDoc).where(OfficeDoc.status.in_(("signed", "in_force")), cast(OfficeDoc.acks, String).like(f'%"{user.id}"%'))).all():   # D-140
+        a = office_svc.acked_by(d, user.id)
+        if a is not None and not a.get("acked_at"):
+            office_items.append({"id": d.id, "number": d.number, "subject": d.subject, "counterparty": office_svc.KINDS.get(d.kind, ""), "due_on": None,
+                                 "verb": "Ознакомиться"})
     for d in db.scalars(select(OfficeDoc).where(OfficeDoc.status == "approval")).all():
         if office_svc.is_approver(db, d, user):
             office_items.append({"id": d.id, "number": "", "subject": d.subject, "counterparty": office_svc.KINDS.get(d.kind, ""), "due_on": None,

@@ -1008,3 +1008,5 @@ a.lv-stat:hover { background: var(--accent-soft); }
 @media (max-width: 760px) { .office-ai-diff { grid-template-columns: 1fr; } }
 .office-guide section ul { margin: 4px 0 10px; padding-left: 20px; display: grid; gap: 4px; }
 .office-guide h3 { margin: 12px 0 4px; }
+.linked-letters { margin-top: 14px; }
+.office-pick { display: grid; gap: 4px; margin-top: 6px; max-height: 220px; overflow: auto; }

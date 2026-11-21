@@ -1,6 +1,7 @@
 import { useAllColumns } from "./Levels";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import LinkedLetters from "./LinkedLetters";
 import { api } from "../api";
 import { ClaimCard, ClaimsTable, NewClaimDialog, type ClaimRow } from "./ClaimsBlock";
 import { askConfirm } from "./Dialogs";
@@ -266,6 +267,7 @@ function ContractCard({ id, cat, onClose, onOpen }: { id: string; cat: Catalog; 
 
         {tab === "exec" && c.obligations && <ExecTab c={c} ob={c.obligations} onSaved={(x) => { setC(x); setErr([]); setInfo("Записано"); }} onErr={fail} />}
         {tab === "files" && <PackagesSection contractId={c.id} />}
+        {tab === "files" && <LinkedLetters contractId={c.id} />}
         {tab === "files" && (
           <div className="poa-section" style={{ marginTop: 14 }}>
             <div className="poa-section-head" style={{ justifyContent: "space-between" }}>
