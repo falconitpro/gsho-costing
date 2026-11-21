@@ -109,7 +109,8 @@ def _my_tasks(db: Session, user: CurrentUser, today: date) -> list[dict]:
     return out
 
 
-def _todo(user: CurrentUser, today: date, tasks: list[dict], approvals: list[dict], open_deals: list[Deal], events: list[dict], idle: dict[str, int] | None = None) -> list[dict]:
+def _todo(user: CurrentUser, today: date, tasks: list[dict], approvals: list[dict], open_deals: list[Deal], events: list[dict], idle: dict[str, int] | None = None,
+          questions: list[dict] | None = None) -> list[dict]:
     """Лента «Что сделать»: решения, задачи, сроки и черновики без движения — без повторов, по срочности.
     Задача по сделке, которая уже ждёт решения (виза / утверждение), не дублируется; срок КП — только если по сделке нет задачи."""
     items: list[dict] = []
@@ -151,6 +152,13 @@ def _todo(user: CurrentUser, today: date, tasks: list[dict], approvals: list[dic
             items.append({"kind": "draft", "title": f"Черновик {d.number} · {d.client.name if d.client else ''}", "sub": " · ".join(x for x in (_equipment(d), hint) if x),
                           "url": f"/deals/{d.id}", "action": "Открыть", "tone": "warn" if age < 14 else "bad", "due": None, "days_left": None, "overdue": False,
                           "when": f"{age} дн. без движения", "task_id": None, "rank": 3})
+    for q in questions or []:   # D-127: мои вопросы в обсуждениях сделок, ответа на которые ещё нет
+        dl = (q["due_on"] - today).days if q["due_on"] else None
+        when = "" if dl is None else f"просрочено {-dl} дн." if dl < 0 else "сегодня" if dl == 0 else "завтра" if dl == 1 else f"до {q['due_on']:%d.%m}"
+        items.append({"kind": "question", "title": f"Ждём ответа: {q['body'][:80]}", "sub": f"{q['deal_number']} · {q['section_title']}",
+                      "url": f"/deals/{q['deal_id']}?tab=feed", "action": "Открыть", "tone": "bad" if dl is not None and dl < 0 else "info",
+                      "due": q["due_on"].isoformat() if q["due_on"] else None, "days_left": dl, "overdue": bool(dl is not None and dl < 0), "when": when,
+                      "task_id": None, "rank": 0 if dl is not None and dl < 0 else 2})
     items.sort(key=lambda x: (x["rank"], x["days_left"] if x["days_left"] is not None else 99, x["title"]))
     for x in items:
         x.pop("rank")
@@ -464,7 +472,13 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
                  "claims_answer_overdue": sum(1 for cl in claims if cl.answer_due and cl.answer_due < today and cl.status in ("sent", "received"))}
 
     # ---------------- что сделать (D-097): одна лента вместо «Главное сейчас», задач, согласований и сроков; первая строка — главное
-    todo = _todo(user, today, tasks, approvals, open_deals, events, idle)
+    from ..models import FeedEntry
+    from ..services.deal_feed import SECTIONS
+    qrows = db.execute(select(FeedEntry, Deal.number).join(Deal, Deal.id == FeedEntry.deal_id).where(
+        FeedEntry.user_id == user.id, FeedEntry.awaiting.is_(True), FeedEntry.resolved_at.is_(None), FeedEntry.deleted_at.is_(None),
+        Deal.deleted_at.is_(None)).order_by(FeedEntry.due_on).limit(50)).all()
+    questions = [{"deal_id": e.deal_id, "deal_number": num, "body": e.body, "due_on": e.due_on, "section_title": SECTIONS.get(e.section, "")} for e, num in qrows]
+    todo = _todo(user, today, tasks, approvals, open_deals, events, idle, questions)
 
     # ---------------- раскладка
     default_order = ROLE_BLOCKS.get(role, ROLE_BLOCKS["observer"])

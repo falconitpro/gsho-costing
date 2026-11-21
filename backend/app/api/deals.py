@@ -1016,10 +1016,7 @@ def related(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Dep
 
 # ------------------------------------------------------------------ лента, версии, вложения, журнал
 
-@router.get("/{deal_id}/feed")
-def feed(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    deal = get_deal_or_404(db, deal_id, user)
-    return [serialize(f) for f in db.scalars(select(FeedEntry).where(FeedEntry.deal_id == deal.id).order_by(FeedEntry.at.desc())).all()]
+# лента сделки — app/api/deal_feed.py (D-127)
 
 
 @router.get("/{deal_id}/versions")
