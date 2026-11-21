@@ -117,7 +117,11 @@ def build_sale_context(db: Session, deal: Deal, ch: SaleChoice) -> dict:
                 "warranty": warranty_text(first) if first else "", "subject": "поставка горно-шахтного оборудования", "language": "ru"}
     rule_ctx = {"delivery_days": (first.production_days or 0) + (first.delivery_days or 0) if first else "", "warranty_months": first.warranty_months if first else "", "warranty_hours": first.warranty_hours if first else "",
                 "seller": seller, "currency": first.currency if first else "CNY"}
-    totals = {"items_count": len(items), "units_count": units, "amount": price["amount"], "currency": price["currency"]}
+    # D-149: итого по договору — к оплате клиентом, с НДС (как в реестре и графике исполнения); без НДС — amount_net
+    from .legal_contracts import deal_client_terms
+    from .legal_packages import vat_fields
+    gross, gcur = (deal_client_terms(deal, db)[1:] if v else (None, price["currency"]))
+    totals = {"items_count": len(items), "units_count": units, "amount": gross, "currency": gcur or price["currency"], **vat_fields(db, gross, gcur or price["currency"], True)}
     return {"own_entity": {"id": ent.id, "name": ent.name}, "client": {"id": client.id, "name": client.name}, "seller": seller, "buyer": buyer, "contract": contract, "items": items, "params": params,
             "options": options_rows, "zip": [], "totals": totals, "brand_company": brand_company, "forbidden_names": sorted(set(forbidden_names)), "rule_ctx": rule_ctx,
             "deal_version": {"id": ver.id if ver else None, "no": ver.version_no if ver else None}, "variant": {"id": v.id if v else None, "name": v.name if v else ""}, "sources": src, "language": "ru",

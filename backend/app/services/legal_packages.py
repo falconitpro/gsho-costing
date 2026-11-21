@@ -301,11 +301,25 @@ def build_context(db: Session, deal: Deal, ch: Choice) -> dict:
         src["contract.number"] = f"рамочный договор {framework['number']}; спецификация {framework['spec_number']}"
     src["contract.payment_terms"] = "условия оплаты заводу из позиции (КД / ответ завода)"
     totals = {"equipment_amount": round(eq_amount, 2), "zip_amount": zip_amount, "options_amount": 0.0, "amount": total, "amount_words": amount_words(total, currency), "currency": currency,
-              "vat_text": "НДС не облагается (экспорт)" if country != "RU" else "в том числе НДС 20 %", "items_count": len(items), "units_count": units, "zip_included": included}
+              **vat_fields(db, total, currency, country == "RU"), "items_count": len(items), "units_count": units, "zip_included": included}
     return {"factory": {"id": factory.id, "name": factory.name, "short_name": factory.short_name or factory.name, "country": country}, "own_entity": {"id": own_entity.id, "name": own_entity.name, "code": own_entity.code} if own_entity else None,
             "buyer": buyer, "seller": seller, "contract": contract, "items": items, "params": params_rows, "zip": zrows, "zip_set": {"id": zs.id if zs else None, "confirmed": bool(zs and zs.confirmed_at), "pricing_mode": zs.pricing_mode if zs else "included", "lines_total": len(zs.lines) if zs else 0},
             "options": [], "totals": totals, "deal_version": {"id": ver.id if ver else None, "no": ver.version_no if ver else None}, "language": language, "sources": src,
             "package": {"created_on": _fmt_date(date.today()), "author": "", "version": "", "status": STATUS_TITLES["draft"]}, "mirror": mirror, "framework": framework}
+
+
+def vat_fields(db: Session, gross: Optional[float], currency: str, taxable: bool) -> dict:
+    """НДС в итогах документа (D-149): ставка — из настроек «НДС с продажи» (с 2026 — 22 %), сумма НДС в т. ч. Сумма договора — с НДС.
+    Поставщик не из России — экспорт, НДС не облагается."""
+    if not taxable:
+        return {"vat_rate": 0.0, "vat_amount": 0.0, "amount_net": gross, "vat_text": "НДС не облагается (экспорт)"}
+    from . import settings_service
+    rate = float(settings_service.get(db, "sales_vat_pct") or 22.0)
+    if gross is None:
+        return {"vat_rate": rate, "vat_amount": None, "amount_net": None, "vat_text": f"в том числе НДС {rate:g} %"}
+    vat = round(gross * rate / (100 + rate), 2)
+    num = f"{vat:,.2f}".replace(",", " ").replace(".", ",")
+    return {"vat_rate": rate, "vat_amount": vat, "amount_net": round(gross - vat, 2), "vat_text": f"в том числе НДС {rate:g} % — {num} {currency}"}
 
 
 def amount_words(v: float, currency: str) -> str:

@@ -6,6 +6,8 @@
 - Логистическая партия (`Batch.payments`): формат в CRM не задан и поле пока нигде не заполняется (сверка 10.11.2026).
   Адаптер принимает `{due|on, amount, currency, payee|counterparty, comment|title, paid_on}`; валюту не выдумываем —
   строка без валюты уходит в конфликт «валюта не определена» (D-123).
+- Гарантийная претензия заводу (`WarrantyClaim.compensations`, вид «деньгами»): сумма, которую завод признал и должен вернуть, —
+  обязательство «нам платят», срок не согласован; отметка «получено» — старая отметка → запись «требует сверки» (D-149).
 - Запчасти: ожидаемые поступления по заказанным, но не отгруженным строкам заявок клиентов — не обязательства с датой,
   а отдельный блок «ожидается, срок не согласован» (только чтение, D-124).
 """
@@ -19,7 +21,7 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ...models import Batch, Deal, Factory, FinanceObligation, PurchaseOrder
+from ...models import Batch, Deal, Factory, FinanceObligation, PurchaseOrder, WarrantyClaim
 from .money import dec, s
 from .obligations import LineSpec, SyncStats, project_lines
 
@@ -78,6 +80,34 @@ def sync_purchase_order(db: Session, po: PurchaseOrder, user_id: Optional[str] =
     return st
 
 
+# ------------------------------------------------------------------ гарантийная претензия: компенсация деньгами
+
+def sync_warranty_claim(db: Session, c: WarrantyClaim, user_id: Optional[str] = None) -> SyncStats:
+    """Компенсация деньгами по претензии — ожидаемое поступление от завода (D-149). Деталью — уже есть в заказе заводу (цена 0);
+    скидкой — не деньги, в «Финансы» не идёт."""
+    supplier = db.get(Factory, c.supplier_id) if c.supplier_id else None
+    comps = [x for x in (c.compensations or []) if x.get("kind") == "money"]
+    specs = []
+    for i, x in enumerate(comps):
+        amount, currency = dec(x.get("amount")), (x.get("currency") or "").upper() or None
+        fields = {"deal_id": c.deal_id, "contract_id": None, "legal_entity_id": None, "counterparty_kind": "factory", "counterparty_id": c.supplier_id,
+                  "counterparty_name_snapshot": (supplier.name if supplier else "")[:255], "direction": "in", "nature": "operational",
+                  "title": f"{c.number}: гарантийная компенсация" + (f" — {x['note']}" if x.get("note") else ""), "event_code": "warranty_comp", "source_line_no": i + 1,
+                  "legal_due_on": None, "legal_due_text": "срок возврата заводом не согласован", "event_on": None, "event_is_fact": False, "forecast_on": None}
+        fields["title"] = fields["title"][:255]
+        active, reason = (False, "претензия закрыта без получения") if c.status == "closed" and not x.get("received_on") else (True, "")
+        basis = {"claim_number": c.number, "claim_status": c.status, "compensation": {k: x.get(k) for k in ("id", "amount", "currency", "note")}}
+        specs.append(LineSpec(key=f"comp:{x['id']}", revision=_rev({"amount": s(amount), "currency": currency, "active": active}), amount=amount, currency=currency,
+                              fields=fields, basis=basis, active=active, reason=reason))
+    st = project_lines(db, "warranty_claim", c.id, specs, user_id, c.deal_id, "компенсация удалена из претензии")
+    from . import legacy
+    for x in comps:   # «получено» в претензии — отметка менеджера, не банковский факт
+        legacy.record(db, user_id, origin_type="warranty_claim_legacy", origin_id=f"{c.id}:{x['id'][:20]}", deal_id=c.deal_id, direction="in",
+                      amount=x.get("amount") if x.get("received_on") else None, currency=(x.get("currency") or "XXX").upper(), on=_date(x.get("received_on")),
+                      note=f"{c.number}: гарантийная компенсация", source=("warranty_claim", c.id, f"comp:{x['id']}"), counterparty_name=supplier.name if supplier else "")
+    return st
+
+
 # ------------------------------------------------------------------ логистическая партия
 
 def sync_batch(db: Session, b: Batch, user_id: Optional[str] = None, deleted: bool = False) -> SyncStats:
@@ -118,6 +148,9 @@ def rebuild_sources(db: Session, user_id: Optional[str]) -> SyncStats:
             total.add(sync_batch(db, b, user_id))
     for d in db.scalars(select(Deal).where(Deal.approved_version_id.is_not(None))).all():
         total.add(sync_calculation(db, d, user_id))
+    for c in db.scalars(select(WarrantyClaim)).all():
+        if any(x.get("kind") == "money" for x in c.compensations or []):
+            total.add(sync_warranty_claim(db, c, user_id))
     return total
 
 

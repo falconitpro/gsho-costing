@@ -536,7 +536,34 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
 def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     out, ctx = build(db, user)
     out["briefing"] = briefing_block(db, user, ctx)
+    out["tails"] = tails(db, user)
     return out
+
+
+def tails(db: Session, user: CurrentUser) -> Optional[list[dict]]:
+    """«Хвосты» для ЗГД одной строкой (D-149): ссылки на уже существующие списки, без нового экрана. Сбой — строки нет."""
+    if not user.has(Role.GD):
+        return None
+    try:
+        from datetime import date as _date
+
+        from ..models import Contract, Deal, ExecutionStage
+        from ..models.finance import FinanceObligation, FinanceTransaction
+        from ..services.legal_contracts import LOCKED
+        today = _date.today()
+        stages = db.scalar(select(func.count(ExecutionStage.id)).join(Deal, Deal.id == ExecutionStage.deal_id).where(
+            Deal.status == DealStatus.EXECUTION, ExecutionStage.actual_on.is_(None), ExecutionStage.planned_on < today, ExecutionStage.code != "closing")) or 0
+        no_scan = sum(1 for c in db.scalars(select(Contract).where(Contract.status.in_(LOCKED), Contract.doc_type != "amendment")).all()
+                      if not any(f.get("kind") == "signed_scan" for f in (c.files or [])))
+        rec = (db.scalar(select(func.count(FinanceTransaction.id)).where(FinanceTransaction.status == "needs_reconciliation", FinanceTransaction.withdrawn_at.is_(None))) or 0) \
+            + (db.scalar(select(func.count(FinanceObligation.id)).where(FinanceObligation.sync_status == "conflict")) or 0)
+        return [{"key": "stages", "title": "этапов исполнения без факта после плановой даты", "value": stages, "url": "/summary?kind=shipments"},
+                {"key": "no_scan", "title": "подписанных договоров без скана", "value": no_scan, "url": "/legal?tab=contracts"},
+                {"key": "reconciliation", "title": "записей «требует сверки» в «Финансах»", "value": rec, "url": "/finance?tab=reconciliation"}]
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("gsho.workplace").exception("tails")
+        return None
 
 
 def briefing_block(db: Session, user: CurrentUser, ctx: dict) -> dict:

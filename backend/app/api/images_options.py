@@ -212,11 +212,13 @@ class LocalOptionIn(BaseModel):
     quote_attachment_id: Optional[str] = None
 
 
-def _option_tasks(db: Session, deal, pos: Position, o: LocalOption, user_id: str) -> None:
+def _option_tasks(db: Session, deal, pos: Position, o: LocalOption, user_id: str, quoted: bool = False) -> None:
     """Задачи на этапе расчёта: менеджеру — КП поставщиков, сервису — оценка установки, КД — утвердить стоимость."""
     existing = {t.block for t in db.scalars(select(Task).where(Task.deal_id == deal.id, Task.done_at.is_(None))).all()}
     today = date.today()
-    specs = [(Role.MANAGER, deal.manager_id, f"Запросить КП поставщиков опции «{o.name}» ({pos.designation})", f"local_option_quote:{o.id}", 2)]
+    specs = []
+    if not quoted:   # D-149: стоимость и срок поставщика внесены при создании опции — запрашивать КП не нужно
+        specs.append((Role.MANAGER, deal.manager_id, f"Запросить КП поставщиков опции «{o.name}» ({pos.designation})", f"local_option_quote:{o.id}", 2))
     if o.needs_install:
         specs.append((Role.SERVICE_HEAD, deal.service_head_id, f"Оценить время и стоимость установки опции «{o.name}» ({pos.designation})", f"local_option_install_est:{o.id}", 2))
     specs.append((Role.CD, None, f"Утвердить стоимость опции РФ «{o.name}» ({pos.designation})", f"local_option_approve:{o.id}", 2))
@@ -247,7 +249,7 @@ def add_option(deal_id: str, pos_id: str, body: LocalOptionIn, db: Session = Dep
         r = db.get(PositionTechParam, body.tech_param_id)
         if r and r.position_id == pos.id:
             r.local_ru = True
-    _option_tasks(db, deal, pos, o, user.id)
+    _option_tasks(db, deal, pos, o, user.id, quoted=bool(body.cost) and "supplier_lead_days" in body.model_fields_set)
     audit(db, user.id, deal.id, "local_option", o.id, "create", after=body.model_dump())
     db.commit()
     return serialize(o)
@@ -275,7 +277,7 @@ def patch_option(deal_id: str, pos_id: str, opt_id: str, body: dict, db: Session
         from datetime import datetime, timezone
         for t in db.scalars(select(Task).where(Task.deal_id == deal.id, Task.block == f"local_option_approve:{o.id}", Task.done_at.is_(None))).all():
             t.done_at = datetime.now(timezone.utc)
-    if "cost" in body and user.has(Role.MANAGER):
+    if ("cost" in body and user.has(Role.MANAGER)) or (o.cost and "supplier_lead_days" in body):   # D-149: внесены стоимость и срок поставщика
         from datetime import datetime, timezone
         for t in db.scalars(select(Task).where(Task.deal_id == deal.id, Task.block == f"local_option_quote:{o.id}", Task.done_at.is_(None))).all():
             t.done_at = datetime.now(timezone.utc)

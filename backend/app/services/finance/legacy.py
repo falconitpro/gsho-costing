@@ -27,7 +27,7 @@ from .obligations import paid_map
 
 MSK = ZoneInfo("Europe/Moscow")
 ORIGINS = {"execution_legacy": "этап исполнения", "contract_legacy": "отметка в договоре", "planfact_legacy": "план/факт",
-           "purchase_order_legacy": "отметка в заказе поставщику", "batch_legacy": "отметка в партии"}
+           "purchase_order_legacy": "отметка в заказе поставщику", "batch_legacy": "отметка в партии", "warranty_claim_legacy": "отметка в гарантийной претензии"}
 
 
 def _key(origin_type: str, origin_id: str) -> str:

@@ -1069,3 +1069,7 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .speed-bar .med { fill: var(--accent); }
 .speed-note { font-size: 12px; }
 @media (max-width: 760px) { .speed-tbl { display: block; overflow-x: auto; } }
+
+/* D-149: «хвосты» ЗГД на рабочем месте — одна строка ссылок */
+.wp-tails { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
+.wp-tails a b { color: var(--warn); }

@@ -156,6 +156,8 @@ def contract_amend(deal_id: str, body: AmendIn, db: Session = Depends(get_db), u
            "date": body.signed_at.isoformat(), "reason": reason, "by": user.id, "at": datetime.now(timezone.utc).isoformat()}
     deal.contract_history = list(deal.contract_history or []) + [rec]
     who = "с клиентом" if body.side == "client" else "с заводом"
+    from ..services.legal_contracts import sync_deal_signing
+    sync_deal_signing(db, deal, user.id)    # D-149: новые номер и дата — и в реестре договоров
     audit(db, user.id, deal.id, "deal", deal.id, "contract_amend", {"number": old_number, "date": str(old_date or "")}, {"number": number, "date": body.signed_at.isoformat(), "reason": reason, "side": body.side})
     db.add(FeedEntry(deal_id=deal.id, kind="system", subject=f"Изменён подписанный договор {who}: № {old_number} от {old_date:%d.%m.%Y} → № {number} от {body.signed_at:%d.%m.%Y}" if old_date
                      else f"Изменён подписанный договор {who}: № {number} от {body.signed_at:%d.%m.%Y}", body=reason, user_id=user.id))
@@ -223,6 +225,10 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
             deal.contract_history = list(deal.contract_history or []) + [{
                 "side": side, "action": "unsigned", "old_number": getattr(deal, num_f) or "", "old_date": str(getattr(deal, date_f) or ""),
                 "number": getattr(deal, num_f) or "", "date": "", "reason": body.comment.strip(), "by": user.id, "at": datetime.now(timezone.utc).isoformat()}]
+            from ..services.legal_contracts import unsign_from_deal
+            kept = unsign_from_deal(db, deal, side, body.comment.strip(), user.id)   # D-149: договор из сделки — «на подписании», строки «Финансов» выключены
+            if kept:
+                body.comment = (body.comment + f" · В реестре остаётся подписанным договор {', '.join(kept)} (оформлен юристом) — проверьте его статус в карточке.").strip()
         if body.code == "client_signed":
             deal.contract_signed_at = None
         if body.code == "factory_signed":

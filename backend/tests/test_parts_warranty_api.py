@@ -72,7 +72,18 @@ def test_warranty_claim(client):
     assert po["lines"][0]["price"] == 0 and po["lines"][0]["warranty_claim_id"] == c["id"] and po["total"] == 0
     x = _ok(client.post(f"/api/parts/claims/{c['id']}/compensations", headers=H(MGR), json={"kind": "money", "amount": 500, "currency": "RUB"}))
     money = x["compensations"][1]
+    # D-149: деньги от завода — ожидаемое поступление в «Финансах»; «получено» — запись на сверку, не банковский факт
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models.finance import FinanceObligation, FinanceTransaction
+    with SessionLocal() as db:
+        ob = db.scalars(select(FinanceObligation).where(FinanceObligation.source_type == "warranty_claim", FinanceObligation.source_id == c["id"])).all()
+        assert [(o.direction, float(o.amount), o.currency, o.is_active) for o in ob] == [("in", 500.0, "RUB", True)]
     _ok(client.post(f"/api/parts/claims/{c['id']}/compensations/{money['id']}/received", headers=H(MGR), json={}))
+    with SessionLocal() as db:
+        tx = db.scalars(select(FinanceTransaction).where(FinanceTransaction.origin_type == "warranty_claim_legacy")).all()
+        assert [(t.status, t.direction, float(t.amount)) for t in tx if t.origin_id.startswith(c["id"])] == [("needs_reconciliation", "in", 500.0)]
     assert _ok(client.get(f"/api/parts/claims/{c['id']}", headers=H(MGR)))["status"] == "partial"
     # приёмка гарантийной детали закрывает компенсацию деталью → «компенсация получена»
     _ok(client.post(f"/api/parts/po/{po['id']}/mark-sent", headers=H(CD)))
