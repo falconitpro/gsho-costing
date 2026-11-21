@@ -138,6 +138,31 @@ def temporary_password(user_id: str, request: Request, db: Session = Depends(get
     return {"ok": True, "temporary_password": temp, "sessions_revoked": n}
 
 
+class LinkIn(BaseModel):
+    email: Optional[str] = None            # куда отправить; пусто — на e-mail из профиля
+    reset: bool = True                     # сбросить: текущий пароль перестаёт действовать, все входы закрываются
+
+
+@router.post("/users/{user_id}/password-link")
+def password_link(user_id: str, body: LinkIn, request: Request, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    """«Сбросить пароль» / «Отправить ссылку»: одноразовая ссылка на 24 часа на e-mail из профиля или на указанный адрес."""
+    from .admin import _password_link
+    require_step_up(user)
+    u = _target(db, user_id)
+    if not u.is_active:
+        raise HTTPException(409, "Учётная запись отключена — сначала включите доступ")
+    if u.id == user.id:
+        raise HTTPException(409, "Свой пароль меняется в профиле: «Сменить пароль»")
+    if body.reset and u.password_hash:
+        password_policy.remember_old(db, u)        # сброшенный пароль нельзя будет задать снова
+        u.password_hash, u.password_must_change = None, False
+        n = sess.revoke_all(db, u.id, "password_reset", user.id)
+        audit(db, user.id, None, "user", u.id, "password_reset", after={"by": user.display_name, "sessions_revoked": n})
+    link = _password_link(db, u, user, "reset" if u.password_set_at else "invite", body.email or u.email, request)
+    db.commit()
+    return link
+
+
 class ConfirmIn(BaseModel):
     confirm_name: str = ""
     reason: str = ""

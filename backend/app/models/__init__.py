@@ -1063,6 +1063,21 @@ class PasswordHistory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PasswordLink(Base):
+    """D-132: одноразовая ссылка «Задать пароль» (приглашение нового сотрудника или сброс). В базе — только хэш токена."""
+    __tablename__ = "password_links"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    purpose: Mapped[str] = mapped_column(String(16))                  # invite | reset | forgot
+    sent_to: Mapped[str] = mapped_column(String(255), default="")
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))     # пусто — сотрудник сам нажал «Забыли пароль?»
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
 class SecurityEvent(Base):
     """События безопасности (02 §5): только вставка; без паролей, кодов, токенов и содержимого документов."""
     __tablename__ = "security_events"

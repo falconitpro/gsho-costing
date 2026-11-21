@@ -990,3 +990,10 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .office-form label.row input[type=checkbox] { width: auto; }
 .office-form .row input:not([type=checkbox]) { width: auto; flex: 1; min-width: 0; }
 @media (max-width: 760px) { .office-form .grid2, .office-card .office-grid { grid-template-columns: 1fr; } }
+
+/* D-132: ссылка «Задать пароль» */
+.pwlink-fields { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 8px 0; font-size: 13px; }
+.pwlink-fields label.row { gap: 6px; }
+.pwlink-result { display: grid; gap: 8px; }
+.pwlink-url { word-break: break-all; font-size: 12px; flex: 1; }
+.pwlink-acts { justify-content: flex-end; margin-top: 10px; }

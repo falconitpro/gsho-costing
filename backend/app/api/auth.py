@@ -151,7 +151,7 @@ def password_login(body: PasswordLoginIn, request: Request, response: Response, 
         if user is not None and not user.is_active:
             raise HTTPException(401, "Учётная запись отключена")
         if user is not None and not user.password_hash:
-            raise HTTPException(401, "Для этой учётной записи пароль не задан — войдите через Microsoft 365 или обратитесь к администратору")
+            raise HTTPException(401, "Пароль не задан или сброшен — откройте ссылку «Задать пароль» из письма или нажмите «Забыли пароль?»")
         raise bad
     user.failed_logins, user.locked_until = 0, None
     user.last_seen_at = now
@@ -470,3 +470,72 @@ def dev_users(db: Session = Depends(get_db), s: Settings = Depends(get_settings)
 @router.get("/roles")
 def roles():
     return [{"code": r.value, "title": t} for r, t in ROLE_TITLES.items()]
+
+
+
+# ------------------------------------------------------------------ D-132: «Забыли пароль?» и ссылка «Задать пароль»
+
+class ForgotIn(BaseModel):
+    email: str
+
+
+class LinkCheckIn(BaseModel):
+    token: str
+
+
+class LinkSetIn(BaseModel):
+    token: str
+    new_password: str
+
+
+FORGOT_TEXT = "Если такой адрес есть в системе, на него отправлена ссылка для смены пароля (действует 24 часа). Письма нет — проверьте «Спам» или обратитесь к администратору."
+
+
+@router.post("/forgot")
+def forgot(body: ForgotIn, request: Request, db: Session = Depends(get_db), s: Settings = Depends(get_settings)):
+    """Ответ одинаковый для любого адреса — система не раскрывает, есть ли сотрудник. Текущий пароль не сбрасывается:
+    он действует, пока сотрудник не задаст новый по ссылке (чужой запрос не может заблокировать вход)."""
+    from ..services import password_links as pl
+    email = body.email.strip().lower()[:255]
+    ip = request.client.host if request.client else ""
+    if pl.throttled(f"ip:{ip}") or pl.throttled(f"email:{email}"):
+        raise HTTPException(429, "Слишком много запросов. Повторите через час или обратитесь к администратору")
+    user = db.scalar(select(User).where(User.email == email)) if "@" in email else None
+    if user is not None and user.is_active:
+        row, token = pl.issue(db, user, "forgot", email, None)
+        sent, _ = pl.send(s, user, email, pl.link_url(s, token), "forgot")
+        sev.record(db, "password", "link_forgot", subject_id=user.id, request=request, meta={"sent": sent})
+    else:
+        sev.record(db, "password", "link_forgot", result="denied", request=request, meta={"reason": "unknown_or_inactive"})
+    db.commit()
+    return {"ok": True, "message": FORGOT_TEXT}
+
+
+@router.post("/link/check")
+def link_check(body: LinkCheckIn, db: Session = Depends(get_db)):
+    from ..services import password_links as pl
+    row = pl.find(db, body.token)
+    if row is None:
+        raise HTTPException(410, "Ссылка недействительна: срок истёк, она уже использована или выдана новая. Запросите новую — «Забыли пароль?» на странице входа")
+    u = db.get(User, row.user_id)
+    return {"ok": True, "login": u.email if u else "", "name": u.display_name if u else "", "purpose": row.purpose,
+            "expires_at": row.expires_at.isoformat(), "rules": f"не короче {password_policy.MIN_LEN} символов, буква и цифра, не из распространённых, не от логина или имени, не один из прежних"}
+
+
+@router.post("/link/set")
+def link_set(body: LinkSetIn, request: Request, db: Session = Depends(get_db), s: Settings = Depends(get_settings)):
+    """Задать пароль по ссылке. Вход не выполняется автоматически: сотрудник входит сам (и вводит код из приложения, если он включён)."""
+    from ..services import password_links as pl
+    row = pl.find(db, body.token)
+    u = db.get(User, row.user_id) if row is not None else None
+    if row is None or u is None or not u.is_active:
+        raise HTTPException(410, "Ссылка недействительна: срок истёк, она уже использована или выдана новая")
+    _set_password(db, u, body.new_password)     # правила паролей и запрет повторов — как при обычной смене
+    u.password_must_change, u.failed_logins, u.locked_until = False, 0, None
+    row.used_at = datetime.now(timezone.utc)
+    n = sess.revoke_all(db, u.id, "password", u.id)
+    audit(db, u.id, None, "user", u.id, "password_set_by_link", after={"purpose": row.purpose, "sessions_revoked": n})
+    sev.record(db, "password", "set_by_link", actor_id=u.id, subject_id=u.id, request=request, meta={"purpose": row.purpose, "sessions_revoked": n})
+    db.commit()
+    pl.notify_changed(s, u)
+    return {"ok": True, "login": u.email}

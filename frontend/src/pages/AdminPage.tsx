@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import OffboardDialog from "../components/OffboardDialog";
+import { InviteFields, LinkResultBox, type LinkResult } from "../components/PasswordLink";
 import { api, fmtDate, fmtRub } from "../api";
 import { COST_ITEMS, type Me } from "../types";
 import { AUDIT_ACTION, AUDIT_ENTITY, INTEGRATION, OPERATION, STATUS, lbl } from "../labels";
@@ -52,13 +53,18 @@ function Users({ me }: { me: Me }) {
   const [msg, setMsg] = useState("");
   const [q, setQ] = useState("");
   const [nu, setNu] = useState({ email: "", display_name: "", roles: [] as string[] });
+  const [inv, setInv] = useState({ on: true, email: "" });
+  const [linkRes, setLinkRes] = useState<LinkResult | null>(null);
   const [access, setAccess] = useState<{ u: U; mode: "offboard" | "reactivate" } | null>(null);   // отключение — единой операцией безопасности
   const load = () => api.get<U[]>("/api/admin/users").then(setRows).catch((e) => setMsg(e.message));
   useEffect(() => { load(); api.get<Role[]>("/api/auth/roles").then(setRoles); }, []);
   const patch = (u: U, body: Partial<U>) => api.patch(`/api/admin/users/${u.id}`, body).then(() => { setMsg(`Сохранено: ${u.display_name}`); load(); }).catch((e) => setMsg(e.message));
   const toggle = (list: string[], r: string) => (list.includes(r) ? list.filter((x) => x !== r) : [...list, r]);
   async function create() {
-    try { await api.post("/api/admin/users", { ...nu, notify_channels: ["app"] }); setNu({ email: "", display_name: "", roles: [] }); setMsg("Сотрудник добавлен"); load(); }
+    try {
+      const r = await api.post<{ link: LinkResult | null }>("/api/admin/users", { ...nu, notify_channels: ["app"], send_link: inv.on, link_email: inv.email.trim() || null });
+      setNu({ email: "", display_name: "", roles: [] }); setInv({ on: true, email: "" }); setLinkRes(r.link); setMsg("Сотрудник добавлен"); load();
+    }
     catch (e) { setMsg((e as Error).message); }
   }
   const shown = rows.filter((u) => !q || `${u.display_name} ${u.email}`.toLowerCase().includes(q.toLowerCase()));
@@ -89,6 +95,8 @@ function Users({ me }: { me: Me }) {
         {roles.map((r) => <label key={r.code} className="row"><input type="checkbox" checked={nu.roles.includes(r.code)} onChange={() => setNu({ ...nu, roles: toggle(nu.roles, r.code) })} /> {r.title}</label>)}
         <button className="btn" disabled={!nu.email.includes("@") || !nu.display_name.trim() || !nu.roles.length} onClick={create}>Добавить</button>
       </div>
+      <InviteFields login={nu.email} on={inv.on} email={inv.email} onChange={(on, email) => setInv({ on, email })} />
+      {linkRes && <LinkResultBox r={linkRes} onClose={() => setLinkRes(null)} />}
       <p className="muted" style={{ fontSize: 12 }}>Контакты и каналы уведомлений сотрудника — в разделе «Сотрудники».</p>
     </div>
   );
