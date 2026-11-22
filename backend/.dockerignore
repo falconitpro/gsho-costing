@@ -1,0 +1,7 @@
+# D-151: секреты и данные в образ не копируются (настройки — через env_file при запуске)
+.env
+.env.*
+!.env.example
+data/
+**/__pycache__/
+.pytest_cache/

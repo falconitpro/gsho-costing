@@ -8,7 +8,9 @@ COPY requirements.txt constraints.txt ./
 RUN pip install --no-cache-dir --index-url $PIP_INDEX_URL -r requirements.txt -c constraints.txt
 COPY . .
 # D-151: пользователь без привилегий; данные (/app/data) отдаются ему при старте (entrypoint.sh)
-RUN groupadd -g 10001 app && useradd -u 10001 -g 10001 -d /home/app -m -s /usr/sbin/nologin app && chmod 755 /app/entrypoint.sh
+# код на сервере может быть выгружен с правами 600 (umask root) — делаем его читаемым для app; .env в образ не попадает (.dockerignore)
+RUN groupadd -g 10001 app && useradd -u 10001 -g 10001 -d /home/app -m -s /usr/sbin/nologin app \
+    && chmod -R a+rX,go-w /app && chmod 755 /app/entrypoint.sh
 ENV PYTHONPATH=/app HOME=/home/app
 EXPOSE 8000
 ENTRYPOINT ["/app/entrypoint.sh"]
