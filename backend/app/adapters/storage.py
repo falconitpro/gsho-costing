@@ -14,6 +14,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..core.files import safe_filename
+
 DEAL_SUBFOLDERS = {
     "01_rfq": "01 Запрос и RFQ",
     "02_logistics": "02 Логистика",
@@ -82,6 +84,7 @@ class LocalStorage(StorageAdapter):
         return out
 
     def upload(self, local_path: str, folder: str, subfolder_key: str, file_name: str) -> StoredFile:
+        file_name = safe_filename(file_name)   # D-151: имя от клиента не выходит за папку сделки
         dest_dir = self.root / folder / DEAL_SUBFOLDERS[subfolder_key]
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / file_name
@@ -139,7 +142,7 @@ class SharePointStorage(StorageAdapter):
 
     def upload(self, local_path: str, folder: str, subfolder_key: str, file_name: str) -> StoredFile:   # pragma: no cover
         import httpx
-        path = f"{folder}/{DEAL_SUBFOLDERS[subfolder_key]}/{file_name}"
+        path = f"{folder}/{DEAL_SUBFOLDERS[subfolder_key]}/{safe_filename(file_name)}"
         with open(local_path, "rb") as f:
             r = httpx.put(f"{self.base}/root:/{path}:/content", headers=self._h(), content=f.read(), timeout=120)
         r.raise_for_status()
@@ -206,7 +209,7 @@ class S3Storage(StorageAdapter):
         return {k: f"{folder}/{v}" for k, v in DEAL_SUBFOLDERS.items()}   # в S3 папки виртуальны
 
     def upload(self, local_path, folder, subfolder_key, file_name):   # pragma: no cover
-        key = f"{folder}/{DEAL_SUBFOLDERS[subfolder_key]}/{file_name}"
+        key = f"{folder}/{DEAL_SUBFOLDERS[subfolder_key]}/{safe_filename(file_name)}"
         self._client().upload_file(local_path, self.s.s3_bucket, key)
         # в базе — только адрес системы: подписанная ссылка создаётся при каждом скачивании после проверки прав (04 §9)
         return StoredFile(path=key, url=self.link(key), sha256=sha256_file(local_path), size=os.path.getsize(local_path))

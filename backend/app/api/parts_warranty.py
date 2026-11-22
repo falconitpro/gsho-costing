@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
+from ..core.files import safe_filename
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
 from ..core.files import file_response
@@ -173,7 +174,7 @@ def update_claim(cid: str, body: ClaimIn, db: Session = Depends(get_db), user: C
 @router.post("/claims/{cid}/photos")
 def claim_photo(cid: str, file: UploadFile = File(...), db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
     c = _claim_or_404(db, cid)
-    name = os.path.basename(file.filename or "photo.jpg").replace("/", "-")
+    name = safe_filename(file.filename, "photo.jpg").replace("/", "-")
     fd, path = tempfile.mkstemp()
     with os.fdopen(fd, "wb") as f:
         f.write(file.file.read())

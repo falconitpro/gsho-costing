@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
+from ..core.files import safe_filename
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
 from ..core.files import file_response
@@ -50,7 +51,7 @@ def _store(db: Session, model: EquipmentModel, file: UploadFile, kind: str, lang
            user: CurrentUser, deal_id: Optional[str] = None) -> ModelDocument:
     if kind not in DOC_KINDS:
         raise HTTPException(422, "Вид документа: руководство, каталог запчастей, чертежи, схемы, сертификаты или прочее")
-    name = os.path.basename(file.filename or "document").replace("/", "-")
+    name = safe_filename(file.filename, "document").replace("/", "-")
     fd, path = tempfile.mkstemp()
     with os.fdopen(fd, "wb") as f:
         f.write(file.file.read())

@@ -289,6 +289,7 @@ class FreightTerms(BaseModel):
 
 class BatchInput(BaseModel):
     id: str
+    name: str = ""                       # D-151: для сообщений («Партия 1»)
     route: str = "завод → Маньчжурия → Забайкальск → пункт поставки"
     transport_units: int = 1
     intl_freight: Money = Field(default_factory=lambda: Money(amount=0, currency="CNY"))

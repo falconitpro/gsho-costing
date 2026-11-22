@@ -259,7 +259,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
         _br = lv.split(_num(it.get("broker_rub")), lv.included(it, "broker_rub"), vat_in_pct)
         _rf = lv.split(_num(it.get("rf_delivery_rub")), lv.included(it, "rf_delivery_rub"), vat_in_pct)
         batches.append(BatchInput(
-            id=b.id, route=b.route, transport_units=b.transport_units,
+            id=b.id, name=b.name or "", route=b.route, transport_units=b.transport_units,
             intl_freight=Money(**it.get("intl_freight", {"amount": 0, "currency": "CNY"})),
             insurance_pct=it.get("insurance_pct"), insurance_amount=Money(**it.get("insurance_amount", {"amount": 0, "currency": "CNY"})),
             broker_rub=_br[0], rf_delivery_rub=_rf[0], broker_vat_rub=_br[1], rf_delivery_vat_rub=_rf[1],

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
+from ..core.files import safe_filename
 from ..core.config import get_settings
 from ..core.files import file_response
 from sqlalchemy import select
@@ -386,7 +387,7 @@ async def upload_profile_document(pid: str, file: UploadFile = File(...), title:
     p = _profile(db, pid)
     if p.owner_kind == "own":
         _own_editor(user)
-    name = os.path.basename(file.filename or "scan")
+    name = safe_filename(file.filename, "scan")
     ext = os.path.splitext(name)[1].lower()
     if ext not in DOC_EXT:
         raise HTTPException(422, "Допустимые файлы: PDF, JPG, PNG, TIFF, DOCX, ZIP")

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.files import safe_filename
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
 from ..db import get_db
@@ -60,7 +61,7 @@ def _check_section(user: CurrentUser, section: str, write: bool = True) -> None:
 
 def _store(db: Session, deal: Deal, user: CurrentUser, name: str, data: bytes, comment: str = "") -> Attachment:
     d = tempfile.mkdtemp()
-    name = os.path.basename(name or "file").replace("/", "-")[:200] or "file"
+    name = safe_filename(name, "file")
     path = os.path.join(d, name)
     with open(path, "wb") as f:
         f.write(data)

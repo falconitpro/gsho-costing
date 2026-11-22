@@ -8,6 +8,7 @@ application/octet-stream: даже если сотрудник загрузил 
 from __future__ import annotations
 
 import os
+import unicodedata
 from typing import Optional
 
 from fastapi import HTTPException, UploadFile
@@ -61,3 +62,20 @@ def read_limited(file: UploadFile, limit: int = LIMIT_DOCUMENT) -> bytes:
     if len(data) > limit:
         raise HTTPException(413, f"Файл больше допустимого размера ({limit // MB} МБ)")
     return data
+
+
+# ------------------------------------------------------------------ имя файла от клиента (D-151, аудит 22.11.2026 п. 4.1)
+_FORBIDDEN = set('<>:"|?*')
+
+
+def safe_filename(name: Optional[str], default: str = "file") -> str:
+    """Имя, которое прислал браузер, — только подпись: в путь на диске оно попадает лишь после этой функции.
+    Отбрасываются каталоги (в т. ч. «..», абсолютный путь, обратные слеши Windows), управляющие и запрещённые символы,
+    ведущие точки; Unicode приводится к NFC; длина — до 200 символов с сохранением расширения."""
+    base = unicodedata.normalize("NFC", (name or "").replace("\\", "/")).split("/")[-1]
+    base = "".join(ch for ch in base if ch.isprintable() and ch not in _FORBIDDEN).strip().lstrip(".").strip()
+    if len(base) > 200:
+        stem, ext = os.path.splitext(base)
+        ext = ext[:20]
+        base = stem[: 200 - len(ext)] + ext
+    return base or default

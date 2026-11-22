@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import String, cast, or_, select
 from sqlalchemy.orm import Session
 
+from ..core.files import safe_filename
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import ROLE_TITLES, Role
 from ..core.config import get_settings
@@ -456,7 +457,7 @@ async def upload(did: str, file: UploadFile = File(...), kind: str = Form("attac
     if kind not in ("original", "scan", "attachment", "draft"):
         raise HTTPException(422, "Неизвестный вид файла")
     fid = uuid.uuid4().hex
-    name = os.path.basename(file.filename or "file").replace("/", "-")[:200] or "file"
+    name = safe_filename(file.filename, "file").replace("/", "-")[:200] or "file"
     path = os.path.join(_files_dir(doc.id), f"{fid}__{name}")
     h = hashlib.sha256()
     size = 0

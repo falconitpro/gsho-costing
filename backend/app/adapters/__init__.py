@@ -76,12 +76,20 @@ def _profile_settings(kind: str, profile: str) -> "Settings | None":
     return dataclasses.replace(s, wecom_corp_id=env("CORP_ID"), wecom_agent_id=env("AGENT_ID"), wecom_secret=env("SECRET"))
 
 
+def live(kind: str) -> bool:
+    """D-151 (аудит п. 4.3): канал реально отправляет. Консоль на стенде имитирует отправку (для сквозных проверок);
+    в рабочем режиме консоль = «не подключено», и экран должен сказать «не отправлено», а не показывать номер «отправки»."""
+    s = get_settings()
+    provider = s.mail_provider if kind == "mail" else s.messenger_provider
+    return provider != "console" or s.env not in ("prod", "production")
+
+
 def mail_for(profile: str) -> MailAdapter | None:
     """Почта от имени компании группы. На стенде без реальной почты (MAIL_PROVIDER=console) — консоль, как и общая почта.
     В рабочем режиме чужой ящик не подставляется: профиль не настроен → None, запрос не уходит, файл можно скачать."""
     s = get_settings()
     if s.mail_provider == "console":
-        return ConsoleMail()
+        return ConsoleMail() if live("mail") else None
     ps = _profile_settings("MAIL", profile)
     return YandexSmtpMail(ps) if ps else None
 
@@ -89,6 +97,6 @@ def mail_for(profile: str) -> MailAdapter | None:
 def messenger_for(profile: str) -> MessengerAdapter | None:
     s = get_settings()
     if s.messenger_provider == "console":
-        return ConsoleMessenger()
+        return ConsoleMessenger() if live("wecom") else None
     ps = _profile_settings("WECOM", profile)
     return WeComMessenger(ps) if ps else None

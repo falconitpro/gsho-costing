@@ -115,4 +115,6 @@ GitHub → репозиторий → Settings → Secrets and variables → Act
 
 ## 6. Боевой контур (позже)
 
+> D-151 (22.11.2026): `AUTH_PROVIDER=entra|yandex|keycloak`, `STORAGE_PROVIDER=sharepoint|yandex_disk` и `MAIL_PROVIDER=outlook` в рабочем режиме запрещены проверкой запуска до доработки адаптеров; сейчас — `password`, `local`/`s3`, `smtp`.
+
 Отдельная ВМ или та же с другим доменом (`costing.berghaus.ru`): `AUTH_PROVIDER=entra`, `STORAGE_PROVIDER=sharepoint`, `MAIL_PROVIDER=outlook` в `backend/.env`, `APP_ENV=prod` (без dev-переключателя ролей и без seed), basic auth убрать, Managed PostgreSQL вместо контейнера, Object Storage для копий. 152-ФЗ: зона ru-central1 — данные в РФ.

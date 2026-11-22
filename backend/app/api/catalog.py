@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..core.files import safe_filename
 from ..core.auth import CurrentUser, get_current_user
 from ..core.files import file_response
 from ..core.roles import Role
@@ -384,7 +385,7 @@ def _tmp_upload(file: UploadFile) -> str:
     import shutil
     import tempfile
     d = tempfile.mkdtemp()
-    path = os.path.join(d, file.filename or "table.xlsx")
+    path = os.path.join(d, safe_filename(file.filename, "table.xlsx"))
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     return path

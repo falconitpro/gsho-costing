@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
+from ..core.files import safe_filename
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
 from ..core.files import file_response
@@ -189,7 +190,7 @@ def add_file(deal_id: str, uid: str, file: UploadFile = File(...), kind: str = F
     _editor(user)
     u = _unit(db, deal_id, uid, user)
     deal = db.get(Deal, u.deal_id)
-    name = os.path.basename(file.filename or "file").replace("/", "-")
+    name = safe_filename(file.filename, "file").replace("/", "-")
     fd, path = tempfile.mkstemp()
     with os.fdopen(fd, "wb") as f:
         f.write(file.file.read())
@@ -332,7 +333,7 @@ def act_file(deal_id: str, uid: str, file: UploadFile = File(...), db: Session =
     _editor(user)
     u = _unit(db, deal_id, uid, user)
     deal = db.get(Deal, u.deal_id)
-    name = os.path.basename(file.filename or "act.pdf").replace("/", "-")
+    name = safe_filename(file.filename, "act.pdf").replace("/", "-")
     fd, path = tempfile.mkstemp()
     with os.fdopen(fd, "wb") as f:
         f.write(file.file.read())

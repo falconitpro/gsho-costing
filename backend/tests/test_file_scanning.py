@@ -350,6 +350,35 @@ def test_unsafe_config_combinations_refused():
     p = environment.config_problems(_s(env="recovery", mail_provider="smtp", messenger_provider="wecom", storage_provider="s3"))
     assert len(p) == 3
     assert environment.config_problems(_s(env="recovery", mail_provider="console", messenger_provider="console", storage_provider="local")) == []
+    # D-151 (аудит п. 4.3, 4.4): внешний вход и незавершённые адаптеры в рабочем режиме не включаются
+    ok = {"env": "prod", "file_scan": "clamav", **PROD_KEYS}
+    for kw, word in (({"auth_provider": "entra"}, "AUTH_PROVIDER=entra"), ({"auth_provider": "yandex"}, "AUTH_PROVIDER=yandex"),
+                     ({"auth_provider": "password", "storage_provider": "sharepoint"}, "STORAGE_PROVIDER=sharepoint"),
+                     ({"auth_provider": "password", "mail_provider": "outlook"}, "MAIL_PROVIDER=outlook")):
+        p = environment.config_problems(_s(**ok, **kw))
+        assert len(p) == 1 and word in p[0], p
+    assert environment.config_problems(_s(env="dev", auth_provider="entra")) == []          # на стенде можно проверять
+
+
+def test_console_channels_do_not_pretend_in_prod(monkeypatch):
+    """D-151: в рабочем режиме консольная почта/WeCom — «не подключено», а не имитация отправки."""
+    from app import adapters
+    from app.core import config
+    monkeypatch.setattr(config, "get_settings", lambda: _s(env="prod", mail_provider="console", messenger_provider="console"))
+    monkeypatch.setattr(adapters, "get_settings", lambda: _s(env="prod", mail_provider="console", messenger_provider="console"))
+    assert adapters.live("mail") is False and adapters.mail_for("") is None and adapters.messenger_for("") is None
+    monkeypatch.setattr(adapters, "get_settings", lambda: _s(env="dev", mail_provider="console", messenger_provider="console"))
+    assert adapters.live("mail") is True and adapters.mail_for("") is not None
+
+
+def test_safe_filename():
+    from app.core.files import safe_filename
+    assert safe_filename("../../etc/x.png") == "x.png" and safe_filename("/etc/passwd") == "passwd"
+    assert safe_filename("..\\..\\win.ini") == "win.ini" and safe_filename("..") == "file" and safe_filename(".env") == "env"
+    assert safe_filename("a\x00b.png") == "ab.png" and safe_filename("акт «приёмки» №1.pdf") == "акт «приёмки» №1.pdf"
+    long = safe_filename("x" * 300 + ".pdf")
+    assert len(long) == 200 and long.endswith(".pdf")
+    assert safe_filename(None, "image") == "image"
 
 
 def test_database_marker_blocks_test_env_on_production_data():

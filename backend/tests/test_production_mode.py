@@ -45,8 +45,8 @@ def _s(**kw):
 def test_production_requires_own_secrets_and_known_login_mode():
     good = dict(env="prod", auth_provider="password", file_scan="clamav", **KEYS)
     assert environment.config_problems(_s(**good)) == []
-    for provider in ("entra", "yandex", "keycloak"):
-        assert environment.config_problems(_s(**{**good, "auth_provider": provider})) == []
+    for provider in ("entra", "yandex", "keycloak"):   # D-151: внешний вход в рабочем режиме выключен до доработки (аудит п. 4.4)
+        assert ["AUTH_PROVIDER=" + provider in x for x in environment.config_problems(_s(**{**good, "auth_provider": provider}))] == [True]
     for bad, needle in (({"auth_provider": "dev"}, "AUTH_PROVIDER=dev"), ({"auth_provider": "m365"}, "AUTH_PROVIDER=m365"),
                         ({"secret_key": "dev-secret-change-me"}, "SECRET_KEY"), ({"secret_key": "change-me"}, "SECRET_KEY"),
                         ({"secret_key": "short"}, "SECRET_KEY"), ({"mfa_encryption_key": ""}, "MFA_ENCRYPTION_KEY"),
