@@ -71,6 +71,9 @@ def test_claims_ladder_and_lifecycle():
         assert x["status"] == "sent" and x["answer_due"] == (today + timedelta(days=30)).isoformat()
         pen = c.get(f"/api/legal/contracts/{cid}/obligations", headers=H(LAW)).json()["penalties"][0]
         assert pen["status"] == "claimed" and pen["amount"] == 30000
+        # D-150: предъявленная неустойка — сразу в «Финансах» (нам должны), без правки договора
+        fin = c.get("/api/finance/obligations?source_type=penalty", headers=H(GD)).json()["items"]
+        assert [(i["direction"], float(i["amount"])) for i in fin if (i.get("contract") or {}).get("id") == cid] == [("in", 30000.0)]
 
         # частично удовлетворена (половина) → неустойка признана на 15 000
         assert c.post(f"/api/legal/claims/{cl['id']}/answer", headers=H(LAW), json={"result": "partial"}).status_code == 422
@@ -78,6 +81,8 @@ def test_claims_ladder_and_lifecycle():
         assert x["status"] == "answered" and x["result_amount"] == 515000
         pen = c.get(f"/api/legal/contracts/{cid}/obligations", headers=H(LAW)).json()["penalties"][0]
         assert pen["status"] == "recognized" and pen["amount"] == 15000
+        fin = c.get("/api/finance/obligations?source_type=penalty", headers=H(GD)).json()["items"]
+        assert [(i["direction"], float(i["amount"])) for i in fin if (i.get("contract") or {}).get("id") == cid] == [("in", 15000.0)]
         assert c.post(f"/api/legal/claims/{cl['id']}/status", headers=H(LAW), json={"status": "court"}).status_code == 422
         assert c.post(f"/api/legal/claims/{cl['id']}/status", headers=H(LAW), json={"status": "closed"}).json()["status"] == "closed"
 
@@ -85,5 +90,23 @@ def test_claims_ladder_and_lifecycle():
         x = c.post(f"/api/legal/contracts/{cid}/claims", headers=H(LAW), json={"direction": "incoming", "number": "№ 45/11", "issued_on": today.isoformat(),
                                                                                "lines": [{"kind": "penalty", "title": "Штраф за недопоставку", "amount": 5000}]}).json()
         assert x["status"] == "received" and x["number"] == "№ 45/11" and x["total"] == 5000 and x["answer_due"]
+        # D-150: вписанная вручную неустойка во входящей — выплата в «Финансах»; отклонили — строка выключена
+        fin = [i for i in c.get("/api/finance/obligations?source_type=claim", headers=H(GD)).json()["items"] if i["source"]["id"] == x["id"]]
+        assert [(i["direction"], float(i["amount"])) for i in fin] == [("out", 5000.0)]
         assert c.post(f"/api/legal/claims/{x['id']}/answer", headers=H(LAW), json={"result": "rejected", "comment": "поставка в срок"}).json()["result"] == "rejected"
+        assert not [i for i in c.get("/api/finance/obligations?source_type=claim", headers=H(GD)).json()["items"] if i["source"]["id"] == x["id"]]
         assert c.get("/api/legal/claims?direction=incoming", headers=H(FD)).json()["items"][0]["direction"] == "incoming"
+        # D-150: на входящую отвечаем мы — напоминание за 3 дня до срока
+        y = c.post(f"/api/legal/contracts/{cid}/claims", headers=H(LAW), json={"direction": "incoming", "number": "№ 46/11", "issued_on": today.isoformat(), "answer_days": 2,
+                                                                               "lines": [{"kind": "penalty", "title": "Штраф за просрочку ПНР", "amount": 7000}]}).json()
+        assert y["answer_due"] == (today + timedelta(days=2)).isoformat()
+    from sqlalchemy import select
+
+    from app.models import NotificationLog as Notification
+    with SessionLocal() as db:
+        legal_claims.ladder(db, today)
+        db.commit()
+        legal_claims.ladder(db, today)
+        db.commit()
+        msgs = [n.text for n in db.scalars(select(Notification)).all() if "№ 46/11" in (n.text or "")]
+        assert len(msgs) >= 1 and all("осталось 2 дн." in m for m in msgs) and len(set(msgs)) == 1

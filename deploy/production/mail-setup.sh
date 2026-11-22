@@ -31,8 +31,9 @@ setenv SMTP_FROM "$NAME <$FROM>"
 chmod 600 "$ENVF"
 unset PASS
 
-echo "Перезапуск сервера приложения…"
-"${DC[@]}" up -d backend >/dev/null
+echo "Перезапуск сервера приложения и фоновых заданий…"
+# фоновые задания (worker, D-143) читают тот же backend/.env: напоминания уходят письмами — перезапускаем и их
+"${DC[@]}" up -d backend worker >/dev/null
 sleep 8
 echo "Проверочное письмо на $TEST…"
 if "${DC[@]}" exec -T -e TEST_TO="$TEST" backend python -c '

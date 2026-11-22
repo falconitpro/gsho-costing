@@ -901,7 +901,28 @@ def obligations(db: Session, c: Contract, today: Optional[date] = None) -> dict:
     totals = {"receivable": s("cp", final_sts), "payable": s("us", final_sts), "receivable_accruing": s("cp", ("accruing",)), "payable_accruing": s("us", ("accruing",)),
               "overdue_payments": sum(1 for x in pays if x["status"] == "overdue"), "overdue_performance": sum(1 for x in perfs if x["status"] == "overdue"), "currency": c.currency}
     totals["net"] = round(totals["receivable"] - totals["payable"], 2)
+    _fin_paid(db, c, pens)
     return {"payments": pays, "performance": perfs, "penalties": pens, "totals": totals, "statuses": PEN_STATUS, "key_rate": kr}
+
+
+def _fin_paid(db: Session, c: Contract, pens: list[dict]) -> None:
+    """D-150: неустойка предъявлена/признана, а в «Финансах» по ней уже разнесена оплата — подсказка юристу отметить «оплачена»
+    (статус в договоре — решение юриста, автоматически не меняется)."""
+    open_ = {f"penalty:{x['key']}": x for x in pens if x.get("status") in ("claimed", "recognized")}
+    if not open_:
+        return
+    try:
+        from ..models.finance import FinanceObligation
+        from .finance.obligations import paid_map
+        obs = db.scalars(select(FinanceObligation).where(FinanceObligation.source_type == "penalty", FinanceObligation.source_id == c.id,
+                                                         FinanceObligation.source_line_key.in_(list(open_)), FinanceObligation.is_active.is_(True))).all()
+        paid = paid_map(db, [o.id for o in obs])
+        for o in obs:
+            got = paid[o.id]["confirmed"]
+            if got > 0:
+                open_[o.source_line_key]["fin_paid"] = float(got)
+    except Exception:  # noqa: BLE001 — подсказка не ломает карточку договора
+        return
 
 
 def set_fact(c: Contract, kind: str, key: str, data: dict) -> None:

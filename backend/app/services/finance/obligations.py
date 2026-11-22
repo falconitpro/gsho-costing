@@ -24,7 +24,7 @@ from .money import ZERO, dec, s
 
 PROJECTED_STATUSES = ("active", "closed", "terminated")   # подписанные договоры (legal.LOCKED)
 DIRECTION = {"income": "in", "expense": "out"}
-SOURCE_TITLES = {"contract": "Договор", "calculation": "Расчёт", "purchase_order": "Заказ поставщику", "batch": "Партия", "warranty_claim": "Гарантийная претензия",
+SOURCE_TITLES = {"contract": "Договор", "calculation": "Расчёт", "purchase_order": "Заказ поставщику", "batch": "Партия", "warranty_claim": "Гарантийная претензия", "claim": "Претензия по договору",
                  "part_request": "Заявка на запчасти", "penalty": "Неустойка"}
 
 
@@ -315,6 +315,8 @@ def source_url(o: FinanceObligation) -> Optional[str]:
         return "/supply?tab=po"
     if o.source_type == "warranty_claim":
         return "/supply?tab=claims"
+    if o.source_type == "claim":
+        return "/legal?tab=claims"
     if o.source_type == "batch" and o.deal_id:
         return f"/deals/{o.deal_id}?tab=logistics"
     if o.source_type == "calculation" and o.deal_id:

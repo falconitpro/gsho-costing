@@ -603,7 +603,43 @@ async def s9_warranty_finance(browser):
     check_true(scn, "«получено» по претензии — запись на сверку у ФД", any(c["number"] in (t.get("note") or t.get("purpose") or "") for t in tx))
 
 
-SCENARIOS = [s1_single, s2_two_models, s3_usd_rub_input, s4_rework_qty, s5_bargain_contract, s6_office, s7_execution, s8_execution_branches, s9_warranty_finance]
+async def s10_claims_penalties(browser):
+    """10. Претензии и неустойки: просрочка оплаты → претензия → подпись → отправка → признание → «Финансы»; входящая — выплата в «Финансах»"""
+    from datetime import date as _d, timedelta as _td
+    scn, today = "s10", _d.today()
+    ent = api(LAW, "GET", "/api/legal/contracts")["entities"][0]
+    cl_ref = api(CD, "GET", "/api/refs/clients")[0]
+    k = api(CD, "POST", "/api/legal/contracts", {"kind": "client_parts", "own_entity_id": ent["id"], "cp_kind": "client", "cp_id": cl_ref["id"], "subject": "E2E: запчасти — претензия",
+                                                 "amount": 1000000, "currency": "RUB", "signatory": {"name": "Иванов И. И.", "basis": "Устав"},
+                                                 "signed_on": str(today - _td(days=40)), "payment_terms": [{"share_pct": 100, "event": "contract", "offset_days": 10, "offset_kind": "calendar"}]})
+    cid = k["id"]
+    upload(LAW, f"/api/legal/contracts/{cid}/files", "scan.pdf", b"%PDF-1.4 e2e", "signed_scan")
+    api(LAW, "POST", f"/api/legal/contracts/{cid}/status", {"status": "active"})
+    av = api(LAW, "GET", f"/api/legal/contracts/{cid}/claims")["available_out"]
+    pen = next((x for x in av if x["kind"] == "penalty"), None)
+    check_true(scn, "просрочка оплаты 30 дней → долг и неустойка доступны для претензии", pen is not None and any(x["kind"] == "debt" for x in av), str(av)[:200])
+    cl = api(LAW, "POST", f"/api/legal/contracts/{cid}/claims", {"direction": "outgoing", "keys": [pen["key"]]})
+    api(LAW, "POST", f"/api/legal/claims/{cl['id']}/to-sign", {})
+    api(CD, "POST", f"/api/legal/claims/{cl['id']}/sign", {})
+    api(LAW, "POST", f"/api/legal/claims/{cl['id']}/send", {"sent_on": str(today), "sent_via": "post", "track": "E2E1"})
+
+    def fin(direction):
+        return [float(i["amount"]) for i in api(FD, "GET", "/api/finance/obligations?source_type=penalty")["items"]
+                if (i.get("contract") or {}).get("id") == cid and i["direction"] == direction]
+
+    check(scn, "отправлена → неустойка к получению в «Финансах»", sum(fin("in")), pen["amount"], 0.01)
+    api(LAW, "POST", f"/api/legal/claims/{cl['id']}/answer", {"result": "satisfied", "comment": "оплатим"})
+    st = api(LAW, "GET", f"/api/legal/contracts/{cid}/obligations")["penalties"]
+    check_true(scn, "удовлетворена → неустойка «признана»", any(p["key"] == pen["penalty_key"] and p["status"] == "recognized" for p in st))
+    check(scn, "признанная неустойка — в «Финансах», та же сумма", sum(fin("in")), pen["amount"], 0.01)
+    inc = api(LAW, "POST", f"/api/legal/contracts/{cid}/claims", {"direction": "incoming", "number": "E2E вх-1", "issued_on": str(today), "answer_days": 10,
+                                                                  "lines": [{"kind": "penalty", "title": "Штраф за недопоставку", "amount": 5000}]})
+    check_true(scn, "входящая: срок ответа = дата + 10 дней", inc["answer_due"] == str(today + _td(days=10)))
+    out = [float(i["amount"]) for i in api(FD, "GET", "/api/finance/obligations?source_type=claim")["items"] if i["source"]["id"] == inc["id"]]
+    check_true(scn, "входящая: неустойка к нам — выплата в «Финансах»", out == [5000.0], str(out))
+
+
+SCENARIOS = [s1_single, s2_two_models, s3_usd_rub_input, s4_rework_qty, s5_bargain_contract, s6_office, s7_execution, s8_execution_branches, s9_warranty_finance, s10_claims_penalties]
 
 
 async def main():

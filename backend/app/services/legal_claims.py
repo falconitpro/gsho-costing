@@ -294,4 +294,17 @@ def ladder(db: Session, today: Optional[date] = None) -> int:
         cs.notify_users(db, c, lawyers + bosses + [c.curator_id or ""], txt, "claim")
         cl.notified = list(cl.notified or []) + [key]
         n += 1
+    # входящая претензия: ответить нужно нам — напоминание за 3 дня до срока, а не только после (D-150)
+    soon = today + timedelta(days=3)
+    for cl in db.scalars(select(ContractClaim).where(ContractClaim.direction == "incoming", ContractClaim.status == "received",
+                                                     ContractClaim.answer_due >= today, ContractClaim.answer_due <= soon)).all():
+        key = f"answer_soon:{cl.answer_due}"
+        if key in (cl.notified or []):
+            continue
+        c = db.get(Contract, cl.contract_id)
+        left = (cl.answer_due - today).days
+        cs.notify_users(db, c, lawyers + bosses + [c.curator_id or ""],
+                        f"Ответ на входящую претензию {cl.number} ({cs.cp_display(db, c)}) — до {cl.answer_due:%d.%m.%Y}" + (" (сегодня)" if left == 0 else f", осталось {left} дн."), "claim")
+        cl.notified = list(cl.notified or []) + [key]
+        n += 1
     return n

@@ -166,7 +166,9 @@ export default function DealsList({ me }: { me: Me }) {
   const allCols = wantAll;
   const setBlock = (b: Block) => { save("gsho.dealsBlock", b); setF({ ...f, statuses: [] }); const n = new URLSearchParams(sp); n.set("block", b); setSp(n); };
   const urlType = new URLSearchParams(window.location.search).get("type") as DealType | null;
-  const [f, setFState] = useState<Filters>(() => ({ ...EMPTY_F, type: "gsho", ...load<Partial<Filters>>("gsho.dealsFilters", {}), ...(urlType === "gsho" || urlType === "parts" ? { type: urlType } : {}) }));
+  const urlFlag = new URLSearchParams(window.location.search).get("flag");   // D-150: «Хвосты» ЗГД → ?block=won&flag=overdue
+  const [f, setFState] = useState<Filters>(() => ({ ...EMPTY_F, type: "gsho", ...load<Partial<Filters>>("gsho.dealsFilters", {}), ...(urlType === "gsho" || urlType === "parts" ? { type: urlType } : {}),
+    ...(urlFlag === "overdue" ? { flag: "overdue", type: "gsho", q: "", manager: "", client: "", statuses: [] } : {}) }));
   const setF = (x: Filters) => { setFState(x); save("gsho.dealsFilters", x); };
   const urlSort = new URLSearchParams(window.location.search).get("sort") as SortKey | null;
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>(() => (urlSort ? { key: urlSort, dir: 1 as 1 | -1 } : load("gsho.dealsSort2", { key: "date" as SortKey, dir: -1 as 1 | -1 })));

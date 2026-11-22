@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -78,6 +78,44 @@ def sync_purchase_order(db: Session, po: PurchaseOrder, user_id: Optional[str] =
                       amount=row.get("amount") if row.get("paid_on") else None, currency=currency or "XXX", on=_date(row.get("paid_on")),
                       note=row.get("comment") or "", source=("purchase_order", po.id, _key(row, i)), counterparty_name=supplier.name if supplier else "")
     return st
+
+
+# ------------------------------------------------------------------ претензия по договору: неустойки, вписанные вручную
+
+def sync_contract_claim(db: Session, cl, user_id: Optional[str] = None) -> SyncStats:
+    """Строки-неустойки претензии без привязки к условию договора (вписаны вручную, чаще во входящей) — в «Финансы» (D-150).
+    Неустойки по условиям договора идут через договор (`penalty`), долг — это строки графика, их не дублируем.
+    Предъявлена (исходящая отправлена / входящая получена) — сумма строк; ответ «удовлетворена частично» — пропорционально;
+    «отклонена», отменена, закрыта без признания — строка выключена."""
+    from ...models import Contract
+    c = db.get(Contract, cl.contract_id)
+    manual = [x for x in (cl.lines or []) if x.get("kind") == "penalty" and not x.get("penalty_key") and x.get("amount")]
+    specs = []
+    if c is not None and manual:
+        total_all = sum(float(x.get("amount") or 0) for x in cl.lines or [] if x.get("kind") in ("debt", "penalty"))
+        share = 1.0
+        if cl.result == "partial" and total_all:
+            share = min(1.0, float(cl.result_amount or 0) / total_all)
+        claimed = cl.status in ("sent", "received", "answered", "court", "closed") and cl.result not in ("rejected",)
+        if cl.status == "closed" and cl.result not in ("satisfied", "partial"):
+            claimed = False
+        recognized = cl.result in ("satisfied", "partial")
+        from ..legal_contracts import cp_display
+        cp = cp_display(db, c) or ""
+        direction = "in" if cl.direction == "outgoing" else "out"
+        due = cl.answer_due if not recognized else ((cl.answer_on or date.today()) + timedelta(days=10))
+        for i, x in enumerate(manual):
+            amount = dec(round(float(x["amount"]) * share, 2))
+            fields = {"deal_id": cl.deal_id or c.deal_id, "contract_id": c.id, "legal_entity_id": c.own_entity_id, "counterparty_kind": c.cp_kind or "other",
+                      "counterparty_id": c.cp_id, "counterparty_name_snapshot": cp[:255], "direction": direction, "nature": "penalty",
+                      "title": f"{cl.number}: {x.get('title') or 'неустойка'} ({'признана' if recognized else 'предъявлена'})"[:255], "event_code": "recognized" if recognized else "claimed",
+                      "source_line_no": i + 1, "legal_due_on": None, "legal_due_text": "ожидаемая дата: срок ответа на претензию" if not recognized else "ожидаемая дата: 10 дней после признания",
+                      "event_on": None, "event_is_fact": False, "forecast_on": due}
+            active, reason = (True, "") if claimed else (False, "претензия отклонена, отменена или закрыта без признания")
+            specs.append(LineSpec(key=f"line:{i + 1}", revision=_rev({"amount": s(amount), "rec": recognized, "active": active, "due": str(due)}), amount=amount,
+                                  currency=cl.currency, fields=fields, basis={"claim_number": cl.number, "claim_status": cl.status, "result": cl.result, "line": x},
+                                  active=active, reason=reason))
+    return project_lines(db, "claim", cl.id, specs, user_id, cl.deal_id, "строка удалена из претензии")
 
 
 # ------------------------------------------------------------------ гарантийная претензия: компенсация деньгами

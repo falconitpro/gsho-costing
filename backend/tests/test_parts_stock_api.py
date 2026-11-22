@@ -62,7 +62,9 @@ def test_receipt_reserve_ship(client):
     _ok(client.post(f"/api/parts/po/{po['id']}/mark-sent", headers=H(MGR)))
     assert {p["id"] for p in _ok(client.get("/api/parts/stock/receivable", headers=H(LOG)))} >= {po["id"]}
     assert client.post("/api/parts/stock/receipts", headers=H(MGR), json={**rc_body, "warehouse_id": virt["id"]}).status_code == 422
-    assert client.post("/api/parts/stock/receipts", headers=H(LOG), json=rc_body).status_code == 403
+    # D-150: приёмка — по праву «Склад запчастей: приёмка»: логист может (решение владельца 22.11.2026), без права — нет
+    assert client.get("/api/parts/stock/meta", headers=H(LOG)).json()["can_receive"] is True
+    assert client.post("/api/parts/stock/receipts", headers=H("fd@example.com"), json=rc_body).status_code == 403
 
     # первая приёмка: строка 1 — 3 из 4 (недопоставка), строка 2 — 1 годный + 1 брак из 3
     rc = _ok(client.post("/api/parts/stock/receipts", headers=H(MGR), json={**rc_body, "lines": [

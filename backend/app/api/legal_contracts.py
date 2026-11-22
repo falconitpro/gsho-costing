@@ -7,7 +7,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -147,6 +147,7 @@ def contracts_catalog(db: Session = Depends(get_db), user: CurrentUser = Depends
 
 @router.get("/legal/contracts")
 def contracts_registry(kind: str = "", status: str = "", direction: str = "", entity_id: str = "", cp_id: str = "", deal_id: str = "", q: str = "", include_children: bool = False,
+                       flag: str = Query("", pattern="^(|no_scan|overdue|expiring|no_terms)$"),
                        db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Реестр договоров группы: фильтры, сводка (действуют, проекты, истекают, без скана, без условий оплаты)."""
     if not _imported["done"]:
@@ -185,6 +186,11 @@ def contracts_registry(kind: str = "", status: str = "", direction: str = "", en
                "expiring": sum(1 for x in items if x["status"] == "active" and x["days_to_expiry"] is not None and 0 <= x["days_to_expiry"] <= 30),
                "no_scan": sum(1 for x in items if x["status"] in svc.LOCKED and not x["has_scan"]),
                "no_terms": sum(1 for x in items if x["direction"] in ("income", "expense") and not x["terms_text"])}
+    flt = {"no_scan": lambda x: x["status"] in svc.LOCKED and not x["has_scan"], "overdue": lambda x: bool((x.get("exec") or {}).get("overdue")),
+           "expiring": lambda x: x["status"] == "active" and x["days_to_expiry"] is not None and 0 <= x["days_to_expiry"] <= 30,
+           "no_terms": lambda x: x["direction"] in ("income", "expense") and not x["terms_text"]}.get(flag)
+    if flt:   # D-150: сводка — по всему реестру, список — по отметке
+        items = [x for x in items if flt(x)]
     return {"items": items, "summary": summary, "entities": [{"id": k, "name": v} for k, v in ents.items()],
             "can_create": True, "can_manage": user.has(*EDIT_ROLES)}
 
