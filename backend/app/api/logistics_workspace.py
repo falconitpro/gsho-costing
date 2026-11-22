@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from ..core.files import safe_filename
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user, require_roles
 from ..core.files import file_response
@@ -215,7 +216,7 @@ async def add_quote(deal_id: str, carrier: str = Form(...), amount: float = Form
     att = None
     if file is not None and file.filename:
         d = tempfile.mkdtemp()
-        name = os.path.basename(file.filename)
+        name = safe_filename(file.filename)
         path = os.path.join(d, name)
         with open(path, "wb") as f:
             shutil.copyfileobj(file.file, f)

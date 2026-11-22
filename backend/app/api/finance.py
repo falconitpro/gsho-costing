@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..core.files import safe_filename
 from ..core.auth import CurrentUser, get_current_user
 from ..db import get_db
 from ..models import AuditLog, FinanceAccount, FinanceAllocation, FinanceBalanceSnapshot, FinanceObligation, FinanceTransaction, LegalEntity
@@ -809,7 +810,7 @@ async def question_file(qid: str, file: UploadFile = File(...), db: Session = De
         raise HTTPException(404, "Вопрос не найден")
     if q.status not in ("open", "rejected"):
         raise HTTPException(409, "Ответ уже дан — файл добавить нельзя")
-    name = os.path.basename(file.filename or "file")
+    name = safe_filename(file.filename, "file")
     ext = os.path.splitext(name)[1].lower()
     if ext not in (".pdf", ".jpg", ".jpeg", ".png", ".xlsx", ".xls", ".csv", ".docx", ".doc", ".zip"):
         raise HTTPException(422, "Файл: PDF, JPG, PNG, XLSX, XLS, CSV, DOCX, DOC или ZIP")

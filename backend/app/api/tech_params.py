@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.files import safe_filename
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
@@ -42,7 +43,7 @@ def _can_edit(user: CurrentUser, deal) -> None:
 
 def _tmp(file: UploadFile) -> str:
     d = tempfile.mkdtemp()
-    path = os.path.join(d, file.filename or "table.xlsx")
+    path = os.path.join(d, safe_filename(file.filename, "table.xlsx"))
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     return path
@@ -247,8 +248,8 @@ async def import_apply(deal_id: str, pos_id: str, file: UploadFile = File(...), 
         # файл — в папку сделки
         try:
             ensure_folders(db, deal)
-            stored = adapters.storage().upload(path, deal.storage_folder, "01_rfq", f"{'ответ_завода' if target == 'factory_answer' else 'требования_клиента'}_{file.filename}")
-            db.add(Attachment(deal_id=deal.id, folder="01_rfq", entity="position", entity_id=pos.id, file_name=file.filename or "table.xlsx",
+            stored = adapters.storage().upload(path, deal.storage_folder, "01_rfq", f"{'ответ_завода' if target == 'factory_answer' else 'требования_клиента'}_{safe_filename(file.filename, 'table.xlsx')}")
+            db.add(Attachment(deal_id=deal.id, folder="01_rfq", entity="position", entity_id=pos.id, file_name=safe_filename(file.filename, "table.xlsx"),
                               storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=user.id))
         except Exception as e:
             audit(db, user.id, deal.id, "tech_params", pos.id, "storage_failed", comment=str(e)[:300])

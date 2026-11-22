@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.files import safe_filename
 from ..core.auth import CurrentUser, get_current_user
 from ..core.config import get_settings
 from ..core.files import file_response
@@ -631,7 +632,7 @@ async def upload_file(cid: str, file: UploadFile = File(...), kind: str = Form("
         raise HTTPException(403, "Загружают куратор, юрист, ФД, КД и ЗГД")
     if kind not in svc.FILE_KINDS:
         raise HTTPException(422, "Вид файла: " + ", ".join(svc.FILE_KINDS))
-    name = os.path.basename(file.filename or "file")
+    name = safe_filename(file.filename, "file")
     if os.path.splitext(name)[1].lower() not in (".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".docx", ".doc", ".xlsx", ".zip", ".sig", ".xml", ".p7s"):
         raise HTTPException(422, "Файл: PDF, JPG, PNG, TIFF, DOCX, XLSX, ZIP или файлы ЭДО (SIG, XML, P7S)")
     fid = uuid.uuid4().hex

@@ -401,6 +401,10 @@ def submit(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     if errors:
         raise HTTPException(422, {"message": "Перед утверждением задайте условия оплаты и оцените опции РФ", "errors": errors})
     inp, res = run_calc(db, deal)
+    from ..calc.costing import allocation_gaps
+    gaps = allocation_gaps(inp)
+    if gaps:   # D-151: не утверждаем расчёт, где доля логистики позиции обнулилась из-за отсутствующей массы/объёма
+        raise HTTPException(422, {"message": "Не хватает данных для распределения логистики", "errors": gaps})
     flags = approval_flags(res)
     st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution, execution_started=deal.execution_started)
     try:
@@ -447,6 +451,10 @@ def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: Curren
     if not body.approved and not body.comment:
         raise HTTPException(422, "Отказ требует комментария")
     inp, res = run_calc(db, deal)
+    from ..calc.costing import allocation_gaps
+    gaps = allocation_gaps(inp)
+    if gaps:   # D-151: не утверждаем расчёт, где доля логистики позиции обнулилась из-за отсутствующей массы/объёма
+        raise HTTPException(422, {"message": "Не хватает данных для распределения логистики", "errors": gaps})
     flags = approval_flags(res)
     st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution, execution_started=deal.execution_started)
     try:

@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
+from ..core.files import safe_filename
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
 from ..core.files import file_response
@@ -297,7 +298,7 @@ def close_dev(did: str, db: Session = Depends(get_db), user: CurrentUser = Depen
 def add_photo(did: str, file: UploadFile = File(...), db: Session = Depends(get_db), user: CurrentUser = Depends(_receiver)):
     d = _dev_or_404(db, did)
     po = db.get(PurchaseOrder, d.po_id)
-    name = os.path.basename(file.filename or "photo.jpg").replace("/", "-")
+    name = safe_filename(file.filename, "photo.jpg").replace("/", "-")
     fd, path = tempfile.mkstemp()
     with os.fdopen(fd, "wb") as f:
         f.write(file.file.read())

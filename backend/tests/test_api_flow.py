@@ -498,6 +498,15 @@ def test_tech_params_offers_images_local_options(client, tmp_path):
     assert client.patch(f"/api/deals/{did}/positions/{pid}/images/{img['id']}", headers=H(MGR), json={"in_kp": True}).status_code == 403
     _ok(client.patch(f"/api/deals/{did}/positions/{pid}/images/{img['id']}", headers=H(CD), json={"in_kp": True, "kp_order": 1}))
     assert client.post(f"/api/deals/{did}/positions/{pid}/images", headers=H(FD), files={"file": ("x.png", b"123", "image/png")}).status_code == 403
+    # D-151 (аудит п. 4.1): имя файла от клиента не выходит за временную папку и папку сделки
+    import tempfile as _tf
+    import uuid as _uuid
+    tag = _uuid.uuid4().hex[:8]
+    for evil in (f"../gsho_trav_{tag}.png", f"{_tf.gettempdir()}/gsho_abs_{tag}.png", f"..\\..\\gsho_win_{tag}.png"):
+        with open(png, "rb") as fh:
+            r = _ok(client.post(f"/api/deals/{did}/positions/{pid}/images", headers=H(MGR), files={"file": (evil, fh, "image/png")}, data={"kind": "photo"}), 201)
+        assert "/" not in r["file_name"] and "\\" not in r["file_name"] and not r["file_name"].startswith(".") and ".." not in r["url"]
+    assert not [f for f in os.listdir(_tf.gettempdir()) if tag in f]
     # задача 9: запрос двум заводам (файл RU+CN, строка опции РФ не включена), ответ второго завода, сравнение, отбор КД
     # файлы клиента без подтверждения проверки — 422 (задача 10)
     r = client.post(f"/api/deals/{did}/positions/{pid}/tech-params/request", headers=H(MGR), json={"factory_ids": [factories[0]["id"]], "image_ids": [img["id"]]})

@@ -53,6 +53,14 @@ def config_problems(s: Settings) -> list[str]:
             p.append("пароль базы данных по умолчанию: задайте POSTGRES_PASSWORD в файле .env")
         if s.file_scan != "clamav":
             p.append("production без проверки файлов запрещён: задайте FILE_SCAN=clamav")
+        # D-151 (аудит п. 4.3): незавершённые адаптеры в рабочем режиме не включаются — сделка не должна «тихо» не сохранить файл или письмо
+        if s.storage_provider in ("sharepoint", "yandex_disk"):
+            p.append(f"STORAGE_PROVIDER={s.storage_provider}: адаптер не завершён — используйте local или s3")
+        if s.mail_provider == "outlook":
+            p.append("MAIL_PROVIDER=outlook: отправка через Microsoft Graph не реализована — используйте smtp (deploy/production/mail-setup.sh)")
+        if s.auth_provider in ("entra", "yandex", "keycloak"):   # D-151, аудит 22.11.2026 п. 4.4; решение владельца — вариант А
+            p.append(f"AUTH_PROVIDER={s.auth_provider}: вход через внешнюю учётную запись в рабочем режиме выключен до доработки "
+                     "(вход только для заведённых сотрудников, привязка аккаунта, снятие ролей, PKCE/nonce/issuer) — задайте AUTH_PROVIDER=password")
     if s.env == "recovery":
         if s.mail_provider != "console":
             p.append("recovery: внешняя почта должна быть выключена (MAIL_PROVIDER=console)")

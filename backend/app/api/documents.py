@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.files import safe_filename
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
@@ -64,7 +65,7 @@ def _review(db: Session, deal: Deal) -> dict:
 
 def _save(db: Session, deal: Deal, user: CurrentUser, file: UploadFile, category: str, comment: str) -> Attachment:
     d = tempfile.mkdtemp()
-    name = os.path.basename(file.filename or "document")
+    name = safe_filename(file.filename, "document")
     path = os.path.join(d, name)
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)

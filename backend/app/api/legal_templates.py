@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
+from ..core.files import safe_filename
 from ..core.auth import CurrentUser, get_current_user
 from ..core.config import get_settings
 from ..core.files import file_response
@@ -64,7 +65,7 @@ async def upload_template(kind: str = Form(...), title: str = Form(""), language
     if kind not in ALL_KINDS:
         raise HTTPException(422, "Неизвестный вид шаблона")
     is_example = kind in svc.EXAMPLE_KINDS
-    name = os.path.basename(file.filename or "template.docx")
+    name = safe_filename(file.filename, "template.docx")
     ext = os.path.splitext(name)[1].lower()
     if not is_example and ext != ".docx":
         raise HTTPException(422, "Шаблон должен быть файлом DOCX")

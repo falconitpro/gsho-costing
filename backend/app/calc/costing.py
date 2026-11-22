@@ -505,6 +505,24 @@ def _sensitivity(inp: DealCalcInput, variant: VariantInput, scen: ScenarioParams
 
 # ------------------------------------------------------------------ публичный API ядра
 
+def allocation_gaps(inp: DealCalcInput) -> list[str]:
+    """D-151 (аудит п. 4.2): партия распределяется по массе или объёму, а у позиции этого значения нет (пусто, текст, 0) —
+    её доля логистики стала бы нулевой, а расходы молча легли бы на остальные позиции. Расчёт не падает, но сообщает,
+    а отправить на утверждение нельзя."""
+    out = []
+    for b in inp.batches:
+        if b.allocation not in (AllocationMethod.WEIGHT, AllocationMethod.VOLUME):
+            continue
+        by_weight = b.allocation == AllocationMethod.WEIGHT
+        miss = [p.model for p in inp.positions if p.batch_id == b.id and (p.weight_kg if by_weight else p.volume_m3) <= 0]
+        if miss:
+            what = "массе" if by_weight else "объёму"
+            out.append(f"Партия «{b.name or b.route}»: логистика распределяется по {what}, а у позиции {', '.join('«' + m + '»' for m in miss)} "
+                       f"{'масса' if by_weight else 'объём'} не указан{'а' if by_weight else ''} — доля этой позиции была бы нулевой. "
+                       f"Укажите {'массу (характеристика 1.15)' if by_weight else 'объём'} или выберите распределение «по стоимости».")
+    return out
+
+
 def calc_deal(inp: DealCalcInput) -> DealCalcResult:
     fx = _FxCache(inp)
     results: dict[str, dict[str, VariantScenarioResult]] = {}
@@ -515,6 +533,7 @@ def calc_deal(inp: DealCalcInput) -> DealCalcResult:
         warnings.append(f"Курс ЦБ недоступен: использован последний загруженный курс ({inp.fx.note}).")
     if inp.fx.source == "manual":
         warnings.append("Используется курс, введённый вручную администратором.")
+    warnings.extend(allocation_gaps(inp))
 
     for v in inp.variants:
         results[v.id] = {}

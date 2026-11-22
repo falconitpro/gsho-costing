@@ -319,3 +319,21 @@ def test_freight_payment_terms():
     assert sum(f.amount_rub for f in pre) == pytest.approx(before * 0.3, rel=1e-9)
     assert all(any(f.on == max(e["shipment"] - _td(days=10), e["contract"]) for e in evs) for f in pre)
     assert all(any(f.on == e["border"] + _td(days=5) for e in evs) for f in post)
+
+
+def test_allocation_by_weight_without_weight_is_reported():
+    """D-151 (аудит п. 4.2): распределение по массе, у позиции массы нет — расчёт не падает, но предупреждает; по стоимости — молчит."""
+    from app.calc.costing import allocation_gaps
+    from app.calc.types import AllocationMethod
+    inp = sample_deal()
+    inp.batches[0].name = "Партия 1"
+    assert allocation_gaps(inp) == []
+    inp.batches[0].allocation = AllocationMethod.WEIGHT
+    assert allocation_gaps(inp) == []
+    inp.positions[1].weight_kg = 0.0   # «указать» в характеристике массы → 0
+    gaps = allocation_gaps(inp)
+    assert len(gaps) == 1 and "Партия 1" in gaps[0] and f"«{inp.positions[1].model}»" in gaps[0] and "масса" in gaps[0]
+    res = calc_deal(inp)
+    assert gaps[0] in res.warnings
+    inp.batches[0].allocation = AllocationMethod.VOLUME
+    assert allocation_gaps(inp) == []      # объём у позиции есть

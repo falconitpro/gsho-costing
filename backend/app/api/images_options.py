@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.files import safe_filename
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import Role
@@ -47,13 +48,13 @@ async def upload_image(deal_id: str, pos_id: str, file: UploadFile = File(...), 
     if ext not in IMAGE_EXT:
         raise HTTPException(422, f"Формат {ext or '?'} не поддерживается: {', '.join(sorted(IMAGE_EXT))}")
     d = tempfile.mkdtemp()
-    path = os.path.join(d, file.filename or f"image{ext}")
+    path = os.path.join(d, safe_filename(file.filename, f"image{ext}"))
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     try:
         ensure_folders(db, deal)
-        stored = adapters.storage().upload(path, deal.storage_folder, "01_rfq", f"img_{pos.model}_{file.filename}".replace("/", "-"))
-        att = Attachment(deal_id=deal.id, folder="01_rfq", entity="position", entity_id=pos.id, file_name=file.filename or "image",
+        stored = adapters.storage().upload(path, deal.storage_folder, "01_rfq", f"img_{pos.model}_{safe_filename(file.filename, 'image')}".replace("/", "-"))
+        att = Attachment(deal_id=deal.id, folder="01_rfq", entity="position", entity_id=pos.id, file_name=safe_filename(file.filename, "image"),
                          storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=user.id)
     except Exception as e:
         raise HTTPException(502, f"Хранилище недоступно: {e}")
@@ -87,17 +88,17 @@ async def upload_offer_image(deal_id: str, offer_id: str, file: UploadFile = Fil
     if ext not in IMAGE_EXT:
         raise HTTPException(422, f"Формат {ext or '?'} не поддерживается: {', '.join(sorted(IMAGE_EXT))}")
     d = tempfile.mkdtemp()
-    path = os.path.join(d, file.filename or f"image{ext}")
+    path = os.path.join(d, safe_filename(file.filename, f"image{ext}"))
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     try:
         ensure_folders(db, deal)
-        stored = adapters.storage().upload(path, deal.storage_folder, "01_rfq", f"img_завод_{file.filename}".replace("/", "-"))
+        stored = adapters.storage().upload(path, deal.storage_folder, "01_rfq", f"img_завод_{safe_filename(file.filename, 'image')}")
     except Exception as e:
         raise HTTPException(502, f"Хранилище недоступно: {e}")
     finally:
         shutil.rmtree(d, ignore_errors=True)
-    att = Attachment(deal_id=deal.id, folder="01_rfq", entity="factory_offer", entity_id=offer.id, file_name=file.filename or "image",
+    att = Attachment(deal_id=deal.id, folder="01_rfq", entity="factory_offer", entity_id=offer.id, file_name=safe_filename(file.filename, "image"),
                      storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=user.id)
     db.add(att)
     db.flush()

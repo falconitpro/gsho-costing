@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install -r backend/requirements.txt
+      - run: pip install -r backend/requirements.txt -c backend/constraints.txt
       - name: restic, shellcheck, pg_dump 16 — для тестов резервного копирования (docs/operations/03)
         # pg_dump/pg_restore той же версии, что сервер (postgres:16): клиент 17+ пишет в дамп SET transaction_timeout, которого нет в 16
         run: |
@@ -98,7 +98,7 @@ jobs:
         with: { python-version: "3.12" }
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
-      - run: pip install -r backend/requirements.txt playwright
+      - run: pip install -r backend/requirements.txt -c backend/constraints.txt playwright
       - run: cd frontend && npm install
       - name: backend и frontend
         run: |

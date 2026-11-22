@@ -673,7 +673,9 @@ def send_request(db: Session, deal, pos: Position, factory: Factory, file_path: 
     from .deal_service import ensure_folders
     result: dict[str, Any] = {"wecom": None, "mail": None}
     text = f"Запрос технических характеристик по сделке {deal.number}: {pos.designation} × {pos.qty}. 技术参数询价，请填写附件并回复。"
-    if via_wecom and factory.wecom_external_ids:
+    if via_wecom and factory.wecom_external_ids and not adapters.live("wecom"):
+        result["wecom"] = "не отправлено: WeCom системы не подключён — отправьте файл запроса вручную"
+    elif via_wecom and factory.wecom_external_ids:
         try:
             result["wecom"] = adapters.messenger().send_to_external(factory.wecom_external_ids[0], text, deal.number)
         except Exception as e:
@@ -686,7 +688,9 @@ def send_request(db: Session, deal, pos: Position, factory: Factory, file_path: 
     emails = [c.get("email") for c in (rfq_contacts or contacts) if c.get("email")]
     if via_mail and not emails:
         result["mail"] = "не отправлено: в карточке завода нет e-mail"
-    if via_mail and emails:
+    if via_mail and emails and not adapters.live("mail"):
+        result["mail"] = "не отправлено: почта системы не подключена — отправьте файл запроса вручную"
+    elif via_mail and emails:
         try:
             from ..adapters.mail import OutgoingMail
             result["mail"] = adapters.mail().send(OutgoingMail(to=emails, subject=f"Запрос технических характеристик / 技术参数询价 — {deal.number}",

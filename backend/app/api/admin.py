@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..core.files import safe_filename
 from .. import adapters
 from ..core.auth import CurrentUser, get_current_user, require_roles
 from ..core.roles import ROLE_TITLES, Role
@@ -449,7 +450,7 @@ async def upload_template(kind: str, file: UploadFile = File(...), db: Session =
     ver = (db.scalar(select(Template.version).where(Template.kind == kind).order_by(Template.version.desc())) or 0) + 1
     d = os.path.join(get_settings().storage_local_root, "_templates")   # постоянный том хранилища, а не временная папка
     os.makedirs(d, exist_ok=True)
-    name = os.path.basename(file.filename or kind).replace(" ", "_")
+    name = safe_filename(file.filename, kind).replace(" ", "_")
     path = os.path.join(d, f"{kind}_v{ver}_{name}")
     with open(path, "wb") as f:
         f.write(await file.read())

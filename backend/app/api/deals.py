@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..core.files import safe_filename
 from .. import adapters
 from ..adapters.storage import sha256_file
 from ..core.auth import CurrentUser, get_current_user, require_roles
@@ -677,7 +678,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     deal = get_deal_or_404(db, deal_id, user)
     _editable_by_manager(deal, user)
     tmpdir = tempfile.mkdtemp()
-    path = os.path.join(tmpdir, file.filename or "rfq.xlsx")
+    path = os.path.join(tmpdir, safe_filename(file.filename, "rfq.xlsx"))
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     from ..services.tech_params_service import l_codes
@@ -767,7 +768,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
     try:
         ensure_folders(db, deal)
         stored = adapters.storage().upload(path, deal.storage_folder, "01_rfq", f"RFQ_{(factory.name if factory else 'запрос')[:30]}_v{attempt}.xlsx")
-        db.add(Attachment(deal_id=deal.id, folder="01_rfq", entity="position", entity_id=pos.id, file_name=file.filename or "rfq.xlsx",
+        db.add(Attachment(deal_id=deal.id, folder="01_rfq", entity="position", entity_id=pos.id, file_name=safe_filename(file.filename, "rfq.xlsx"),
                           storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=user.id))
         imp.file_path = stored.path
     except Exception as e:
