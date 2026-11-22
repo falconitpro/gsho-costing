@@ -25,6 +25,8 @@ for a in "$@"; do
 done
 case "$REASON" in daily|pre_deploy|manual|restore_check) ;; *) echo "gsho-backup: укажите --reason=daily|pre_deploy|manual|restore_check" >&2; exit 2 ;; esac
 
+# служба systemd запускается без HOME — restic без кэша работает медленнее и пишет «unable to open cache» (D-152)
+export HOME="${HOME:-/root}"
 STATUS_DIR="${BACKUP_STATUS_DIR:-/var/lib/gsho-backup/status}"
 STAGING_ROOT="${BACKUP_STAGING_DIR:-/var/lib/gsho-backup/staging}"
 LOCK_FILE="${BACKUP_LOCK_FILE:-/run/lock/gsho-backup.lock}"
@@ -101,6 +103,21 @@ trap cleanup EXIT
 trap 'STEP=interrupted; on_error' INT TERM
 
 compose() { (cd "$COMPOSE_DIR" && docker compose "$@"); }
+# Команда в окружении backend (переменные .env и том файлов). Если контейнер backend не работает (перезапускается после неудачного
+# обновления) — разовый контейнер из того же образа, без запуска приложения (D-152): авария не должна блокировать копию,
+# а значит и обновление, которое её исправляет.
+BACKEND_MODE=""
+backend_mode() {
+  if compose exec -T backend true >/dev/null 2>&1; then BACKEND_MODE="exec"
+  else BACKEND_MODE="run"; log "backend не отвечает — файлы берутся разовым контейнером из образа backend"; fi
+}
+backend_sh() {
+  if [ "$BACKEND_MODE" = "exec" ]; then
+    compose exec -T backend sh -c "$1"
+  else
+    compose run --rm --no-deps -T --entrypoint sh backend -c "$1"
+  fi
+}
 
 # ---------- 1. конфигурация и блокировка ----------
 missing=()
@@ -159,8 +176,9 @@ DB_BYTES=$(stat -c %s "$STAGE/db.dump")
 # ---------- 4. вложения ----------
 STEP="unsupported_storage"
 if [ "$FILES_SOURCE" = "compose" ]; then
+  backend_mode
   # shellcheck disable=SC2016  # переменная раскрывается внутри контейнера
-  PROVIDER="$(compose exec -T backend sh -c 'printf %s "${STORAGE_PROVIDER:-local}"')"
+  PROVIDER="$(backend_sh 'printf %s "${STORAGE_PROVIDER:-local}"')"
 else
   PROVIDER="${BACKUP_STORAGE_PROVIDER:-local}"
 fi
@@ -168,7 +186,7 @@ case "$PROVIDER" in local) ;; s3) false ;; *) PROVIDER="unknown"; false ;; esac
 STEP="files_failed"
 if [ "$FILES_SOURCE" = "compose" ]; then
   # shellcheck disable=SC2016
-  compose exec -T backend sh -c 'cd "${STORAGE_LOCAL_ROOT:-/app/data/storage}" && tar -cf - .' > "$STAGE/files.tar"
+  backend_sh 'cd "${STORAGE_LOCAL_ROOT:-/app/data/storage}" && tar -cf - .' > "$STAGE/files.tar"
 else
   [ -d "${BACKUP_FILES_DIR:-}" ] || false
   tar -C "$BACKUP_FILES_DIR" -cf - . > "$STAGE/files.tar"

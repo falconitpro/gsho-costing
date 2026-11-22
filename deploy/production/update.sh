@@ -75,5 +75,16 @@ if [ -n "$CID" ]; then
 else
   echo "  контейнер антивируса не найден"
 fi
+echo "== резервное копирование: версия скриптов"   # D-152: исправления скриптов копии доходят до сервера с обычным обновлением
+upd=0
+install_if_changed() {   # $1 — файл из репозитория, $2 — установленный, $3 — права
+  if [ -f "$1" ] && [ -f "$2" ] && ! cmp -s "$1" "$2"; then
+    if install -m "$3" "$1" "$2"; then echo "  обновлён $2"; upd=1; else echo "  ВНИМАНИЕ: не удалось обновить $2 — установите вручную (deploy/backup/install.md)"; fi
+  fi
+}
+install_if_changed deploy/backup/gsho-backup.sh "$BIN" 0750
+install_if_changed deploy/backup/gsho-backup-status.sh /usr/local/sbin/gsho-backup-status.sh 0750
+for u in deploy/backup/*.service deploy/backup/*.timer; do install_if_changed "$u" "/etc/systemd/system/$(basename "$u")" 0644; done
+if [ "$upd" = 1 ]; then systemctl daemon-reload 2>/dev/null || true; else echo "  без изменений"; fi
 echo "== проверка"
 "${DC[@]}" exec -T backend python -m scripts.prod_init check
