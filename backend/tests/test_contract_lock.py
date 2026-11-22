@@ -90,3 +90,14 @@ def test_signed_contract_is_locked():
         st = c.get(f"{base}/stages", headers=H(GD)).json()
         assert not st["client_locked"] and st["factory_locked"]
         assert [x["action"] for x in st["contract_history"]] == ["unsigned", "amended", "amended"]
+        # D-149: в реестре — новые реквизиты после доп. соглашения, после снятия подписания — «на подписании», строки «Финансов» выключены
+        from app.models import FinanceObligation
+        with SessionLocal() as db:
+            k = db.scalars(select(Contract).where(Contract.deal_id == d["id"], Contract.direction == "income")).one()
+            assert (k.status, k.number, str(k.signed_on)) == ("signing", "K-2/1", "2026-11-03")
+            assert [h["action"] for h in k.history][-2:] == ["edit", "unsigned"]
+            assert all(not o.is_active for o in db.scalars(select(FinanceObligation).where(FinanceObligation.contract_id == k.id)).all())
+        assert c.post(f"{base}/contract-step", headers=H(MGR), json={"code": "client_signed", "done": True, "on": "2026-11-06", "contract_number": "K-2/2"}).status_code == 200
+        with SessionLocal() as db:
+            k = db.scalars(select(Contract).where(Contract.deal_id == d["id"], Contract.direction == "income")).one()
+            assert (k.status, k.number, str(k.signed_on)) == ("active", "K-2/2", "2026-11-06")

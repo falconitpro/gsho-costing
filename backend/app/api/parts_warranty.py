@@ -277,6 +277,7 @@ def add_comp(cid: str, body: CompIn, db: Session = Depends(get_db), user: Curren
             raise HTTPException(422, "Укажите сумму")
         comp.update(amount=body.amount, currency=body.currency, amount_rub=round(to_rub(body.amount, body.currency, latest_fx(db)) or 0, 2))
     c.compensations = [*(c.compensations or []), comp]
+    _fin_sync(db, c, user.id)
     db.commit()
     return _claim_payload(db, c)
 
@@ -296,8 +297,17 @@ def comp_received(cid: str, comp_id: str, body: ReceivedIn, db: Session = Depend
     x["received_on"] = (body.received_on or date.today()).isoformat()
     c.compensations = comps
     c.status = status_after_compensation(c.status, comps)
+    _fin_sync(db, c, user.id)
     db.commit()
     return _claim_payload(db, c)
+
+
+def _fin_sync(db: Session, c, user_id: Optional[str]) -> None:
+    """Компенсация деньгами — ожидаемое поступление в «Финансах» (D-149)."""
+    if any(x.get("kind") == "money" for x in c.compensations or []):
+        from ..services.finance.sources import sync_warranty_claim
+        db.flush()
+        sync_warranty_claim(db, c, user_id)
 
 
 def part_compensation_received(db: Session, pl: PoLine, on: date) -> None:
@@ -326,6 +336,7 @@ def close_claim(cid: str, body: CloseIn, db: Session = Depends(get_db), user: Cu
     c = _claim_or_404(db, cid)
     c.status, c.closed_at = "closed", datetime.now(timezone.utc)
     c.close_reason = body.reason or c.close_reason
+    _fin_sync(db, c, user.id)
     db.commit()
     return _claim_payload(db, c)
 

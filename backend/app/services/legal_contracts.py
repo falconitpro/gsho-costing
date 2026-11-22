@@ -448,9 +448,34 @@ def sync_deal_signing(db: Session, deal: Deal, user_id: Optional[str]) -> int:
     n = import_from_deals(db, deal)
     db.flush()
     for c in db.scalars(select(Contract).where(Contract.deal_id == deal.id, Contract.doc_type == "contract")).all():
+        num, on = (deal.contract_number, deal.contract_signed_at) if c.direction == "income" else (deal.factory_contract_number, deal.factory_contract_signed_at)
+        if c.source == "deal_import" and c.status == "signing" and on:     # D-149: подписание сняли и отметили снова
+            c.status, c.number, c.signed_on = "active", num or c.number, on
+            hist(c, user_id, "signed", f"подписание снова отмечено в сделке {deal.number}: № {c.number} от {on:%d.%m.%Y}")
+        elif c.source == "deal_import" and c.status == "active" and on and ((num and num != c.number) or on != c.signed_on):   # D-149: реквизиты изменены в сделке
+            hist(c, user_id, "edit", f"реквизиты изменены в сделке {deal.number}: № {c.number} от {c.signed_on.strftime('%d.%m.%Y') if c.signed_on else '—'} → № {num or c.number} от {on:%d.%m.%Y}")
+            c.number, c.signed_on = num or c.number, on
         if eligible(c):
             sync_contract(db, c, user_id)
     return n
+
+
+def unsign_from_deal(db: Session, deal: Deal, side: str, reason: str, user_id: Optional[str]) -> list[str]:
+    """Подписание снято в сделке (КД или ЗГД, с причиной) → договор, созданный из сделки, — «на подписании», его строки в «Финансах»
+    выключаются (не удаляются: где есть разнесения, они остаются и видны в сверке). Договор из юридического пакета, подписанный в своей
+    карточке, не меняем — возвращаем его номер для предупреждения (D-149)."""
+    from .finance.obligations import project_lines
+    direction = "income" if side == "client" else "expense"
+    kept = []
+    for c in db.scalars(select(Contract).where(Contract.deal_id == deal.id, Contract.direction == direction, Contract.doc_type == "contract",
+                                               Contract.status == "active")).all():
+        if c.source != "deal_import":
+            kept.append(c.number)
+            continue
+        c.status = "signing"
+        hist(c, user_id, "unsigned", f"подписание снято в сделке {deal.number}: {reason}")
+        project_lines(db, "contract", c.id, [], user_id, deal.id, f"подписание договора снято в сделке: {reason}"[:255])
+    return kept
 
 
 def repair_client_vat(db: Session) -> int:

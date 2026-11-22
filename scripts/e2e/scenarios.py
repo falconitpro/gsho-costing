@@ -506,6 +506,10 @@ async def s8_execution_branches(browser):
     var = api(MGR, "GET", f"/api/deals/{did}")["offer"]
     opt = api(MGR, "POST", f"/api/deals/{did}/positions/{pos[0]['id']}/local-options", {"name": "Пожаротушение", "cost": 150000, "currency": "RUB",
               "supplier_lead_days": 20, "needs_install": True, "install_stage": "before_handover", "install_days": 3, "install_cost_rub": 30000})
+    mt = api(MGR, "GET", "/api/tasks/my")
+    mt = mt if isinstance(mt, list) else mt.get("items", [])
+    check_true(scn, "стоимость и срок опции внесены сразу — задачи «Запросить КП поставщиков» нет",
+               not any(t.get("deal_id") == did and "Запросить КП поставщиков" in t.get("title", "") for t in mt))
     check_true(scn, "сервис открывает черновик с опцией РФ (у него задача оценить установку)",
                not refused(SVC, "GET", f"/api/deals/{did}"))
     api(CD, "PATCH", f"/api/deals/{did}/positions/{pos[0]['id']}/local-options/{opt['id']}", {"approve": True})
@@ -574,7 +578,32 @@ async def s8_execution_branches(browser):
     check_true(scn, "ФД получил задачу закрыть план/факт", any(t.get("deal_id") == did and "план/факт" in t.get("title", "") for t in todo))
 
 
-SCENARIOS = [s1_single, s2_two_models, s3_usd_rub_input, s4_rework_qty, s5_bargain_contract, s6_office, s7_execution, s8_execution_branches]
+async def s9_warranty_finance(browser):
+    """9. Гарантия: машина закрытой сделки → претензия заводу → компенсация деньгами в «Финансах» → «получено» — на сверку"""
+    scn = "s9"
+    did = next((x["id"] for x in api(CD, "GET", "/api/deals?status=closed") if x["site"] == "E2E: ветки исполнения"), None)
+    machines = [m for m in api(MGR, "GET", "/api/parts/fleet/machines") if m.get("deal_id") == did] if did else []
+    check_true(scn, "после закрытия сделки машины — в парке клиента", len(machines) == 2, str(len(machines)))
+    if not machines:
+        return
+    m = machines[0]
+    factory = next(p["factory_id"] for p in api(MGR, "GET", f"/api/deals/{did}")["positions"])
+    c = api(MGR, "POST", "/api/parts/claims", {"supplier_id": factory, "machine_id": m["id"], "machine_hours": 300, "description": "течь гидроцилиндра",
+                                                "lines": [{"article": "E2E-CYL", "name": "Гидроцилиндр", "qty": 1, "cost_rub": 90000}]})
+    check_true(scn, "претензия привязана к сделке машины", c.get("deal_id") == did)
+    api(MGR, "POST", f"/api/parts/claims/{c['id']}/sent", {"answer_days": 10})
+    api(MGR, "POST", f"/api/parts/claims/{c['id']}/answer", {"status": "accepted", "answer": "компенсируем деньгами"})
+    x = api(MGR, "POST", f"/api/parts/claims/{c['id']}/compensations", {"kind": "money", "amount": 7000, "currency": "CNY"})
+    ob = [i for i in api(FD, "GET", f"/api/finance/obligations?deal_id={did}&source_type=warranty_claim")["items"]]
+    check_true(scn, "компенсация — ожидаемое поступление от завода в «Финансах»",
+               [(i["direction"], float(i["amount"]), i["currency"]) for i in ob] == [("in", 7000.0, "CNY")], str(ob)[:200])
+    api(MGR, "POST", f"/api/parts/claims/{c['id']}/compensations/{x['compensations'][0]['id']}/received", {})
+    tx = api(FD, "GET", "/api/finance/transactions?status=needs_reconciliation&origin=legacy&limit=500")
+    tx = tx if isinstance(tx, list) else tx.get("items", [])
+    check_true(scn, "«получено» по претензии — запись на сверку у ФД", any(c["number"] in (t.get("note") or t.get("purpose") or "") for t in tx))
+
+
+SCENARIOS = [s1_single, s2_two_models, s3_usd_rub_input, s4_rework_qty, s5_bargain_contract, s6_office, s7_execution, s8_execution_branches, s9_warranty_finance]
 
 
 async def main():

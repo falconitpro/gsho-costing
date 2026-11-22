@@ -24,7 +24,7 @@ from .money import ZERO, dec, s
 
 PROJECTED_STATUSES = ("active", "closed", "terminated")   # подписанные договоры (legal.LOCKED)
 DIRECTION = {"income": "in", "expense": "out"}
-SOURCE_TITLES = {"contract": "Договор", "calculation": "Расчёт", "purchase_order": "Заказ поставщику", "batch": "Партия",
+SOURCE_TITLES = {"contract": "Договор", "calculation": "Расчёт", "purchase_order": "Заказ поставщику", "batch": "Партия", "warranty_claim": "Гарантийная претензия",
                  "part_request": "Заявка на запчасти", "penalty": "Неустойка"}
 
 
@@ -305,7 +305,7 @@ def source_number(o: FinanceObligation) -> str:
     bs = o.basis_snapshot or {}
     if bs.get("version_no"):
         return f"версия {bs['version_no']}"
-    return str(bs.get("po_number") or bs.get("batch") or bs.get("contract_number") or "")
+    return str(bs.get("po_number") or bs.get("claim_number") or bs.get("batch") or bs.get("contract_number") or "")
 
 
 def source_url(o: FinanceObligation) -> Optional[str]:
@@ -313,6 +313,8 @@ def source_url(o: FinanceObligation) -> Optional[str]:
         return f"/legal?tab=contracts&open={o.contract_id}"
     if o.source_type == "purchase_order":
         return "/supply?tab=po"
+    if o.source_type == "warranty_claim":
+        return "/supply?tab=claims"
     if o.source_type == "batch" and o.deal_id:
         return f"/deals/{o.deal_id}?tab=logistics"
     if o.source_type == "calculation" and o.deal_id:

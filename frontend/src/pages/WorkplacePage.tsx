@@ -40,7 +40,7 @@ type Data = {
   kpis: { title: string; value: string; sub: string; tone: string; url?: string }[];
   focus: { title: string; text: string; action: string; url: string; tone: string } | null;
   today: { events: Ev[]; week: { date: string; wd: string; day: number; today: boolean; count: number; tones: string[] }[] };
-  upcoming: Ev[]; todo?: Todo[]; tasks: TaskRow[]; tasks_total: number; tasks_overdue: number; deals: DealRow[]; approvals: Approval[]; attention: Att[];
+  upcoming: Ev[]; todo?: Todo[]; tasks: TaskRow[]; tasks_total: number; tasks_overdue: number; tails?: { key: string; title: string; value: number; url: string }[] | null; deals: DealRow[]; approvals: Approval[]; attention: Att[];
   money: { curve: { week: string; label: string; in: number; out: number; net: number; cum: number | null }[]; receivable_sum: number; receivable_count: number; min_cum: number | null; min_week: string;
     balance_status?: "confirmed" | "partial" | "unknown"; url?: string } | null;
   funnel: { code: string; title: string; count: number; parts?: number }[]; team: { name: string; open: number; exec: number; overdue: number; share: number }[];
@@ -291,6 +291,14 @@ export default function WorkplacePage({ me }: { me: Me }) {
         {d.quick[0] && <button className="btn add" onClick={() => nav(d.quick[0].url)}>{d.quick[0].title}</button>}
       </div>
     </header>);
+  // «хвосты» ЗГД одной строкой (D-149): ссылки на существующие списки
+  const tailsRow = d.tails ? (
+    <div className="wp-tails" aria-label="Хвосты">
+      <b>Хвосты:</b>
+      {d.tails.some((t) => t.value > 0)
+        ? d.tails.filter((t) => t.value > 0).map((t) => <Link key={t.key} to={t.url}><b>{t.value}</b> {t.title}</Link>)
+        : <span className="muted">нет — этапы отмечены, сканы на месте, сверять нечего</span>}
+    </div>) : null;
   // переключатель направлений второго уровня: из любого направления — в соседнее, в полный вид и назад к входам
   const groupsShown = WP_GROUPS.filter((g) => g.blocks.some((b) => visibleAll.includes(b)));
   const views = (
@@ -306,6 +314,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
       <div className="wp" ref={rootRef}>
         {<Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: level === "all" ? "Все блоки" : group!.title }]} />}
         {head}
+        {tailsRow}
         {views}
         {me.roles.some((r) => r.code === "gd") && level === "all" && <DownloadRequests />}
         {level === "all" && kpiRow}
@@ -405,6 +414,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
   return (
     <div className="wp" ref={rootRef}>
       {head}
+      {tailsRow}
       {me.roles.some((r) => r.code === "gd") && <DownloadRequests />}
       <NewsStrip me={me} />
       {kpiRow}

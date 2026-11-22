@@ -128,7 +128,10 @@ def list_deals(status: Optional[str] = None, archived: bool = False, db: Session
     q = select(Deal).order_by(Deal.created_at.desc())
     q = q.where(Deal.archived_at.isnot(None)) if archived else q.where(Deal.archived_at.is_(None))
     if status:
-        q = q.where(Deal.status == DealStatus(status))
+        try:
+            q = q.where(Deal.status == DealStatus(status.lower()))
+        except ValueError:
+            raise HTTPException(422, f"Неизвестный статус сделки: {status}")
     from ..services.execution_service import status_detail
     deals = [d for d in db.scalars(q).all() if _visible(user, d)]
     out = []

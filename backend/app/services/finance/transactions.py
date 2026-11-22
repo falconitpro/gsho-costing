@@ -306,7 +306,7 @@ def alloc_dto(al: FinanceAllocation, tx: Optional[FinanceTransaction] = None, ob
 
 LEGACY_TITLES = {"fx": "конвертация валют", "fx_fee": "комиссия за конвертацию", "bank_import": "из выписки",
                  "execution_legacy": "старая отметка: этап исполнения", "contract_legacy": "старая отметка: договор", "planfact_legacy": "старая отметка: план/факт",
-                 "purchase_order_legacy": "старая отметка: заказ поставщику", "batch_legacy": "старая отметка: партия"}
+                 "purchase_order_legacy": "старая отметка: заказ поставщику", "batch_legacy": "старая отметка: партия", "warranty_claim_legacy": "старая отметка: гарантийная претензия"}
 
 
 def tx_dto(tx: FinanceTransaction, used: Decimal, account_title: str = "", fx_leg: bool = False) -> dict:
