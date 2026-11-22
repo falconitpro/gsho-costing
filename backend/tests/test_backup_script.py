@@ -240,3 +240,32 @@ def test_example_env_has_only_placeholders():
     for k in ("RESTIC_PASSWORD", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
         line = next(x for x in t.splitlines() if x.startswith(k + "="))
         assert line.split("=", 1)[1].startswith("<"), line
+
+
+@integration
+def test_files_from_one_off_container_when_backend_is_down(box):
+    """D-152: backend перезапускается по кругу (неудачное обновление) — копия берёт файлы разовым контейнером из образа,
+    а не останавливается: иначе авария блокирует и копию, и обновление, которое её исправляет."""
+    tmp, env = box
+    fake = tmp / "bin"
+    fake.mkdir()
+    calls = tmp / "docker-calls.log"
+    files = env["BACKUP_FILES_DIR"]
+    (fake / "docker").write_text(f"""#!/usr/bin/env bash
+echo "$*" >> {calls}
+case "$*" in
+  "compose exec -T backend true") echo "Error response from daemon: Container is restarting" >&2; exit 1 ;;
+  "compose exec "*) exit 1 ;;
+  "compose run --rm --no-deps -T --entrypoint sh backend -c "*printf*) printf local ;;
+  "compose run --rm --no-deps -T --entrypoint sh backend -c "*tar*) tar -C {files} -cf - . ;;
+  *) exit 1 ;;
+esac
+""")
+    (fake / "docker").chmod(0o755)
+    p = _run(env, BACKUP_FILES_SOURCE="compose", PATH=f"{fake}:{env['PATH']}")
+    assert p.returncode == 0, p.stderr
+    assert "разовым контейнером" in p.stderr
+    st = _last(tmp)
+    assert st["status"] == "success" and st["files_count"] == 2 and st["storage_provider"] == "local"
+    log = calls.read_text()
+    assert "compose run --rm --no-deps -T --entrypoint sh backend" in log and log.count("compose exec -T backend true") == 1
