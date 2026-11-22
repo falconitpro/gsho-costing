@@ -183,7 +183,9 @@ def list_deals(status: Optional[str] = None, archived: bool = False, db: Session
             row["price_currency"] = v.price_currency
         sts = stages.get(d.id) or []
         if sts:
-            open_ = sorted((s for s in sts if not s.actual_on and (s.refined_on or s.planned_on)), key=lambda s: (s.refined_on or s.planned_on, s.sort))
+            # закрытая сделка не «просрочена»: невыполненные необязательные этапы (предприёмка) остаются без факта навсегда (D-150)
+            open_ = [] if d.status == DealStatus.CLOSED else sorted((s for s in sts if not s.actual_on and (s.refined_on or s.planned_on)),
+                                                                     key=lambda s: (s.refined_on or s.planned_on, s.sort))
             nxt = open_[0] if open_ else None
             row["exec"] = {"done": sum(1 for s in sts if s.actual_on), "total": len(sts),
                            "overdue": sum(1 for s in open_ if (s.refined_on or s.planned_on) < today),
