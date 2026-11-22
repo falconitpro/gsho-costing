@@ -114,6 +114,8 @@ FIELD_GROUPS: dict[str, tuple[str, set[str]]] = {
     "office": ("Канцелярия: журналы писем, приказов, распоряжений и внутренних документов", set()),
     "office_hr": ("Канцелярия: приказы по личному составу", set()),
     "office_signers": ("Канцелярия: подписанты, факсимиле, коды юр. лиц", set()),
+    # D-150: приёмка поставок запчастей на склад и фото отклонений; решения по отклонениям — по-прежнему менеджеры, закупки, КД, ЗГД
+    "parts_receiving": ("Склад запчастей: приёмка поставок и фото отклонений", set()),
 }
 
 # Стартовая матрица: роль → {группа: уровень}. Не перечисленные группы = 0.
@@ -149,6 +151,9 @@ for _r in Role:
     DEFAULT_MATRIX.setdefault(_r, {}).setdefault("assistant_use", READ)
     DEFAULT_MATRIX[_r].setdefault("file_download", READ)   # по умолчанию скачивание открыто всем; закрывается в «Уровнях доступа»
 DEFAULT_MATRIX[Role.GD]["assistant_admin"] = EDIT
+# Приёмка на склад (D-150, решение владельца 22.11.2026): менеджер и логист; закупки, КД и ЗГД — как раньше
+for _r in (Role.MANAGER, Role.LOGISTICIAN, Role.PURCHASING, Role.CD, Role.GD):
+    DEFAULT_MATRIX[_r]["parts_receiving"] = EDIT
 # Канцелярия (D-128): КД и ФД видят журналы
 for _r in (Role.CD, Role.FD):
     DEFAULT_MATRIX[_r].setdefault("office", READ)

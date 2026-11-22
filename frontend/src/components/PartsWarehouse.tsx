@@ -12,7 +12,7 @@ type Dev = { id: string; number: string; po_number: string; supplier_name: strin
   decision_title: string; status: string; status_title: string; claim_text: string; claim_sent_at: string | null; comment: string; created_at: string;
   line: { no: number; number: string; name: string; qty: number; received_qty: number; unit: string } | null; photos: { i: number; name: string }[] };
 type Move = { id: string; at: string; article: string; name: string; warehouse: string; qty: number; kind: string; doc_number: string; user: string };
-type Meta = { warehouses: { id: string; name: string }[]; discrepancy: Record<string, string>; decisions: Record<string, string>; can_edit: boolean; can_approve?: boolean };
+type Meta = { warehouses: { id: string; name: string }[]; discrepancy: Record<string, string>; decisions: Record<string, string>; can_edit: boolean; can_approve?: boolean; can_receive?: boolean };
 type Row = { qty: string; qty_bad: string; discrepancy: string; cell: string; comment: string };
 
 const KIND: Record<string, string> = { receipt: "приёмка", shipment: "отгрузка", adjust: "инвентаризация" };
@@ -70,7 +70,7 @@ function Receipt({ meta, setMsg }: { meta: Meta; setMsg: (s: string) => void }) 
         <h2 style={{ marginTop: 0 }}>Ждём поступления</h2>
         {list.length === 0 && <div className="muted">Нет заказов, отправленных поставщикам и ожидающих приёмки</div>}
         {list.map((p) => (
-          <div key={p.id} style={{ borderBottom: "1px solid var(--line)", padding: "6px 0", cursor: meta.can_edit ? "pointer" : undefined }} onClick={() => meta.can_edit && pick(p)}>
+          <div key={p.id} style={{ borderBottom: "1px solid var(--line)", padding: "6px 0", cursor: meta.can_receive ? "pointer" : undefined }} onClick={() => meta.can_receive && pick(p)}>
             <b>{p.number}</b> · {p.supplier_name} <span className="muted">· строк {p.lines.length}</span>
             <div className="muted" style={{ fontSize: 12 }}>{p.lines.map((l) => `${l.article} × ${l.remaining}`).join(", ")}</div>
           </div>))}
@@ -119,16 +119,18 @@ function Deviations({ meta, setMsg }: { meta: Meta; setMsg: (s: string) => void 
             <span><b>{d.number}</b> · {d.kind_title} {d.qty} {d.line?.unit} · {d.po_number}, {d.supplier_name}</span><span className="muted">{d.status_title}{d.decision_title && ` · ${d.decision_title}`}</span></div>
           {d.line && <div className="muted" style={{ fontSize: 12 }}>строка {d.line.no}: {d.line.number} {d.line.name} — заказано {d.line.qty}, принято {d.line.received_qty}{d.comment && ` · ${d.comment}`}</div>}
           {d.photos.length > 0 && <div style={{ fontSize: 12 }}>Фото: {d.photos.map((p) => <a key={p.i} href={`/api/parts/stock/deviations/${d.id}/photos/${p.i}`} target="_blank" rel="noreferrer" style={{ marginRight: 6 }}>{p.name}</a>)}</div>}
-          {meta.can_edit && d.status !== "closed" && (
+          {(meta.can_edit || meta.can_receive) && d.status !== "closed" && (
             <div className="row" style={{ flexWrap: "wrap", marginTop: 4 }}>
+              {meta.can_edit && <>
               <select value={edit[d.id]?.decision || ""} onChange={(e) => setEdit({ ...edit, [d.id]: { ...edit[d.id], decision: e.target.value } })}>
                 <option value="">решение…</option>{Object.entries(meta.decisions).filter(([k]) => k !== "cancel" || d.kind === "short").map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
               <input style={{ minWidth: 260 }} placeholder="текст претензии поставщику" value={edit[d.id]?.claim_text || ""} onChange={(e) => setEdit({ ...edit, [d.id]: { ...edit[d.id], claim_text: e.target.value } })} />
               <button className="btn" disabled={!edit[d.id]?.decision} onClick={() => run(() => api.put(`/api/parts/stock/deviations/${d.id}`, edit[d.id]), "Решение сохранено")}>Сохранить</button>
               {edit[d.id]?.claim_text && !d.claim_sent_at && <button className="btn ghost" onClick={() => run(() => api.post(`/api/parts/stock/deviations/${d.id}/claim-sent`), "Претензия отмечена как отправленная")}>претензия отправлена</button>}
-              <label className="btn ghost" style={{ cursor: "pointer" }}>фото<input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) run(() => api.upload(`/api/parts/stock/deviations/${d.id}/photos`, f), "Фото добавлено"); e.target.value = ""; }} /></label>
-              <button className="btn ghost" onClick={() => run(() => api.post(`/api/parts/stock/deviations/${d.id}/close`), "Отклонение закрыто")}>закрыть</button>
+              </>}
+              {meta.can_receive && <label className="btn ghost" style={{ cursor: "pointer" }}>фото<input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) run(() => api.upload(`/api/parts/stock/deviations/${d.id}/photos`, f), "Фото добавлено"); e.target.value = ""; }} /></label>}
+              {meta.can_edit && <button className="btn ghost" onClick={() => run(() => api.post(`/api/parts/stock/deviations/${d.id}/close`), "Отклонение закрыто")}>закрыть</button>}
             </div>)}
           {d.claim_sent_at && <div className="muted" style={{ fontSize: 12 }}>Претензия отправлена {fmtDate(d.claim_sent_at)}: {d.claim_text}</div>}
         </div>))}

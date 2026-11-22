@@ -277,7 +277,7 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
           <select value={f.currency} onChange={(e) => go({ currency: e.target.value })} aria-label="Валюта">
             <option value="">все валюты</option>{meta.currencies.map((c) => <option key={c}>{c}</option>)}</select>
           <select value={f.source_type} onChange={(e) => go({ source: e.target.value })} aria-label="Источник">
-            <option value="">все источники</option><option value="contract">договоры</option><option value="purchase_order">заказы поставщикам</option><option value="batch">логистические партии</option><option value="calculation">прогноз по расчёту</option><option value="penalty">неустойки</option><option value="warranty_claim">гарантийные претензии</option></select>
+            <option value="">все источники</option><option value="contract">договоры</option><option value="purchase_order">заказы поставщикам</option><option value="batch">логистические партии</option><option value="calculation">прогноз по расчёту</option><option value="penalty">неустойки</option><option value="warranty_claim">гарантийные претензии</option><option value="claim">претензии по договорам</option></select>
           <select value={f.legal_entity_id} onChange={(e) => go({ entity: e.target.value })} aria-label="Компания группы">
             <option value="">все компании группы</option>{meta.entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
           <label className="row" style={{ gap: 4 }} title="Срок по договору, а если он ещё не определён — ожидаемая дата">с <input type="date" value={f.date_from} onChange={(e) => go({ from: e.target.value })} />

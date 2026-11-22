@@ -44,6 +44,13 @@ def _editor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     return user
 
 
+def _receiver(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Приёмка и фото отклонений — по праву «Склад запчастей: приёмка» (D-150; по умолчанию менеджер, логист, закупки, КД, ЗГД)."""
+    if not user.can("parts_receiving", 2):
+        raise HTTPException(403, "Нет права на приёмку на склад — его выдают в «Настройки → Уровни доступа»")
+    return user
+
+
 def _number(db: Session, model, prefix: str) -> str:
     p = f"{prefix}-{date.today().year}-"
     last = db.scalars(select(model.number).where(model.number.like(f"{p}%"))).all()
@@ -64,7 +71,7 @@ def _physical(db: Session, wid: str) -> Warehouse:
 def meta(db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
     whs = db.scalars(select(Warehouse).where(Warehouse.is_active.is_(True), Warehouse.kind == "physical").order_by(Warehouse.name)).all()
     return {"warehouses": [{"id": w.id, "name": w.name} for w in whs], "discrepancy": DISCREPANCY, "decisions": DECISIONS, "dev_status": DEV_STATUS,
-            "can_edit": user.has(*EDIT_ROLES), "can_approve": user.has(Role.CD, Role.GD)}
+            "can_edit": user.has(*EDIT_ROLES), "can_approve": user.has(Role.CD, Role.GD), "can_receive": user.can("parts_receiving", 2)}
 
 
 # ------------------------------------------------------------------ приёмка
@@ -125,7 +132,7 @@ def _receipt_payload(db: Session, r: PartReceipt) -> dict:
 
 
 @router.post("/receipts", status_code=201)
-def create_receipt(body: ReceiptIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+def create_receipt(body: ReceiptIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_receiver)):
     """Приёмка: годное — в остаток склада и сразу в жёсткий резерв под заявку клиента; расхождения — отклонения с решением."""
     po = db.get(PurchaseOrder, body.po_id)
     if po is None or po.kind != "external":
@@ -287,7 +294,7 @@ def close_dev(did: str, db: Session = Depends(get_db), user: CurrentUser = Depen
 
 
 @router.post("/deviations/{did}/photos")
-def add_photo(did: str, file: UploadFile = File(...), db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+def add_photo(did: str, file: UploadFile = File(...), db: Session = Depends(get_db), user: CurrentUser = Depends(_receiver)):
     d = _dev_or_404(db, did)
     po = db.get(PurchaseOrder, d.po_id)
     name = os.path.basename(file.filename or "photo.jpg").replace("/", "-")

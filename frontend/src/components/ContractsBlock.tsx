@@ -23,7 +23,7 @@ type Row = {
   package?: { id: string; version_no: number; status: string; status_title: string } | null;
 };
 type Ob = { key: string; title: string; debtor: string; amount: number | null; currency: string; due_on: string | null; due_legal: boolean; done_on: string | null; done_source?: string; days_late: number; status: string; no?: number; idx?: number };
-type Pen = { key: string; payer: string; payer_title: string; reason_title: string; obligation: string; days: number; base: number | null; rate_text: string; calc_amount: number | null; amount: number | null;
+type Pen = { key: string; fin_paid?: number; payer: string; payer_title: string; reason_title: string; obligation: string; days: number; base: number | null; rate_text: string; calc_amount: number | null; amount: number | null;
   currency: string; capped: boolean; status: string; status_title: string; mark: { comment?: string; on?: string; amount?: number } };
 type Obligations = { payments: Ob[]; performance: Ob[]; penalties: Pen[]; totals: { receivable: number; payable: number; receivable_accruing: number; payable_accruing: number; net: number; currency: string } };
 type Step = { code: string; title: string; decision: string | null; by_name: string; at: string | null; comment: string; pending: boolean };
@@ -42,6 +42,7 @@ type Catalog = { kinds: Record<string, { title: string; direction: string; cp_ki
   penalty_bases: Record<string, string>; cap_kinds: Record<string, string> };
 type Registry = { items: Row[]; summary: Record<string, number>; entities: { id: string; name: string }[]; can_manage: boolean };
 
+const FLAGS: Record<string, string> = { no_scan: "без скана", overdue: "с просрочкой", expiring: "истекают в 30 дней", no_terms: "без условий оплаты" };
 const STATUS_CLASS: Record<string, string> = { draft: "", legal_review: "info", approval: "info", approved: "info", signing: "warn", active: "ok", closed: "", terminated: "bad", cancelled: "" };
 const d = (s?: string | null) => (s ? new Date(s).toLocaleDateString("ru-RU") : "—");
 const money = (v: number | null | undefined, cur = "") => (v == null ? "—" : `${v.toLocaleString("ru-RU", { maximumFractionDigits: 2 })}${cur ? " " + cur : ""}`);
@@ -50,8 +51,9 @@ const ACTION: Record<string, string> = { created: "создан", edited: "из�
 export default function ContractsBlock({ dealId, compact }: { dealId?: string; compact?: boolean }) {
   const [reg, setReg] = useState<Registry | null>(null);
   const [cat, setCat] = useState<Catalog | null>(null);
-  const [f, setF] = useState({ q: "", status: "", direction: "", kind: "" });
   const qs = new URLSearchParams(window.location.search);
+  // flag — отметка из сводки (ссылки «Хвосты» ЗГД и обзора юр. блока, D-150): без скана, с просрочкой, истекают, без условий оплаты
+  const [f, setF] = useState({ q: "", status: "", direction: "", kind: "", flag: dealId ? "" : qs.get("flag") || "" });
   const [open, setOpen] = useState<string | null>(dealId ? null : qs.get("open"));
   const [creating, setCreating] = useState(!dealId && qs.get("new") === "1");
   const [msg, setMsg] = useState("");
@@ -61,7 +63,7 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
     const p = new URLSearchParams({ ...f, ...(dealId ? { deal_id: dealId } : {}) });
     api.get<Registry>(`/api/legal/contracts?${p}`).then(setReg).catch((e) => setMsg((e as Error).message));
   };
-  useEffect(() => { load(); }, [f.q, f.status, f.direction, f.kind, dealId]);
+  useEffect(() => { load(); }, [f.q, f.status, f.direction, f.kind, f.flag, dealId]);
   useEffect(() => { api.get<Catalog>("/api/legal/contracts/catalog").then(setCat).catch(() => undefined); }, []);
   if (!reg || !cat) return <div className="card">{msg || "Загрузка…"}</div>;
   const s = reg.summary;
@@ -81,6 +83,7 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
             <select value={f.direction} onChange={(e) => setF({ ...f, direction: e.target.value })}><option value="">все направления</option>{Object.entries(cat.directions).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
             <select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}><option value="">все виды</option>{Object.entries(cat.kinds).map(([k, v]) => <option key={k} value={k}>{v.title}</option>)}</select>
             <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">все статусы</option>{Object.entries(cat.statuses).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+            <select value={f.flag} onChange={(e) => setF({ ...f, flag: e.target.value })} aria-label="Отметка"><option value="">все отметки</option>{Object.entries(FLAGS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
           </>}
           <button className="btn add" onClick={() => setCreating(true)}>Договор</button>
         </div>
@@ -508,7 +511,7 @@ function ExecTab({ c, ob, onSaved, onErr }: { c: Full; ob: Obligations; onSaved:
                 <td>{p.payer_title}</td><td>{p.reason_title}<div className="muted" style={{ fontSize: 11 }}>{p.obligation}</div></td><td className="num">{p.days}</td>
                 <td className="num" style={{ whiteSpace: "nowrap" }}>{money(p.base, p.currency)}</td><td style={{ fontSize: 12 }}>{p.rate_text}</td>
                 <td className="num" style={{ whiteSpace: "nowrap" }}><b>{money(p.amount, p.currency)}</b>{p.capped && <div className="muted" style={{ fontSize: 11 }}>ограничено пределом</div>}{p.calc_amount !== p.amount && p.calc_amount != null && <div className="muted" style={{ fontSize: 11 }}>расчёт {money(p.calc_amount)}</div>}</td>
-                <td><span className={`badge ${p.status === "waived" ? "" : p.status === "paid" ? "ok" : p.payer === "us" ? "bad" : "warn"}`}>{p.status_title}</span>{p.mark?.comment && <div className="muted" style={{ fontSize: 11 }}>{p.mark.comment}</div>}</td>
+                <td><span className={`badge ${p.status === "waived" ? "" : p.status === "paid" ? "ok" : p.payer === "us" ? "bad" : "warn"}`}>{p.status_title}</span>{p.mark?.comment && <div className="muted" style={{ fontSize: 11 }}>{p.mark.comment}</div>}{p.fin_paid ? <div className="pen-fin">в «Финансах» оплачено {money(p.fin_paid, p.currency)} — отметьте «оплачена»</div> : null}</td>
                 <td style={{ textAlign: "right" }}><span className="row" style={{ gap: 4, justifyContent: "flex-end", flexWrap: "wrap" }}>
                   <input type="number" title="сумма (если отличается от расчёта)" placeholder="сумма" style={{ width: 90 }} value={amt[p.key] ?? ""} onChange={(e) => setAmt({ ...amt, [p.key]: e.target.value })} />
                   {[["claimed", "предъявлена"], ["recognized", "признана"], ["paid", "оплачена"], ["waived", "не взыскиваем"]].filter(([k]) => k !== p.status).map(([k, tt]) => (

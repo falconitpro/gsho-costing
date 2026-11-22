@@ -134,6 +134,8 @@ def create_claim(cid: str, body: ClaimIn, db: Session = Depends(get_db), user: C
         cl.answer_days = body.answer_days
         if cl.direction == "incoming" and cl.sent_on:
             cl.answer_due = cl.sent_on + timedelta(days=cl.answer_days)
+    if cl.direction == "incoming":
+        _fin(db, c, user.id, cl)    # входящая — неустойка к нам предъявлена: выплата в «Финансах» (D-150)
     audit(db, user.id, c.deal_id, "claim", cl.id, "create", after={"number": cl.number, "direction": cl.direction, **svc.totals(cl)})
     db.commit()
     return _out(db, user, cl, c)
@@ -175,6 +177,8 @@ def edit_claim(clid: str, body: ClaimEdit, db: Session = Depends(get_db), user: 
     if "track" in data:
         cl.track = (data["track"] or "").strip()
     svc.hist(cl, user.id, "edited", ", ".join(data.keys()))
+    if cl.direction == "incoming" and "lines" in data:
+        _fin(db, c, user.id, cl)
     db.commit()
     return _out(db, user, cl, c)
 
@@ -247,6 +251,18 @@ def sign(clid: str, body: StepIn, db: Session = Depends(get_db), user: CurrentUs
     return _out(db, user, cl, c)
 
 
+def _fin(db: Session, c, user_id: str, cl=None) -> None:
+    """Неустойка предъявлена / признана → строка в «Финансах» сразу, а не при следующей правке договора (D-150);
+    неустойки, вписанные в претензию вручную, — отдельной строкой по претензии."""
+    from ..services.finance.obligations import eligible, sync_contract
+    from ..services.finance.sources import sync_contract_claim
+    db.flush()
+    if eligible(c):
+        sync_contract(db, c, user_id)
+    if cl is not None:
+        sync_contract_claim(db, cl, user_id)
+
+
 @router.post("/claims/{clid}/send")
 def send(clid: str, body: StepIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     cl, c = _claim(db, clid, user)
@@ -261,6 +277,7 @@ def send(clid: str, body: StepIn, db: Session = Depends(get_db), user: CurrentUs
     cl.answer_due = cl.sent_on + timedelta(days=cl.answer_days)
     cl.status = "sent"
     svc.mark_penalties(c, cl, "claimed", user.id)
+    _fin(db, c, user.id, cl)
     svc.hist(cl, user.id, "sent", f"{svc.SENT_VIA.get(cl.sent_via, '')} {cl.sent_on:%d.%m.%Y}" + (f", трек {cl.track}" if cl.track else "") + f"; ответ до {cl.answer_due:%d.%m.%Y}")
     cs.hist(c, user.id, "claim", f"претензия {cl.number} отправлена, ответ до {cl.answer_due:%d.%m.%Y}")
     db.commit()
@@ -285,6 +302,7 @@ def answer(clid: str, body: StepIn, db: Session = Depends(get_db), user: Current
     if body.result in ("satisfied", "partial"):
         share = 1.0 if body.result == "satisfied" or not t["total"] else min(1.0, float(body.amount or 0) / t["total"])
         svc.mark_penalties(c, cl, "recognized", user.id, share)
+    _fin(db, c, user.id, cl)
     svc.hist(cl, user.id, "answer", svc.RESULTS[body.result] + (f" — {svc._money(cl.result_amount)} {cl.currency}" if body.result == "partial" else "") + (f": {cl.answer_text}" if cl.answer_text else ""))
     cs.hist(c, user.id, "claim", f"претензия {cl.number}: {svc.RESULTS[body.result]}")
     db.commit()
@@ -308,6 +326,7 @@ def set_status(clid: str, body: StepIn, db: Session = Depends(get_db), user: Cur
         raise HTTPException(403, "Решение о суде принимают юрист, КД или ЗГД")
     before = cl.status
     cl.status = to
+    _fin(db, c, user.id, cl)
     svc.hist(cl, user.id, "status", f"{svc.statuses(cl).get(before)} → {svc.statuses(cl).get(to)}" + (f": {body.comment.strip()}" if body.comment.strip() else ""))
     db.commit()
     return _out(db, user, cl, c)

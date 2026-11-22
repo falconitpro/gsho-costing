@@ -26,14 +26,17 @@ setenv OFFICE_AI on
 chmod 600 "$ENVF"
 unset KEY
 
-echo "Перезапуск сервера приложения…"
-"${DC[@]}" up -d backend >/dev/null
+echo "Перезапуск сервера приложения и фоновых заданий…"
+# фоновые задания (worker, D-143) читают тот же backend/.env: напоминания уходят письмами — перезапускаем и их
+"${DC[@]}" up -d backend worker >/dev/null
 sleep 8
 echo "Проверочный запрос к модели…"
 if "${DC[@]}" exec -T backend python -c '
 from app.services import office_ai as oa
 out, warn, llm = oa.edit("Просим сообщить срок поставки ковша по договору 45-П до 05.12.2026.", "business", "Исходящее письмо")
-print("Модель ответила:", out[:200])
+print("Модель для писем ответила:", out[:200])
+tr, warn2, llm2 = oa.translate("Просим сообщить срок поставки ковша по договору 45-П.", "zh")
+print("Модель для перевода ответила:", tr[:120])
 '; then
   echo "Готово: в карточках писем появился блок «ИИ». Выключить — OFFICE_AI=off в backend/.env и перезапуск."
 else

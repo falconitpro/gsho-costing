@@ -84,7 +84,7 @@ def overview(as_of: Optional[date] = None, db: Session = Depends(get_db), user: 
 @router.get("/obligations")
 def obligations(as_of: Optional[date] = None, direction: Optional[str] = Query(None, pattern="^(in|out)$"), currency: Optional[str] = None,
                 legal_entity_id: Optional[str] = None, deal_id: Optional[str] = None, contract_id: Optional[str] = None, status: Optional[str] = None,
-                source_type: Optional[str] = Query(None, pattern="^(contract|purchase_order|batch|calculation|penalty|warranty_claim)$"),
+                source_type: Optional[str] = Query(None, pattern="^(contract|purchase_order|batch|calculation|penalty|warranty_claim|claim)$"),
                 date_from: Optional[date] = None, date_to: Optional[date] = None, search: str = "", include_inactive: bool = False, reconciliation: bool = False,
                 limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
                 db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
@@ -875,7 +875,7 @@ def question_close(qid: str, body: ReasonIn, db: Session = Depends(get_db), user
 def export_xlsx(kind: str = Query(..., pattern="^(obligations|debt|liquidity|economy|reconciliation)$"), format: str = Query("xlsx", pattern="^xlsx$"),
                 as_of: Optional[date] = None, direction: Optional[str] = Query(None, pattern="^(in|out)$"), currency: Optional[str] = None,
                 legal_entity_id: Optional[str] = None, deal_id: Optional[str] = None, contract_id: Optional[str] = None, status: Optional[str] = None,
-                source_type: Optional[str] = Query(None, pattern="^(contract|purchase_order|batch|calculation|penalty|warranty_claim)$"), date_from: Optional[date] = None,
+                source_type: Optional[str] = Query(None, pattern="^(contract|purchase_order|batch|calculation|penalty|warranty_claim|claim)$"), date_from: Optional[date] = None,
                 date_to: Optional[date] = None, search: str = "", include_inactive: bool = False, reconciliation: bool = False,
                 group_by: Optional[str] = Query(None, pattern="^(counterparty|deal|day|week)$"), horizon_days: int = Query(90, ge=7, le=730), queue: Optional[str] = None,
                 db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
