@@ -194,7 +194,7 @@ def _action_for(d: Deal, user: CurrentUser, today: date, tasks_by_deal: dict[str
     return "", ""
 
 
-def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
+def build(db: Session, user: CurrentUser, executive: bool = False) -> tuple[dict, dict]:
     """Рабочее место без сводки и данные для неё (те же, уже отфильтрованные по правам списки) — для /api/workplace и /api/briefing."""
     now = datetime.now(timezone.utc)
     local = now + timedelta(hours=3)          # московское время: дата и приветствие — по нему, а не по UTC сервера
@@ -442,7 +442,7 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
         kpis = [{"title": "Воронка · в работе", "value": str(len(open_deals) + len(open_parts)), "sub": (_fmt_money(in_work_sum) + " · " if fin else "") + f"ГШО {len(open_deals)} · ЗЧ {len(open_parts)}" + (f" · машина стоит: {len(urgent_parts)}" if urgent_parts else ""), "tone": "bad" if urgent_parts else "", "url": "/board" if board else "/deals?block=work"},
                 {"title": "Выиграно в квартале", "value": str(len(won_q) + len(won_q_parts)), "sub": (_fmt_money(won_sum) + " · " if fin else "") + f"ГШО {len(won_q)} · ЗЧ {len(won_q_parts)}", "tone": "ok" if won_q or won_q_parts else "", "url": "/deals?block=won"},
                 {"title": "Ждут решения", "value": str(len(approvals)), "sub": "согласований", "tone": "warn" if approvals else "ok", "url": "#todo"},
-                ({"title": "Дебиторка просрочена", "value": str(money["receivable_count"]), "sub": _fmt_money(money["receivable_sum"]) if money["receivable_count"] else "платежей", "tone": "bad" if money["receivable_count"] else "ok", "url": money["url"]} if money else
+                ({"title": "Дебиторка просрочена", "value": str(money["receivable_count"]), "sub": (money.get("receivable_text") or _fmt_money(money["receivable_sum"])) if money["receivable_count"] else "платежей", "tone": "bad" if money["receivable_count"] else "ok", "url": money["url"]} if money else
                  {"title": "Дебиторка просрочена", "value": str(len(receivables)), "sub": "платежей", "tone": "bad" if receivables else "ok", "url": "/summary?kind=money"}) if lead else
                 {"title": "Просрочено задач", "value": str(len(overdue_tasks)), "sub": "", "tone": "bad" if overdue_tasks else "ok", "url": "/tasks"},
                 {"title": "Исполнение", "value": str(len(exec_rows)), "sub": f"{sum(1 for r in exec_rows if r['delay'] > 0)} с отставанием", "tone": "warn" if any(r["delay"] > 0 for r in exec_rows) else "", "url": "/summary?kind=shipments" if user.can("finance_analytics") or user.has(Role.LOGISTICIAN) else "/deals?block=won"}]
@@ -528,8 +528,24 @@ def build(db: Session, user: CurrentUser) -> tuple[dict, dict]:
             "kpis": kpis, "focus": focus, "today": {"events": today_events, "week": week}, "upcoming": upcoming, "tasks": tasks[:10], "tasks_total": len(tasks), "tasks_overdue": len(overdue_tasks),
             "deals": deal_rows, "approvals": approvals, "todo": todo, "attention": attention, "money": money, "funnel": funnel, "team": team, "notifications": notifications, "legal": legal,
             "fin": fin, "quick": _quick(user)}
+    if executive:   # D-153: новый вид рабочего места ЗГД — из тех же списков
+        from ..services import executive as exec_svc
+        out["executive"] = exec_svc.build(db, user, today=today, names=names, fin=fin, open_deals=open_deals, open_parts=open_parts, exec_rows=exec_rows,
+                                          won_q=won_q, won_q_parts=won_q_parts, approvals=approvals, money=money, legal=legal, cin=cin, claims=claims,
+                                          poas=poas, price=_price)
     ctx = {"today": today, "local": local, "tasks": tasks, "approvals": approvals, "poas": poas, "cin": cin, "claims": claims, "money": money}
     return out, ctx
+
+
+@router.get("/executive")
+def workplace_executive(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Новый вид «Пульт» рабочего места ЗГД (D-153): прежние данные + блок executive. Только ЗГД."""
+    if not user.has(Role.GD):
+        raise HTTPException(403, "Пульт — рабочее место заместителя генерального директора")
+    out, ctx = build(db, user, executive=True)
+    out["briefing"] = briefing_block(db, user, ctx)
+    out["tails"] = tails(db, user)
+    return out
 
 
 @router.get("")
@@ -545,12 +561,11 @@ def tails(db: Session, user: CurrentUser) -> Optional[list[dict]]:
     if not user.has(Role.GD):
         return None
     try:
-        from datetime import date as _date
-
         from ..models import Contract, Deal, ExecutionStage
         from ..models.finance import FinanceObligation, FinanceTransaction
         from ..services.legal_contracts import LOCKED
-        today = _date.today()
+        from ..services.finance.cashview import moscow_today
+        today = moscow_today()   # D-153: дата — московская, как в шапке рабочего места
         stages = db.scalar(select(func.count(ExecutionStage.id)).join(Deal, Deal.id == ExecutionStage.deal_id).where(
             Deal.status.in_((DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION)), Deal.archived_at.is_(None), ExecutionStage.actual_on.is_(None),
             func.coalesce(ExecutionStage.refined_on, ExecutionStage.planned_on) < today)) or 0   # как «просрочено» в реестре сделок

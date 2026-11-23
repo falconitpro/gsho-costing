@@ -104,3 +104,30 @@ def test_workplace_todo_feed_drafts_and_default_layout():
         r = c.put("/api/workplace/layout", headers=H(MGR), json={"order": lay["order"], "hidden": ["funnel"]}).json()
         assert r["v"] == 2
         assert c.get("/api/workplace", headers=H(MGR)).json()["layout"]["hidden"] == ["funnel"]
+
+
+def test_executive_workplace_gd_only_and_shape():
+    """D-153: «Пульт» ЗГД — только для ЗГД, 6 показателей, очередь без повторов, дебиторка по валютам."""
+    seed()
+    from app.services.executive import money_by_currency
+    with TestClient(app) as c:
+        assert c.get("/api/workplace/executive", headers=H(MGR)).status_code == 403
+        assert c.get("/api/workplace/executive", headers=H(FD)).status_code == 403
+        r = c.get("/api/workplace/executive", headers=H(GD))
+        assert r.status_code == 200
+        ex = r.json()["executive"]
+        assert [k["key"] for k in ex["kpis"]] == ["active", "risk", "won", "margin", "receivable", "exec"]
+        for k in ex["kpis"]:
+            assert k["url"].startswith("/") and k["source"]
+            if k["value"] is None:
+                assert k["data_quality"] == "unavailable"
+        keys = [e["key"] for e in ex["escalations"]]
+        assert len(keys) == len(set(keys))
+        order = {"critical": 0, "high": 1, "normal": 2}
+        assert [order[e["priority"]] for e in ex["escalations"]] == sorted(order[e["priority"]] for e in ex["escalations"])
+        assert {d["title"] for d in ex["directions"]} >= {"Коммерция", "Финансы", "Юридический блок"}
+        assert "assignments" in ex and "meta" in ex
+        # обычное рабочее место не тянет «Пульт»
+        assert "executive" not in c.get("/api/workplace", headers=H(GD)).json()
+    assert money_by_currency([(100, "RUB"), (5, "CNY")]) != money_by_currency([(100, "RUB")])
+    assert money_by_currency([]) in ("0 ₽", "—", "")
