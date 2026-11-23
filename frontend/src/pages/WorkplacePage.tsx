@@ -1,4 +1,5 @@
 import DownloadRequests from "../components/DownloadRequests";
+import ExecWorkplace from "../components/workplace/ExecWorkplace";
 import BriefingBlock, { type Briefing } from "../components/BriefingBlock";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -94,7 +95,16 @@ const dShort = (iso: string) => { const d = new Date(iso); return `${String(d.ge
 const ago = (iso: string | null) => { if (!iso) return ""; const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 60 ? `${m} мин назад` : m < 1440 ? `${Math.round(m / 60)} ч назад` : `${Math.round(m / 1440)} дн. назад`; };
 const money = (v: number) => Math.abs(v) >= 1e6 ? `${(v / 1e6).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} млн` : `${Math.round(v / 1e3).toLocaleString("ru-RU")} тыс.`;
 
+/** Рабочее место. У ЗГД — переключатель «Обычный вид / Пульт» (D-153); выбор — в браузере (gsho.gdView). */
 export default function WorkplacePage({ me }: { me: Me }) {
+  const isGd = me.roles.some((r) => r.code === "gd");
+  const [view, setView] = useState<string>(() => { try { return localStorage.getItem("gsho.gdView") || "classic"; } catch { return "classic"; } });
+  const pick = (v: string) => { setView(v); try { localStorage.setItem("gsho.gdView", v); } catch { /* браузер без хранилища — выбор до перезагрузки */ } };
+  if (isGd && view === "pult") return <ExecWorkplace me={me} onClassic={() => pick("classic")} />;
+  return <ClassicWorkplace me={me} onPult={isGd ? () => pick("pult") : undefined} />;
+}
+
+function ClassicWorkplace({ me, onPult }: { me: Me; onPult?: () => void }) {
   void me;
   const nav = useNavigate();
   const loc = useLocation();
@@ -286,6 +296,7 @@ export default function WorkplacePage({ me }: { me: Me }) {
     <header className="wp-top">
       <div><h1>{d.user.greeting}, {d.user.first_name || d.user.name}</h1><div className="muted" style={{ fontSize: 13 }}>{d.date.text} · {d.user.role_title} · {d.today.events.length} событий сегодня{d.tasks_overdue ? ` · ${d.tasks_overdue} задач просрочено` : ""}</div></div>
       <div className="row" style={{ gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        {onPult && <div className="wpx-switch" role="group" aria-label="Вид рабочего места"><button className="cur" aria-pressed="true">Обычный вид</button><button onClick={onPult}>Пульт</button></div>}
         <button className="btn ghost" onClick={() => nav("/support?new=1&from=/")} title="Обращение в поддержку внутри CRM">Сообщить о проблеме</button>
         {level === "entries" && <ActionMenu label="Быстрые действия" items={quickRest} onPick={(u) => nav(u)} />}
         {d.quick[0] && <button className="btn add" onClick={() => nav(d.quick[0].url)}>{d.quick[0].title}</button>}

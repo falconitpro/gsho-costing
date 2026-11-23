@@ -113,6 +113,8 @@ def workplace_money(db: Session, user, today: date, monday: date) -> dict:
     known = [p for p in pts if p["cum"] is not None]
     low = min(known, key=lambda p: p["cum"]) if known else None
     from .access import can_read
+    from ..executive import money_by_currency   # D-153: в разных валютах — по валютам, а не «0 ₽», когда просрочен аванс в юанях
     return {"curve": pts, "receivable_sum": round(sum(r["amount"] or 0 for r in rec if r["currency"] == "RUB")), "receivable_count": len(rec),
+            "receivable_text": money_by_currency([(r["amount"], r["currency"]) for r in rec]),
             "min_cum": low["cum"] if low else None, "min_week": low["label"] if low else "", "balance_status": cv["balance_status"],
             "url": "/finance?tab=liquidity" if can_read(user) else "/summary?kind=money"}

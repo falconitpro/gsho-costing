@@ -243,7 +243,7 @@ def _money_summary(db, user, ctx) -> list[Item]:
         return []
     n = m["receivable_count"]
     return [Item(item_key="money:receivables", source_type="money", source_id="receivables", severity="medium",
-                 title=f"Просроченных поступлений от клиентов: {n}", reason=f"Сумма в рублях: {_money(m.get('receivable_sum', 0))} RUB",
+                 title=f"Просроченных поступлений от клиентов: {n}", reason=f"Сумма: {m.get('receivable_text') or _money(m.get('receivable_sum', 0)) + ' RUB'}",   # D-153: по валютам
                  advice_text="Откройте сводку по деньгам и проверьте поступления", url=m.get("url") or "/summary?kind=money", source_label="Деньги",
                  amount=str(m.get("receivable_sum", 0)), currency="RUB", sig_fields={"n": n, "sum": m.get("receivable_sum")})]
 
