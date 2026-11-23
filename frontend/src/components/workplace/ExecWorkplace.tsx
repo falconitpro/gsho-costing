@@ -75,7 +75,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
   x.escalations.forEach((e) => { counts[e.priority] += 1; });
   const fromEsc = (e: Esc, kind: "task" | "explain"): AsgPrefill => ({
     kind, priority: e.priority === "info" ? "normal" : e.priority, source_url: e.url, source_key: e.key,
-    source_title: `${e.object_type}${e.object_number ? ` ${e.object_number}` : ""}: ${e.title}`,
+    source_title: e.object_number && e.title.includes(e.object_number) ? `${e.object_type}: ${e.title}` : `${e.object_type}${e.object_number ? ` ${e.object_number}` : ""}: ${e.title}`,
     expected_result: kind === "explain" ? "Письменно: причина, что сделано, новый срок устранения" : `Причина сигнала устранена: ${e.reason}`.slice(0, 500),
     title: kind === "explain" ? `Пояснить: ${e.reason}`.slice(0, 250) : `${e.next_action}: ${e.title}`.slice(0, 250) });
 
@@ -153,7 +153,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
             <span>{k.sub}</span>
             {k.reference && <span className="wp-exec-kpi-ref">{k.reference.text}</span>}
             {k.extra.map((e) => <span key={e.label} className="wp-exec-kpi-x">{e.label}: <b>{e.value}</b></span>)}
-            {k.data_quality !== "confirmed" && <i className={`wp-exec-q ${k.data_quality}`}>{qt[k.data_quality]}{k.quality_note && (empty || k.data_quality !== "partial") ? ` — ${k.quality_note}` : ""}</i>}
+            {k.data_quality !== "confirmed" && <i className={`wp-exec-q ${k.data_quality}`}>{qt[k.data_quality]}{k.quality_note ? ` — ${k.quality_note}` : ""}</i>}
             <span className="wp-exec-kpi-foot">{k.period} · {hhmm(k.calculated_at)} МСК</span>
           </button>);
       })}

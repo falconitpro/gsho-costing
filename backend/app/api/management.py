@@ -49,12 +49,16 @@ def directions(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cu
         out.append({"key": key, "title": title, "head_id": h.id if h else None, "head": h.display_name if h else None,
                     "position": _position(h) if h else "", "deputy": svc.deputy_info(h, users, today) if h else None,
                     "head_active": bool(h and h.is_active)})
-    return {"items": out, "users": [{"id": u.id, "name": u.display_name, "position": _position(u), "direction": svc.direction_of(u)}
+    mem = svc.members(db)
+    return {"items": out, "users": [{"id": u.id, "name": u.display_name, "position": _position(u), "direction": svc.direction_of(u, mem),
+                                     "directions": svc.directions_of(u, mem), "pinned": mem.get(u.id, ""),
+                                     "by_role": svc.directions_of(u, None)}
                                     for u in sorted(users.values(), key=lambda x: x.display_name) if u.is_active]}
 
 
 class DirectionsIn(BaseModel):
-    heads: dict[str, Optional[str]]
+    heads: dict[str, Optional[str]] = {}
+    members: dict[str, Optional[str]] = {}      # D-157: сотрудник → направление ("" / null — по роли)
 
 
 @router.put("/directions")
@@ -75,6 +79,24 @@ def set_directions(body: DirectionsIn, db: Session = Depends(get_db), user: Curr
             db.add(row)
         row.head_id, row.updated_by = uid or None, user.id
     audit(db, user.id, None, "org_direction", "heads", "update", before, {**before, **{k: v or None for k, v in body.heads.items()}})
+    if body.members:
+        from ..models import OrgMember
+        mem_before = svc.members(db)
+        for uid, key in body.members.items():
+            if key and key not in svc.DIRECTION_TITLES:
+                raise HTTPException(422, f"Неизвестное направление: {key}")
+            u = db.get(User, uid)
+            if not u:
+                raise HTTPException(422, "Сотрудник не найден")
+            row = db.get(OrgMember, uid)
+            if key:
+                if not row:
+                    row = OrgMember(user_id=uid, direction_key=key)
+                    db.add(row)
+                row.direction_key, row.updated_by = key, user.id
+            elif row:
+                db.delete(row)
+        audit(db, user.id, None, "org_direction", "members", "update", mem_before, {**mem_before, **{k: v or None for k, v in body.members.items()}})
     db.commit()
     return directions(db, user)
 
@@ -171,12 +193,22 @@ def assignment_action(aid: str, body: ActionIn, db: Session = Depends(get_db), u
 
 @router.get("/assignees")
 def assignees(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Кому можно поручить: активные сотрудники с подразделением; руководители направлений."""
+    """Кому можно поручить. AUD-01: ЗГД — все активные сотрудники с должностью, направлением и руководителями;
+    руководитель направления — только сотрудники своих направлений (имя и id), чтобы передать поручение исполнителю;
+    остальным — 403 (справочник сотрудников и оргструктуры им не нужен)."""
     users = db.scalars(select(User).where(User.is_active.is_(True))).all()
     hd = svc.heads(db)
-    return {"users": [{"id": u.id, "name": u.display_name, "position": _position(u), "direction": svc.direction_of(u)}
-                      for u in sorted(users, key=lambda x: x.display_name)],
-            "heads": hd, "directions": [{"key": k, "title": t} for k, t in svc.DIRECTIONS]}
+    mem = svc.members(db)
+    if user.has(Role.GD):
+        return {"users": [{"id": u.id, "name": u.display_name, "position": _position(u), "direction": svc.direction_of(u, mem),
+                           "directions": svc.directions_of(u, mem)} for u in sorted(users, key=lambda x: x.display_name)],
+                "heads": hd, "directions": [{"key": k, "title": t} for k, t in svc.DIRECTIONS]}
+    mine = {k for k, h in hd.items() if h and h in ({user.id} | set(user.acting_for or set()))}
+    if not mine:
+        raise HTTPException(403, "Список сотрудников для поручений — у ЗГД и руководителей направлений")
+    return {"users": [{"id": u.id, "name": u.display_name} for u in sorted(users, key=lambda x: x.display_name)
+                      if set(svc.directions_of(u, mem)) & mine and u.id != user.id],
+            "heads": {}, "directions": [{"key": k, "title": t} for k, t in svc.DIRECTIONS if k in mine]}
 
 
 # ------------------------------------------------------------------ D-155: подтверждения к поручениям

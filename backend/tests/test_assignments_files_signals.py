@@ -38,7 +38,7 @@ def test_files_reminders_signals_direction():
     with TestClient(app) as c:
         mgr, cd = _id(c, MGR), _id(c, CD)
         c.put(f"{B}/directions", headers=H(GD), json={"heads": {"sales": cd}})
-        a = c.post(f"{B}/assignments", headers=H(GD), json={"title": "Сверить оплату", "assignee_id": mgr, "due_on": (today + timedelta(days=1)).isoformat()}).json()
+        a = c.post(f"{B}/assignments", headers=H(GD), json={"title": "Сверить оплату", "expected_result": "оплата разнесена", "assignee_id": mgr, "due_on": (today + timedelta(days=1)).isoformat()}).json()
         aid = a["id"]
         # файлы: исполнитель прикладывает, руководитель (только видит) — нет, посторонний не скачивает
         up = c.post(f"{B}/assignments/{aid}/files", headers=H(MGR), files=[("files", ("п-п 123.pdf", b"%PDF-1.4 test", "application/pdf"))])

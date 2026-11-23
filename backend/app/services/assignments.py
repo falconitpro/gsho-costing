@@ -75,9 +75,23 @@ def heads(db: Session) -> dict[str, Optional[str]]:
     return {k: rows.get(k) for k, _ in DIRECTIONS}
 
 
-def direction_of(u: User) -> str:
+def members(db: Session) -> dict[str, str]:
+    """D-157: явные закрепления сотрудник → направление (перекрывают роль)."""
+    from ..models import OrgMember
+    return {m.user_id: m.direction_key for m in db.scalars(select(OrgMember)).all()}
+
+
+def directions_of(u: User, mem: Optional[dict] = None) -> list[str]:
+    """Направления сотрудника: явное закрепление, иначе — по ролям (в порядке приоритета ROLE_DIRECTION)."""
+    if mem and u.id in mem:
+        return [mem[u.id]]
     roles = set(u.roles or [])
-    return next((d for r, d in ROLE_DIRECTION if r in roles), "")
+    return list(dict.fromkeys(d for r, d in ROLE_DIRECTION if r in roles))
+
+
+def direction_of(u: User, mem: Optional[dict] = None) -> str:
+    ds = directions_of(u, mem)
+    return ds[0] if ds else ""
 
 
 def deputy_info(u: Optional[User], users: dict[str, User], today: date) -> Optional[dict]:
@@ -154,6 +168,11 @@ def create(db: Session, user, *, title: str, body: str, mode: str, assignee_id: 
     title = (title or "").strip()
     if not title:
         raise HTTPException(422, "Укажите, что нужно сделать")
+    expected_result = (expected_result or "").strip()
+    if kind == "explain" and not expected_result:
+        expected_result = "Письменно: причина, что сделано, новый срок устранения"
+    if not expected_result:
+        raise HTTPException(422, "Укажите ожидаемый результат — по нему принимается выполнение")
     if mode not in ("head", "direct") or priority not in PRIORITY_TITLES or kind not in KIND_TITLES:
         raise HTTPException(422, "Неверный режим, приоритет или вид поручения")
     if source_url and not source_url.startswith("/"):
@@ -172,7 +191,14 @@ def create(db: Session, user, *, title: str, body: str, mode: str, assignee_id: 
         if hd.get(direction_key) != assignee_id:
             raise HTTPException(422, "Руководитель подразделения не назначен или выбран другой сотрудник — назначьте руководителя в «Направлениях»")
     else:
-        direction_key = direction_key if direction_key in DIRECTION_TITLES else direction_of(target)
+        # AUD-02: направление клиенту не доверяем — только из направлений самого сотрудника (закрепление или роль)
+        mine = directions_of(target, members(db))
+        if direction_key and direction_key not in DIRECTION_TITLES:
+            raise HTTPException(422, "Неизвестное подразделение")
+        if direction_key and direction_key not in mine:
+            raise HTTPException(422, f"{target.display_name} не относится к подразделению «{DIRECTION_TITLES[direction_key]}» — "
+                                     "выберите его подразделение или закрепите сотрудника в «Направлениях»")
+        direction_key = direction_key or (mine[0] if mine else "")
         h = hd.get(direction_key) if direction_key else None
         head_id = h if h and h != assignee_id else None
     year = now().year
@@ -224,6 +250,8 @@ def act(db: Session, user, a: Assignment, action: str, *, comment: str = "", rep
         ex = db.get(User, executor_id) if executor_id else None
         if not ex or not ex.is_active:
             raise HTTPException(422, "Исполнитель не найден или отключён")
+        if a.direction_key and a.direction_key not in directions_of(ex, members(db)):
+            raise HTTPException(422, f"{ex.display_name} не относится к подразделению «{DIRECTION_TITLES.get(a.direction_key, a.direction_key)}»")
         data = {"from": a.executor_id, "to": ex.id}
         a.executor_id = ex.id
     elif action == "block":

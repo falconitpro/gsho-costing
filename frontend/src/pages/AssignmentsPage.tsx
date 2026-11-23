@@ -23,19 +23,20 @@ const PR_CLS: Record<string, string> = { critical: "bad", high: "warn", normal: 
 
 function Card({ id, onChanged, onClose }: { id: string; onChanged: () => void; onClose: () => void }) {
   const [a, setA] = useState<Full | null>(null);
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState("");          // ошибка действия — показывается в карточке, карточка не пропадает
+  const [loadErr, setLoadErr] = useState("");
   const [act, setAct] = useState("");
   const [text, setText] = useState("");
   const [due, setDue] = useState("");
   const [user, setUser] = useState("");
   const [users, setUsers] = useState<U[]>([]);
-  useEffect(() => { setA(null); api.get<Full>(`/api/management/assignments/${id}`).then(setA).catch((e: Error) => setErr(e.message)); }, [id]);
+  useEffect(() => { setA(null); setErr(""); setLoadErr(""); api.get<Full>(`/api/management/assignments/${id}`).then(setA).catch((e: Error) => setLoadErr(e.message)); }, [id]);
   useEffect(() => { if (act === "delegate" && !users.length) api.get<{ users: U[] }>("/api/management/assignees").then((r) => setUsers(r.users)).catch(() => undefined); }, [act, users.length]);
-  if (err) return <aside className="card asg-card"><p className="bad">{err}</p></aside>;
+  if (loadErr) return <aside className="card asg-card"><p className="bad">{loadErr}</p></aside>;
   if (!a) return <aside className="card asg-card"><p className="muted">Загрузка…</p></aside>;
   const run = (action: string) => {
     const need = NEED[action] || "";
-    if (need && act !== action) { setAct(action); setText(""); setDue(a.due_on); setUser(""); return; }
+    if (need && act !== action) { setAct(action); setText(""); setDue(a.due_on); setUser(""); setErr(""); return; }
     api.post<Full>(`/api/management/assignments/${a.id}/action`, { action, comment: need === "comment" || need === "date" ? text : "", report: need === "report" ? text : "",
       due_on: need === "date" ? due : null, executor_id: need === "user" ? user : null })
       .then((r) => { setA(r); setAct(""); setErr(""); onChanged(); }).catch((e: Error) => setErr(e.message));
@@ -76,6 +77,7 @@ function Card({ id, onChanged, onClose }: { id: string; onChanged: () => void; o
       </div>}
       {a.actions.length > 0 && <div className="asg-acts">{a.actions.map((x) => (
         <button key={x} className={`btn ${x === "approve" || x === "submit" || x === "accept" ? "add" : "ghost"}${act === x ? " cur" : ""}`} onClick={() => run(x)}>{BTN[x]}</button>))}</div>}
+      {err && <p className="bad asg-err" role="alert">{err}</p>}
       {need && <div className="asg-form">
         {(need === "comment" || need === "report" || need === "date") && <label className="f"><span>{need === "report" ? "Результат: что сделано (файлы-подтверждения приложите выше)" : act === "comment" ? "Комментарий" : "Причина"}</span>
           <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} /></label>}

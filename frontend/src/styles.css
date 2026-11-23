@@ -1215,3 +1215,4 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .wp-exec-asg a.bad { background: var(--bad-bg); } .wp-exec-asg a.bad b { color: var(--bad); } .wp-exec-asg a.warn b { color: var(--warn); }
 .wp-exec-dl.overdue .wp-exec-dl-on { color: var(--bad); } .wp-exec-dl.today .wp-exec-dl-on { color: var(--warn); } .wp-exec-dl.soon .wp-exec-dl-on { color: var(--ink); }
 .wp-exec-dl .wp-exec-dl-on { font-weight: 600; } .wp-exec-dl.later .wp-exec-dl-on { font-weight: 400; }
+.dir-dlg-h { font-size: 15px; margin: 14px 0 2px; } .dir-dlg-t td { cursor: default; } .dir-dlg-t select { width: 100%; }
