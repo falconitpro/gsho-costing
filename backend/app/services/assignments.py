@@ -29,7 +29,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core.roles import Role
-from ..models import Assignment, AssignmentEvent, NotificationLog, OrgDirection, User
+from ..models import Assignment, AssignmentEvent, AssignmentFile, OrgDirection, User
 
 OPEN = ("new", "accepted", "in_progress", "blocked", "review", "rework")
 STATUS_TITLES = {"new": "новое", "accepted": "принято", "in_progress": "в работе", "blocked": "заблокировано", "review": "на проверке",
@@ -136,9 +136,10 @@ def allowed(user, a: Assignment) -> list[str]:
 
 
 def _notify(db: Session, a: Assignment, user_ids, text: str, exclude: Optional[str]) -> None:
+    """Во все каналы сотрудника (в системе; e-mail и мессенджеры — когда подключены), замещающему — тоже (D-154/D-155)."""
+    from .deal_service import notify
     for uid in dict.fromkeys(u for u in user_ids if u and u != exclude):
-        db.add(NotificationLog(user_id=uid, deal_id=None, event="assignment", channel="app", status="sent",
-                               text=f"{a.number} «{a.title[:80]}»: {text}"[:500], link=f"/assignments?open={a.id}"))
+        notify(db, None, uid, "assignment", None, f"Поручение {a.number} «{a.title[:80]}»: {text}"[:500], f"/assignments?open={a.id}")
 
 
 def _event(db: Session, a: Assignment, by: Optional[str], action: str, frm: str, to: str, comment: str = "", data: Optional[dict] = None) -> None:
@@ -295,3 +296,109 @@ def summary(db: Session, user, today: date, names: dict[str, str]) -> dict:
             "today": sum(1 for a in rows if a.due_on == today), "review": sum(1 for a in rows if a.status == "review"),
             "items": [as_dict(a, names, today, user) for a in top], "url": "/assignments", "create_url": "/assignments?new=1",
             "source": "поручения ЗГД"}
+
+
+# ------------------------------------------------------------------ D-155: подтверждения (файлы)
+
+MAX_FILES, MAX_FILE = 10, 25 * 1024 * 1024
+ACTION_TITLES.update({"file": "приложены файлы", "file_removed": "файл убран"})
+
+
+def can_attach(user, a: Assignment) -> bool:
+    return a.status in OPEN and bool(role_of(user, a) & {"assignee", "executor", "author", "gd"})
+
+
+def save_files(db: Session, user, a: Assignment, files: list) -> list[AssignmentFile]:
+    """Файлы уже прошли общий вход загрузок (core/upload_gate): антивирус и zip-бомбы — до вызова обработчика."""
+    import os
+    import shutil
+    import tempfile
+
+    from .. import adapters
+    from ..core.files import check_size, safe_filename
+    from ..core.upload_gate import current_uploads
+    if not can_attach(user, a):
+        raise HTTPException(403, "Прикладывать файлы могут ответственный, исполнитель и автор, пока поручение открыто")
+    if not files:
+        raise HTTPException(422, "Нет файлов")
+    have = db.scalar(select(func.count(AssignmentFile.id)).where(AssignmentFile.assignment_id == a.id, AssignmentFile.removed_at.is_(None))) or 0
+    if have + len(files) > MAX_FILES:
+        raise HTTPException(422, f"Не больше {MAX_FILES} файлов в поручении")
+    for f in files:
+        check_size(f, MAX_FILE)
+    scans = current_uploads() or {}
+    out = []
+    for f in files:
+        d = tempfile.mkdtemp()
+        name = safe_filename(f.filename or "") or "файл"
+        path = os.path.join(d, name)
+        try:
+            with open(path, "wb") as fh:
+                f.file.seek(0)
+                shutil.copyfileobj(f.file, fh)
+            stored = adapters.storage().upload(path, f"Поручения/{a.year}/{a.number}", "06_mail", f"{now():%Y%m%d-%H%M%S}-{os.urandom(3).hex()}-{name}")
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(502, f"Хранилище недоступно: {type(e).__name__}")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        scan_id = scans.get(stored.sha256)
+        row = AssignmentFile(assignment_id=a.id, file_name=name, storage_path=stored.path, sha256=stored.sha256, size=stored.size,
+                             scan_status="clean" if scan_id else "legacy_unscanned", scan_id=scan_id, uploaded_by=user.id)
+        db.add(row)
+        out.append(row)
+    db.flush()
+    _event(db, a, user.id, "file", a.status, a.status, ", ".join(x.file_name for x in out), {"files": [x.id for x in out]})
+    return out
+
+
+def files_of(db: Session, a: Assignment, names: dict[str, str], user) -> list[dict]:
+    rows = db.scalars(select(AssignmentFile).where(AssignmentFile.assignment_id == a.id, AssignmentFile.removed_at.is_(None)).order_by(AssignmentFile.at)).all()
+    return [{"id": f.id, "name": f.file_name, "size": f.size, "by": names.get(f.uploaded_by or "", ""), "at": f.at.isoformat() if f.at else None,
+             "url": f"/api/management/assignments/{a.id}/files/{f.id}", "can_remove": a.status in OPEN and f.uploaded_by == user.id} for f in rows]
+
+
+def remove_file(db: Session, user, a: Assignment, f: AssignmentFile) -> None:
+    if f.uploaded_by != user.id or a.status not in OPEN:
+        raise HTTPException(403, "Убрать файл может только тот, кто его приложил, пока поручение открыто")
+    f.removed_at, f.removed_by = now(), user.id
+    _event(db, a, user.id, "file_removed", a.status, a.status, f.file_name, {"file": f.id})
+
+
+# ------------------------------------------------------------------ D-155: напоминания о сроках (фоновое задание, раз в цикл)
+
+def check(db: Session, today: Optional[date] = None) -> int:
+    """Накануне срока и в день срока — исполнителю; просрочка — исполнителю, автору и руководителю (один раз на срок),
+    через 7 дней просрочки — повторно автору; результат на проверке дольше 2 дней — автору. Повторов нет (alerts)."""
+    from datetime import timedelta
+
+    from .finance.cashview import moscow_today
+    today = today or moscow_today()
+    sent = 0
+    for a in db.scalars(select(Assignment).where(Assignment.status.in_(OPEN))).all():
+        al = dict(a.alerts or {})
+        workers = [a.assignee_id, a.executor_id]
+
+        def once(key: str, who, text: str) -> None:
+            nonlocal sent
+            if key in al:
+                return
+            al[key] = today.isoformat()
+            _notify(db, a, who, text, None)
+            sent += 1
+        due = a.due_on
+        if a.status != "review":
+            if due == today + timedelta(days=1):
+                once(f"pre:{due}", workers, f"срок завтра, {due:%d.%m.%Y}")
+            elif due == today:
+                once(f"today:{due}", workers, "срок сегодня")
+            elif due < today:
+                once(f"over:{due}", workers + [a.author_id, a.head_id], f"просрочено — срок был {due:%d.%m.%Y}")
+                if (today - due).days >= 7:
+                    once(f"over7:{due}", [a.author_id], f"просрочено на {(today - due).days} дн.")
+        elif a.submitted_at and (today - a.submitted_at.date()).days >= 2:
+            once(f"review:{a.submitted_at.date()}", [a.author_id], "результат ждёт вашей проверки больше 2 дней")
+        if al != (a.alerts or {}):
+            a.alerts = al
+    return sent

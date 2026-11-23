@@ -102,7 +102,7 @@ def _channels_of(user: User | None) -> list[str]:
     return list(dict.fromkeys(["app", *chs]))
 
 
-def notify(db: Session, deal: Deal | None, user_id: str | None, event: str, channels: list[str] | None, text: str) -> None:
+def notify(db: Session, deal: Deal | None, user_id: str | None, event: str, channels: list[str] | None, text: str, link: str | None = None) -> None:
     """Уведомление исполнителю — во все каналы, выбранные в его карточке (e-mail, мессенджеры, в системе).
     Канал без подключённой интеграции записывается в журнал со статусом «ожидает подключения»."""
     user = db.get(User, user_id) if user_id else None
@@ -113,10 +113,10 @@ def notify(db: Session, deal: Deal | None, user_id: str | None, event: str, chan
         if (user.deputy_from is None or user.deputy_from <= today) and (user.deputy_to is None or user.deputy_to >= today):
             dep = db.get(User, user.deputy_id)
             if dep is not None and dep.is_active:
-                notify(db, deal, dep.id, event, channels, f"{text} (за {user.display_name})")
+                notify(db, deal, dep.id, event, channels, f"{text} (за {user.display_name})", link)
     contacts = (user.contacts or {}) if user else {}
     for ch in _channels_of(user):
-        row = NotificationLog(deal_id=deal.id if deal else None, user_id=user_id, event=event, channel=ch, text=text)
+        row = NotificationLog(deal_id=deal.id if deal else None, user_id=user_id, event=event, channel=ch, text=text, link=link)
         try:
             if ch == "app":
                 row.status = "sent"
@@ -124,8 +124,10 @@ def notify(db: Session, deal: Deal | None, user_id: str | None, event: str, chan
                 from ..adapters.mail import OutgoingMail
                 to = [a for a in (user.email, contacts.get("extra_email")) if a]
                 base = (get_settings().cors_origins or [""])[0].rstrip("/")
-                link = f'<p><a href="{base}/deals/{deal.id}">Открыть сделку {deal.number}</a></p>' if deal and base else ""
-                adapters.mail().send(OutgoingMail(to=to, subject=f"[ГШО] {text[:120]}", body_html=f"<p>{text}</p>{link}"))
+                link_html = f'<p><a href="{base}/deals/{deal.id}">Открыть сделку {deal.number}</a></p>' if deal and base else ""
+                if link and base and not deal:
+                    link_html = f'<p><a href="{base}{link}">Открыть в CRM</a></p>'
+                adapters.mail().send(OutgoingMail(to=to, subject=f"[ГШО] {text[:120]}", body_html=f"<p>{text}</p>{link_html}"))
                 row.status = "sent" if get_settings().mail_provider != "console" else "queued"
                 if row.status == "queued":
                     row.error = "почта не подключена"

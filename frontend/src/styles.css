@@ -1190,3 +1190,18 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .asg-src, .asg-hint { font-size: 12px; margin: 0 0 6px; }
 @media (max-width: 900px) { .asg-layout.with-card { grid-template-columns: minmax(0, 1fr); } .asg-card { position: static; } }
 @media (max-width: 760px) { .asg-table thead { display: none; } .asg-table tr { display: block; border-bottom: 1px solid var(--line); padding: 4px 0; } .asg-table td { display: block; border: 0; padding: 2px 0; } .asg-row { grid-template-columns: 1fr; } }
+.asg-files { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; font-size: 13px; }
+.asg-files ul { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.asg-rm { padding: 0 6px; font-size: 11px; margin-left: 6px; min-height: 0; }
+.asg-up { position: relative; overflow: hidden; display: inline-block; cursor: pointer; } .asg-up input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+/* ---------- D-155: карточка направления (.dir-*) ---------- */
+.dir-page { max-width: 1440px; margin: 0 auto; padding: 12px 0 24px; }
+.dir-page h2 { font-size: 16px; margin: 0 0 8px; }
+.dir-crumbs { font-size: 12px; margin-bottom: 4px; }
+.dir-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.dir-head h1 { margin: 0 0 2px; font-size: 24px; } .dir-act { display: flex; gap: 8px; flex-wrap: wrap; }
+.dir-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; margin-bottom: 12px; }
+.dir-grid > .card { margin: 0; } .dir-bad { border-left: 4px solid var(--bad); } .dir-page .bad { color: var(--bad); }
+.wp-exec-drill li > span:first-child { min-width: 0; }
+@media (max-width: 900px) { .dir-grid { grid-template-columns: minmax(0, 1fr); } }
+.wp-exec-dir-link { color: var(--ink); text-decoration: none; } .wp-exec-dir-link:hover { color: var(--accent); }

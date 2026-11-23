@@ -9,7 +9,7 @@ type Row = { id: string; source: string; kind: string; message: string; where: s
 type Jobs = { worker_alive: boolean; last_cycle_ok: string | null; stale: boolean; failing: string[];
   jobs: { job: string; last_ok: string | null; last_error: string; error_at: string | null; duration_ms: number | null }[] };
 const JOB_TITLES: Record<string, string> = { "fx rates": "курсы ЦБ", "parts SLA check": "запчасти: сроки", "parts TO reminders": "запчасти: ТО машин",
-  "overdue check": "просроченные задачи", "notification cleanup": "уведомления", "office due watch": "Канцелярия: сроки и ознакомление",
+  "overdue check": "просроченные задачи", "notification cleanup": "уведомления", "office due watch": "Канцелярия: сроки и ознакомление", "assignments due watch": "поручения: сроки", "signals refresh": "пульт: история сигналов",
   "fd visa escalation": "виза ФД → ЗГД", "draft watch": "черновики сделок", "poa expiry check": "доверенности", "contracts expiry check": "договоры: сроки",
   "claims ladder": "претензии", "access review reminders": "пересмотр прав", "assistant purge": "помощник: срок хранения",
   "backup status refresh": "резервные копии", "one-time data repairs": "разовые исправления данных", "scanner check": "антивирус" };

@@ -25,6 +25,7 @@ PAYMENTS = ("client_advance", "client_final", "factory_advance", "factory_final"
 FACTORY = ("production", "factory_preacceptance", "local_option_order")
 SERVICE = ("commissioning", "local_option_install")
 PRIO = {"critical": 0, "high": 1, "normal": 2, "info": 3}
+STALE_BANK_DAYS = 3        # D-155: рабочих дней без загрузки банковских операций — дебиторка «устарело»
 
 
 def _money(v: Optional[float], ccy: str = "RUB") -> str:
@@ -101,6 +102,18 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
     for x in late_stage_rows:
         x.pop("_d")
     rec_ccy = sorted({(r["currency"] or "RUB").upper() for r in rec_rows})
+    # D-155: свежесть банковских данных — просрочка дебиторки верна, только если выписки загружены (оплата могла прийти, но не разнесена)
+    rec_q, rec_note, bank_last = ("confirmed", "", None)
+    if fin:
+        from ..calc.calendar import DEFAULT_CALENDAR as CAL
+        from ..models.finance import FinanceImportBatch, FinanceTransaction
+        b1 = db.scalar(select(func.max(FinanceImportBatch.updated_at)).where(FinanceImportBatch.status == "confirmed"))
+        b2 = db.scalar(select(func.max(FinanceTransaction.created_at)).where(FinanceTransaction.status.in_(("posted", "needs_reconciliation"))))
+        bank_last = max([x for x in (b1, b2) if x], default=None)
+        if bank_last is None:
+            rec_q, rec_note = "unverified", "банковские операции в «Финансах» не загружались — оплата могла прийти"
+        elif CAL.working_days_between(bank_last.date(), today) > STALE_BANK_DAYS:
+            rec_q, rec_note = "stale", f"последняя банковская операция загружена {bank_last:%d.%m} — выписки устарели"
     kpis = [
         _kpi("active", "Активные сделки", len(open_deals) + len(open_parts), (_money(in_work) + " в работе · " if fin else "") + f"ГШО {len(open_deals)} · ЗЧ {len(open_parts)}",
              "/deals?block=work", source="реестр сделок: в работе", unit="сделок", currency="RUB" if fin else "", period="на сегодня", calculated_at=now),
@@ -115,8 +128,8 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
              "/deals?block=won", quality=m_quality if can_cost else "unavailable", period=period, note=m_note,
              source="маржа базового сценария утверждённой версии расчёта по выигранному предложению", unit="%", calculated_at=now, drill=can_cost),
         _kpi("receivable", "Дебиторка просрочена", len(rec_rows) if fin else None, money_by_currency([(r["amount"], r["currency"]) for r in rec_rows]) if fin else "нет доступа к финансам",
-             (money or {}).get("url") or "/finance?tab=liquidity", "bad" if rec_rows else "ok", quality="confirmed" if fin else "unavailable",
-             note="" if fin else "нет права на финансы", unit="обязательств", currency=" · ".join(rec_ccy), period="на сегодня", calculated_at=now,
+             (money or {}).get("url") or "/finance?tab=liquidity", "bad" if rec_rows else "ok", quality=rec_q if fin else "unavailable",
+             note=rec_note if fin else "нет права на финансы", unit="обязательств", currency=" · ".join(rec_ccy), period="на сегодня", calculated_at=now,
              source="«Финансы»: обязательства «нам платят» с прошедшим сроком, остаток к оплате; валюты не складываются", drill=fin),
         _kpi("exec", "Исполнение: просроченные этапы", overdue_stages, f"сделок в исполнении: {len(in_exec)}",
              "/deals?block=won&flag=overdue" if overdue_stages else "/deals?block=won", "warn" if overdue_stages else "", unit="этапов", period="на сегодня",
@@ -226,6 +239,9 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
         a = open_asg.get(e["key"])
         e["assignment"] = {"number": a.number, "status": asg.STATUS_TITLES[a.status], "url": f"/assignments?open={a.id}"} if a else None
     escalations = sorted(esc.values(), key=lambda e: (PRIO[e["priority"]], e["react_by"] or "9999", -(e["days"] or 0)))
+    if fin and can_cost:     # журнал сигналов — только по полной очереди (без прав часть сигналов не видна, D-155)
+        from ..services import signals
+        signals.sync(db, escalations)
 
     # ---------------- направления — руководитель из «Направлений» (назначает ЗГД, D-154); сотрудники — по ролям
     users = db.scalars(select(User).where(User.is_active.is_(True))).all()
@@ -267,6 +283,25 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
     from ..services import assignments as asg
     hd = asg.heads(db)
     users_by_id = {u.id: u for u in users}
+    deal_of = {s.id: r["deal"] for r in exec_rows for s in r["stages"]}
+
+    def st_rows(stages) -> list[dict]:
+        return [{"kind": "этап", "title": f"{deal_of[s.id].number} · {s.title}", "url": f"/deals/{deal_of[s.id].id}?tab=execution",
+                 "note": f"план {(s.refined_on or s.planned_on):%d.%m}, факта нет {(today - (s.refined_on or s.planned_on)).days} дн.", "bad": True}
+                for s in sorted(stages, key=lambda s: s.refined_on or s.planned_on) if s.id in deal_of]
+    objects = {
+        "sales": [{"kind": "сделка", "title": f"{d.number} · {d.client.name if d.client else ''}", "url": f"/deals/{d.id}", "note": f"срок КП {d.kp_due:%d.%m} прошёл", "bad": True} for d in kp_late]
+                 + [{"kind": "черновик", "title": f"{d.number} · {d.client.name if d.client else ''}", "url": f"/deals/{d.id}", "note": f"без движения с {d.updated_at:%d.%m}", "bad": False} for d in stale],
+        "factory": st_rows(fc), "logistics": st_rows(lg), "service": st_rows(sv),
+        "finance": st_rows(py) + [{"kind": "обязательство", "title": f"{r['title']} · {r['client']}", "url": r["url"] or "/finance?tab=liquidity",
+                                   "note": f"{_money(r['amount'], r['currency'])}, просрочка {r['overdue_days']} дн.", "bad": True} for r in rec_rows],
+        "legal": [{"kind": "претензия", "title": f"Претензия {cl.number}", "url": f"/legal?tab=claims&open={cl.id}", "note": f"срок ответа {cl.answer_due:%d.%m} истёк", "bad": True}
+                  for cl in claims if cl.answer_due and cl.answer_due < today and cl.status in ("sent", "received")]
+                 + [{"kind": "договор", "title": f"Договор {x['number']}", "url": "/legal?tab=contracts&flag=no_scan", "note": "подписан, скана нет", "bad": False}
+                    for x in list({x["number"]: x for x in cin.get("no_scan", [])}.values())[:30]]
+                 + [{"kind": "договор", "title": f"Договор {x['number']} ({x['cp_name']})", "url": "/legal?tab=contracts&flag=expiring", "note": f"истекает через {x['days']} дн.", "bad": False}
+                    for x in cin.get("expiring", [])],
+    }
     directions = []
     for key, title in asg.DIRECTIONS:
         staff, tn, results, devs, url = D[key]
@@ -276,7 +311,8 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
             pos = (h.contacts or {}).get("position", "") if isinstance(h.contacts, dict) else ""
             head = {"id": h.id, "name": h.display_name, "position": pos, "deputy": asg.deputy_info(h, users_by_id, today)}
         directions.append({"key": key, "title": title, "head": head, "people": staff, "staff_count": len(staff), "tone": tn,
-                           "results": results, "deviations": devs, "lines": results + devs, "url": url})
+                           "results": results, "deviations": devs, "lines": results + devs, "url": url, "card_url": f"/directions/{key}",
+                           "objects": objects.get(key, [])})
 
     # ---------------- поручения ЗГД (D-154); контроль документов Канцелярии — отдельной строкой
     assignments = asg.summary(db, user, today, names)

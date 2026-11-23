@@ -11,7 +11,8 @@ type A = { id: string; number: string; kind: string; kind_title: string; title: 
   author: string; assignee: string; executor: string; head: string; status: string; status_title: string; overdue: boolean; overdue_days: number; due_on: string; first_due_on: string;
   rescheduled: boolean; source_url: string; source_title: string; report: string; block_reason: string; actions: string[]; my_role: string[] };
 type H = { at: string; by: string; action: string; action_title: string; from: string; to: string; comment: string; data: Record<string, string> };
-type Full = A & { history: H[] };
+type F = { id: string; name: string; size: number; by: string; at: string; url: string; can_remove: boolean };
+type Full = A & { history: H[]; files: F[]; can_attach: boolean };
 type U = { id: string; name: string; position: string };
 
 const ddmm = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
@@ -40,6 +41,14 @@ function Card({ id, onChanged, onClose }: { id: string; onChanged: () => void; o
       .then((r) => { setA(r); setAct(""); setErr(""); onChanged(); }).catch((e: Error) => setErr(e.message));
   };
   const need = NEED[act] || "";
+  const attach = (list: FileList | null) => {
+    if (!list || !list.length) return;
+    const fd = new FormData();
+    Array.from(list).forEach((f) => fd.append("files", f));
+    api.form<Full>(`/api/management/assignments/${a.id}/files`, fd).then((r) => { setA(r); setErr(""); onChanged(); }).catch((e: Error) => setErr(e.message));
+  };
+  const unattach = (f: F) => api.del<Full>(`/api/management/assignments/${a.id}/files/${f.id}`).then((r) => { setA(r); onChanged(); }).catch((e: Error) => setErr(e.message));
+  const kb = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1).replace(".", ",")} МБ` : `${Math.max(1, Math.round(n / 1024))} КБ`);
   return (
     <aside className="card asg-card" aria-label={`Поручение ${a.number}`}>
       <div className="asg-card-head"><b>{a.number}</b> <span className={`wp-exec-prio ${PR_CLS[a.priority]}`}>{a.priority_title}</span> <span className="asg-st">{a.status_title}</span>
@@ -56,10 +65,18 @@ function Card({ id, onChanged, onClose }: { id: string; onChanged: () => void; o
         {a.block_reason && <><dt>Блокировка</dt><dd className="bad">{a.block_reason}</dd></>}
         {a.report && <><dt>Отчёт</dt><dd>{a.report}</dd></>}
       </dl>
+      {(a.files.length > 0 || a.can_attach) && <div className="asg-files">
+        <b>Подтверждения</b>
+        <ul>{a.files.map((f) => (
+          <li key={f.id}><button className="asg-num" onClick={() => api.download(f.url, f.name).catch((e: Error) => setErr(e.message))}>{f.name}</button>
+            <span className="muted"> {kb(f.size)} · {f.by}</span>{f.can_remove && <button className="btn ghost asg-rm" onClick={() => unattach(f)} aria-label={`Убрать ${f.name}`}>✕</button>}</li>))}
+          {!a.files.length && <li className="muted">Файлов нет.</li>}</ul>
+        {a.can_attach && <label className="btn ghost asg-up">Приложить файл<input type="file" multiple onChange={(e) => { attach(e.target.files); e.target.value = ""; }} /></label>}
+      </div>}
       {a.actions.length > 0 && <div className="asg-acts">{a.actions.map((x) => (
         <button key={x} className={`btn ${x === "approve" || x === "submit" || x === "accept" ? "add" : "ghost"}${act === x ? " cur" : ""}`} onClick={() => run(x)}>{BTN[x]}</button>))}</div>}
       {need && <div className="asg-form">
-        {(need === "comment" || need === "report" || need === "date") && <label className="f"><span>{need === "report" ? "Результат (что сделано, подтверждение)" : act === "comment" ? "Комментарий" : "Причина"}</span>
+        {(need === "comment" || need === "report" || need === "date") && <label className="f"><span>{need === "report" ? "Результат: что сделано (файлы-подтверждения приложите выше)" : act === "comment" ? "Комментарий" : "Причина"}</span>
           <textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} /></label>}
         {need === "date" && <label className="f"><span>Новый срок</span><input type="date" value={due} onChange={(e) => setDue(e.target.value)} /></label>}
         {need === "user" && <label className="f"><span>Кому передать выполнение</span><select value={user} onChange={(e) => setUser(e.target.value)}>

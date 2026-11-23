@@ -2574,6 +2574,40 @@ class Assignment(TimestampMixin, Base):
     done_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     done_by: Mapped[Optional[str]] = mapped_column(String(36))
     cancelled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    alerts: Mapped[dict] = mapped_column(JSONType, default=dict)            # D-155: отправленные напоминания {ключ: дата} — без повторов
+
+
+class AssignmentFile(Base):
+    """D-155: подтверждение к поручению (отчёт исполнителя, материалы). Файл прошёл общий вход загрузок (антивирус)."""
+    __tablename__ = "assignment_files"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    assignment_id: Mapped[str] = mapped_column(ForeignKey("assignments.id"), index=True)
+    file_name: Mapped[str] = mapped_column(String(255))
+    storage_path: Mapped[str] = mapped_column(String(1024))
+    sha256: Mapped[str] = mapped_column(String(64), default="")
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    scan_status: Mapped[str] = mapped_column(String(24), default="clean")
+    scan_id: Mapped[Optional[str]] = mapped_column(String(36))
+    uploaded_by: Mapped[Optional[str]] = mapped_column(String(36))
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    removed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    removed_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+
+class SignalLog(Base):
+    """D-155: история сигналов «Требует вмешательства»: когда появился, когда ушёл (причина устранена), поручение по нему."""
+    __tablename__ = "signal_log"
+    key: Mapped[str] = mapped_column(String(160), primary_key=True)
+    priority: Mapped[str] = mapped_column(String(16), default="normal")
+    title: Mapped[str] = mapped_column(String(512), default="")
+    object_type: Mapped[str] = mapped_column(String(64), default="")
+    object_number: Mapped[str] = mapped_column(String(64), default="")
+    direction: Mapped[str] = mapped_column(String(64), default="")
+    url: Mapped[str] = mapped_column(String(300), default="")
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    times: Mapped[int] = mapped_column(Integer, default=1)             # сколько раз возникал (возврат после устранения)
 
 
 class AssignmentEvent(Base):
