@@ -10,6 +10,7 @@ const ITEMS: Item[] = [
   { key: "work", to: "/", label: "Рабочее место", end: true },
   { key: "deals", to: "/deals", label: "Сделки" },
   { key: "tasks", to: "/tasks", label: "Мои задачи" },
+  { key: "assignments", to: "/assignments", label: "Поручения" },
   { key: "board", to: "/board", label: "Доска" },
   { key: "summary", to: "/summary", label: "Сводка" },
   { key: "finance", to: "/finance", label: "Финансы" },
@@ -38,7 +39,7 @@ export default function RoleNav({ me }: { me: Me }) {
   const has = (...r: string[]) => codes.some((c) => r.includes(c));
   const perm = (g: string) => (me.perms?.[g] ?? 0) >= 1;
   const allowed: Record<string, boolean> = {
-    work: true, deals: true, tasks: true, legal: true, catalog: true, settings: true,
+    work: true, deals: true, tasks: true, assignments: true, legal: true, catalog: true, settings: true,
     board: has("cd", "fd", "gd", "observer"),
     summary: has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager"),
     finance: perm("finance_section"),

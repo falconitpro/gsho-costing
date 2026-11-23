@@ -17,13 +17,14 @@ from typing import Any, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..core.roles import Role
 from ..core.workflow import DealStatus
 
 LOGISTICS = ("readiness", "shipment", "border", "declaration", "delivery")
 PAYMENTS = ("client_advance", "client_final", "factory_advance", "factory_final", "lc_opened")
 FACTORY = ("production", "factory_preacceptance", "local_option_order")
 SERVICE = ("commissioning", "local_option_install")
-PRIO = {"critical": 0, "high": 1, "normal": 2}
+PRIO = {"critical": 0, "high": 1, "normal": 2, "info": 3}
 
 
 def _money(v: Optional[float], ccy: str = "RUB") -> str:
@@ -46,51 +47,92 @@ def money_by_currency(items: list[tuple[Optional[float], str]]) -> str:
     return " · ".join(_money(v, k) for k, v in sorted(acc.items(), key=lambda x: (x[0] != "RUB", x[0]))) or "—"
 
 
-def _kpi(key: str, title: str, value: Any, sub: str, url: str, tone: str = "", quality: str = "confirmed", period: str = "", source: str = "") -> dict:
-    return {"key": key, "title": title, "value": value, "sub": sub, "url": url, "tone": tone, "data_quality": quality, "period": period, "source": source}
+QUALITY = ("confirmed", "partial", "stale", "unavailable", "unverified")
+
+
+def _kpi(key: str, title: str, value: Any, sub: str, url: str, tone: str = "", quality: str = "confirmed", period: str = "", source: str = "",
+         unit: str = "", currency: str = "", note: str = "", calculated_at: str = "", drill: bool = False, extra: Optional[list] = None) -> dict:
+    """KPI по ТЗ v2 §7: key, title, value, unit/currency, period, calculated_at, data_quality, drilldown. Нет данных — value=None и причина."""
+    assert quality in QUALITY
+    return {"key": key, "title": title, "value": value, "sub": sub, "url": url, "tone": tone, "data_quality": quality, "quality_note": note,
+            "period": period, "source": source, "unit": unit, "currency": currency, "calculated_at": calculated_at,
+            "drilldown": {"url": url, "list": key if drill else None}, "extra": extra or []}
 
 
 def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals: list, open_parts: list, exec_rows: list, won_q: list, won_q_parts: list,
           approvals: list, money: Optional[dict], legal: Optional[dict], cin: dict, claims: list, poas: list, price) -> dict:
-    from ..models import ExecutionStage, OfficeDoc, User, WarrantyClaim
+    from ..models import ExecutionStage, User, WarrantyClaim
     from ..services.execution_service import won_variant
     now = datetime.now(timezone.utc).isoformat()
     q = (today.month - 1) // 3 + 1
     period = f"{q} квартал {today.year}"
 
-    # ---------------- показатели
+    # ---------------- показатели (R0 сверка, D-154: маржа — из утверждённой версии расчёта; исполнение — этапы отдельно от сделок)
+    from ..models import DealVersion
+    can_cost = user.can("cost")
     in_work = sum(price(d) or 0 for d in open_deals) + sum(p["price_rub"] for p in open_parts)
     risk_rows = [r for r in exec_rows if r["overdue"]]
     risk_sum = sum(price(r["deal"]) or 0 for r in risk_rows)
     won_sum = sum(price(d) or 0 for d in won_q) + sum(p["price_rub"] for p in won_q_parts)
-    margins = []
+    margins, margin_rows = [], []
     for d in won_q:
         v = won_variant(d) if d.variants else None
-        p = price(d)
-        if v is not None and getattr(v, "margin_pct", None) is not None and p:
-            margins.append((float(v.margin_pct), p))
+        ver = db.get(DealVersion, d.approved_version_id) if d.approved_version_id else None
+        res = ((ver.calc_result or {}).get("variants", {}).get(v.id, {}) if (ver and v) else {}).get("base", {}) or {}
+        m, p = res.get("margin_pct"), price(d)
+        why = "" if m is not None else ("нет утверждённой версии расчёта" if not ver else "в утверждённом расчёте нет маржи по выигранному предложению")
+        if m is not None and p:
+            margins.append((float(m), p))
+        margin_rows.append({"title": f"{d.number} · {d.client.name if d.client else ''}", "url": f"/deals/{d.id}",
+                            "value": f"{float(m):.1f} %".replace(".", ",") if m is not None and can_cost else None, "note": why or (f"версия {ver.version_no}" if ver else "")})
     m_quality = "unavailable" if not margins else ("partial" if len(margins) < len(won_q) else "confirmed")
     m_val = round(sum(m * p for m, p in margins) / sum(p for _, p in margins), 1) if margins else None
+    m_note = ("выигранных сделок за квартал нет" if not won_q else f"утверждённый расчёт с маржой есть у {len(margins)} из {len(won_q)}") if can_cost else "нет права «себестоимость»"
     from ..services.finance.cashview import rows as fin_rows
     rec_rows = [r for r in fin_rows(db, user, today, today) if r["direction"] == "in" and r["overdue_days"] > 0] if fin else []
     in_exec = [r for r in exec_rows if r["deal"].status == DealStatus.EXECUTION]
     overdue_stages = sum(r["overdue"] for r in exec_rows)
+    shifted = [r for r in exec_rows if r["delay"] > 0]
+    late_stage_rows = sorted(({"title": f"{r['deal'].number} · {s.title}", "url": f"/deals/{r['deal'].id}?tab=execution",
+                               "value": f"план {(s.refined_on or s.planned_on):%d.%m}", "note": f"факта нет, {(today - (s.refined_on or s.planned_on)).days} дн.",
+                               "_d": s.refined_on or s.planned_on}
+                              for r in exec_rows for s in r["stages"] if not s.actual_on and (s.refined_on or s.planned_on) and (s.refined_on or s.planned_on) < today),
+                             key=lambda x: x["_d"])
+    for x in late_stage_rows:
+        x.pop("_d")
+    rec_ccy = sorted({(r["currency"] or "RUB").upper() for r in rec_rows})
     kpis = [
         _kpi("active", "Активные сделки", len(open_deals) + len(open_parts), (_money(in_work) + " в работе · " if fin else "") + f"ГШО {len(open_deals)} · ЗЧ {len(open_parts)}",
-             "/deals?block=work", source="реестр сделок: в работе"),
-        _kpi("risk", "Сделки под риском", len(risk_rows), (f"на {_money(risk_sum)} · " if fin and risk_sum else "") + "этапы без факта после плановой даты",
-             "/deals?block=won&flag=overdue", "bad" if risk_rows else "ok", source="этапы исполнения: просрочено (уточнённая или плановая дата)"),
+             "/deals?block=work", source="реестр сделок: в работе", unit="сделок", currency="RUB" if fin else "", period="на сегодня", calculated_at=now),
+        _kpi("risk", "Сделки под риском", len(risk_rows), (f"на {_money(risk_sum)} · " if fin and risk_sum else "") + "причина: этапы без факта после плановой даты",
+             "/deals?block=won&flag=overdue", "bad" if risk_rows else "ok", source="этапы исполнения: просрочено (уточнённая или плановая дата)",
+             unit="сделок", period="на сегодня", calculated_at=now, drill=True),
         _kpi("won", "Выиграно за квартал", len(won_q) + len(won_q_parts), (_money(won_sum) + " · " if fin else "") + "план продаж не задан — без % к плану",
-             "/deals?block=won", "ok" if won_q or won_q_parts else "", period=period, source="выигранные сделки по дате контракта"),
-        _kpi("margin", "Маржа выигранных", f"{m_val:.1f} %".replace(".", ",") if m_val is not None else None,
-             (f"по {len(margins)} из {len(won_q)} сделок · " if won_q else "") + "ориентир утверждённого расчёта" if fin else "нет доступа к финансам",
-             "/deals?block=won", quality=m_quality if fin else "unavailable", period=period, source="маржа базового сценария утверждённого расчёта, средневзвешенная по цене"),
+             "/deals?block=won", "ok" if won_q or won_q_parts else "", period=period, source="выигранные сделки по дате контракта", unit="сделок",
+             currency="RUB" if fin else "", calculated_at=now),
+        _kpi("margin", "Маржа выигранных", f"{m_val:.1f} %".replace(".", ",") if m_val is not None and can_cost else None,
+             (f"средневзвешенная по цене · {m_note}" if m_val is not None and can_cost else m_note),
+             "/deals?block=won", quality=m_quality if can_cost else "unavailable", period=period, note=m_note,
+             source="маржа базового сценария утверждённой версии расчёта по выигранному предложению", unit="%", calculated_at=now, drill=can_cost),
         _kpi("receivable", "Дебиторка просрочена", len(rec_rows) if fin else None, money_by_currency([(r["amount"], r["currency"]) for r in rec_rows]) if fin else "нет доступа к финансам",
              (money or {}).get("url") or "/finance?tab=liquidity", "bad" if rec_rows else "ok", quality="confirmed" if fin else "unavailable",
-             source="«Финансы»: обязательства «нам платят» с прошедшим сроком, остаток к оплате"),
-        _kpi("exec", "Исполнение", len(in_exec), f"{overdue_stages} этапов просрочено · уточнённый срок сдвинут у {sum(1 for r in exec_rows if r['delay'] > 0)}",
-             "/deals?block=won&flag=overdue" if overdue_stages else "/deals?block=won", "warn" if overdue_stages else "", source="этапы исполнения выигранных сделок"),
+             note="" if fin else "нет права на финансы", unit="обязательств", currency=" · ".join(rec_ccy), period="на сегодня", calculated_at=now,
+             source="«Финансы»: обязательства «нам платят» с прошедшим сроком, остаток к оплате; валюты не складываются", drill=fin),
+        _kpi("exec", "Исполнение: просроченные этапы", overdue_stages, f"сделок в исполнении: {len(in_exec)}",
+             "/deals?block=won&flag=overdue" if overdue_stages else "/deals?block=won", "warn" if overdue_stages else "", unit="этапов", period="на сегодня",
+             calculated_at=now, drill=True, source="этапы исполнения выигранных сделок: факт не отмечен, дата прошла",
+             extra=[{"label": "сделок с просроченными этапами", "value": len(risk_rows)},
+                    {"label": "сделок со сдвигом уточнённого срока окончания", "value": len(shifted)}]),
     ]
+    rec_list = [{"title": f"{r['title']} · {r['client']}", "url": r["url"] or "/finance?tab=liquidity", "value": _money(r["amount"], r["currency"]),
+                 "note": f"{r['deal_number']}, срок {r['on']:%d.%m}, просрочка {r['overdue_days']} дн."} for r in sorted(rec_rows, key=lambda r: -r["overdue_days"])]
+    drill = {
+        "risk": {"title": "Сделки под риском", "rows": [{"title": f"{r['deal'].number} · {r['deal'].client.name if r['deal'].client else ''}", "url": f"/deals/{r['deal'].id}?tab=execution",
+                                                       "value": f"{r['overdue']} этап(ов)", "note": (_money(price(r['deal'])) if fin and price(r['deal']) else "")} for r in risk_rows]},
+        "exec": {"title": "Просроченные этапы исполнения", "rows": late_stage_rows},
+        "receivable": {"title": "Просроченная дебиторка", "rows": rec_list} if fin else None,
+        "margin": {"title": "Маржа выигранных за квартал", "rows": margin_rows} if can_cost else None,
+    }
 
     # ---------------- требует вмешательства: одна очередь, без повторов (ключ — источник + правило)
     esc: dict[str, dict] = {}
@@ -106,7 +148,7 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
         pay = [s for s in late if s.code in ("client_advance", "client_final")]
         for s in pay:
             days = (today - (s.refined_on or s.planned_on)).days
-            add(f"deal:{d.id}:receivable", priority="critical" if days > 30 else "high", title=f"{s.title} · {cl}",
+            add(f"deal:{d.id}:receivable", obj=("сделка", d.number), dir="sales", priority="critical" if days > 30 else "high", title=f"{s.title} · {cl}",
                 reason=f"{d.number}: оплата клиента не отмечена, просрочка {days} дн.", impact={"amount": float(s.amount), "currency": s.currency} if fin and s.amount else None,
                 owner=names.get(d.manager_id, ""), owner_role="менеджер", next_action="Связаться с клиентом, уточнить дату оплаты", url=f"/deals/{d.id}?tab=execution",
                 due=(s.refined_on or s.planned_on).isoformat(), days=days, source="этап исполнения")
@@ -114,13 +156,13 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
         if other:
             first = min(other, key=lambda s: s.refined_on or s.planned_on)
             days = (today - (first.refined_on or first.planned_on)).days
-            add(f"deal:{d.id}:stages_late", priority="high" if days > 14 or len(other) >= 3 else "normal", title=f"{d.number} · {cl}: {len(other)} этап(ов) без факта",
+            add(f"deal:{d.id}:stages_late", obj=("сделка", d.number), dir="sales", priority="high" if days > 14 or len(other) >= 3 else "normal", title=f"{d.number} · {cl}: {len(other)} этап(ов) без факта",
                 reason=f"первый — «{first.title}», план {(first.refined_on or first.planned_on):%d.%m}, {days} дн. назад", impact=None,
                 owner=names.get(d.manager_id, ""), owner_role="менеджер", next_action="Отметить факт или уточнить дату", url=f"/deals/{d.id}?tab=execution",
                 due=(first.refined_on or first.planned_on).isoformat(), days=days, source="этапы исполнения")
     for r in rec_rows:   # «Финансы»: просроченные поступления (в т. ч. по договорам вне этапов) — тот же ключ, что у этапа оплаты
         k = f"deal:{r['deal_id']}:receivable" if r.get("deal_id") else f"obligation:{r['obligation_id']}:receivable"
-        add(k, priority="critical" if r["overdue_days"] > 30 else "high", title=f"{r['title']} · {r['client']}",
+        add(k, obj=("обязательство", r["deal_number"]), dir="sales" if r.get("manager") else "finance", priority="critical" if r["overdue_days"] > 30 else "high", title=f"{r['title']} · {r['client']}",
             reason=f"{r['deal_number']}: поступление не разнесено, просрочка {r['overdue_days']} дн.", impact={"amount": r["amount"], "currency": r["currency"]} if r["amount"] else None,
             owner=r.get("manager") or "ФД", owner_role="менеджер" if r.get("manager") else "финансы", next_action="Проверить оплату и связаться с клиентом",
             url=r["url"] or "/finance?tab=liquidity", due=r["on"].isoformat(), days=r["overdue_days"], source="«Финансы»")
@@ -130,12 +172,12 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
             waited = (today - datetime.fromisoformat(since).date()).days if since else 0
         except ValueError:
             waited = 0
-        add(f"approval:{a['url']}:{a['kind']}", priority="high" if waited >= 2 else "normal", title=a["title"], reason=a["sub"] + (f" · ждёт {waited} дн." if waited else ""),
+        add(f"approval:{a['url']}:{a['kind']}", obj=("согласование", ""), dir="", priority="high" if waited >= 2 else "normal", title=a["title"], reason=a["sub"] + (f" · ждёт {waited} дн." if waited else ""),
             impact=None, owner="вы", owner_role="решение ЗГД", next_action="Рассмотреть", url=a["url"], due=None, days=waited, source="согласование")
     for cl in claims:
         if cl.answer_due and cl.answer_due < today and cl.status in ("sent", "received"):
             days = (today - cl.answer_due).days
-            add(f"claim:{cl.id}:answer", priority="high", title=f"Претензия {cl.number}: " + ("клиент не ответил" if cl.direction == "outgoing" else "наш ответ просрочен"),
+            add(f"claim:{cl.id}:answer", obj=("претензия", cl.number), dir="legal", priority="high", title=f"Претензия {cl.number}: " + ("клиент не ответил" if cl.direction == "outgoing" else "наш ответ просрочен"),
                 reason=f"срок ответа истёк {cl.answer_due:%d.%m}, {days} дн. назад", impact=None, owner="юрист", owner_role="юр. блок",
                 next_action="Решить: суд, повторное требование или закрытие" if cl.direction == "outgoing" else "Ответить контрагенту",
                 url=f"/legal?tab=claims&open={cl.id}", due=cl.answer_due.isoformat(), days=days, source="претензия")
@@ -146,25 +188,46 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
         ctl = {"items": []}
     for r in ctl.get("items", []):
         if r["overdue"]:
-            add(f"office:{r['user_id'] or 'none'}:overdue", priority="high" if r["overdue"] >= 3 else "normal", title=f"{r['name']}: просрочено поручений по документам — {r['overdue']}",
+            add(f"office:{r['user_id'] or 'none'}:overdue", obj=("документы Канцелярии", ""), dir="", owner_id=r["user_id"], priority="high" if r["overdue"] >= 3 else "normal", title=f"{r['name']}: просрочено поручений по документам — {r['overdue']}",
                 reason=", ".join(f"{x['number']} ({x['days']} р. дн.)" for x in r["late_docs"][:3]), impact=None, owner=r["name"], owner_role="исполнитель",
                 next_action="Запросить статус", url="/office?t=control", due=None, days=max((x["days"] for x in r["late_docs"]), default=0), source="Канцелярия")
     if cin.get("no_scan"):
-        add("contracts:no_scan", priority="normal", title=f"Подписанных договоров без скана: {len(cin['no_scan'])}", reason=", ".join(list(dict.fromkeys(x["number"] for x in cin["no_scan"]))[:4]),
+        add("contracts:no_scan", obj=("договоры", ""), dir="legal", priority="info", title=f"Подписанных договоров без скана: {len(cin['no_scan'])}", reason=", ".join(list(dict.fromkeys(x["number"] for x in cin["no_scan"]))[:4]),
             impact=None, owner="юрист", owner_role="юр. блок", next_action="Загрузить сканы", url="/legal?tab=contracts&flag=no_scan", due=None, days=0, source="реестр договоров")
     for x in cin.get("expiring", [])[:3]:
-        add(f"contract:{x['number']}:expiring", priority="normal", title=f"Договор {x['number']} ({x['cp_name']}) истекает через {x['days']} дн.", reason="продлить или закрыть",
+        add(f"contract:{x['number']}:expiring", obj=("договор", x["number"]), dir="legal", priority="normal", title=f"Договор {x['number']} ({x['cp_name']}) истекает через {x['days']} дн.", reason="продлить или закрыть",
             impact=None, owner="юрист", owner_role="юр. блок", next_action="Решить о продлении", url="/legal?tab=contracts&flag=expiring", due=None, days=0, source="реестр договоров")
     if fin:
         from ..models.finance import FinanceObligation, FinanceTransaction
         rec = (db.scalar(select(func.count(FinanceTransaction.id)).where(FinanceTransaction.status == "needs_reconciliation", FinanceTransaction.withdrawn_at.is_(None))) or 0) \
             + (db.scalar(select(func.count(FinanceObligation.id)).where(FinanceObligation.sync_status == "conflict")) or 0)
         if rec:
-            add("finance:reconciliation", priority="normal", title=f"Записей «требует сверки» в «Финансах»: {rec}", reason="отметки об оплате без банковского подтверждения и конфликты графиков",
+            add("finance:reconciliation", obj=("банковские операции", ""), dir="finance", priority="info", title=f"Записей «требует сверки» в «Финансах»: {rec}", reason="отметки об оплате без банковского подтверждения и конфликты графиков",
                 impact=None, owner="ФД", owner_role="финансы", next_action="Сверить с банком", url="/finance?tab=reconciliation", due=None, days=0, source="«Финансы»")
-    escalations = sorted(esc.values(), key=lambda e: (PRIO[e["priority"]], -(e["days"] or 0)))
+    # ответственность: руководитель направления (если назначен и это не сам ответственный); срок реакции; поручение по сигналу
+    from ..models import Assignment
+    from ..services import assignments as asg
+    hd = asg.heads(db)
+    by_name = {v: k for k, v in names.items()}
+    open_asg = {a.source_key: a for a in db.scalars(select(Assignment).where(Assignment.source_key != "", Assignment.status.in_(asg.OPEN))).all()}
+    users_all = {u.id: u for u in db.scalars(select(User)).all()}
+    for e in esc.values():
+        otype, onum = e.pop("obj")
+        e["object_type"], e["object_number"] = otype, onum
+        dk = e.pop("dir")
+        oid = e.pop("owner_id", None) or by_name.get(e.get("owner") or "")
+        if not dk and oid and oid in users_all:
+            dk = asg.direction_of(users_all[oid])
+        h = hd.get(dk) if dk else None
+        e["direction"] = asg.DIRECTION_TITLES.get(dk, "")
+        e["head"] = names.get(h, "") if h and h != oid else ""
+        e["owner_id"] = oid
+        e["react_by"] = today.isoformat() if e["priority"] in ("critical", "high") else (e["due"] or None)
+        a = open_asg.get(e["key"])
+        e["assignment"] = {"number": a.number, "status": asg.STATUS_TITLES[a.status], "url": f"/assignments?open={a.id}"} if a else None
+    escalations = sorted(esc.values(), key=lambda e: (PRIO[e["priority"]], e["react_by"] or "9999", -(e["days"] or 0)))
 
-    # ---------------- направления — по ролям сотрудников (оргструктуры «отдел → руководитель» в системе нет)
+    # ---------------- направления — руководитель из «Направлений» (назначает ЗГД, D-154); сотрудники — по ролям
     users = db.scalars(select(User).where(User.is_active.is_(True))).all()
 
     def people(*roles: str) -> list[str]:
@@ -184,33 +247,42 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
     except Exception:  # noqa: BLE001
         wc_open = None
     lg_ = legal or {}
-    directions = [
-        {"key": "sales", "title": "Коммерция", "people": people("manager"), "tone": tone(len(kp_late), len(stale)),
-         "lines": [f"в работе: {len(open_deals)} ГШО · {len(open_parts)} ЗЧ", f"КП с прошедшим сроком: {len(kp_late)}", f"черновики без движения 7+ дн.: {len(stale)}"], "url": "/deals?block=work"},
-        {"key": "factory", "title": "Завод и закупки", "people": people("purchasing", "manager"), "tone": tone(len(fc)),
-         "lines": [f"этапов без факта: {len(fc)}" + (f" (первый — {min(fc, key=lambda s: s.refined_on or s.planned_on).title})" if fc else ""), f"заявок на запчасти в работе: {len(open_parts)}"],
-         "url": "/deals?block=won&flag=overdue" if fc else "/supply"},
-        {"key": "logistics", "title": "Логистика", "people": people("logistician"), "tone": tone(sum(1 for s in lg if (today - (s.refined_on or s.planned_on)).days > 7), len(lg)),
-         "lines": [f"этапов без факта: {len(lg)}", "готовность, отгрузка, граница, ДТ, доставка"], "url": "/deals?block=won&flag=overdue" if lg else "/summary?kind=shipments"},
-        {"key": "finance", "title": "Финансы", "people": people("fd"), "tone": tone(sum(1 for s in py if s.code.startswith("client")), len(py)),
-         "lines": [f"платежей без факта: {len(py)}", f"просроченная дебиторка: {money_by_currency([(r['amount'], r['currency']) for r in rec_rows]) if fin else 'нет доступа'}"],
-         "url": "/finance?tab=liquidity" if fin else "/deals?block=won"},
-        {"key": "legal", "title": "Юридический блок", "people": people("lawyer"), "tone": tone(lg_.get("claims_answer_overdue", 0), lg_.get("contracts_no_scan", 0) + lg_.get("contracts_review", 0)),
-         "lines": [f"договоры без скана: {lg_.get('contracts_no_scan', 0)} · на проверке: {lg_.get('contracts_review', 0)}", f"претензии: открыто {lg_.get('claims_open', 0)}, срок ответа истёк {lg_.get('claims_answer_overdue', 0)}"],
-         "url": "/legal"},
-        {"key": "service", "title": "Сервис", "people": people("service_head"), "tone": tone(len(sv), wc_open or 0),
-         "lines": [f"ПНР и установка опций без факта: {len(sv)}", f"гарантийные претензии в работе: {wc_open if wc_open is not None else 'нет данных'}"], "url": "/supply?tab=claims"},
-    ]
+    rec_txt = money_by_currency([(r['amount'], r['currency']) for r in rec_rows]) if fin else "нет доступа"
+    D = {
+        "sales": (people("cd", "manager"), tone(len(kp_late), len(stale)), [f"в работе: {len(open_deals)} ГШО · {len(open_parts)} ЗЧ", f"выиграно за квартал: {len(won_q) + len(won_q_parts)}"],
+                  [x for x in (f"КП с прошедшим сроком: {len(kp_late)}" if kp_late else "", f"черновики без движения 7+ дн.: {len(stale)}" if stale else "") if x], "/deals?block=work"),
+        "factory": (people("purchasing"), tone(len(fc)), [f"заявок на запчасти в работе: {len(open_parts)}"],
+                    [f"этапов завода без факта: {len(fc)} (первый — {min(fc, key=lambda s: s.refined_on or s.planned_on).title})"] if fc else [], "/deals?block=won&flag=overdue" if fc else "/supply"),
+        "logistics": (people("logistician"), tone(sum(1 for s in lg if (today - (s.refined_on or s.planned_on)).days > 7), len(lg)), ["готовность, отгрузка, граница, ДТ, доставка"],
+                      [f"этапов логистики без факта: {len(lg)}"] if lg else [], "/deals?block=won&flag=overdue" if lg else "/summary?kind=shipments"),
+        "finance": (people("fd"), tone(sum(1 for s in py if s.code.startswith("client")) + len(rec_rows), len(py)), [f"сделок в исполнении: {len(in_exec)}"],
+                    [x for x in (f"платежей без факта: {len(py)}" if py else "", f"просроченная дебиторка: {rec_txt}" if rec_rows else "") if x], "/finance?tab=liquidity" if fin else "/deals?block=won"),
+        "legal": (people("lawyer"), tone(lg_.get("claims_answer_overdue", 0), lg_.get("contracts_no_scan", 0) + lg_.get("contracts_review", 0)),
+                  [f"на проверке и подписи: {lg_.get('contracts_review', 0)}", f"претензии открыты: {lg_.get('claims_open', 0)}"],
+                  [x for x in (f"договоры без скана: {lg_.get('contracts_no_scan', 0)}" if lg_.get("contracts_no_scan") else "",
+                               f"срок ответа на претензию истёк: {lg_.get('claims_answer_overdue', 0)}" if lg_.get("claims_answer_overdue") else "") if x], "/legal"),
+        "service": (people("service_head"), tone(len(sv), wc_open or 0), [f"гарантийные претензии в работе: {wc_open if wc_open is not None else 'нет данных'}"],
+                    [f"ПНР и установка опций без факта: {len(sv)}"] if sv else [], "/supply?tab=claims"),
+    }
+    from ..services import assignments as asg
+    hd = asg.heads(db)
+    users_by_id = {u.id: u for u in users}
+    directions = []
+    for key, title in asg.DIRECTIONS:
+        staff, tn, results, devs, url = D[key]
+        h = users_by_id.get(hd.get(key) or "")
+        head = None
+        if h:
+            pos = (h.contacts or {}).get("position", "") if isinstance(h.contacts, dict) else ""
+            head = {"id": h.id, "name": h.display_name, "position": pos, "deputy": asg.deputy_info(h, users_by_id, today)}
+        directions.append({"key": key, "title": title, "head": head, "people": staff, "staff_count": len(staff), "tone": tn,
+                           "results": results, "deviations": devs, "lines": results + devs, "url": url})
 
-    # ---------------- поручения — резолюции Канцелярии с контролем исполнения (управленческих поручений с приёмкой в системе пока нет)
-    o_open = sum(r["open"] for r in ctl.get("items", []))
+    # ---------------- поручения ЗГД (D-154); контроль документов Канцелярии — отдельной строкой
+    assignments = asg.summary(db, user, today, names)
     o_over = sum(r["overdue"] for r in ctl.get("items", []))
-    o_today = sum(r["today"] for r in ctl.get("items", []))
-    nearest = db.scalars(select(OfficeDoc).where(OfficeDoc.status.in_(("assigned", "in_work", "review")), OfficeDoc.due_on.is_not(None)).order_by(OfficeDoc.due_on).limit(3)).all()
-    assignments = {"open": o_open, "overdue": o_over, "today": o_today,
-                   "items": [{"number": x.number, "subject": x.subject, "executor": names.get(x.reviewer_id if x.status == "review" else x.executor_id, "") or "не назначен",
-                              "due_on": x.due_on.isoformat(), "overdue": x.due_on < today, "url": f"/office?doc={x.id}"} for x in nearest],
-                   "url": "/office?t=control", "create_url": "/office", "source": "резолюции Канцелярии"}
+    assignments["office"] = {"open": sum(r["open"] for r in ctl.get("items", [])), "overdue": o_over, "url": "/office?t=control"}
 
-    return {"meta": {"generated_at": now, "today": today.isoformat(), "period": period, "timezone": "Europe/Moscow"},
-            "kpis": kpis, "escalations": escalations, "directions": directions, "assignments": assignments}
+    return {"meta": {"generated_at": now, "today": today.isoformat(), "period": period, "timezone": "Europe/Moscow", "quality_titles": {"confirmed": "подтверждено", "partial": "частичные данные", "stale": "устарело", "unavailable": "нет данных", "unverified": "не подтверждено"}},
+            "kpis": kpis, "escalations": escalations, "directions": directions, "assignments": assignments, "drill": drill,
+            "can_assign": user.has(Role.GD)}
