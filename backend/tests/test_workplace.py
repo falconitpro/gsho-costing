@@ -123,7 +123,7 @@ def test_executive_workplace_gd_only_and_shape():
                 assert k["data_quality"] == "unavailable"
         keys = [e["key"] for e in ex["escalations"]]
         assert len(keys) == len(set(keys))
-        order = {"critical": 0, "high": 1, "normal": 2}
+        order = {"critical": 0, "high": 1, "normal": 2, "info": 3}
         assert [order[e["priority"]] for e in ex["escalations"]] == sorted(order[e["priority"]] for e in ex["escalations"])
         assert {d["title"] for d in ex["directions"]} >= {"Коммерция", "Финансы", "Юридический блок"}
         assert "assignments" in ex and "meta" in ex

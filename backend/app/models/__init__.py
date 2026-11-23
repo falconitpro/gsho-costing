@@ -2529,3 +2529,62 @@ class OfficeRoute(TimestampMixin, Base):
     required: Mapped[bool] = mapped_column(Boolean, default=False)          # без согласования не подписать
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+
+# ------------------------------------------------------------------ D-154: оргструктура направлений и управленческие поручения
+
+class OrgDirection(Base):
+    """Направление (подразделение) рабочего места ЗГД и его руководитель. Назначает ЗГД; не назначен — так и показывается."""
+    __tablename__ = "org_directions"
+    key: Mapped[str] = mapped_column(String(32), primary_key=True)             # sales | factory | logistics | finance | legal | service
+    head_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    updated_by: Mapped[Optional[str]] = mapped_column(String(36))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Assignment(TimestampMixin, Base):
+    """Управленческое поручение ЗГД: руководителю подразделения или напрямую сотруднику (ТЗ v2 §5).
+    Статусы: new → accepted → in_progress → blocked / review → rework → review → done; cancelled. Просрочка — по сроку, не статус."""
+    __tablename__ = "assignments"
+    __table_args__ = (Index("ix_assignments_status_due", "status", "due_on"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(24), index=True)               # П-2026-001
+    seq: Mapped[int] = mapped_column(Integer)
+    year: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16), default="task")             # task — поручение | explain — запрос пояснения
+    title: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str] = mapped_column(Text, default="")
+    priority: Mapped[str] = mapped_column(String(16), default="normal")       # critical | high | normal
+    mode: Mapped[str] = mapped_column(String(8), default="direct")            # head — руководителю подразделения | direct — сотруднику
+    direction_key: Mapped[str] = mapped_column(String(32), default="")
+    author_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    assignee_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)      # ответственный (руководитель или сотрудник)
+    executor_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))         # поручение руководителю: кому он передал выполнение
+    head_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"), index=True) # прямое поручение: руководитель видит, но не принимает
+    status: Mapped[str] = mapped_column(String(16), default="new")
+    due_on: Mapped[date] = mapped_column(Date)
+    first_due_on: Mapped[date] = mapped_column(Date)
+    source_url: Mapped[str] = mapped_column(String(300), default="")          # откуда поручение: сделка, проблема из очереди
+    source_key: Mapped[str] = mapped_column(String(160), default="")          # ключ сигнала очереди «Требует вмешательства»
+    source_title: Mapped[str] = mapped_column(String(255), default="")
+    report: Mapped[str] = mapped_column(Text, default="")
+    block_reason: Mapped[str] = mapped_column(Text, default="")
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    done_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    done_by: Mapped[Optional[str]] = mapped_column(String(36))
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class AssignmentEvent(Base):
+    """История поручения: назначения, статусы, сроки, комментарии, решения. Только добавление."""
+    __tablename__ = "assignment_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    assignment_id: Mapped[str] = mapped_column(ForeignKey("assignments.id"), index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    by_id: Mapped[Optional[str]] = mapped_column(String(36))
+    action: Mapped[str] = mapped_column(String(24))
+    from_status: Mapped[str] = mapped_column(String(16), default="")
+    to_status: Mapped[str] = mapped_column(String(16), default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    data: Mapped[dict] = mapped_column(JSONType, default=dict)

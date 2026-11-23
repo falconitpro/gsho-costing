@@ -296,7 +296,7 @@ function ClassicWorkplace({ me, onPult }: { me: Me; onPult?: () => void }) {
     <header className="wp-top">
       <div><h1>{d.user.greeting}, {d.user.first_name || d.user.name}</h1><div className="muted" style={{ fontSize: 13 }}>{d.date.text} · {d.user.role_title} · {d.today.events.length} событий сегодня{d.tasks_overdue ? ` · ${d.tasks_overdue} задач просрочено` : ""}</div></div>
       <div className="row" style={{ gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-        {onPult && <div className="wpx-switch" role="group" aria-label="Вид рабочего места"><button className="cur" aria-pressed="true">Обычный вид</button><button onClick={onPult}>Пульт</button></div>}
+        {onPult && <div className="wp-exec-switch" role="group" aria-label="Вид рабочего места"><button className="cur" aria-pressed="true">Обычный вид</button><button onClick={onPult}>Пульт</button></div>}
         <button className="btn ghost" onClick={() => nav("/support?new=1&from=/")} title="Обращение в поддержку внутри CRM">Сообщить о проблеме</button>
         {level === "entries" && <ActionMenu label="Быстрые действия" items={quickRest} onPick={(u) => nav(u)} />}
         {d.quick[0] && <button className="btn add" onClick={() => nav(d.quick[0].url)}>{d.quick[0].title}</button>}
