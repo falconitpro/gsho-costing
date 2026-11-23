@@ -2554,6 +2554,7 @@ class Assignment(TimestampMixin, Base):
     kind: Mapped[str] = mapped_column(String(16), default="task")             # task — поручение | explain — запрос пояснения
     title: Mapped[str] = mapped_column(String(255))
     body: Mapped[str] = mapped_column(Text, default="")
+    expected_result: Mapped[str] = mapped_column(Text, default="")           # D-156: какой результат принять (критерий приёмки)
     priority: Mapped[str] = mapped_column(String(16), default="normal")       # critical | high | normal
     mode: Mapped[str] = mapped_column(String(8), default="direct")            # head — руководителю подразделения | direct — сотруднику
     direction_key: Mapped[str] = mapped_column(String(32), default="")

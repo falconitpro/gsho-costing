@@ -1205,3 +1205,13 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .wp-exec-drill li > span:first-child { min-width: 0; }
 @media (max-width: 900px) { .dir-grid { grid-template-columns: minmax(0, 1fr); } }
 .wp-exec-dir-link { color: var(--ink); text-decoration: none; } .wp-exec-dir-link:hover { color: var(--accent); }
+/* D-156: группы проблем по объекту, методика, ближайшие сроки */
+.wp-exec-grp { list-style: none; } .wp-exec-grp > .wp-exec-list { gap: 4px; }
+.wp-exec-more { border: 0; background: none; padding: 2px 0 0 12px; font: inherit; font-size: 12px; color: var(--info); cursor: pointer; }
+.wp-exec-kpi .wp-exec-kpi-ref { color: var(--muted); font-size: 11px; }
+.wp-exec-method { background: var(--bg); border-radius: 8px; padding: 8px 10px; font-size: 13px; margin-bottom: 8px; } .wp-exec-method .muted { font-size: 12px; margin-top: 4px; }
+.wp-exec-asg a { display: block; background: var(--bg); border-radius: 8px; padding: 8px 4px; color: var(--ink); text-decoration: none; } .wp-exec-asg a:hover { outline: 1px solid var(--accent); }
+.wp-exec-asg a b { display: block; font-size: 22px; } .wp-exec-asg a small { color: var(--muted); font-size: 12px; }
+.wp-exec-asg a.bad { background: var(--bad-bg); } .wp-exec-asg a.bad b { color: var(--bad); } .wp-exec-asg a.warn b { color: var(--warn); }
+.wp-exec-dl.overdue .wp-exec-dl-on { color: var(--bad); } .wp-exec-dl.today .wp-exec-dl-on { color: var(--warn); } .wp-exec-dl.soon .wp-exec-dl-on { color: var(--ink); }
+.wp-exec-dl .wp-exec-dl-on { font-weight: 600; } .wp-exec-dl.later .wp-exec-dl-on { font-weight: 400; }

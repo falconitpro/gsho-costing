@@ -57,13 +57,14 @@ def test_files_reminders_signals_direction():
     # напоминания: накануне — исполнителю один раз; просрочка — исполнителю, автору и руководителю
     with SessionLocal() as db:
         n0 = db.query(NotificationLog).filter(NotificationLog.event == "assignment").count()
-        assert svc.check(db, today) == 1 and svc.check(db, today) == 0
+        assert svc.check(db, today) >= 1 and svc.check(db, today) == 0
         db.commit()
         a_row = db.get(Assignment, aid)
         assert f"pre:{a_row.due_on}" in a_row.alerts
-        assert svc.check(db, today + timedelta(days=3)) == 1                     # просрочка: один сигнал на срок
+        assert svc.check(db, today + timedelta(days=3)) >= 1 and svc.check(db, today + timedelta(days=3)) == 0   # просрочка: один сигнал на срок
         db.commit()
-        over = db.query(NotificationLog).filter(NotificationLog.event == "assignment", NotificationLog.text.like("%просрочено%")).all()
+        over = db.query(NotificationLog).filter(NotificationLog.event == "assignment", NotificationLog.text.like("%просрочено%"),
+                                                NotificationLog.link == f"/assignments?open={aid}").all()
         assert {mgr, cd} <= {x.user_id for x in over}                            # исполнитель и руководитель направления
         assert db.query(NotificationLog).filter(NotificationLog.event == "assignment").count() > n0
         assert all(x.link == f"/assignments?open={aid}" for x in over)

@@ -3,7 +3,7 @@ import { api } from "../../api";
 import SecurityModal from "../SecurityModal";
 
 // Новое поручение ЗГД (D-154): руководителю подразделения или напрямую сотруднику. Права и проверки — на сервере.
-export type AsgPrefill = { title?: string; body?: string; source_url?: string; source_key?: string; source_title?: string; kind?: "task" | "explain"; priority?: string; assignee_id?: string };
+export type AsgPrefill = { title?: string; body?: string; expected_result?: string; source_url?: string; source_key?: string; source_title?: string; kind?: "task" | "explain"; priority?: string; assignee_id?: string };
 type U = { id: string; name: string; position: string; direction: string };
 type Ref = { users: U[]; heads: Record<string, string | null>; directions: { key: string; title: string }[] };
 
@@ -18,6 +18,7 @@ export default function AssignmentDialog({ prefill, onClose, onDone }: { prefill
   const [who, setWho] = useState(p.assignee_id || "");
   const [title, setTitle] = useState(p.title || "");
   const [body, setBody] = useState(p.body || "");
+  const [expected, setExpected] = useState(p.expected_result || "");
   const [due, setDue] = useState(plusDays(explain ? 1 : 3));
   const [prio, setPrio] = useState(p.priority || "normal");
   const [err, setErr] = useState("");
@@ -28,7 +29,7 @@ export default function AssignmentDialog({ prefill, onClose, onDone }: { prefill
   const submit = () => {
     if (!target) { setErr(mode === "head" ? "У подразделения не назначен руководитель — выберите «сотруднику» или назначьте руководителя в «Направлениях»" : "Выберите сотрудника"); return; }
     setBusy(true); setErr("");
-    api.post<{ id: string }>("/api/management/assignments", { title, body, mode, assignee_id: target, direction_key: dir, due_on: due, priority: prio,
+    api.post<{ id: string }>("/api/management/assignments", { title, body, expected_result: expected, mode, assignee_id: target, direction_key: dir, due_on: due, priority: prio,
       kind: p.kind || "task", source_url: p.source_url || "", source_key: p.source_key || "", source_title: p.source_title || "" })
       .then((r) => onDone(r.id)).catch((e: Error) => { setErr(e.message); setBusy(false); });
   };
@@ -52,7 +53,8 @@ export default function AssignmentDialog({ prefill, onClose, onDone }: { prefill
         </select></label>}
       {mode === "direct" && <p className="muted asg-hint">Руководитель подразделения сотрудника увидит поручение, но принимать результат будете вы.</p>}
       <label className="f"><span>{explain ? "Что пояснить" : "Что сделать"}</span><input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={255} /></label>
-      <label className="f"><span>Подробности</span><textarea rows={3} value={body} onChange={(e) => setBody(e.target.value)} /></label>
+      <label className="f"><span>Ожидаемый результат — что вы примете</span><textarea rows={2} value={expected} onChange={(e) => setExpected(e.target.value)} placeholder="например: оплата поступила и разнесена; приложена выписка" /></label>
+      <label className="f"><span>Подробности</span><textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} /></label>
       <div className="asg-row">
         <label className="f"><span>Срок</span><input type="date" value={due} min={plusDays(0)} onChange={(e) => setDue(e.target.value)} /></label>
         <label className="f"><span>Приоритет</span><select value={prio} onChange={(e) => setPrio(e.target.value)}>
