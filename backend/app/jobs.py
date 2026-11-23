@@ -149,7 +149,9 @@ def _jobs(first: bool) -> list[tuple[str, Callable[[], None]]]:
     from .services.legal_contracts import check_expiring as check_contracts
     from .services.legal_poa import check_expiring
     from .services.notification_kinds import close_done_task_notices
+    from .services.assignments import check as check_assignments
     from .services.office_watch import check as check_office
+    from .services.signals import refresh as refresh_signals
     from .services.parts_sla import check as check_parts_sla
     from .services.visa_watch import escalate_fd
     jobs: list[tuple[str, Callable[[], None]]] = [
@@ -159,6 +161,8 @@ def _jobs(first: bool) -> list[tuple[str, Callable[[], None]]]:
         ("overdue check", _commit_if(check_overdue_tasks)),          # просроченные задачи
         ("notification cleanup", _commit_if(close_done_task_notices)),
         ("office due watch", _commit_if(check_office)),              # D-133, D-140: сроки писем, ознакомление
+        ("assignments due watch", _commit_if(check_assignments)),    # D-155: сроки поручений ЗГД
+        ("signals refresh", _commit_if(refresh_signals)),            # D-155: история сигналов «Требует вмешательства»
         ("fd visa escalation", _commit_if(escalate_fd)),             # D-112
         ("draft watch", _commit_if(check_drafts)),                   # черновики без движения
         ("poa expiry check", _commit_if(check_expiring)),            # доверенности

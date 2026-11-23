@@ -545,6 +545,7 @@ def workplace_executive(db: Session = Depends(get_db), user: CurrentUser = Depen
     out, ctx = build(db, user, executive=True)
     out["briefing"] = briefing_block(db, user, ctx)
     out["tails"] = tails(db, user)
+    db.commit()          # D-155: журнал сигналов (signal_log) обновлён при сборке очереди
     return out
 
 
@@ -553,6 +554,7 @@ def workplace(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
     out, ctx = build(db, user)
     out["briefing"] = briefing_block(db, user, ctx)
     out["tails"] = tails(db, user)
+    db.commit()          # D-155: журнал сигналов (signal_log) обновлён при сборке очереди
     return out
 
 
@@ -650,3 +652,43 @@ def save_role_blocks(body: RoleBlocksIn, db: Session = Depends(get_db), user: Cu
     audit(db, user.id, None, "settings", "workplace_blocks", "update", after=cur)
     db.commit()
     return cur
+
+
+@router.get("/executive/direction/{key}")
+def executive_direction(key: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """D-155: карточка направления — руководитель и замещение, сотрудники с нагрузкой, объекты с отклонениями, поручения, история."""
+    from ..models import Assignment, AssignmentEvent, AuditLog
+    from ..services import assignments as asg
+    from ..services.finance.cashview import moscow_today
+    if not user.has(Role.GD):
+        raise HTTPException(403, "Карточка направления — на пульте ЗГД")
+    if key not in asg.DIRECTION_TITLES:
+        raise HTTPException(404, "Направление не найдено")
+    out, _ctx = build(db, user, executive=True)
+    d = next(x for x in out["executive"]["directions"] if x["key"] == key)
+    today = moscow_today()
+    users = db.scalars(select(User).where(User.is_active.is_(True))).all()
+    staff = [u for u in users if asg.direction_of(u) == key or (d["head"] and u.id == d["head"]["id"])]
+    ids = [u.id for u in staff]
+    tasks = db.scalars(select(Task).where(Task.assignee_id.in_(ids or [""]), Task.done_at.is_(None))).all()
+    names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
+    rows = db.scalars(select(Assignment).where((Assignment.direction_key == key) | (Assignment.assignee_id.in_(ids or [""])) | (Assignment.executor_id.in_(ids or [""])))
+                      .order_by(Assignment.created_at.desc()).limit(50)).all()
+    open_a = [a for a in rows if a.status in asg.OPEN]
+    d["staff"] = [{"id": u.id, "name": u.display_name, "position": (u.contacts or {}).get("position", "") if isinstance(u.contacts, dict) else "",
+                   "is_head": bool(d["head"] and u.id == d["head"]["id"]),
+                   "tasks_open": sum(1 for t in tasks if t.assignee_id == u.id), "tasks_overdue": sum(1 for t in tasks if t.assignee_id == u.id and t.due and t.due < today),
+                   "assignments_open": sum(1 for a in open_a if u.id in (a.assignee_id, a.executor_id))} for u in sorted(staff, key=lambda u: u.display_name)]
+    d["assignments"] = [asg.as_dict(a, names, today, user) for a in rows]
+    ev = db.scalars(select(AssignmentEvent).where(AssignmentEvent.assignment_id.in_([a.id for a in rows] or [""])).order_by(AssignmentEvent.at.desc()).limit(40)).all()
+    num = {a.id: a.number for a in rows}
+    hist = [{"at": e.at.isoformat() if e.at else None, "who": names.get(e.by_id or "", ""), "text": f"{num.get(e.assignment_id, '')}: {asg.ACTION_TITLES.get(e.action, e.action)}"
+             + (f" — {e.comment[:120]}" if e.comment else ""), "url": f"/assignments?open={e.assignment_id}"} for e in ev]
+    for lg in db.scalars(select(AuditLog).where(AuditLog.entity == "org_direction").order_by(AuditLog.at.desc()).limit(20)).all():
+        b, a = (lg.before or {}).get(key), (lg.after or {}).get(key)
+        if b != a:
+            hist.append({"at": lg.at.isoformat() if lg.at else None, "who": names.get(lg.user_id or "", ""),
+                         "text": f"руководитель: {names.get(b, 'не назначен') if b else 'не назначен'} → {names.get(a, 'не назначен') if a else 'не назначен'}", "url": ""})
+    d["history"] = sorted(hist, key=lambda h: h["at"] or "", reverse=True)[:50]
+    d["meta"] = out["executive"]["meta"]
+    return d

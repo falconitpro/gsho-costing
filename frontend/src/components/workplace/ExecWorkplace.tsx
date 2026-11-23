@@ -19,10 +19,12 @@ type Esc = { key: string; priority: Prio; title: string; reason: string; impact:
   object_type: string; object_number: string; next_action: string; url: string; due: string | null; days: number; source: string; react_by: string | null;
   assignment: { number: string; status: string; url: string } | null };
 type Head = { id: string; name: string; position: string; deputy: { id: string; name: string; temporary: boolean; to: string | null } | null } | null;
-type Dir = { key: string; title: string; head: Head; people: string[]; staff_count: number; tone: string; results: string[]; deviations: string[]; url: string };
+type Dir = { key: string; title: string; head: Head; people: string[]; staff_count: number; tone: string; results: string[]; deviations: string[]; url: string; card_url: string };
 type AsgItem = { id: string; number: string; title: string; assignee: string; executor: string; due_on: string; overdue: boolean; status: string; status_title: string; priority: string; priority_title: string };
 type Asg = { open: number; overdue: number; today: number; review: number; items: AsgItem[]; url: string; create_url: string; source: string; office: { open: number; overdue: number; url: string } };
 type Drill = { title: string; rows: { title: string; url: string; value: string | null; note: string }[] } | null;
+type SigHist = { key: string; priority: Prio; title: string; object_type: string; object_number: string; direction: string; url: string; first_seen: string; resolved_at: string;
+  hours: number; times: number; assignment: { id: string; number: string; status: string } | null };
 type Exec = { meta: { generated_at: string; today: string; period: string; timezone: string; quality_titles: Record<Quality, string> }; kpis: Kpi[]; escalations: Esc[];
   directions: Dir[]; assignments: Asg; drill: Record<string, Drill>; can_assign: boolean };
 type Approval = { kind: string; title: string; sub: string; url: string; waiting_since: string | null; tone: string };
@@ -56,9 +58,11 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
   const [drill, setDrill] = useState<Kpi | null>(null);
   const [asg, setAsg] = useState<AsgPrefill | null>(null);
   const [dirs, setDirs] = useState(false);
+  const [hist, setHist] = useState<SigHist[] | null>(null);
   const nav = useNavigate();
   const load = () => api.get<Data>("/api/workplace/executive").then(setD).catch((e: Error) => setErr(String(e?.message || e)));
   useEffect(() => { load(); }, [me.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tab === "ops" && hist === null) api.get<{ items: SigHist[] }>("/api/management/signals/history").then((r) => setHist(r.items)).catch(() => setHist([])); }, [tab, hist]);
   const esc = useMemo(() => (d?.executive.escalations || []).filter((e) => !prio || e.priority === prio), [d, prio]);
   if (err) return <div className="wp-exec"><div className="card"><b>Пульт не загрузился.</b> <span className="muted">{err}</span> <button className="btn ghost" onClick={onClassic}>Обычный вид</button></div></div>;
   if (!d) return <div className="wp-exec"><div className="wp-exec-kpis">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="wp-exec-kpi wp-exec-skel" />)}</div></div>;
@@ -130,7 +134,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
             <b>{empty ? "нет данных" : k.value}{!empty && k.unit && k.unit !== "%" ? <em> {k.unit}</em> : null}</b>
             <span>{k.sub}</span>
             {k.extra.map((e) => <span key={e.label} className="wp-exec-kpi-x">{e.label}: <b>{e.value}</b></span>)}
-            {k.data_quality !== "confirmed" && <i className={`wp-exec-q ${k.data_quality}`}>{qt[k.data_quality]}{k.quality_note && empty ? ` — ${k.quality_note}` : ""}</i>}
+            {k.data_quality !== "confirmed" && <i className={`wp-exec-q ${k.data_quality}`}>{qt[k.data_quality]}{k.quality_note && (empty || k.data_quality !== "partial") ? ` — ${k.quality_note}` : ""}</i>}
             <span className="wp-exec-kpi-foot">{k.period} · {hhmm(k.calculated_at)} МСК</span>
           </button>);
       })}
@@ -161,6 +165,15 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
             </div></div>
           {esc.length ? <ul className="wp-exec-list">{esc.map(escRow)}</ul> : <p className="muted">Ничего не требует вмешательства.</p>}
           <p className="muted wp-exec-note">Порядок: приоритет → срок реакции → длительность просрочки. Один источник и правило — одна строка. Сигнал уходит из очереди, когда устранена причина в исходной карточке; поручение по сигналу видно в строке.</p>
+        </section>
+        <section className="card">
+          <div className="wp-exec-h"><h2>Устранено за 30 дней {hist && hist.length > 0 && <span className="muted">{hist.length}</span>}</h2></div>
+          {hist === null ? <p className="muted">Загрузка…</p> : hist.length === 0 ? <p className="muted">Пока пусто: история ведётся с этого выпуска.</p> :
+            <ul className="wp-exec-drill">{hist.map((h) => (
+              <li key={h.key}><span><span className={`wp-exec-prio ${PRIO[h.priority]?.[1] || "info"}`}>{PRIO[h.priority]?.[0] || h.priority}</span> <Link to={h.url}>{h.object_number && h.title.includes(h.object_number) ? h.title : `${h.object_type}${h.object_number ? ` ${h.object_number}` : ""}: ${h.title}`}</Link></span>
+                <span className="muted">{h.hours < 48 ? `${Math.max(1, Math.round(h.hours))} ч` : `${Math.round(h.hours / 24)} дн.`}</span>
+                <small className="muted">появился {new Date(h.first_seen).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}, устранён {new Date(h.resolved_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}{h.times > 1 ? ` · возникал ${h.times} раза` : ""}{h.assignment ? ` · поручение ${h.assignment.number}` : ""}</small></li>))}</ul>}
+          <p className="muted wp-exec-note">Время устранения — с точностью до часа: журнал обновляется при открытии пульта и фоновым заданием.</p>
         </section>
         {modals}
       </div>);
@@ -196,13 +209,13 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
           <table className="wp-exec-dirs"><thead><tr><th>Направление</th><th>Руководитель</th><th>Результат</th><th>Отклонения</th><th></th></tr></thead>
             <tbody>{x.directions.map((r) => (
               <tr key={r.key} className={r.tone}>
-                <td><b>{r.title}</b><div className="muted">сотрудников: {r.staff_count}</div></td>
+                <td><Link to={r.card_url} className="wp-exec-dir-link"><b>{r.title}</b></Link><div className="muted">сотрудников: {r.staff_count}</div></td>
                 <td>{r.head ? <>{r.head.name}{r.head.position && <div className="muted">{r.head.position}</div>}
                   {r.head.deputy && <div className="wp-exec-dep">{r.head.deputy.temporary ? `замещение${r.head.deputy.to ? ` до ${ddmm(r.head.deputy.to)}` : ""}: ${r.head.deputy.name}` : `заместитель: ${r.head.deputy.name}`}</div>}</>
                   : <span className="muted">не назначен</span>}</td>
                 <td>{r.results.map((l) => <div key={l}>{l}</div>)}</td>
                 <td>{r.deviations.length ? r.deviations.map((l) => <div key={l} className={r.tone === "bad" ? "bad" : "warn"}>{l}</div>) : <span className="muted">нет</span>}</td>
-                <td><Link to={r.url} aria-label={`Открыть: ${r.title}`}>→</Link></td>
+                <td><Link to={r.card_url} aria-label={`Карточка направления: ${r.title}`}>→</Link></td>
               </tr>))}</tbody></table>
         </div>
       </section>

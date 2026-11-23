@@ -4,7 +4,9 @@ from __future__ import annotations
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+import os
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,7 +14,7 @@ from sqlalchemy.orm import Session
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import ROLE_TITLES, Role
 from ..db import get_db
-from ..models import Assignment, AssignmentEvent, OrgDirection, User
+from ..models import Assignment, AssignmentEvent, AssignmentFile, OrgDirection, User
 from ..services import assignments as svc
 from ..services.deal_service import audit
 from ..services.finance.cashview import moscow_today
@@ -144,6 +146,8 @@ def get_assignment(aid: str, db: Session = Depends(get_db), user: CurrentUser = 
     names = _names(db)
     out = svc.as_dict(a, names, moscow_today(), user)
     ev = db.scalars(select(AssignmentEvent).where(AssignmentEvent.assignment_id == a.id).order_by(AssignmentEvent.at, AssignmentEvent.id)).all()
+    out["files"] = svc.files_of(db, a, names, user)
+    out["can_attach"] = svc.can_attach(user, a)
     out["history"] = [{"at": e.at.isoformat() if e.at else None, "by": names.get(e.by_id or "", ""), "action": e.action,
                        "action_title": svc.ACTION_TITLES.get(e.action, e.action), "from": svc.STATUS_TITLES.get(e.from_status, ""),
                        "to": svc.STATUS_TITLES.get(e.to_status, ""), "comment": e.comment, "data": e.data} for e in ev]
@@ -168,3 +172,67 @@ def assignees(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
     return {"users": [{"id": u.id, "name": u.display_name, "position": _position(u), "direction": svc.direction_of(u)}
                       for u in sorted(users, key=lambda x: x.display_name)],
             "heads": hd, "directions": [{"key": k, "title": t} for k, t in svc.DIRECTIONS]}
+
+
+# ------------------------------------------------------------------ D-155: подтверждения к поручениям
+
+def _visible(db: Session, user, aid: str) -> Assignment:
+    a = db.get(Assignment, aid)
+    if not a or not svc.can_see(user, a):
+        raise HTTPException(404, "Поручение не найдено")
+    return a
+
+
+@router.post("/assignments/{aid}/files")
+def upload_files(aid: str, files: list[UploadFile] = File(...), db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    a = _visible(db, user, aid)
+    svc.save_files(db, user, a, files)
+    db.commit()
+    return get_assignment(a.id, db, user)
+
+
+@router.get("/assignments/{aid}/files/{fid}")
+def download_file(aid: str, fid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Доступ — через поручение (кто его видит), затем статус проверки, затем выдача (журнал скачиваний)."""
+    from ..core.config import get_settings
+    from ..core.download_audit import note
+    from ..core.files import file_response
+    a = _visible(db, user, aid)
+    f = db.get(AssignmentFile, fid)
+    if f is None or f.assignment_id != a.id or f.removed_at is not None:
+        raise HTTPException(404, "Файл не найден")
+    if f.scan_status not in ("clean", "legacy_unscanned"):
+        raise HTTPException(410, "Файл заблокирован проверкой безопасности")
+    note(entity_type="assignment_file", entity_id=f.id)
+    st = get_settings()
+    if st.storage_provider == "s3":
+        from fastapi.responses import RedirectResponse
+        from .. import adapters
+        note(presigned=True)
+        return RedirectResponse(adapters.storage(st).presigned(f.storage_path, f.file_name), status_code=307,
+                                headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+    full = os.path.join(st.storage_local_root, f.storage_path)
+    if not os.path.isfile(full):
+        raise HTTPException(404, "Файл не найден")
+    return file_response(full, f.file_name)
+
+
+@router.delete("/assignments/{aid}/files/{fid}")
+def delete_file(aid: str, fid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    a = _visible(db, user, aid)
+    f = db.get(AssignmentFile, fid)
+    if f is None or f.assignment_id != a.id or f.removed_at is not None:
+        raise HTTPException(404, "Файл не найден")
+    svc.remove_file(db, user, a, f)
+    db.commit()
+    return get_assignment(a.id, db, user)
+
+
+# ------------------------------------------------------------------ D-155: история сигналов «Требует вмешательства»
+
+@router.get("/signals/history")
+def signals_history(days: int = 30, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    if not user.has(Role.GD):
+        raise HTTPException(403, "История сигналов — на пульте ЗГД")
+    from ..services import signals
+    return {"items": signals.history(db, max(1, min(days, 180))), "days": days}
