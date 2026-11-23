@@ -7,7 +7,7 @@ import AssignmentDialog, { type AsgPrefill } from "../components/workplace/Assig
 // Поручения ЗГД (D-154, ТЗ «Рабочее место ЗГД» v2 §5): реестр «На контроле», «Мне», «Моему подразделению»; карточка с историей.
 // Полный цикл: новое → принято → в работе → заблокировано / на проверке → на доработке → выполнено; отменено.
 
-type A = { id: string; number: string; kind: string; kind_title: string; title: string; body: string; priority: string; priority_title: string; mode: string; direction: string;
+type A = { id: string; number: string; kind: string; kind_title: string; title: string; body: string; expected_result: string; priority: string; priority_title: string; mode: string; direction: string;
   author: string; assignee: string; executor: string; head: string; status: string; status_title: string; overdue: boolean; overdue_days: number; due_on: string; first_due_on: string;
   rescheduled: boolean; source_url: string; source_title: string; report: string; block_reason: string; actions: string[]; my_role: string[] };
 type H = { at: string; by: string; action: string; action_title: string; from: string; to: string; comment: string; data: Record<string, string> };
@@ -56,6 +56,7 @@ function Card({ id, onChanged, onClose }: { id: string; onChanged: () => void; o
       <h2>{a.kind === "explain" ? "Пояснение: " : ""}{a.title}</h2>
       {a.body && <p className="asg-body">{a.body}</p>}
       <dl className="asg-dl">
+        {a.expected_result && <><dt>Ожидаемый результат</dt><dd><b>{a.expected_result}</b></dd></>}
         <dt>Кому</dt><dd>{a.assignee}{a.mode === "head" ? ` — руководитель${a.direction ? ` («${a.direction}»)` : ""}` : ""}</dd>
         {a.executor && <><dt>Исполнитель</dt><dd>{a.executor}</dd></>}
         {a.head && <><dt>Руководитель видит</dt><dd>{a.head}</dd></>}
@@ -99,6 +100,7 @@ export default function AssignmentsPage({ me }: { me: Me }) {
   const [err, setErr] = useState("");
   const open = sp.get("open") || "";
   const creating = sp.get("new") === "1";
+  useEffect(() => { const st = sp.get("status"); const sc = sp.get("scope"); if (st) setStatus(st); if (sc) setScope(sc); }, [sp]);
   const load = useCallback(() => { api.get<{ items: A[] }>(`/api/management/assignments?scope=${scope}&status=${status}`).then((r) => setRows(r.items)).catch((e: Error) => setErr(e.message)); }, [scope, status]);
   useEffect(load, [load]);
   const set = (k: string, v: string) => { const n = new URLSearchParams(sp); if (v) n.set(k, v); else n.delete(k); setSp(n); };
@@ -111,7 +113,7 @@ export default function AssignmentsPage({ me }: { me: Me }) {
       <div className="asg-filters">
         <nav className="wp-exec-tabs" aria-label="Чьи поручения">{scopes.map(([k, t]) => <button key={k} className={scope === k ? "cur" : ""} onClick={() => setScope(k)}>{t}</button>)}</nav>
         <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Статус">
-          <option value="open">открытые</option><option value="overdue">просроченные</option><option value="review">на проверке</option>
+          <option value="open">открытые</option><option value="inwork">в работе</option><option value="today">срок сегодня</option><option value="overdue">просроченные</option><option value="review">на проверке</option>
           <option value="blocked">заблокированные</option><option value="done">выполненные</option><option value="cancelled">отменённые</option><option value="any">все</option></select>
       </div>
       {err && <p className="bad">{err}</p>}

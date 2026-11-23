@@ -13,20 +13,22 @@ import DirectionsDialog from "./DirectionsDialog";
 
 type Quality = "confirmed" | "partial" | "stale" | "unavailable" | "unverified";
 type Kpi = { key: string; title: string; value: number | string | null; sub: string; url: string; tone: string; data_quality: Quality; quality_note: string; period: string; source: string;
-  unit: string; currency: string; calculated_at: string; drilldown: { url: string; list: string | null }; extra: { label: string; value: number }[] };
+  unit: string; currency: string; calculated_at: string; drilldown: { url: string; list: string | null }; extra: { label: string; value: number }[];
+  method: string; reference: { amount: number; text: string; rates: { currency: string; rate: number; on: string }[] } | null };
 type Prio = "critical" | "high" | "normal" | "info";
-type Esc = { key: string; priority: Prio; title: string; reason: string; impact: { amount: number; currency: string } | null; owner: string; owner_role: string; head: string; direction: string;
+type Esc = { key: string; group: string; priority: Prio; title: string; reason: string; impact: { amount: number; currency: string; rub_ref?: string } | null; owner: string; owner_role: string; head: string; direction: string;
   object_type: string; object_number: string; next_action: string; url: string; due: string | null; days: number; source: string; react_by: string | null;
   assignment: { number: string; status: string; url: string } | null };
 type Head = { id: string; name: string; position: string; deputy: { id: string; name: string; temporary: boolean; to: string | null } | null } | null;
 type Dir = { key: string; title: string; head: Head; people: string[]; staff_count: number; tone: string; results: string[]; deviations: string[]; url: string; card_url: string };
 type AsgItem = { id: string; number: string; title: string; assignee: string; executor: string; due_on: string; overdue: boolean; status: string; status_title: string; priority: string; priority_title: string };
 type Asg = { open: number; overdue: number; today: number; review: number; items: AsgItem[]; url: string; create_url: string; source: string; office: { open: number; overdue: number; url: string } };
-type Drill = { title: string; rows: { title: string; url: string; value: string | null; note: string }[] } | null;
+type Drill = { title: string; footer?: string; rows: { title: string; url: string; value: string | null; note: string }[] } | null;
+type Deadline = { on: string; title: string; sub: string; type: string; who: string; url: string; urgency: "overdue" | "today" | "soon" | "later" };
 type SigHist = { key: string; priority: Prio; title: string; object_type: string; object_number: string; direction: string; url: string; first_seen: string; resolved_at: string;
   hours: number; times: number; assignment: { id: string; number: string; status: string } | null };
 type Exec = { meta: { generated_at: string; today: string; period: string; timezone: string; quality_titles: Record<Quality, string> }; kpis: Kpi[]; escalations: Esc[];
-  directions: Dir[]; assignments: Asg; drill: Record<string, Drill>; can_assign: boolean };
+  directions: Dir[]; assignments: Asg; drill: Record<string, Drill>; can_assign: boolean; deadlines: Deadline[] };
 type Approval = { kind: string; title: string; sub: string; url: string; waiting_since: string | null; tone: string };
 type Ev = { on: string; title: string; sub: string; tone: string; url: string };
 type Data = {
@@ -59,6 +61,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
   const [asg, setAsg] = useState<AsgPrefill | null>(null);
   const [dirs, setDirs] = useState(false);
   const [hist, setHist] = useState<SigHist[] | null>(null);
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
   const nav = useNavigate();
   const load = () => api.get<Data>("/api/workplace/executive").then(setD).catch((e: Error) => setErr(String(e?.message || e)));
   useEffect(() => { load(); }, [me.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -73,6 +76,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
   const fromEsc = (e: Esc, kind: "task" | "explain"): AsgPrefill => ({
     kind, priority: e.priority === "info" ? "normal" : e.priority, source_url: e.url, source_key: e.key,
     source_title: `${e.object_type}${e.object_number ? ` ${e.object_number}` : ""}: ${e.title}`,
+    expected_result: kind === "explain" ? "Письменно: причина, что сделано, новый срок устранения" : `Причина сигнала устранена: ${e.reason}`.slice(0, 500),
     title: kind === "explain" ? `Пояснить: ${e.reason}`.slice(0, 250) : `${e.next_action}: ${e.title}`.slice(0, 250) });
 
   const escRow = (e: Esc) => (
@@ -83,7 +87,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
         <Link to={e.url} className="wp-exec-esc-title">{e.title}</Link>
         <div className="muted">{e.reason}</div>
         <div className="wp-exec-esc-meta">
-          <span>{e.impact ? <b>{money(e.impact.amount, e.impact.currency)}</b> : <span className="muted">сумма не определена</span>}</span>
+          <span>{e.impact ? <><b>{money(e.impact.amount, e.impact.currency)}</b>{e.impact.rub_ref ? <span className="muted"> ({e.impact.rub_ref})</span> : null}</> : <span className="muted">сумма не определена</span>}</span>
           <span>ответственный: {e.owner || "не назначен"}{e.owner_role && e.owner !== "вы" && !e.owner.includes("(") ? ` (${e.owner_role})` : ""}{e.head ? ` · руководитель: ${e.head}` : ""}</span>
           <span>дальше: {e.next_action}</span>
         </div>
@@ -95,6 +99,20 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
         {x.can_assign && !e.assignment && <button className="btn ghost" onClick={() => setAsg(fromEsc(e, "explain"))}>Запросить пояснение</button>}
       </div>
     </li>);
+
+  // разные проблемы одного объекта (сделки) — одна группа: первая (самая важная) видна, остальные — по «ещё N» (DEV-07)
+  const grouped = (list: Esc[]) => {
+    const order: string[] = []; const by: Record<string, Esc[]> = {};
+    list.forEach((e) => { const g = e.group || e.key; if (!by[g]) { by[g] = []; order.push(g); } by[g].push(e); });
+    return order.map((g) => ({ g, items: by[g] }));
+  };
+  const groupRows = (list: Esc[], limit?: number) => grouped(list).slice(0, limit).map(({ g, items }) => (
+    <li key={g} className="wp-exec-grp">
+      <ul className="wp-exec-list">{escRow(items[0])}{opened[g] && items.slice(1).map(escRow)}</ul>
+      {items.length > 1 && <button className="wp-exec-more" onClick={() => setOpened({ ...opened, [g]: !opened[g] })}>
+        {opened[g] ? "свернуть" : `ещё ${items.length - 1} ${items.length - 1 === 1 ? "проблема" : "проблемы"} по ${items[0].object_type === "сделка" ? "этой сделке" : "этому объекту"}`}</button>}
+    </li>));
+  const groupsCount = grouped(x.escalations).length;
 
   const header = (
     <header className="wp-exec-head">
@@ -127,12 +145,13 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
     <section className="wp-exec-kpis" aria-label="Показатели компании">
       {x.kpis.map((k) => {
         const empty = k.value === null || k.value === undefined;
-        const open = () => (k.drilldown.list && x.drill[k.drilldown.list] ? setDrill(k) : nav(k.url));
+        const open = () => setDrill(k);
         return (
-          <button key={k.key} type="button" onClick={open} className={`wp-exec-kpi ${k.tone}`} title={`Источник: ${k.source}`}>
+          <button key={k.key} type="button" onClick={open} className={`wp-exec-kpi ${k.tone}`} title={`${k.method}\nИсточник: ${k.source}`} aria-label={`${k.title}: открыть расшифровку и методику`}>
             <small>{k.title}</small>
             <b>{empty ? "нет данных" : k.value}{!empty && k.unit && k.unit !== "%" ? <em> {k.unit}</em> : null}</b>
             <span>{k.sub}</span>
+            {k.reference && <span className="wp-exec-kpi-ref">{k.reference.text}</span>}
             {k.extra.map((e) => <span key={e.label} className="wp-exec-kpi-x">{e.label}: <b>{e.value}</b></span>)}
             {k.data_quality !== "confirmed" && <i className={`wp-exec-q ${k.data_quality}`}>{qt[k.data_quality]}{k.quality_note && (empty || k.data_quality !== "partial") ? ` — ${k.quality_note}` : ""}</i>}
             <span className="wp-exec-kpi-foot">{k.period} · {hhmm(k.calculated_at)} МСК</span>
@@ -141,12 +160,16 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
     </section>);
 
   const modals = (<>
-    {drill && x.drill[drill.drilldown.list || ""] && (() => { const dr = x.drill[drill.drilldown.list || ""]!; return (
-      <SecurityModal title={`${dr.title}: ${dr.rows.length}`} onClose={() => setDrill(null)} width={640}>
-        <p className="muted">{drill.source}. {drill.period}, рассчитано в {hhmm(drill.calculated_at)} МСК.</p>
-        <ul className="wp-exec-drill">{dr.rows.map((r, i) => (
+    {drill && (() => { const dr = drill.drilldown.list ? x.drill[drill.drilldown.list] : null; return (
+      <SecurityModal title={dr ? `${dr.title}: ${dr.rows.length}` : drill.title} onClose={() => setDrill(null)} width={680}>
+        <div className="wp-exec-method">
+          <b>Как считается.</b> {drill.method}
+          <div className="muted">Источник: {drill.source}. Период: {drill.period}. Рассчитано в {hhmm(drill.calculated_at)} МСК.{drill.data_quality !== "confirmed" ? ` Качество: ${qt[drill.data_quality]}${drill.quality_note ? ` — ${drill.quality_note}` : ""}.` : ""}</div>
+        </div>
+        {dr && <ul className="wp-exec-drill">{dr.rows.map((r, i) => (
           <li key={i}><Link to={r.url}>{r.title}</Link><span>{r.value ?? <span className="muted">нет данных</span>}</span>{r.note && <small className="muted">{r.note}</small>}</li>))}
-          {!dr.rows.length && <li className="muted">Список пуст.</li>}</ul>
+          {!dr.rows.length && <li className="muted">Список пуст.</li>}</ul>}
+        {dr?.footer && <p className="muted wp-exec-note">Справочно: {dr.footer}. Курс — последний опубликованный ЦБ РФ не позже сегодняшней даты.</p>}
         <div className="asg-actions"><Link className="btn ghost" to={drill.url}>Открыть реестр →</Link></div>
       </SecurityModal>); })()}
     {asg && <AssignmentDialog prefill={asg} onClose={() => setAsg(null)} onDone={() => { setAsg(null); load(); }} />}
@@ -163,7 +186,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
               {([["", `все ${x.escalations.length}`], ["critical", `критично ${counts.critical}`], ["high", `высокий ${counts.high}`], ["normal", `обычный ${counts.normal}`], ["info", `информационно ${counts.info}`]] as const).map(([k, t]) => (
                 <button key={k} className={prio === k ? "cur" : ""} onClick={() => setPrio(k)}>{t}</button>))}
             </div></div>
-          {esc.length ? <ul className="wp-exec-list">{esc.map(escRow)}</ul> : <p className="muted">Ничего не требует вмешательства.</p>}
+          {esc.length ? <ul className="wp-exec-list">{groupRows(esc)}</ul> : <p className="muted">Ничего не требует вмешательства.</p>}
           <p className="muted wp-exec-note">Порядок: приоритет → срок реакции → длительность просрочки. Один источник и правило — одна строка. Сигнал уходит из очереди, когда устранена причина в исходной карточке; поручение по сигналу видно в строке.</p>
         </section>
         <section className="card">
@@ -186,17 +209,17 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
       {header}{quick}{tabs}{kpis}
       <section className="card wp-exec-queue">
         <div className="wp-exec-h"><h2>Требует моего вмешательства {x.escalations.length > 0 && <span className="wp-exec-count">{x.escalations.length}</span>}</h2>
-          {x.escalations.length > 5 && <button className="btn ghost" onClick={() => setTab("ops")}>Все проблемы ({x.escalations.length}) →</button>}</div>
-        {x.escalations.length ? <ul className="wp-exec-list">{x.escalations.slice(0, 5).map(escRow)}</ul> : <p className="muted">Ничего не требует вмешательства.</p>}
+          {groupsCount > 5 && <button className="btn ghost" onClick={() => setTab("ops")}>Все проблемы ({x.escalations.length}) →</button>}</div>
+        {x.escalations.length ? <ul className="wp-exec-list">{groupRows(x.escalations, 5)}</ul> : <p className="muted">Ничего не требует вмешательства.</p>}
       </section>
       <section className="wp-exec-grid2">
         <div className="card">
           <div className="wp-exec-h"><h2>Поручения</h2><Link to={a.url + "?scope=control"}>На контроле →</Link></div>
           <div className="wp-exec-asg">
-            <div><b>{a.open}</b><small>в работе</small></div>
-            <div className={a.overdue ? "bad" : ""}><b>{a.overdue}</b><small>просрочено</small></div>
-            <div><b>{a.today}</b><small>срок сегодня</small></div>
-            <div className={a.review ? "warn" : ""}><b>{a.review}</b><small>на проверке</small></div>
+            <Link to="/assignments?scope=all&status=inwork"><b>{a.open}</b><small>в работе</small></Link>
+            <Link to="/assignments?scope=all&status=overdue" className={a.overdue ? "bad" : ""}><b>{a.overdue}</b><small>просрочено</small></Link>
+            <Link to="/assignments?scope=all&status=today"><b>{a.today}</b><small>срок сегодня</small></Link>
+            <Link to="/assignments?scope=all&status=review" className={a.review ? "warn" : ""}><b>{a.review}</b><small>на проверке</small></Link>
           </div>
           <ul className="wp-exec-mini">{a.items.map((i) => (
             <li key={i.id}><Link to={`/assignments?open=${i.id}`}><span className={`wp-exec-prio ${PR_CLS[i.priority]}`}>{i.priority_title}</span> {i.title}</Link>
@@ -222,7 +245,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
       <section className="wp-exec-grid4">
         <div className="card">
           <div className="wp-exec-h"><h2>Денежный поток</h2>{d.money?.url && <Link to={d.money.url}>Финансы →</Link>}</div>
-          {d.money ? <>
+          {d.money && !d.money.curve.some((c) => c.in || c.out) ? <p className="muted">Поступлений и платежей за 8 недель в «Финансах» нет.</p> : d.money ? <>
             <svg className="wp-exec-bars" viewBox={`0 0 ${d.money.curve.length * 40} 110`} role="img" aria-label="Поступления и платежи по неделям, рубли">
               {d.money.curve.map((c, i) => (
                 <g key={c.week}><title>{`${c.label}: поступления ${money(c.in)}, платежи ${money(c.out)}`}</title>
@@ -249,9 +272,11 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
           </ul> : <p className="muted">Нет доступа.</p>}
         </div>
         <div className="card">
-          <div className="wp-exec-h"><h2>Ближайшие сроки</h2></div>
-          <ul className="wp-exec-mini">{d.upcoming.slice(0, 3).map((e) => <li key={e.url + e.on + e.title}><Link to={e.url}>{e.title}</Link><span className="muted">{ddmm(e.on)} · {e.sub}</span></li>)}
-            {!d.upcoming.length && <li className="muted">В ближайшие 14 дней сроков нет.</li>}</ul>
+          <div className="wp-exec-h"><h2>Ближайшие сроки</h2><span className="muted">14 дней</span></div>
+          <ul className="wp-exec-mini">{x.deadlines.slice(0, 5).map((e) => (
+            <li key={e.url + e.on + e.title} className={`wp-exec-dl ${e.urgency}`}><Link to={e.url}>{e.title}</Link>
+              <span><b className="wp-exec-dl-on">{e.urgency === "overdue" ? `просрочено с ${ddmm(e.on)}` : e.urgency === "today" ? "сегодня" : ddmm(e.on)}</b> · {e.type}{e.who ? ` · ${e.who}` : ""}</span></li>))}
+            {!x.deadlines.length && <li className="muted">В ближайшие 14 дней сроков нет.</li>}</ul>
         </div>
       </section>
       <p className="muted wp-exec-note">Обновлено {new Date(x.meta.generated_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" })} МСК. Нажатие на показатель открывает список с теми же условиями; подсказка — источник.</p>

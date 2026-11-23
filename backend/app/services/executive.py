@@ -11,21 +11,27 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core.roles import Role
-from ..core.workflow import DealStatus
+from ..core.workflow import STATUS_TITLES as STATUS_NAMES, DealStatus
 
 LOGISTICS = ("readiness", "shipment", "border", "declaration", "delivery")
 PAYMENTS = ("client_advance", "client_final", "factory_advance", "factory_final", "lc_opened")
 FACTORY = ("production", "factory_preacceptance", "local_option_order")
 SERVICE = ("commissioning", "local_option_install")
 PRIO = {"critical": 0, "high": 1, "normal": 2, "info": 3}
-STALE_BANK_DAYS = 3        # D-155: рабочих дней без загрузки банковских операций — дебиторка «устарело»
+STALE_BANK_DAYS = 3
+METHOD = {'active': 'Сделки ГШО в работе (статусы до выигрыша) и открытые заявки на запчасти. Сумма — цена КП без НДС в рублях из расчёта. Исключены: черновики в корзине, проигранные, закрытые.',
+          'risk': 'Выигранные сделки, у которых хотя бы один этап исполнения без отметки факта, а уточнённая (если есть) или плановая дата уже прошла. Сумма — цена сделки без НДС.',
+          'won': 'Сделки со статусом «выиграна» и дальше, дата контракта — в текущем квартале; плюс выигранные заявки на запчасти. Сравнения с планом нет: план продаж не задан.',
+          'margin': 'Средневзвешенная по цене маржа базового сценария утверждённой версии расчёта по выигранному предложению. Сделки без утверждённого расчёта не учитываются — покрытие указано в подписи.',
+          'receivable': 'Обязательства «нам платят» в «Финансах» с прошедшим сроком и ненулевым остатком к оплате. Суммы — в валюте обязательства, разные валюты не складываются; рубли — справочно по курсу ЦБ на сегодня. «Устарело» — банковские операции не загружались больше 3 рабочих дней.',
+          'exec': 'Этапы исполнения выигранных сделок без отметки факта, у которых уточнённая или плановая дата прошла. Отдельно: сколько сделок имеют такие этапы и у скольких уточнённый срок окончания позже планового.'}        # D-155: рабочих дней без загрузки банковских операций — дебиторка «устарело»
 
 
 def _money(v: Optional[float], ccy: str = "RUB") -> str:
@@ -51,17 +57,43 @@ def money_by_currency(items: list[tuple[Optional[float], str]]) -> str:
 QUALITY = ("confirmed", "partial", "stale", "unavailable", "unverified")
 
 
+def rub_reference(db: Session, items: list[tuple[Optional[float], str]], today: date) -> Optional[dict]:
+    """Справочно: сумма в рублях по курсу ЦБ на сегодня (последний курс не позже сегодняшней даты). Решение владельца 23.11.2026:
+    дебиторка — в валюте обязательства, рубли — только справочно, с курсом и датой. Нет курса по какой-то валюте — справки нет."""
+    from ..models import FxRate
+    acc: dict[str, float] = defaultdict(float)
+    for amount, ccy in items:
+        if amount:
+            acc[(ccy or "RUB").upper()] += float(amount)
+    if not acc or set(acc) == {"RUB"}:
+        return None
+    total, rates = 0.0, []
+    for ccy, v in acc.items():
+        if ccy == "RUB":
+            total += v
+            continue
+        r = db.scalars(select(FxRate).where(FxRate.currency == ccy, FxRate.on <= today).order_by(FxRate.on.desc(), FxRate.source).limit(1)).first()
+        if r is None:
+            return None
+        total += v * float(r.rate)
+        rates.append({"currency": ccy, "rate": round(float(r.rate), 4), "on": r.on.isoformat(), "source": r.source})
+    on = min(x["on"] for x in rates)
+    return {"amount": round(total, 2), "text": f"≈ {_money(total)} по курсу ЦБ на {on[8:10]}.{on[5:7]}",
+            "rates": rates}
+
+
 def _kpi(key: str, title: str, value: Any, sub: str, url: str, tone: str = "", quality: str = "confirmed", period: str = "", source: str = "",
-         unit: str = "", currency: str = "", note: str = "", calculated_at: str = "", drill: bool = False, extra: Optional[list] = None) -> dict:
+         unit: str = "", currency: str = "", note: str = "", calculated_at: str = "", drill: bool = False, extra: Optional[list] = None,
+         method: str = "", ref: Optional[dict] = None) -> dict:
     """KPI по ТЗ v2 §7: key, title, value, unit/currency, period, calculated_at, data_quality, drilldown. Нет данных — value=None и причина."""
     assert quality in QUALITY
     return {"key": key, "title": title, "value": value, "sub": sub, "url": url, "tone": tone, "data_quality": quality, "quality_note": note,
             "period": period, "source": source, "unit": unit, "currency": currency, "calculated_at": calculated_at,
-            "drilldown": {"url": url, "list": key if drill else None}, "extra": extra or []}
+            "drilldown": {"url": url, "list": key if drill else None}, "extra": extra or [], "method": method, "reference": ref}
 
 
 def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals: list, open_parts: list, exec_rows: list, won_q: list, won_q_parts: list,
-          approvals: list, money: Optional[dict], legal: Optional[dict], cin: dict, claims: list, poas: list, price) -> dict:
+          approvals: list, money: Optional[dict], legal: Optional[dict], cin: dict, claims: list, poas: list, price, events: Optional[list] = None) -> dict:
     from ..models import ExecutionStage, User, WarrantyClaim
     from ..services.execution_service import won_variant
     now = datetime.now(timezone.utc).isoformat()
@@ -137,13 +169,30 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
              extra=[{"label": "сделок с просроченными этапами", "value": len(risk_rows)},
                     {"label": "сделок со сдвигом уточнённого срока окончания", "value": len(shifted)}]),
     ]
+    for k in kpis:
+        k["method"] = METHOD.get(k["key"], "")
+    rub_ref = rub_reference(db, [(r["amount"], r["currency"]) for r in rec_rows], today) if fin else None
+    if rub_ref:
+        kpis[4]["reference"] = rub_ref
+    open_list = [{"title": f"{d.number} · {d.client.name if d.client else ''}", "url": f"/deals/{d.id}", "value": _money(price(d)) if fin and price(d) else None,
+                  "note": STATUS_NAMES.get(d.status, "")} for d in open_deals] + \
+                [{"title": f"{p.get('number', '')} · {p.get('client_name', '')}", "url": p.get("url") or "/deals?block=work", "value": _money(p["price_rub"]) if fin and p.get("price_rub") else None,
+                  "note": "заявка на запчасти"} for p in open_parts]
+    won_list = [{"title": f"{d.number} · {d.client.name if d.client else ''}", "url": f"/deals/{d.id}", "value": _money(price(d)) if fin and price(d) else None,
+                 "note": STATUS_NAMES.get(d.status, "")} for d in won_q] + \
+               [{"title": f"{p.get('number', '')} · {p.get('client_name', '')}", "url": p.get("url") or "/deals?block=won", "value": _money(p["price_rub"]) if fin and p.get("price_rub") else None,
+                 "note": "заявка на запчасти"} for p in won_q_parts]
+    kpis[0]["drilldown"]["list"], kpis[2]["drilldown"]["list"] = "active", "won"
     rec_list = [{"title": f"{r['title']} · {r['client']}", "url": r["url"] or "/finance?tab=liquidity", "value": _money(r["amount"], r["currency"]),
                  "note": f"{r['deal_number']}, срок {r['on']:%d.%m}, просрочка {r['overdue_days']} дн."} for r in sorted(rec_rows, key=lambda r: -r["overdue_days"])]
     drill = {
+        "active": {"title": "Активные сделки", "rows": open_list},
+        "won": {"title": f"Выиграно за {period}", "rows": won_list},
         "risk": {"title": "Сделки под риском", "rows": [{"title": f"{r['deal'].number} · {r['deal'].client.name if r['deal'].client else ''}", "url": f"/deals/{r['deal'].id}?tab=execution",
                                                        "value": f"{r['overdue']} этап(ов)", "note": (_money(price(r['deal'])) if fin and price(r['deal']) else "")} for r in risk_rows]},
         "exec": {"title": "Просроченные этапы исполнения", "rows": late_stage_rows},
-        "receivable": {"title": "Просроченная дебиторка", "rows": rec_list} if fin else None,
+        "receivable": {"title": "Просроченная дебиторка", "rows": rec_list, "footer": (rub_ref or {}).get("text", "")
+                       + (" (" + ", ".join(f"{x['currency']} {x['rate']:.4f}".replace(".", ",") for x in rub_ref["rates"]) + ")" if rub_ref else "")} if fin else None,
         "margin": {"title": "Маржа выигранных за квартал", "rows": margin_rows} if can_cost else None,
     }
 
@@ -236,6 +285,11 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
         e["head"] = names.get(h, "") if h and h != oid else ""
         e["owner_id"] = oid
         e["react_by"] = today.isoformat() if e["priority"] in ("critical", "high") else (e["due"] or None)
+        e["group"] = ":".join(e["key"].split(":")[:2]) if e["key"].startswith("deal:") else e["key"]
+        im = e.get("impact")
+        if im and (im.get("currency") or "RUB").upper() != "RUB":
+            ref = rub_reference(db, [(im["amount"], im["currency"])], today)
+            im["rub_ref"] = ref["text"] if ref else ""
         a = open_asg.get(e["key"])
         e["assignment"] = {"number": a.number, "status": asg.STATUS_TITLES[a.status], "url": f"/assignments?open={a.id}"} if a else None
     escalations = sorted(esc.values(), key=lambda e: (PRIO[e["priority"]], e["react_by"] or "9999", -(e["days"] or 0)))
@@ -314,11 +368,37 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
                            "results": results, "deviations": devs, "lines": results + devs, "url": url, "card_url": f"/directions/{key}",
                            "objects": objects.get(key, [])})
 
+    # ---------------- ближайшие сроки (D-156, DEV-12): тип, ответственный, срочность; просроченные поручения — тоже
+    KIND = {"task": "задача", "kp": "срок КП", "decision": "решение клиента", "stage": "этап исполнения", "poa": "доверенность", "contract": "договор", "claim": "претензия"}
+    deal_mgr = {d.id: names.get(d.manager_id, "") for d in list(open_deals) + [r["deal"] for r in exec_rows]}
+    legal_head = names.get(hd.get("legal") or "", "") or "юрист"
+
+    def urgency(on: date) -> str:
+        return "overdue" if on < today else "today" if on == today else "soon" if (on - today).days <= 3 else "later"
+    dl = []
+    for ev in events or []:
+        on = date.fromisoformat(ev["on"])
+        if not today <= on <= today + timedelta(days=14):
+            continue
+        url = ev.get("url") or ""
+        did = url.split("/deals/")[1].split("?")[0].split("/")[0] if url.startswith("/deals/") else ""
+        who = deal_mgr.get(did, "") if did else (legal_head if ev.get("kind") in ("poa", "contract", "claim") else "")
+        dl.append({"on": ev["on"], "title": ev["title"], "sub": ev.get("sub", ""), "type": KIND.get(ev.get("kind", ""), ev.get("kind", "") or "событие"),
+                   "who": who, "url": url, "urgency": urgency(on)})
+    from ..models import Assignment as _A
+    for a in db.scalars(select(_A).where(_A.status.in_(asg.OPEN), _A.due_on <= today + timedelta(days=14))).all():
+        if not asg.can_see(user, a):
+            continue
+        dl.append({"on": a.due_on.isoformat(), "title": f"{a.number}: {a.title}", "sub": asg.STATUS_TITLES[a.status], "type": "поручение",
+                   "who": names.get(a.executor_id or a.assignee_id, ""), "url": f"/assignments?open={a.id}", "urgency": urgency(a.due_on)})
+    U = {"overdue": 0, "today": 1, "soon": 2, "later": 3}
+    deadlines = sorted(dl, key=lambda x: (x["on"], U[x["urgency"]], x["title"]))
+
     # ---------------- поручения ЗГД (D-154); контроль документов Канцелярии — отдельной строкой
     assignments = asg.summary(db, user, today, names)
     o_over = sum(r["overdue"] for r in ctl.get("items", []))
     assignments["office"] = {"open": sum(r["open"] for r in ctl.get("items", [])), "overdue": o_over, "url": "/office?t=control"}
 
     return {"meta": {"generated_at": now, "today": today.isoformat(), "period": period, "timezone": "Europe/Moscow", "quality_titles": {"confirmed": "подтверждено", "partial": "частичные данные", "stale": "устарело", "unavailable": "нет данных", "unverified": "не подтверждено"}},
-            "kpis": kpis, "escalations": escalations, "directions": directions, "assignments": assignments, "drill": drill,
+            "kpis": kpis, "escalations": escalations, "directions": directions, "assignments": assignments, "drill": drill, "deadlines": deadlines,
             "can_assign": user.has(Role.GD)}

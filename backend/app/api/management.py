@@ -84,6 +84,7 @@ def set_directions(body: DirectionsIn, db: Session = Depends(get_db), user: Curr
 class AssignmentIn(BaseModel):
     title: str
     body: str = ""
+    expected_result: str = ""
     mode: str = "direct"
     assignee_id: str
     direction_key: str = ""
@@ -106,7 +107,7 @@ class ActionIn(BaseModel):
 @router.get("/assignments")
 def list_assignments(scope: str = "all", status: str = "open", db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """scope: all — всё, что вижу; mine — мне исполнять; control — я автор; team — моему подразделению (я руководитель).
-    status: open | overdue | review | done | cancelled | any."""
+    status: open | inwork (открытые, кроме «на проверке») | today (срок сегодня) | overdue | review | done | cancelled | any."""
     today = moscow_today()
     q = svc.visible_query(user)
     me = list({user.id} | set(user.acting_for or set()))
@@ -118,6 +119,10 @@ def list_assignments(scope: str = "all", status: str = "open", db: Session = Dep
         q = q.where(Assignment.head_id.in_(me))
     if status == "open":
         q = q.where(Assignment.status.in_(svc.OPEN))
+    elif status == "inwork":
+        q = q.where(Assignment.status.in_([x for x in svc.OPEN if x != "review"]))
+    elif status == "today":
+        q = q.where(Assignment.status.in_(svc.OPEN), Assignment.due_on == today)
     elif status == "overdue":
         q = q.where(Assignment.status.in_(svc.OPEN), Assignment.due_on < today)
     elif status in svc.STATUS_TITLES:

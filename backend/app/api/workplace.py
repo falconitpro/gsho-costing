@@ -532,7 +532,7 @@ def build(db: Session, user: CurrentUser, executive: bool = False) -> tuple[dict
         from ..services import executive as exec_svc
         out["executive"] = exec_svc.build(db, user, today=today, names=names, fin=fin, open_deals=open_deals, open_parts=open_parts, exec_rows=exec_rows,
                                           won_q=won_q, won_q_parts=won_q_parts, approvals=approvals, money=money, legal=legal, cin=cin, claims=claims,
-                                          poas=poas, price=_price)
+                                          poas=poas, price=_price, events=events)
     ctx = {"today": today, "local": local, "tasks": tasks, "approvals": approvals, "poas": poas, "cin": cin, "claims": claims, "money": money}
     return out, ctx
 

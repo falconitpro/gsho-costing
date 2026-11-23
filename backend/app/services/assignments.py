@@ -147,7 +147,8 @@ def _event(db: Session, a: Assignment, by: Optional[str], action: str, frm: str,
 
 
 def create(db: Session, user, *, title: str, body: str, mode: str, assignee_id: str, due_on: date, priority: str = "normal",
-           kind: str = "task", direction_key: str = "", source_url: str = "", source_key: str = "", source_title: str = "") -> Assignment:
+           kind: str = "task", direction_key: str = "", source_url: str = "", source_key: str = "", source_title: str = "",
+           expected_result: str = "") -> Assignment:
     if not user.has(Role.GD):
         raise HTTPException(403, "Поручения создаёт заместитель генерального директора")
     title = (title or "").strip()
@@ -177,6 +178,7 @@ def create(db: Session, user, *, title: str, body: str, mode: str, assignee_id: 
     year = now().year
     seq = (db.scalar(select(func.max(Assignment.seq)).where(Assignment.year == year)) or 0) + 1
     a = Assignment(number=f"П-{year}-{seq:03d}", seq=seq, year=year, kind=kind, title=title[:255], body=(body or "").strip(),
+                   expected_result=(expected_result or "").strip(),
                    priority=priority, mode=mode, direction_key=direction_key, author_id=user.id, assignee_id=assignee_id,
                    head_id=head_id, status="new", due_on=due_on, first_due_on=due_on, source_url=source_url[:300],
                    source_key=source_key[:160], source_title=source_title[:255])
@@ -262,7 +264,7 @@ def act(db: Session, user, a: Assignment, action: str, *, comment: str = "", rep
 
 def as_dict(a: Assignment, names: dict[str, str], today: date, user=None) -> dict:
     overdue = a.status in OPEN and a.due_on < today
-    return {"id": a.id, "number": a.number, "kind": a.kind, "kind_title": KIND_TITLES.get(a.kind, a.kind), "title": a.title, "body": a.body,
+    return {"id": a.id, "number": a.number, "kind": a.kind, "kind_title": KIND_TITLES.get(a.kind, a.kind), "title": a.title, "body": a.body, "expected_result": a.expected_result or "",
             "priority": a.priority, "priority_title": PRIORITY_TITLES.get(a.priority, a.priority), "mode": a.mode,
             "direction_key": a.direction_key, "direction": DIRECTION_TITLES.get(a.direction_key, ""),
             "author": names.get(a.author_id, ""), "author_id": a.author_id,
