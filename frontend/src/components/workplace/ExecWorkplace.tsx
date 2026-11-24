@@ -6,6 +6,7 @@ import SecurityModal from "../SecurityModal";
 import AssignmentDialog, { type AsgPrefill } from "./AssignmentDialog";
 import DirectionsDialog from "./DirectionsDialog";
 import { Loading } from "../States";
+import { useNewUiFlag } from "../../uiMode";
 
 // Рабочее место ЗГД, вид «Пульт» (D-153; v2 — D-154 по ТЗ «Berghaus CRM 2.0»).
 // Данные — GET /api/workplace/executive. KPI: единица, период, время расчёта, качество данных, расшифровка тем же условием.
@@ -64,6 +65,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
   const [hist, setHist] = useState<SigHist[] | null>(null);
   const [opened, setOpened] = useState<Record<string, boolean>>({});
   const nav = useNavigate();
+  const nv = useNewUiFlag();
   const load = () => api.get<Data>("/api/workplace/executive").then(setD).catch((e: Error) => setErr(String(e?.message || e)));
   useEffect(() => { load(); }, [me.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (tab === "ops" && hist === null) api.get<{ items: SigHist[] }>("/api/management/signals/history").then((r) => setHist(r.items)).catch(() => setHist([])); }, [tab, hist]);
@@ -119,7 +121,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
     <header className="wp-exec-head">
       <div>
         <h1>{d.user.greeting}, {d.user.first_name || d.user.name}</h1>
-        <div className="muted">{d.user.role_title} · {d.date.text} · период показателей: {x.meta.period}</div>
+        <div className="muted">{d.user.role_title} · {d.date.text} · период показателей: {x.meta.period}{nv && <> · <span className="wp-exec-upd">обновлено {hhmm(x.meta.generated_at)} МСК</span></>}</div>
       </div>
       <div className="wp-exec-head-act">
         <div className="wp-exec-switch" role="group" aria-label="Вид рабочего места">
@@ -255,6 +257,8 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
                   <text x={i * 40 + 19} y="104" textAnchor="middle">{c.label}</text></g>))}
             </svg>
             <div className="wp-exec-legend"><span><i className="in" />поступления</span><span><i className="out" />платежи</span><span className="muted">₽, 8 недель</span></div>
+            {nv && (() => { const sIn = d.money.curve.reduce((n, c) => n + c.in, 0); const sOut = d.money.curve.reduce((n, c) => n + c.out, 0);
+              return <p className="wp-exec-note wp-exec-sum">За 8 недель на графике: поступления {money(sIn)}, платежи {money(sOut)}{sIn - sOut !== 0 ? `, разница ${sIn - sOut > 0 ? "+" : "−"}${money(Math.abs(sIn - sOut))}` : ""}.</p>; })()}
             <div className="muted wp-exec-note">{d.money.balance_status === "confirmed" && d.money.min_cum !== null ? `минимум прогнозного остатка ${money(d.money.min_cum)} — ${d.money.min_week}` : "остаток на счетах не подтверждён — прогноз остатка не показывается"}</div>
           </> : <p className="muted">Нет доступа к финансам.</p>}
         </div>
@@ -280,7 +284,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
             {!x.deadlines.length && <li className="muted">В ближайшие 14 дней сроков нет.</li>}</ul>
         </div>
       </section>
-      <p className="muted wp-exec-note">Обновлено {new Date(x.meta.generated_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" })} МСК. Нажатие на показатель открывает список с теми же условиями; подсказка — источник.</p>
+      <p className="muted wp-exec-note wp-exec-foot">Обновлено {new Date(x.meta.generated_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" })} МСК. Нажатие на показатель открывает список с теми же условиями; подсказка — источник.</p>
       {modals}
     </div>);
 }

@@ -1384,3 +1384,94 @@ a.lv-stat:hover { background: var(--accent-soft); }
   :where(.ui-new) h1 { font-size: 21px; }
   :where(.ui-new) .card { padding: 14px 12px; }
 }
+
+/* =====================================================================================================
+   D-162 «Новый вид», пакет A — рабочее место ЗГД («Пульт»), доска, сводка. Только .ui-new.
+   ===================================================================================================== */
+/* A1 «Пульт»: показатели — белые карточки, красным только значение отклонения и полоса слева */
+.ui-new .wp-exec { max-width: none; padding-top: 0; }
+.ui-new .wp-exec-kpi { border-radius: var(--nv-radius); border-color: var(--line); box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+.ui-new .wp-exec-kpi.bad { background: #fff; border-color: var(--line); box-shadow: inset 3px 0 0 var(--bad), 0 1px 2px rgba(16, 24, 40, .04); }
+.ui-new .wp-exec-kpi.warn { box-shadow: inset 3px 0 0 var(--warn), 0 1px 2px rgba(16, 24, 40, .04); }
+.ui-new .wp-exec-kpi:hover, .ui-new .wp-exec-kpi:focus-visible { border-color: var(--accent); }
+.ui-new .wp-exec-kpi b { font-size: 24px; }
+.ui-new .wp-exec-upd { white-space: nowrap; }
+.ui-new .wp-exec-foot { display: none; }
+.ui-new .wp-exec-sum { color: var(--ink); }
+.ui-new .wp-exec-switch { border-color: var(--nv-line-strong); border-radius: 7px; }
+.ui-new .wp-exec-qa { border-color: var(--nv-line-strong); border-radius: 7px; }
+.ui-new .wp-exec-tabs { border-bottom-color: var(--line); }
+/* очередь вмешательства — плотнее: действия в одну строку справа, меньше рамок */
+.ui-new .wp-exec-list { gap: 0; }
+.ui-new .wp-exec-grp { border-bottom: 1px solid var(--line); }
+.ui-new .wp-exec-grp:last-child { border-bottom: 0; }
+.ui-new .wp-exec-esc { border: 0; border-left: 3px solid var(--line); border-radius: 0; padding: 10px 10px 10px 12px; }
+.ui-new .wp-exec-esc.bad { border-left-color: var(--bad); } .ui-new .wp-exec-esc.warn { border-left-color: var(--warn); }
+.ui-new .wp-exec-esc:hover { background: var(--nv-row-hover); }
+.ui-new .wp-exec-esc-act { flex-wrap: nowrap; }
+.ui-new .wp-exec-esc-act .btn { min-height: 32px; }
+.ui-new .wp-exec-more { margin: 0 0 8px 15px; }
+.ui-new .wp-exec-prio { border-radius: 6px; font-weight: 600; }
+.ui-new .wp-exec-asg > a { border-radius: 8px; }
+@media (max-width: 1279px) { .ui-new .wp-exec-esc-act { flex-wrap: wrap; max-width: 200px; } }
+/* телефон: сначала риски и поручения, затем показатели, затем графики и остальное (ТЗ A1 §3.4) */
+@media (max-width: 760px) {
+  .ui-new .wp-exec { display: flex; flex-direction: column; }
+  .ui-new .wp-exec > * { order: 10; }
+  .ui-new .wp-exec-head { order: 1; } .ui-new .wp-exec-tabs { order: 2; } .ui-new .wp-exec-queue { order: 3; }
+  .ui-new .wp-exec-grid2 { order: 4; } .ui-new .wp-exec-kpis { order: 5; } .ui-new .wp-exec-grid4 { order: 6; } .ui-new .wp-exec-quick { order: 7; margin-top: 8px; }
+  .ui-new .wp-exec-esc { flex-wrap: wrap; }
+  .ui-new .wp-exec-esc-act { max-width: none; width: 100%; justify-content: flex-start; flex-wrap: wrap; padding-left: 0; }
+  .ui-new .wp-exec-esc-act .btn { min-height: 40px; }
+  .ui-new .wp-exec-kpi b { font-size: 21px; }
+  .ui-new .wp-exec-dirs { display: block; overflow-x: auto; }
+}
+
+/* A2 доска: белые колонки с цветной полосой этапа, счётчик, «Сделок нет»; телефон — одна колонка, этап списком */
+.ui-new .board-meta { display: flex; gap: 6px 18px; align-items: center; flex-wrap: wrap; margin: -6px 0 12px; font-size: 13px; }
+.ui-new .board-meta .bad { color: var(--bad); }
+.board-stage { display: none; }
+.ui-new .nv-board { gap: 12px; align-items: flex-start; }
+.ui-new .nv-board .col { background: #fff; border: 1px solid var(--line); border-top: 3px solid var(--line); border-radius: var(--nv-radius); padding: 10px; }
+.ui-new .nv-board .col h3 { color: var(--ink); font-size: 13px; display: flex; justify-content: space-between; align-items: center; gap: 6px; margin: 0 0 8px; }
+.ui-new .board-n { background: #eef0f2; color: #374151; border-radius: 10px; padding: 0 8px; font-size: 12px; font-weight: 600; line-height: 20px; }
+.ui-new .board-empty { color: var(--muted); font-size: 12px; padding: 8px 2px; }
+.ui-new .nv-board .deal { border: 1px solid var(--line); border-radius: 8px; box-shadow: none; padding: 8px 10px; }
+.ui-new .nv-board .deal:hover { border-color: #9aa1aa; }
+.ui-new .nv-board .deal.overdue { box-shadow: inset 3px 0 0 var(--bad); }
+.ui-new .nv-board .deal .badge { margin-left: 4px; font-size: 11px; }
+.ui-new .board-task { font-size: 12px; color: #374151; margin-top: 2px; }
+.ui-new .board-task.bad { color: var(--bad); }
+.ui-new .board-more { font-size: 12px; display: inline-block; margin-top: 2px; }
+@media (max-width: 760px) {
+  .ui-new .board-stage { display: flex; gap: 8px; align-items: center; width: 100%; font-weight: 600; }
+  .ui-new .board-stage select { flex: 1; min-width: 0; }
+  .ui-new .nv-board { display: block; overflow: visible; }
+  .ui-new .nv-board .col { display: none; width: auto; min-width: 0; max-width: none; }
+  .ui-new .nv-board .col.cur { display: block; }
+  .ui-new .board-type { width: 100%; }
+}
+
+/* A3 сводка: карточки показателей; на телефоне таблица отгрузок — карточками */
+.sum-kpi { flex: 1 1 150px; display: flex; flex-direction: column; gap: 2px; background: #fff; border: 1px solid var(--line); border-radius: var(--nv-radius); padding: 12px 14px; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+.sum-kpi b { font-size: 24px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.sum-kpi span { font-size: 12px; color: var(--muted); }
+.sum-kpi.bad { box-shadow: inset 3px 0 0 var(--bad), 0 1px 2px rgba(16, 24, 40, .04); } .sum-kpi.bad b { color: var(--bad); }
+@media (max-width: 760px) {
+  .ui-new .sum-kpi { flex-basis: calc(50% - 5px); }
+  .ui-new .sum-ship table { min-width: 0 !important; }
+  .ui-new .sum-ship thead { display: none; }
+  .ui-new .sum-ship tbody tr { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .ui-new .sum-ship tbody td { display: block; border: 0; padding: 2px 0; background: none !important; white-space: normal !important; }
+  .ui-new .sum-ship tbody td[data-label]::before { content: attr(data-label); display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+  .ui-new .sum-ship tbody td[data-label="Клиент"], .ui-new .sum-ship tbody td[data-label="Партия"] { grid-column: 1 / -1; }
+  .ui-new .sum-ship tbody td[colspan] { grid-column: 1 / -1; }
+}
+/* закрытая выезжающая панель: без тени у края экрана и вне порядка табуляции */
+@media (max-width: 1024px) {
+  .ui-new .app-shell:not(.drawer-open) .app-sidebar { box-shadow: none; visibility: hidden; transition: transform .2s ease, visibility 0s linear .2s; }
+}
+@media (max-width: 760px) {
+  .ui-new .wp-exec-queue .wp-exec-list > .wp-exec-grp:nth-child(n+4) { display: none; }
+  .ui-new .wp-exec-esc-main { flex: 1 1 calc(100% - 90px); }
+}

@@ -14,6 +14,18 @@ export function setNewUi(on: boolean): void {
   window.dispatchEvent(new Event(EVT));
 }
 
+/** Только узнать, включён ли новый вид (для разметки экранов); класс body ставит App через useNewUi. */
+export function useNewUiFlag(): boolean {
+  const [on, setOn] = useState(isNewUi());
+  useEffect(() => {
+    const f = () => setOn(isNewUi());
+    window.addEventListener(EVT, f);
+    window.addEventListener("storage", f);
+    return () => { window.removeEventListener(EVT, f); window.removeEventListener("storage", f); };
+  }, []);
+  return on;
+}
+
 export function useNewUi(): boolean {
   const [on, setOn] = useState(isNewUi());
   useEffect(() => {

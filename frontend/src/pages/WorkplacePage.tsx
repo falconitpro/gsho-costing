@@ -1,5 +1,6 @@
 import DownloadRequests from "../components/DownloadRequests";
 import ExecWorkplace from "../components/workplace/ExecWorkplace";
+import { useNewUiFlag } from "../uiMode";
 import BriefingBlock, { type Briefing } from "../components/BriefingBlock";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -99,7 +100,10 @@ const money = (v: number) => Math.abs(v) >= 1e6 ? `${(v / 1e6).toLocaleString("r
 /** Рабочее место. У ЗГД — переключатель «Обычный вид / Пульт» (D-153); выбор — в браузере (gsho.gdView). */
 export default function WorkplacePage({ me }: { me: Me }) {
   const isGd = me.roles.some((r) => r.code === "gd");
-  const [view, setView] = useState<string>(() => { try { return localStorage.getItem("gsho.gdView") || "classic"; } catch { return "classic"; } });
+  const nv = useNewUiFlag();
+  // D-162 (пакет A): в «Новом виде» рабочее место ЗГД — «Пульт», пока сотрудник сам не выбрал «Обычный вид»
+  const [saved, setView] = useState<string | null>(() => { try { return localStorage.getItem("gsho.gdView"); } catch { return null; } });
+  const view = saved || (nv ? "pult" : "classic");
   const pick = (v: string) => { setView(v); try { localStorage.setItem("gsho.gdView", v); } catch { /* браузер без хранилища — выбор до перезагрузки */ } };
   if (isGd && view === "pult") return <ExecWorkplace me={me} onClassic={() => pick("classic")} />;
   return <ClassicWorkplace me={me} onPult={isGd ? () => pick("pult") : undefined} />;

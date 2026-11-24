@@ -48,7 +48,7 @@ def main():
                 errs: list[str] = []
                 pg.on("pageerror", lambda e: errs.append(str(e)))
                 pg.goto(BASE + "/")
-                pg.evaluate(f"localStorage.setItem('gsho.newUi', '{'1' if NEW else '0'}'); localStorage.setItem('gsho.gdView', 'classic')")
+                pg.evaluate(f"localStorage.setItem('gsho.newUi', '{'1' if NEW else '0'}');" + ("" if NEW else " localStorage.setItem('gsho.gdView', 'classic')"))
                 for code, path in screens:
                     if not path:
                         continue
