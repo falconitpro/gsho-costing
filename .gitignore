@@ -12,3 +12,4 @@ scripts/start-local.log
 
 deploy/certs/
 deploy/caddy-tls/*.caddy
+artifacts/
