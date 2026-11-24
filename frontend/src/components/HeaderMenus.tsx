@@ -1,3 +1,4 @@
+import { isNewUi, setNewUi } from "../uiMode";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { LATEST, seenNews } from "../whatsNew";
@@ -58,6 +59,8 @@ export function UserMenu({ me, onLogout }: { me: Me; onLogout: () => void }) {
     <Dropdown label={`${name} — ${roles}`} className="hm-user" button={<span className="avatar">{initials}</span>}>
       {(close) => <>
         <div className="hm-who"><b>{name}</b><small>{roles}</small><small>{me.email}</small></div>
+        <button type="button" role="menuitemcheckbox" aria-checked={isNewUi()} onClick={() => { close(); setNewUi(!isNewUi()); }}>
+          {isNewUi() ? "✓ " : ""}Новый вид интерфейса<small>{isNewUi() ? "вернуть прежний вид" : "тёмная боковая панель со всеми разделами; можно вернуть"}</small></button>
         <button type="button" role="menuitem" onClick={() => { close(); onLogout(); }}>Выйти</button>
       </>}
     </Dropdown>

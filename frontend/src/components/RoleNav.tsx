@@ -5,7 +5,8 @@ import type { Me } from "../types";
 /** Меню по роли (D-097): 4–5 главных пунктов роли в строке, остальные доступные — в «Ещё».
  *  Права не меняются: в «Ещё» те же разделы, что были в меню; у нескольких ролей главные пункты объединяются. */
 
-type Item = { key: string; to: string; label: string; end?: boolean };
+export type NavItem = { key: string; to: string; label: string; end?: boolean };
+type Item = NavItem;
 const ITEMS: Item[] = [
   { key: "work", to: "/", label: "Рабочее место", end: true },
   { key: "deals", to: "/deals", label: "Сделки" },
@@ -34,7 +35,8 @@ const PRIMARY: Record<string, string[]> = {
   clerk: ["work", "office", "tasks"],
 };
 
-export default function RoleNav({ me }: { me: Me }) {
+/** Разделы роли: все доступные и «главные» (D-097). Один источник для верхнего меню и боковой панели «Нового вида» (D-159). */
+export function navItems(me: Me): { items: NavItem[]; primary: Set<string> } {
   const codes = me.roles.map((r) => r.code);
   const has = (...r: string[]) => codes.some((c) => r.includes(c));
   const perm = (g: string) => (me.perms?.[g] ?? 0) >= 1;
@@ -48,7 +50,15 @@ export default function RoleNav({ me }: { me: Me }) {
   };
   const primary = new Set(codes.flatMap((c) => PRIMARY[c] || []));
   if (primary.size === 0) ["work", "deals", "tasks"].forEach((k) => primary.add(k));
-  const items = ITEMS.filter((i) => allowed[i.key]);
+  return { items: ITEMS.filter((i) => allowed[i.key]), primary };
+}
+
+export function isActive(i: NavItem, pathname: string): boolean {
+  return i.end ? pathname === i.to : pathname === i.to || pathname.startsWith(i.to + "/");
+}
+
+export default function RoleNav({ me }: { me: Me }) {
+  const { items, primary } = navItems(me);
   const main = items.filter((i) => primary.has(i.key));
   const more = items.filter((i) => !primary.has(i.key));
 

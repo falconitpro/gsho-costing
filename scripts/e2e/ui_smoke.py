@@ -6,6 +6,7 @@
 Создаёт свою синтетическую сделку и доводит её до утверждения; рабочие данные не трогает. Код выхода 1 — есть ошибки.
 """
 import asyncio
+import os
 import json
 import sys
 import urllib.error
@@ -58,10 +59,15 @@ fails: list[str] = []
 visited = 0
 
 
+VIEWS = [v for v in os.environ.get("UI_VIEWS", "classic,new").split(",") if v]
+MENUS: dict = {}
+MIN_SCREENS = int(os.environ.get("UI_SMOKE_MIN", str(120 * len(VIEWS))))   # 23.11.2026: 132 экрана на вид
+
+
 async def check_role(browser, user, title, mode, did):
     global visited
     ctx = await browser.new_context(viewport={"width": 1440, "height": 900}, extra_http_headers={"X-Dev-User": user})
-    await ctx.add_init_script(f"try{{localStorage.setItem('gsho.uiMode','{mode}')}}catch(e){{}}")
+    await ctx.add_init_script(f"try{{localStorage.setItem('gsho.newUi','{'1' if mode == 'new' else '0'}')}}catch(e){{}}")
     pg = await ctx.new_page()
     errs: list[str] = []
     pg.on("pageerror", lambda e: errs.append("ошибка страницы: " + str(e)[:160]))
@@ -82,11 +88,17 @@ async def check_role(browser, user, title, mode, did):
             fails.append(f"{title} / {mode} / {label}: " + "; ".join(sorted(set(errs))[:4]))
 
     await visit("рабочее место", "/")
-    if await pg.locator(".nav-more button").count():
-        await pg.click(".nav-more button")
+    # меню роли — где бы оно ни было: в шапке (прежний вид) или в боковой панели («Новый вид», D-159); «Ещё» раскрываем
+    more = pg.locator("header.top .nav-more > button, .app-sidebar .nav-more > button")
+    if await more.count():
+        await more.first.click()
         await pg.wait_for_timeout(150)
-    hrefs = sorted({h for h in [await a.get_attribute("href") for a in await pg.locator("header.top nav a").all()] if h and h.startswith("/")})
+    links = await pg.locator("header.top nav a, .app-sidebar nav a").all()
+    hrefs = sorted({h for h in [await a.get_attribute("href") for a in links] if h and h.startswith("/")})
     await pg.keyboard.press("Escape")
+    MENUS[(title, mode)] = hrefs
+    if len(hrefs) < 3:
+        fails.append(f"{title} / {mode}: в меню найдено {len(hrefs)} разделов — меню не найдено или пусто")
     for h in hrefs:
         await visit(f"раздел {h}", h)
     # карточка сделки и все её вкладки, если роль видит сделку
@@ -105,10 +117,18 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(executable_path=CHROME, args=["--no-sandbox"]) if CHROME else await p.chromium.launch()
         for user, title in ROLES:
-            for mode in ("new",):   # D-115: с 21.11.2026 — один вид интерфейса
+            for mode in VIEWS:   # D-159: прежний вид и «Новый вид» (переключатель) — оба проверяются
                 await check_role(browser, user, title, mode, did)
         await browser.close()
-    print(f"проверено экранов: {visited}, ошибок: {len(fails)}")
+    # одинаковые разделы в обоих видах: новый вид не должен терять пункты меню роли
+    for user, title in ROLES:
+        if len(VIEWS) == 2 and MENUS.get((title, VIEWS[0])) != MENUS.get((title, VIEWS[1])):
+            a, b = set(MENUS.get((title, VIEWS[0]), [])), set(MENUS.get((title, VIEWS[1]), []))
+            fails.append(f"{title}: разделы меню различаются — только в прежнем {sorted(a - b)}, только в новом {sorted(b - a)}")
+    # защита от тихого сокращения покрытия (смена оболочки, селекторов): экранов не меньше порога
+    if visited < MIN_SCREENS:
+        fails.append(f"проверено экранов {visited} < порога {MIN_SCREENS}: меню или вкладки не найдены — покрытие сократилось")
+    print(f"проверено экранов: {visited} (порог {MIN_SCREENS}), ошибок: {len(fails)}")
     for f in fails:
         print("FAIL", f)
     sys.exit(1 if fails else 0)

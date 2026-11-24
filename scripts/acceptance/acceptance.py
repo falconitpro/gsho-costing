@@ -36,6 +36,7 @@ BROWSER = os.environ.get("BROWSER_EXECUTABLE") or None
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ACCEPT_OUT", "artifacts/acceptance"))
 RUN_ID = os.environ.get("RUN_ID") or dt.datetime.now().strftime("%m%d-%H%M%S")
 RETRY = os.environ.get("ACCEPT_RETRY", "1") == "1"
+UI = os.environ.get("ACCEPT_UI", "classic")      # classic — прежний вид, new — «Новый вид» (D-159, переключатель)
 TAG = f"[приёмка {RUN_ID}]"
 
 MGR, CD, FD, LOG, LAW, ADM, SVC = ("manager@example.com", "cd@example.com", "fd@example.com", "logist@example.com", "lawyer@example.com",
@@ -115,7 +116,7 @@ class Ctx:
             p = c.new_page()
             p.on("pageerror", lambda e, u=user: self.console.append(f"{u}: {e}"))
             p.goto(BASE + "/")
-            p.evaluate("localStorage.setItem('gsho.gdView','pult')")
+            p.evaluate(f"localStorage.setItem('gsho.gdView','pult'); localStorage.setItem('gsho.newUi','{'1' if UI == 'new' else '0'}')")
             self.pages[key] = p
         return self.pages[key]
 
@@ -854,7 +855,7 @@ def report(rows: list[dict], seconds: float) -> None:
         node = subprocess.check_output(["node", "--version"], text=True).strip()
     except Exception:  # noqa: BLE001
         node = ""
-    manifest = {"sha": _git_sha(), "run_id": RUN_ID, "started": dt.datetime.now().isoformat(timespec="seconds"), "seconds": round(seconds, 1),
+    manifest = {"sha": _git_sha(), "run_id": RUN_ID, "ui": UI, "started": dt.datetime.now().isoformat(timespec="seconds"), "seconds": round(seconds, 1),
                 "base_url": BASE, "api_url": API, "python": platform.python_version(), "node": node, "playwright": pw_ver,
                 "schema_migrations_in_code": mig[-1] if mig else "", "browser": BROWSER or "chromium (playwright)"}
     (OUT / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1))
@@ -887,7 +888,7 @@ def report(rows: list[dict], seconds: float) -> None:
 <style>body{{font:14px system-ui,sans-serif;margin:24px;color:#1f2328}}table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #d0d7de;padding:6px 8px;vertical-align:top;text-align:left}}
 .e{{color:#59636e;font-size:12px}}pre{{white-space:pre-wrap;font-size:12px;background:#fff8f8;padding:6px;margin:4px 0}}</style>
 <h1>Автоматическая приёмка «Пульт ЗГД и поручения»</h1>
-<p>Коммит <b>{html.escape(manifest['sha'])}</b> · прогон {html.escape(RUN_ID)} · {html.escape(manifest['started'])} · {manifest['seconds']} с ·
+<p>Коммит <b>{html.escape(manifest['sha'])}</b> · вид интерфейса: <b>{'новый' if UI == 'new' else 'прежний'}</b> · прогон {html.escape(RUN_ID)} · {html.escape(manifest['started'])} · {manifest['seconds']} с ·
 миграции в коде до <b>{html.escape(manifest['schema_migrations_in_code'])}</b> · Python {manifest['python']} · Node {html.escape(node)} · Playwright {html.escape(pw_ver)}</p>
 <p>{' · '.join(f'<b style="color:{color[s]}">{s}: {cnt[s]}</b>' for s in color)} · всего {len(rows)}.
 Приёмка пройдена только если всё — PASS (BLOCKED и FLAKY не засчитываются).</p>
