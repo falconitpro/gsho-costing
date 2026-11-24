@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api";
+import { useNewUiFlag } from "../../uiMode";
 import SecurityModal from "../SecurityModal";
 
 // Новое поручение ЗГД (D-154): руководителю подразделения или напрямую сотруднику. Права и проверки — на сервере.
@@ -29,6 +30,7 @@ export default function AssignmentDialog({ prefill, onClose, onDone }: { prefill
   const [prio, setPrio] = useState(p.priority || "normal");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const nv = useNewUiFlag();
   useEffect(() => { api.get<Ref>("/api/management/assignees").then(setRef).catch((e: Error) => setErr(e.message)); }, []);
   const head = dir && ref ? ref.users.find((u) => u.id === ref.heads[dir]) : undefined;
   const target = mode === "head" ? head?.id : who;
@@ -67,6 +69,13 @@ export default function AssignmentDialog({ prefill, onClose, onDone }: { prefill
         <label className="f"><span>Приоритет</span><select value={prio} onChange={(e) => setPrio(e.target.value)}>
           <option value="critical">критично</option><option value="high">высокий</option><option value="normal">обычный</option></select></label>
       </div>
+      {nv && (() => {   // новый вид: что уйдёт исполнителю — одним абзацем перед отправкой
+        const u = ref?.users.find((x) => x.id === target);
+        const pr = { critical: "критично", high: "высокий", normal: "обычный" }[prio] || prio;
+        return <div className="asg-summary" aria-live="polite"><b>Итог:</b> {u ? `${u.name}${mode === "head" ? " (руководитель)" : ""}` : <span className="muted">исполнитель не выбран</span>}
+          {" · "}{title.trim() || <span className="muted">что сделать — не указано</span>}{" · "}результат: {expected.trim() || <span className="muted">не указан</span>}
+          {" · "}до {due.split("-").reverse().join(".")} · {pr}{p.source_title ? ` · по сигналу` : ""}</div>;
+      })()}
       {err && <p className="bad">{err}</p>}
       <div className="asg-actions"><button className="btn ghost" onClick={onClose}>Отмена</button>
         <button className="btn add" disabled={busy || !title.trim() || (!explain && !expected.trim())} onClick={submit}>{explain ? "Запросить" : "Поручить"}</button></div>
