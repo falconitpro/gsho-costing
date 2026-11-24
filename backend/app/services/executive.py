@@ -26,7 +26,7 @@ FACTORY = ("production", "factory_preacceptance", "local_option_order")
 SERVICE = ("commissioning", "local_option_install")
 PRIO = {"critical": 0, "high": 1, "normal": 2, "info": 3}
 STALE_BANK_DAYS = 3
-METHOD = {'active': 'Сделки ГШО в работе (статусы до выигрыша) и открытые заявки на запчасти. Сумма — цена КП без НДС в рублях из расчёта. Исключены: черновики в корзине, проигранные, закрытые.',
+METHOD = {'active': 'Сделки ГШО в работе (статусы до выигрыша) и открытые заявки на запчасти. Сумма — цена КП без НДС в рублях из расчёта; сделки без цены в сумму не входят (тогда «частичные данные», сумма по X из Y). Исключены: черновики в корзине, проигранные, закрытые.',
           'risk': 'Выигранные сделки, у которых хотя бы один этап исполнения без отметки факта, а уточнённая (если есть) или плановая дата уже прошла. Сумма — цена сделки без НДС.',
           'won': 'Сделки со статусом «выиграна» и дальше, дата контракта — в текущем квартале; плюс выигранные заявки на запчасти. Сравнения с планом нет: план продаж не задан.',
           'margin': 'Средневзвешенная по цене маржа базового сценария утверждённой версии расчёта по выигранному предложению. Сделки без утверждённого расчёта не учитываются — покрытие указано в подписи.',
@@ -103,10 +103,18 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
     # ---------------- показатели (R0 сверка, D-154: маржа — из утверждённой версии расчёта; исполнение — этапы отдельно от сделок)
     from ..models import DealVersion
     can_cost = user.can("cost")
-    in_work = sum(price(d) or 0 for d in open_deals) + sum(p["price_rub"] for p in open_parts)
+    # AUD-06: сделка без цены не считается нулём — сумма по тем, у кого цена есть, и показатель «частичные данные»
+    def priced(items: list, getp) -> tuple[float, int, int]:
+        vals = [getp(x) for x in items]
+        have = [v for v in vals if v is not None]
+        return float(sum(have)), len(have), len(vals)
+
+    def sum_note(n_have: int, n_all: int) -> str:
+        return "" if n_have == n_all else f"сумма по {n_have} из {n_all}: у {n_all - n_have} нет цены (нет утверждённого расчёта)"
+    in_work, aw_have, aw_all = priced(list(open_deals) + list(open_parts), lambda x: x.get("price_rub") if isinstance(x, dict) else price(x))
     risk_rows = [r for r in exec_rows if r["overdue"]]
-    risk_sum = sum(price(r["deal"]) or 0 for r in risk_rows)
-    won_sum = sum(price(d) or 0 for d in won_q) + sum(p["price_rub"] for p in won_q_parts)
+    risk_sum, rk_have, rk_all = priced([r["deal"] for r in risk_rows], price)
+    won_sum, wn_have, wn_all = priced(list(won_q) + list(won_q_parts), lambda x: x.get("price_rub") if isinstance(x, dict) else price(x))
     margins, margin_rows = [], []
     for d in won_q:
         v = won_variant(d) if d.variants else None
@@ -171,6 +179,12 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
     ]
     for k in kpis:
         k["method"] = METHOD.get(k["key"], "")
+    if fin:   # AUD-06: неполная сумма не выдаётся за полную
+        for k, (h, a) in (("active", (aw_have, aw_all)), ("risk", (rk_have, rk_all)), ("won", (wn_have, wn_all))):
+            note = sum_note(h, a)
+            if note:
+                kk = next(x for x in kpis if x["key"] == k)
+                kk["data_quality"], kk["quality_note"] = "partial", note
     rub_ref = rub_reference(db, [(r["amount"], r["currency"]) for r in rec_rows], today) if fin else None
     if rub_ref:
         kpis[4]["reference"] = rub_ref
@@ -203,14 +217,18 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
         if key not in esc:
             esc[key] = {"key": key, **kw}
 
+    # AUD-03: каждый просроченный платёж — отдельный сигнал (раньше один ключ на сделку терял второй платёж).
+    # Источник: если по сделке есть просроченные обязательства в «Финансах» — они (точный остаток), этапы-оплаты не дублируют;
+    # иначе — этапы исполнения. На экране сигналы одной сделки собраны в группу (group = deal:<id>).
+    fin_deals = {r["deal_id"] for r in rec_rows if r.get("deal_id")}
     for r in exec_rows:
         d = r["deal"]
         cl = d.client.name if d.client else ""
         late = [s for s in r["stages"] if not s.actual_on and (s.refined_on or s.planned_on) and (s.refined_on or s.planned_on) < today]
-        pay = [s for s in late if s.code in ("client_advance", "client_final")]
+        pay = [s for s in late if s.code in ("client_advance", "client_final")] if d.id not in fin_deals else []
         for s in pay:
             days = (today - (s.refined_on or s.planned_on)).days
-            add(f"deal:{d.id}:receivable", obj=("сделка", d.number), dir="sales", priority="critical" if days > 30 else "high", title=f"{s.title} · {cl}",
+            add(f"deal:{d.id}:pay:{s.id}", obj=("сделка", d.number), dir="sales", priority="critical" if days > 30 else "high", title=f"{s.title} · {cl}",
                 reason=f"{d.number}: оплата клиента не отмечена, просрочка {days} дн.", impact={"amount": float(s.amount), "currency": s.currency} if fin and s.amount else None,
                 owner=names.get(d.manager_id, ""), owner_role="менеджер", next_action="Связаться с клиентом, уточнить дату оплаты", url=f"/deals/{d.id}?tab=execution",
                 due=(s.refined_on or s.planned_on).isoformat(), days=days, source="этап исполнения")
@@ -222,8 +240,8 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
                 reason=f"первый — «{first.title}», план {(first.refined_on or first.planned_on):%d.%m}, {days} дн. назад", impact=None,
                 owner=names.get(d.manager_id, ""), owner_role="менеджер", next_action="Отметить факт или уточнить дату", url=f"/deals/{d.id}?tab=execution",
                 due=(first.refined_on or first.planned_on).isoformat(), days=days, source="этапы исполнения")
-    for r in rec_rows:   # «Финансы»: просроченные поступления (в т. ч. по договорам вне этапов) — тот же ключ, что у этапа оплаты
-        k = f"deal:{r['deal_id']}:receivable" if r.get("deal_id") else f"obligation:{r['obligation_id']}:receivable"
+    for r in rec_rows:   # «Финансы»: каждое просроченное обязательство — свой сигнал; по сделке — в общей группе
+        k = f"deal:{r['deal_id']}:obl:{r['obligation_id']}" if r.get("deal_id") else f"obligation:{r['obligation_id']}:receivable"
         add(k, obj=("обязательство", r["deal_number"]), dir="sales" if r.get("manager") else "finance", priority="critical" if r["overdue_days"] > 30 else "high", title=f"{r['title']} · {r['client']}",
             reason=f"{r['deal_number']}: поступление не разнесено, просрочка {r['overdue_days']} дн.", impact={"amount": r["amount"], "currency": r["currency"]} if r["amount"] else None,
             owner=r.get("manager") or "ФД", owner_role="менеджер" if r.get("manager") else "финансы", next_action="Проверить оплату и связаться с клиентом",
@@ -270,6 +288,7 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
     from ..models import Assignment
     from ..services import assignments as asg
     hd = asg.heads(db)
+    mem_ = asg.members(db)
     by_name = {v: k for k, v in names.items()}
     open_asg = {a.source_key: a for a in db.scalars(select(Assignment).where(Assignment.source_key != "", Assignment.status.in_(asg.OPEN))).all()}
     users_all = {u.id: u for u in db.scalars(select(User)).all()}
@@ -279,7 +298,7 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
         dk = e.pop("dir")
         oid = e.pop("owner_id", None) or by_name.get(e.get("owner") or "")
         if not dk and oid and oid in users_all:
-            dk = asg.direction_of(users_all[oid])
+            dk = asg.direction_of(users_all[oid], mem_)
         h = hd.get(dk) if dk else None
         e["direction"] = asg.DIRECTION_TITLES.get(dk, "")
         e["head"] = names.get(h, "") if h and h != oid else ""
@@ -291,6 +310,8 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
             ref = rub_reference(db, [(im["amount"], im["currency"])], today)
             im["rub_ref"] = ref["text"] if ref else ""
         a = open_asg.get(e["key"])
+        if a is None and (":pay:" in e["key"] or ":obl:" in e["key"]):     # поручения, созданные до D-157 (ключ «на сделку»)
+            a = open_asg.get(e["group"] + ":receivable")
         e["assignment"] = {"number": a.number, "status": asg.STATUS_TITLES[a.status], "url": f"/assignments?open={a.id}"} if a else None
     escalations = sorted(esc.values(), key=lambda e: (PRIO[e["priority"]], e["react_by"] or "9999", -(e["days"] or 0)))
     if fin and can_cost:     # журнал сигналов — только по полной очереди (без прав часть сигналов не видна, D-155)
@@ -358,7 +379,8 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
     }
     directions = []
     for key, title in asg.DIRECTIONS:
-        staff, tn, results, devs, url = D[key]
+        _staff_by_role, tn, results, devs, url = D[key]
+        staff = [u.display_name for u in users if u.is_active and key in asg.directions_of(u, mem_)]
         h = users_by_id.get(hd.get(key) or "")
         head = None
         if h:

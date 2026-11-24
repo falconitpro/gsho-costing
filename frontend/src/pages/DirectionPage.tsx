@@ -8,7 +8,7 @@ import AssignmentDialog from "../components/workplace/AssignmentDialog";
 // объекты с отклонениями, поручения, история. Данные — те же, что на «Пульте» (GET /api/workplace/executive/direction/:key).
 
 type Obj = { kind: string; title: string; url: string; note: string; bad: boolean };
-type Staff = { id: string; name: string; position: string; is_head: boolean; tasks_open: number; tasks_overdue: number; assignments_open: number };
+type Staff = { id: string; name: string; position: string; is_head: boolean; pinned: boolean; tasks_open: number; tasks_overdue: number; assignments_open: number };
 type A = { id: string; number: string; title: string; assignee: string; executor: string; status: string; status_title: string; due_on: string; overdue: boolean; priority: string; priority_title: string };
 type Dir = { key: string; title: string; tone: string; head: { id: string; name: string; position: string; deputy: { name: string; temporary: boolean; to: string | null } | null } | null;
   results: string[]; deviations: string[]; url: string; objects: Obj[]; staff: Staff[]; assignments: A[]; history: { at: string; who: string; text: string; url: string }[];
@@ -53,7 +53,7 @@ export default function DirectionPage({ me }: { me: Me }) {
         <div className="card"><h2>Сотрудники</h2>
           <table className="asg-table"><thead><tr><th>Сотрудник</th><th>Задачи</th><th>Поручения</th><th></th></tr></thead>
             <tbody>{d.staff.map((u) => (
-              <tr key={u.id}><td>{u.name}{u.is_head ? <span className="muted"> · руководитель</span> : null}{u.position && <div className="muted">{u.position}</div>}</td>
+              <tr key={u.id}><td>{u.name}{u.is_head ? <span className="muted"> · руководитель</span> : null}<div className="muted">{u.pinned ? "закреплён в подразделении" : "по роли"}</div>{u.position && <div className="muted">{u.position}</div>}</td>
                 <td>{u.tasks_open}{u.tasks_overdue ? <span className="bad"> · просрочено {u.tasks_overdue}</span> : null}</td><td>{u.assignments_open}</td>
                 <td><button className="btn ghost" onClick={() => setAsg({ assignee_id: u.id })}>Поручить</button></td></tr>))}
               {!d.staff.length && <tr><td colSpan={4} className="muted">Сотрудников с ролью направления нет.</td></tr>}</tbody></table>

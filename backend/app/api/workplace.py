@@ -668,14 +668,15 @@ def executive_direction(key: str, db: Session = Depends(get_db), user: CurrentUs
     d = next(x for x in out["executive"]["directions"] if x["key"] == key)
     today = moscow_today()
     users = db.scalars(select(User).where(User.is_active.is_(True))).all()
-    staff = [u for u in users if asg.direction_of(u) == key or (d["head"] and u.id == d["head"]["id"])]
+    mem = asg.members(db)
+    staff = [u for u in users if key in asg.directions_of(u, mem) or (d["head"] and u.id == d["head"]["id"])]
     ids = [u.id for u in staff]
     tasks = db.scalars(select(Task).where(Task.assignee_id.in_(ids or [""]), Task.done_at.is_(None))).all()
     names = {u.id: u.display_name for u in db.scalars(select(User)).all()}
     rows = db.scalars(select(Assignment).where((Assignment.direction_key == key) | (Assignment.assignee_id.in_(ids or [""])) | (Assignment.executor_id.in_(ids or [""])))
                       .order_by(Assignment.created_at.desc()).limit(50)).all()
     open_a = [a for a in rows if a.status in asg.OPEN]
-    d["staff"] = [{"id": u.id, "name": u.display_name, "position": (u.contacts or {}).get("position", "") if isinstance(u.contacts, dict) else "",
+    d["staff"] = [{"id": u.id, "name": u.display_name, "pinned": mem.get(u.id) == key, "position": (u.contacts or {}).get("position", "") if isinstance(u.contacts, dict) else "",
                    "is_head": bool(d["head"] and u.id == d["head"]["id"]),
                    "tasks_open": sum(1 for t in tasks if t.assignee_id == u.id), "tasks_overdue": sum(1 for t in tasks if t.assignee_id == u.id and t.due and t.due < today),
                    "assignments_open": sum(1 for a in open_a if u.id in (a.assignee_id, a.executor_id))} for u in sorted(staff, key=lambda u: u.display_name)]

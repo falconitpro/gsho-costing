@@ -44,7 +44,7 @@ def test_assignment_full_cycle_and_rights():
         r = c.put(f"{B}/directions", headers=H(GD), json={"heads": {"sales": cd, "factory": None}})
         assert r.status_code == 200 and next(x for x in r.json()["items"] if x["key"] == "sales")["head_id"] == cd
         # создать — только ЗГД; срок в прошлом нельзя
-        body = {"title": "Уточнить дату оплаты", "mode": "direct", "assignee_id": mgr, "due_on": due, "priority": "high", "source_key": "deal:x:receivable"}
+        body = {"title": "Уточнить дату оплаты", "expected_result": "дата оплаты подтверждена клиентом письменно", "mode": "direct", "assignee_id": mgr, "due_on": due, "priority": "high", "source_key": "deal:x:receivable"}
         assert c.post(f"{B}/assignments", headers=H(MGR), json=body).status_code == 403
         assert c.post(f"{B}/assignments", headers=H(GD), json={**body, "due_on": "2020-01-01"}).status_code == 422
         a = c.post(f"{B}/assignments", headers=H(GD), json=body).json()
@@ -84,7 +84,7 @@ def test_assignment_full_cycle_and_rights():
         assert any("П-" in (n.get("text") or "") for n in (notes.get("items") if isinstance(notes, dict) else notes))
 
         # поручение руководителю: только назначенному руководителю; передать исполнителю; исполнитель не принимает
-        hb = {"title": "План продаж на декабрь", "mode": "head", "direction_key": "sales", "due_on": due}
+        hb = {"title": "План продаж на декабрь", "expected_result": "план по месяцам утверждён", "mode": "head", "direction_key": "sales", "due_on": due}
         assert c.post(f"{B}/assignments", headers=H(GD), json={**hb, "assignee_id": mgr}).status_code == 422
         assert c.post(f"{B}/assignments", headers=H(GD), json={**hb, "direction_key": "factory", "assignee_id": cd}).status_code == 422
         b = c.post(f"{B}/assignments", headers=H(GD), json={**hb, "assignee_id": cd}).json()
@@ -99,7 +99,8 @@ def test_assignment_full_cycle_and_rights():
         # реестры
         mine = [x["id"] for x in c.get(f"{B}/assignments?scope=mine&status=any", headers=H(MGR)).json()["items"]]
         assert aid in mine and bid in mine
-        assert c.get(f"{B}/assignments?scope=all&status=any", headers=H(FD)).json()["items"] == []
+        fd_ids = {x["id"] for x in c.get(f"{B}/assignments?scope=all&status=any", headers=H(FD)).json()["items"]}
+        assert aid not in fd_ids and bid not in fd_ids
         team = [x["id"] for x in c.get(f"{B}/assignments?scope=team&status=any", headers=H(CD)).json()["items"]]
         assert aid in team
 

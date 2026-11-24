@@ -2542,6 +2542,15 @@ class OrgDirection(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class OrgMember(Base):
+    """D-157: явное закрепление сотрудника за направлением, если оно не совпадает с ролью (роль ≠ подразделение). Ведёт ЗГД."""
+    __tablename__ = "org_members"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    direction_key: Mapped[str] = mapped_column(String(32))
+    updated_by: Mapped[Optional[str]] = mapped_column(String(36))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Assignment(TimestampMixin, Base):
     """Управленческое поручение ЗГД: руководителю подразделения или напрямую сотруднику (ТЗ v2 §5).
     Статусы: new → accepted → in_progress → blocked / review → rework → review → done; cancelled. Просрочка — по сроку, не статус."""
