@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
 import type { Me } from "../types";
 import AssignmentDialog from "../components/workplace/AssignmentDialog";
+import { Loading } from "../components/States";
 
 // Карточка направления (D-155, ТЗ «Рабочее место ЗГД» v2 §4.5): руководитель и замещение, сотрудники и нагрузка,
 // объекты с отклонениями, поручения, история. Данные — те же, что на «Пульте» (GET /api/workplace/executive/direction/:key).
@@ -24,7 +25,7 @@ export default function DirectionPage({ me }: { me: Me }) {
   const load = () => api.get<Dir>(`/api/workplace/executive/direction/${key}`).then(setD).catch((e: Error) => setErr(e.message));
   useEffect(() => { load(); }, [key, me.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (err) return <div className="dir-page"><p className="bad">{err}</p><Link to="/">← Пульт</Link></div>;
-  if (!d) return <div className="dir-page"><p className="muted">Загрузка…</p></div>;
+  if (!d) return <div className="dir-page"><Loading p /></div>;
   const open = d.assignments.filter((a) => !["done", "cancelled"].includes(a.status));
   return (
     <div className="dir-page">

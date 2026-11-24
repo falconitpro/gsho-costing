@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { Me } from "../types";
+import { Loading } from "../components/States";
 
 type Matrix = {
   groups: { code: string; title: string; fields: string[] }[]; levels: { level: number; title: string }[];
@@ -22,7 +23,7 @@ export default function AccessPage({ me, embedded = false }: { me: Me; embedded?
   const [msg, setMsg] = useState("");
   const load = () => api.get<Matrix>("/api/admin/access").then(setM).catch((e) => setMsg(e.message));
   useEffect(() => { load(); }, []);
-  if (!m) return <div className="muted">{msg || "Загрузка…"}</div>;
+  if (!m) return <Loading msg={msg} />;
   const colors = ["#ffe3e3", "#f4f4f4", "#ededed"];
   async function setLevel(role: string, group: string, level: number) {
     try { await api.put(`/api/admin/access/${role}/${group}`, { level }); setMsg(""); load(); } catch (e) { setMsg((e as Error).message); }
@@ -41,7 +42,7 @@ export default function AccessPage({ me, embedded = false }: { me: Me; embedded?
       </div>
       {tab === "actions" && (
         <div className="card">
-          {!acts ? <div className="muted">Загрузка…</div> : <>
+          {!acts ? <Loading /> : <>
             <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>Права на действия заданы в коде и здесь не меняются (решение владельца 20.11.2026). Список собран из кода сервера автоматически — {acts.total} правил,
               поэтому всегда совпадает с тем, как система работает. Что каждая роль видит — на вкладке «По ролям».</div>
             <h3 style={{ margin: "0 0 6px" }}>Утверждение расчёта: ступени</h3>
@@ -59,7 +60,7 @@ export default function AccessPage({ me, embedded = false }: { me: Me; embedded?
         </div>)}
       {tab === "history" && (
         <div className="card" style={{ overflowX: "auto" }}>
-          {!hist ? <div className="muted">Загрузка…</div> : hist.length === 0 ? <div className="muted">Права ещё не меняли.</div> : (
+          {!hist ? <Loading /> : hist.length === 0 ? <div className="muted">Права ещё не меняли.</div> : (
             <table><thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Изменение</th><th>Комментарий</th></tr></thead>
               <tbody>{hist.map((h, i) => <tr key={i}><td style={{ whiteSpace: "nowrap" }}>{h.at ? new Date(h.at).toLocaleString("ru-RU") : "—"}</td><td>{h.by}</td><td>{h.what}</td><td>{h.change}</td><td className="muted">{h.comment}</td></tr>)}</tbody></table>)}
         </div>)}

@@ -8,6 +8,7 @@ import { api } from "../api";
 import type { Me } from "../types";
 import { askConfirm } from "../components/Dialogs";
 import { LATEST, NEWS, markNewsSeen, seenNews } from "../whatsNew";
+import { Loading } from "../components/States";
 
 // Рабочее место — главная страница под роль. Каркас «командный центр»: показатели → «главное сейчас» → три колонки
 // (сегодня и задачи · сделки, согласования, деньги · внимание, уведомления, сроки, команда). Набор блоков — по роли,
@@ -462,7 +463,7 @@ export function WorkplaceSettings() {
   const load = () => api.get<Data>("/api/workplace").then(setD).catch((e) => setErr((e as Error).message));
   useEffect(() => { load(); }, []);
   if (err) return <div className="alert error">{err}</div>;
-  if (!d) return <div className="muted">Загрузка…</div>;
+  if (!d) return <Loading />;
   return (
     <>
       {saved && <div className="alert ok">{saved}</div>}

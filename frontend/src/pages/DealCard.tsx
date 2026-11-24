@@ -34,6 +34,7 @@ import AcceptanceTab from "../components/AcceptanceTab";
 import CurrentOfferPanel from "../components/CurrentOfferPanel";
 import { payText } from "../components/PaymentTermsEditor";
 import { askConfirm, askPrompt } from "../components/Dialogs";
+import { Loading } from "../components/States";
 
 type Tab = "overview" | "acceptance" | "main" | "positions" | "offers" | "logistics" | "service" | "pricing" | "execution" | "planfact" | "documents" | "legal" | "catalog" | "feed" | "versions";
 const POST_WIN = ["contract", "execution", "closed"];
@@ -113,7 +114,7 @@ export default function DealCard({ me }: { me: Me }) {
     if (tab === "catalog") api.get<typeof cand>(`/api/deals/${id}/catalog/candidates`).then(setCand);
   }, [tab, id, me.id]);
 
-  if (!deal) return !err ? <div className="muted">Загрузка…</div> : (
+  if (!deal) return !err ? <Loading /> : (
     <div className="card" style={{ maxWidth: 640, margin: "40px auto" }}>
       <h2 style={{ marginTop: 0 }}>Сделка недоступна</h2>
       <p>Сделки с таким адресом нет, она удалена или закрыта для вашей роли. Менеджер видит свои сделки; логист и сервис — сделки, переданные им на расчёт.</p>

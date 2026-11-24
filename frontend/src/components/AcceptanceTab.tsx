@@ -1,6 +1,7 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import { api, fmtDate } from "../api";
 import { askConfirm, askPrompt } from "./Dialogs";
+import { Loading } from "./States";
 
 // Приёмка машин на заводе: по каждой машине — номера, чек-лист, испытания, фото и видео, замечания, решение и акт.
 
@@ -42,7 +43,7 @@ export default function AcceptanceTab({ dealId }: { dealId: string }) {
   const [msg, setMsg] = useState("");
   const load = () => api.get<Data>(base).then((d) => { setData(d); if (cur) setCur(d.units.find((u) => u.id === cur.id) || null); }).catch((e) => setMsg((e as Error).message));
   useEffect(() => { load(); }, [dealId]);
-  if (!data) return <div className="card muted">{msg || "Загрузка…"}</div>;
+  if (!data) return <Loading card msg={msg} />;
   const accepted = data.units.filter((u) => ["accepted", "accepted_remarks"].includes(u.decision)).length;
   return (
     <div className="card">

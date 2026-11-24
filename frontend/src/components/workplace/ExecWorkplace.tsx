@@ -5,6 +5,7 @@ import type { Me } from "../../types";
 import SecurityModal from "../SecurityModal";
 import AssignmentDialog, { type AsgPrefill } from "./AssignmentDialog";
 import DirectionsDialog from "./DirectionsDialog";
+import { Loading } from "../States";
 
 // Рабочее место ЗГД, вид «Пульт» (D-153; v2 — D-154 по ТЗ «Berghaus CRM 2.0»).
 // Данные — GET /api/workplace/executive. KPI: единица, период, время расчёта, качество данных, расшифровка тем же условием.
@@ -191,7 +192,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
         </section>
         <section className="card">
           <div className="wp-exec-h"><h2>Устранено за 30 дней {hist && hist.length > 0 && <span className="muted">{hist.length}</span>}</h2></div>
-          {hist === null ? <p className="muted">Загрузка…</p> : hist.length === 0 ? <p className="muted">Пока пусто: история ведётся с этого выпуска.</p> :
+          {hist === null ? <Loading p /> : hist.length === 0 ? <p className="muted">Пока пусто: история ведётся с этого выпуска.</p> :
             <ul className="wp-exec-drill">{hist.map((h) => (
               <li key={h.key}><span><span className={`wp-exec-prio ${PRIO[h.priority]?.[1] || "info"}`}>{PRIO[h.priority]?.[0] || h.priority}</span> <Link to={h.url}>{h.object_number && h.title.includes(h.object_number) ? h.title : `${h.object_type}${h.object_number ? ` ${h.object_number}` : ""}: ${h.title}`}</Link></span>
                 <span className="muted">{h.hours < 48 ? `${Math.max(1, Math.round(h.hours))} ч` : `${Math.round(h.hours / 24)} дн.`}</span>

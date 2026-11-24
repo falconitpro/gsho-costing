@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { Loading } from "./States";
 
 // Юридический блок: правила анализа договоров (версия, группы проверок) и ИИ-провайдер (выбор — ЗГД; ключи только в backend/.env).
 
@@ -14,7 +15,7 @@ export default function LegalRules() {
   const [test, setTest] = useState<{ ok: boolean; message?: string; provider?: string; model?: string; answer?: string } | null>(null);
   const load = () => api.get<Ai>("/api/legal/ai").then((r) => { setAi(r); setProvider(r.provider); setModel(r.model); }).catch((e) => setMsg((e as Error).message));
   useEffect(() => { load(); }, []);
-  if (!ai) return <div className="card muted">{msg || "Загрузка…"}</div>;
+  if (!ai) return <Loading card msg={msg} />;
   return (
     <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", alignItems: "start" }}>
       <div className="card">

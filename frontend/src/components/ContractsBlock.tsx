@@ -5,6 +5,7 @@ import LinkedLetters from "./LinkedLetters";
 import { api } from "../api";
 import { ClaimCard, ClaimsTable, NewClaimDialog, type ClaimRow } from "./ClaimsBlock";
 import { askConfirm } from "./Dialogs";
+import { Loading } from "./States";
 
 // Реестр договоров (юридический блок, этап 1): договоры с клиентами, поставщиками, подрядчиками и прочие.
 // По каждому договору обязательны условия оплаты «сколько — через сколько дней — после какого события»; неустойки — для потока и претензий.
@@ -65,7 +66,7 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
   };
   useEffect(() => { load(); }, [f.q, f.status, f.direction, f.kind, f.flag, dealId]);
   useEffect(() => { api.get<Catalog>("/api/legal/contracts/catalog").then(setCat).catch(() => undefined); }, []);
-  if (!reg || !cat) return <div className="card">{msg || "Загрузка…"}</div>;
+  if (!reg || !cat) return <Loading card muted={false} msg={msg} />;
   const s = reg.summary;
   return (
     <div className="card">

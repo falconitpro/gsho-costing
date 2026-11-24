@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { api, fmtRub } from "../api";
 import type { Me } from "../types";
 import { UndoButton, useUndoHistory } from "../undo";
+import { Loading } from "../components/States";
 
 type Opt = { value: string; label: string };
 type Col = { key: string; label: string; type?: string; options?: Opt[]; nullable?: boolean };
@@ -158,7 +159,7 @@ export default function SettingsPage({ me, embedded = false }: { me: Me; embedde
   const undoH = useUndoHistory({ draft, comment }, (st) => { setDraft(st.draft); setComment(st.comment); }, open);
   const load = () => api.get<Record<string, unknown>>("/api/admin/settings").then(setValues);
   useEffect(() => { load(); api.get<typeof meta>("/api/admin/settings/meta").then(setMeta); }, []);
-  if (!meta) return <div className="muted">Загрузка…</div>;
+  if (!meta) return <Loading />;
   function start(key: string) {
     if (open === key) { setOpen(null); return; }
     setOpen(key); setDraft(values[key]); setComment(""); setMsg("");

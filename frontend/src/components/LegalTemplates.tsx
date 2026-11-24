@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
+import { Loading } from "./States";
 
 // Юридический блок, этап 2: библиотека DOCX-шаблонов (договоры закупки, спецификации, протокол разногласий, техспецификация)
 // и база примеров. Загрузка → найденные переменные и неизвестные каталогу → тестовое формирование на образцовых данных.
@@ -22,7 +23,7 @@ export default function LegalTemplates() {
   const [open, setOpen] = useState<string | null>(null);
   const load = () => api.get<Resp>("/api/legal/templates").then(setData).catch((e) => setMsg((e as Error).message));
   useEffect(() => { load(); }, []);
-  if (!data) return <div className="card muted">{msg || "Загрузка…"}</div>;
+  if (!data) return <Loading card msg={msg} />;
   const kindOf = (code: string) => data.kinds.find((k) => k.code === code);
   const isExample = (code: string) => code in data.example_kinds;
   async function upload() {

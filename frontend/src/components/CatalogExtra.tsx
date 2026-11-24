@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import type { Me } from "../types";
+import { Loading } from "./States";
 
 // Каталог: комплекты ТО, техника других производителей, склады (перенесены из раздела запчастей / новые экраны).
 
@@ -160,7 +161,7 @@ export function WarehousesBlock({ me }: { me: Me }) {
 export function ModelPartsBlock({ modelId }: { modelId: string }) {
   const [d, setD] = useState<{ parts: { id: string; article: string; name_ru: string; part_group: string; assembly: string; unit: string }[]; kits: { id: string; name: string; interval_hours: number; lines: KitLine[]; active: boolean }[] } | null>(null);
   useEffect(() => { setD(null); api.get<typeof d>(`/api/parts/catalog/by-model/${modelId}`).then(setD).catch(() => setD({ parts: [], kits: [] })); }, [modelId]);
-  if (!d) return <div className="muted">Загрузка…</div>;
+  if (!d) return <Loading />;
   return (
     <>
       <h3 style={{ margin: "4px 0" }}>Комплекты ТО ({d.kits.length})</h3>
