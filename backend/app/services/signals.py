@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from ..models import Assignment, SignalLog
@@ -16,12 +17,19 @@ from ..models import Assignment, SignalLog
 
 def sync(db: Session, escalations: list[dict]) -> None:
     now = datetime.now(timezone.utc)
-    cur = {e["key"]: e for e in escalations}
+    cur = {e["key"][:160]: e for e in escalations}
     rows = {r.key: r for r in db.scalars(select(SignalLog).where((SignalLog.resolved_at.is_(None)) | (SignalLog.key.in_(list(cur) or [""])))).all()}
+    new = [k for k in cur if k not in rows]
+    if new and db.get_bind().dialect.name == "postgresql":
+        # «Пульт» могут открыть одновременно (две вкладки, счётчики): новый ключ вставляется без конфликта,
+        # второй запрос ждёт первый и берёт уже записанную строку (раньше — 500 из-за signal_log_pkey).
+        db.execute(pg_insert(SignalLog).values([{"key": k, "first_seen": now, "last_seen": now, "times": 1} for k in new])
+                   .on_conflict_do_nothing(index_elements=["key"]))
+        rows.update({r.key: r for r in db.scalars(select(SignalLog).where(SignalLog.key.in_(new))).all()})
     for k, e in cur.items():
         r = rows.get(k)
         if r is None:
-            r = SignalLog(key=k[:160], first_seen=now, times=1)
+            r = SignalLog(key=k, first_seen=now, times=1)
             db.add(r)
         elif r.resolved_at is not None:
             r.resolved_at, r.times = None, (r.times or 1) + 1
