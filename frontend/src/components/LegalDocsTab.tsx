@@ -4,6 +4,7 @@ import type { Deal, Me } from "../types";
 import LegalSaleWizard from "./LegalSaleWizard";
 import ContractsBlock from "./ContractsBlock";
 import { askConfirm, askPrompt } from "./Dialogs";
+import { Loading } from "./States";
 
 // Юридический блок, этап 3: вкладка «Юридические документы» в сделке — пакеты (реестр), мастер закупочного пакета,
 // экран подтверждения договорного комплекта ЗИП, предпросмотр источников и проверки перед формированием.
@@ -41,7 +42,7 @@ function ZipSetEditor({ dealId, factoryId, onChanged }: { dealId: string; factor
   const [msg, setMsg] = useState("");
   const load = () => api.get<ZipSet>(base).then((r) => { setZs(r); setLines(r.lines); setMode(r.pricing_mode); setDirty(false); }).catch((e) => setMsg((e as Error).message));
   useEffect(() => { load(); }, [factoryId]);
-  if (!zs) return <div className="muted">{msg || "Загрузка…"}</div>;
+  if (!zs) return <Loading msg={msg} />;
   const upd = (i: number, p: Partial<ZipLine>) => { setLines(lines.map((l, j) => (j === i ? { ...l, ...p } : l))); setDirty(true); };
   const save = () => api.put<ZipSet>(base, { lines: lines.map((l) => ({ ...l, qty: num(l.qty) ?? 0, unit_price: num(l.unit_price), interval_hours: num(l.interval_hours), lead_days: num(l.lead_days) })), pricing_mode: mode })
     .then((r) => { setZs(r); setLines(r.lines); setDirty(false); setMsg("Комплект сохранён — подтвердите его"); onChanged(); }).catch((e) => setMsg((e as Error).message));
@@ -140,7 +141,7 @@ export default function LegalDocsTab({ deal, me, reload }: { deal: Deal; me: Me;
     catch (e) { const d = (e as { detail?: unknown }).detail as { message?: string; errors?: string[] } | undefined; setMsg(d?.errors ? `${d.message}: ${d.errors.join("; ")}` : (e as Error).message); }
     finally { setBuilding(false); }
   };
-  if (!opt) return <div className="muted">{msg || "Загрузка…"}</div>;
+  if (!opt) return <Loading msg={msg} />;
   const sup = opt.suppliers.find((s) => s.id === ch.factory_id);
   const sp = ch.factory_id ? opt.supplier_profiles[ch.factory_id] : undefined;
   const ent = opt.entities.find((e) => e.id === ch.own_entity_id);

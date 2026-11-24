@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
+import { Loading } from "./States";
 
 // Юридический блок, этап 4: мастер «Договор заказчика» — загрузка DOCX, рабочая копия с реквизитами БЕРГ-ХАУС (подстановки с подтверждением),
 // юридический анализ (правила + ИИ), протокол разногласий и техническая спецификация.
@@ -44,7 +45,7 @@ export default function LegalSaleWizard({ dealId, onBuilt, onMsg }: { dealId: st
     if (!clientProfile && cp) setClientProfile(cp.id);
   }).catch((e) => onMsg((e as Error).message));
   useEffect(() => { load(); }, [dealId]);
-  if (!opt) return <div className="muted">Загрузка…</div>;
+  if (!opt) return <Loading />;
   const body = () => ({ framework_contract_id: fw || null, source_attachment_id: src, own_profile_id: ownProfile || null, own_bank_id: ownBank || null, client_profile_id: clientProfile || null, use_ai: useAi, notes,
     templates: Object.fromEntries(Object.entries(tpl).filter(([, v]) => v !== "auto").map(([k, v]) => [k, v === "builtin" ? "" : v])), approved_replacements: [...approved] });
   async function upload() {

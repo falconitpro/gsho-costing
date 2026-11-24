@@ -2,6 +2,7 @@ import { useAllColumns } from "./Levels";
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
 import { askConfirm, askPrompt } from "./Dialogs";
+import { Loading } from "./States";
 
 // Склад запчастей: приёмка по заказу поставщику (удобно с телефона), отклонения и претензии, движения (ТЗ запчастей, разделы 7–8).
 
@@ -309,7 +310,7 @@ function Balances() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, wh, pos, low, group, sort, limit]);
-  if (!d) return <div className="card muted">Загрузка…</div>;
+  if (!d) return <Loading card />;
   const cols = wh ? d.warehouses.filter((w) => w.id === wh) : d.warehouses;
   const all = d.warehouses.reduce((a, w) => ({ positions: a.positions + w.positions, qty: a.qty + w.qty, reserved: a.reserved + w.reserved, available: a.available + w.available,
     below: a.below + w.below_min, value: a.value + (w.value_rub || 0) }), { positions: 0, qty: 0, reserved: 0, available: 0, below: 0, value: 0 });

@@ -1233,6 +1233,18 @@ a.lv-stat:hover { background: var(--accent-soft); }
   --nv-side-w: 248px;
   --nv-side-w-collapsed: 64px;
   --nv-topbar-h: 56px;
+  /* D-160: решение владельца 24.11 — кнопки и текст акцента тёмно-красные (контраст ≥ 4.5:1 с белым),
+     фирменный #ff3131 — логотип, активный раздел панели, счётчики */
+  --nv-brand: #ff3131;
+  --accent: #c62828;
+  --accent-hover: #a91f1f;
+  --accent-soft: #fdeeee;
+  --line: #e1e4e7;
+  --muted: #5f6670;
+  --nv-line-strong: #cfd4da;
+  --nv-th: #f6f7f8;
+  --nv-row-hover: #fafbfc;
+  --nv-focus: 0 0 0 3px rgba(198, 40, 40, .22);
 }
 .app-shell { display: grid; grid-template-columns: var(--nv-side-w) minmax(0, 1fr); min-height: 100vh; }
 .app-shell.collapsed { grid-template-columns: var(--nv-side-w-collapsed) minmax(0, 1fr); }
@@ -1245,13 +1257,13 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .app-nav a, .app-side-btn { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 8px 10px; border-radius: 8px; border: 0; background: none;
   color: var(--nv-side-text); text-decoration: none; font: inherit; font-size: 14px; line-height: 1.2; cursor: pointer; text-align: left; width: 100%; }
 .app-nav a:hover, .app-side-btn:hover { background: var(--nv-side-hover); }
-.app-nav a.active { background: var(--accent); color: #fff; font-weight: 700; }
+.app-nav a.active { background: var(--nv-brand); color: #fff; font-weight: 700; }
 .app-nav a:focus-visible, .app-side-btn:focus-visible, .app-brand:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
 .app-nav svg, .app-side-btn svg { flex: none; width: 20px; height: 20px; }
 .app-nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-count { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+.app-count { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--nv-brand); color: #fff; font-size: 11px; font-weight: 700;
   display: inline-flex; align-items: center; justify-content: center; }
-.app-nav a.active .app-count { background: #fff; color: var(--accent); }
+.app-nav a.active .app-count { background: #fff; color: var(--nv-brand); }
 .app-side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; padding-top: 10px; border-top: 1px solid var(--nv-side-line); }
 .app-side-btn { color: var(--nv-side-muted); font-size: 13px; }
 .app-shell.collapsed .app-nav-label, .app-shell.collapsed .app-brand span { display: none; }
@@ -1297,3 +1309,78 @@ a.lv-stat:hover { background: var(--accent-soft); }
   .ui-new .app-topbar .dev-switch { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .app-sidebar { transition: none; } }
+
+/* =====================================================================================================
+   D-160 «Новый вид», пакет H1 — общие элементы: заголовки, кнопки, поля, таблицы, карточки, метки, вкладки,
+   сообщения, состояния. Только .ui-new; разметка экранов не меняется, прежний вид не затрагивается.
+   ===================================================================================================== */
+:where(.ui-new) h1 { font-size: 24px; line-height: 1.2; letter-spacing: -.01em; font-weight: 700; }
+:where(.ui-new) h2 { font-size: 17px; line-height: 1.3; }
+:where(.ui-new) .page-head { margin-bottom: 18px; min-height: 40px; }
+:where(.ui-new) .section-head { border-bottom-color: var(--line); }
+:where(.ui-new) .card, :where(.ui-new) .wp-card, :where(.ui-new) .wp-kpi { border-color: var(--line); border-radius: var(--nv-radius); box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+:where(.ui-new) .card { padding: 16px; margin-bottom: 16px; }
+/* кнопки: главная — тёмно-красная; вторичные — белые с нейтральной рамкой; высота 36, на телефоне 40 */
+:where(.ui-new) .btn { border-radius: 7px; transition: background-color .12s, border-color .12s, box-shadow .12s; }
+:where(.ui-new) .btn:not(.secondary):not(.ghost):not(.add):hover:not(:disabled) { background: var(--accent-hover); }
+:where(.ui-new) .btn.add.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+:where(.ui-new) .btn.secondary { border-color: var(--nv-line-strong); }
+:where(.ui-new) .btn.ghost, :where(.ui-new) .btn.add { border-color: var(--nv-line-strong); }
+:where(.ui-new) .btn.secondary:hover:not(:disabled), :where(.ui-new) .btn.ghost:hover:not(:disabled), :where(.ui-new) .btn.add:not(.primary):hover:not(:disabled) { border-color: #9aa1aa; background: #f6f7f8; }
+:where(.ui-new) .btn:focus-visible, :where(.ui-new) .tabs button:focus-visible, :where(.ui-new) a:focus-visible, :where(.ui-new) [role="button"]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; }
+/* поля ввода */
+:where(.ui-new) input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"])), :where(.ui-new) select, :where(.ui-new) textarea {
+  border: 1px solid var(--nv-line-strong); border-radius: 7px; transition: border-color .12s, box-shadow .12s; }
+:where(.ui-new) input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"])):hover, :where(.ui-new) select:hover, :where(.ui-new) textarea:hover { border-color: #9aa1aa; }
+:where(.ui-new) input:focus, :where(.ui-new) select:focus, :where(.ui-new) textarea:focus { outline: none; border-color: var(--accent); box-shadow: var(--nv-focus); }
+:where(.ui-new) input[type="checkbox"], :where(.ui-new) input[type="radio"] { accent-color: var(--accent); }
+:where(.ui-new) input:disabled, :where(.ui-new) select:disabled, :where(.ui-new) textarea:disabled { background-color: #f3f4f6; color: #6b7280; }
+:where(.ui-new) input[aria-invalid="true"], :where(.ui-new) select[aria-invalid="true"], :where(.ui-new) textarea[aria-invalid="true"] { border-color: var(--bad); }
+/* таблицы: спокойная шапка, разделители, подсветка строки; числа — справа (td.num уже есть) */
+:where(.ui-new) th { background: var(--nv-th); color: var(--muted); font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--line); padding: 8px 10px; }
+:where(.ui-new) td { padding: 8px 10px; border-bottom-color: #edf0f2; }
+:where(.ui-new) tbody tr:hover > td { background: var(--nv-row-hover); }
+:where(.ui-new) table a { text-underline-offset: 2px; }
+/* метки статусов — текст + цвет, единая форма */
+:where(.ui-new) .badge { border-radius: 6px; padding: 2px 8px; font-weight: 600; line-height: 1.5; background: #eef0f2; color: #374151; }
+:where(.ui-new) .badge.accent { background: var(--accent-soft); color: var(--accent); }
+:where(.ui-new) .badge.ok { background: var(--ok-bg); color: var(--ok); }
+:where(.ui-new) .badge.warn { background: var(--warn-bg); color: var(--warn); }
+:where(.ui-new) .badge.bad { background: var(--bad-bg); color: var(--bad); }
+:where(.ui-new) .badge.info { background: var(--info-bg); color: var(--info); }
+/* вкладки */
+:where(.ui-new) .tabs { border-bottom-color: var(--line); gap: 2px; }
+:where(.ui-new) .tabs button { color: #374151; padding: 9px 12px; border-radius: 6px 6px 0 0; }
+:where(.ui-new) .tabs button:hover { background: #f1f2f4; }
+:where(.ui-new) .tabs button.active { color: var(--ink); border-bottom-color: var(--accent); }
+:where(.ui-new) .tabs.tabs-compact button { border-radius: 8px; }
+:where(.ui-new) .tabs.tabs-compact button.active { color: var(--accent); }
+/* сообщения */
+:where(.ui-new) .alert { border-radius: 8px; padding: 10px 14px; line-height: 1.4; }
+/* показатели */
+:where(.ui-new) .kpi .v { font-size: 22px; font-variant-numeric: tabular-nums; }
+:where(.ui-new) .kpi .l, :where(.ui-new) .wp-kpi small { color: var(--muted); }
+:where(.ui-new) .wp-kpi b { font-variant-numeric: tabular-nums; }
+:where(.ui-new) .wp-kpi.link:hover { border-color: var(--accent); box-shadow: 0 2px 10px rgba(198, 40, 40, .12); }
+/* общие состояния (components/States.tsx): загрузка — заготовка без скачков, пусто / ошибка / нет доступа */
+.st-box { display: flex; flex-direction: column; gap: 6px; }
+.st-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+:where(.ui-new) .st-loading { position: relative; color: transparent; min-height: 96px; overflow: hidden; }
+:where(.ui-new) .st-loading::before { content: ""; position: absolute; inset: 16px; border-radius: 6px;
+  background: linear-gradient(#eceef1 0 0) 0 0 / 45% 14px no-repeat, linear-gradient(#f1f2f4 0 0) 0 26px / 100% 12px no-repeat,
+              linear-gradient(#f1f2f4 0 0) 0 48px / 85% 12px no-repeat, linear-gradient(#f1f2f4 0 0) 0 70px / 60% 12px no-repeat;
+  animation: st-pulse 1.4s ease-in-out infinite; }
+:where(.ui-new) .st-loading > * { visibility: hidden; }
+@keyframes st-pulse { 50% { opacity: .55; } }
+:where(.ui-new) .st-empty, :where(.ui-new) .st-noaccess { text-align: left; padding: 18px 16px; }
+:where(.ui-new) .st-empty .st-title, :where(.ui-new) .st-noaccess .st-title, :where(.ui-new) .st-error .st-title { font-weight: 600; color: var(--ink); }
+:where(.ui-new) .st-noaccess { background: #f6f7f8; }
+@media (prefers-reduced-motion: reduce) { :where(.ui-new) .st-loading::before { animation: none; } }
+@media (max-width: 760px) {
+  :where(.ui-new) .btn { min-height: 40px; }
+  :where(.ui-new) .btn[style*="padding"] { min-height: 0; }
+  :where(.ui-new) input:where(:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"])), :where(.ui-new) select { min-height: 40px; font-size: 16px; }
+  :where(.ui-new) h1 { font-size: 21px; }
+  :where(.ui-new) .card { padding: 14px 12px; }
+}

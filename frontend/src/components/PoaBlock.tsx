@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { askConfirm } from "./Dialogs";
+import { Loading } from "./States";
 
 // Доверенности компаний группы: реестр (статусы, сроки, истекающие), конструктор (представитель → вид и срок → полномочия → ограничения),
 // печать DOCX/PDF, копии и сканы, отзыв с уведомлением. Оформляют и отзывают юрист, ЗГД и ФД; остальным — реестр без паспортных данных.
@@ -37,7 +38,7 @@ export default function PoaBlock({ entityId, compact }: { entityId?: string; com
   useEffect(() => { load(); }, [entityId, status, q]);
   useEffect(() => { api.get<Catalog>("/api/legal/poa/catalog").then(setCat).catch(() => undefined); }, []);
   const reload = (p?: Poa) => { load(); if (p) setOpen(p); };
-  if (!reg) return <div className="card">{msg || "Загрузка…"}</div>;
+  if (!reg) return <Loading card muted={false} msg={msg} />;
   const s = reg.summary;
   return (
     <div className="card">

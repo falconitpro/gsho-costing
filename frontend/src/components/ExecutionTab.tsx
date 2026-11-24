@@ -6,6 +6,7 @@ import { can, type Deal, type Me, type Stage } from "../types";
 import ContractScans from "./ContractScans";
 import { reqSummary, type ReqSet } from "./ClientRequisites";
 import { askPrompt } from "./Dialogs";
+import { Loading } from "./States";
 
 type Resp = { stages: Stage[]; status: string; contract_number: string; contract_signed_at: string | null; factory_contract_signed_at: string | null; factory_contract_number?: string | null; won_variant_id: string | null;
   related: { id: string; number: string; status: string }[]; contract_steps: CStep[]; status_detail: string;
@@ -43,7 +44,7 @@ export default function ExecutionTab({ deal, me, reload }: { deal: Deal; me: Me;
       setNotice(r?.finance?.warning || ""); setErr(""); reload(); load(); setVer((v) => v + 1);
     } catch (e) { setErr((e as Error).message); }
   }
-  if (!data) return <div className="muted">{err || "Загрузка…"}</div>;
+  if (!data) return <Loading msg={err} />;
   const groups: Record<string, Stage[]> = {};
   for (const s of data.stages) { const k = s.batch ? `Партия: ${s.batch}` : s.position ? `Позиция: ${s.position}` : "Сделка"; (groups[k] ||= []).push(s); }
   const done = data.stages.filter((s) => s.done).length;

@@ -5,6 +5,7 @@ import { askPrompt } from "../components/Dialogs";
 import type { Me } from "../types";
 import OfficeAi from "../components/OfficeAi";
 import OfficeGuide from "../components/OfficeGuide";
+import { Loading } from "../components/States";
 
 /** Канцелярия (D-128): журналы входящих и исходящих писем, приказов, распоряжений, служебных записок и внутренних документов.
  *  Регистрирует делопроизводитель (офис-менеджер) или ЗГД; исполнитель видит свои документы; подписантов ведёт ЗГД. */
@@ -78,7 +79,7 @@ export default function OfficePage({ me }: { me: Me }) {
   };
   useEffect(() => { api.get<Meta>("/api/office/meta").then(setMeta); }, []);
   useEffect(load, [tab, onlyOpen]);
-  if (!meta) return <div className="muted">{err || "Загрузка…"}</div>;
+  if (!meta) return <Loading msg={err} />;
   return (
     <div>
       <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Канцелярия" }]} />
@@ -601,7 +602,7 @@ type CtlRow = { user_id: string | null; name: string; open: number; today: numbe
 function Control({ onOpen }: { onOpen: (id: string) => void }) {
   const [data, setData] = useState<{ as_of: string; items: CtlRow[]; total: Omit<CtlRow, "user_id" | "name" | "late_docs"> } | null>(null);
   useEffect(() => { api.get<typeof data>("/api/office/control").then(setData); }, []);
-  if (!data) return <div className="muted">Загрузка…</div>;
+  if (!data) return <Loading />;
   const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "—");
   return (
     <div>

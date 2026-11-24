@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import type { Me } from "../types";
 import AssignmentDialog, { type AsgPrefill } from "../components/workplace/AssignmentDialog";
+import { Loading } from "../components/States";
 
 // Поручения ЗГД (D-154, ТЗ «Рабочее место ЗГД» v2 §5): реестр «На контроле», «Мне», «Моему подразделению»; карточка с историей.
 // Полный цикл: новое → принято → в работе → заблокировано / на проверке → на доработке → выполнено; отменено.
@@ -33,7 +34,7 @@ function Card({ id, onChanged, onClose }: { id: string; onChanged: () => void; o
   useEffect(() => { setA(null); setErr(""); setLoadErr(""); api.get<Full>(`/api/management/assignments/${id}`).then(setA).catch((e: Error) => setLoadErr(e.message)); }, [id]);
   useEffect(() => { if (act === "delegate" && !users.length) api.get<{ users: U[] }>("/api/management/assignees").then((r) => setUsers(r.users)).catch(() => undefined); }, [act, users.length]);
   if (loadErr) return <aside className="card asg-card"><p className="bad">{loadErr}</p></aside>;
-  if (!a) return <aside className="card asg-card"><p className="muted">Загрузка…</p></aside>;
+  if (!a) return <aside className="card asg-card"><Loading p /></aside>;
   const run = (action: string) => {
     const need = NEED[action] || "";
     if (need && act !== action) { setAct(action); setText(""); setDue(a.due_on); setUser(""); setErr(""); return; }
@@ -121,7 +122,7 @@ export default function AssignmentsPage({ me }: { me: Me }) {
       {err && <p className="bad">{err}</p>}
       <div className={`asg-layout${open ? " with-card" : ""}`}>
         <div className="card asg-list">
-          {rows === null ? <p className="muted">Загрузка…</p> : rows.length === 0 ? <p className="muted">Поручений нет.</p> :
+          {rows === null ? <Loading p /> : rows.length === 0 ? <p className="muted">Поручений нет.</p> :
             <table className="asg-table"><thead><tr><th>№</th><th>Поручение</th><th>Кому</th><th>Срок</th><th>Статус</th></tr></thead>
               <tbody>{rows.map((r) => (
                 <tr key={r.id} className={`${r.overdue ? "late" : ""}${open === r.id ? " cur" : ""}`} onClick={() => set("open", r.id)}>

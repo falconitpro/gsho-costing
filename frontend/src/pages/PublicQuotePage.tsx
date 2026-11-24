@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Loading } from "../components/States";
 
 /** Ответ логистической компании по ссылке (D-107): без входа в CRM, только эта страница. */
 type View = {
@@ -61,7 +62,7 @@ export default function PublicQuotePage({ token }: { token: string }) {
       {body}
     </div>);
   if (err && !v) return wrap(<div className="card"><h2 style={{ marginTop: 0 }}>Ответ на запрос</h2><p>{err}</p></div>);
-  if (!v) return wrap(<p className="muted">Загрузка…</p>);
+  if (!v) return wrap(<Loading p />);
   if (done) return wrap(<div className="card"><h2 style={{ marginTop: 0 }}>{done}</h2><p className="muted">Ответ можно изменить по этой же ссылке до {ruDate(v.answer_by)} и ещё две недели после.</p>
     <button className="btn ghost" onClick={() => setDone("")}>Изменить ответ</button></div>);
 

@@ -9,6 +9,7 @@ import TechParamsView from "./TechParamsView";
 import { ImagesEditor, MoreEditor, TechEditor } from "./CatalogEdit";
 import { ModelDocsBlock } from "./PositionExtras";
 import { askConfirm, askPrompt } from "./Dialogs";
+import { Loading } from "./States";
 
 type Hist = { at: string | null; user: string; object: string; action: string; changes: { field: string; before: unknown; after: unknown }[]; comment: string; deal: string | null };
 const fmtVal = (v: unknown) => (v == null || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
@@ -86,7 +87,7 @@ export default function CatalogCard({ modelId, execId, onExec, models = [], onCh
   }
   useEffect(() => { if (execId) setEx(execId); }, [execId]);
   if (err) return <div className="alert error">{err}</div>;
-  if (!card) return <div className="card muted">Загрузка…</div>;
+  if (!card) return <Loading card />;
   const e = card.executions.find((x) => x.id === ex) || card.executions[0];
   const images = card.executions.flatMap((x) => x.images.map((im) => ({ ...im, exec: x.name })));
   const an = card.analytics;
@@ -250,7 +251,7 @@ export default function CatalogCard({ modelId, execId, onExec, models = [], onCh
             {!Object.keys(an.factory).length && an.client.price_rub.n === 0 && <li className="muted">Истории цен по модели пока нет.</li>}
           </ul>
         </>)}
-      {tab === "history" && (hist == null ? <div className="muted">Загрузка…</div> : hist.length === 0 ? <div className="muted">Изменений пока нет.</div> : (
+      {tab === "history" && (hist == null ? <Loading /> : hist.length === 0 ? <div className="muted">Изменений пока нет.</div> : (
         <table><thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Действие</th><th>Было → стало</th><th>Комментарий</th></tr></thead>
           <tbody>{hist.map((h, i) => (
             <tr key={i}><td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{h.at ? new Date(h.at).toLocaleString("ru-RU") : ""}</td><td>{h.user}</td><td style={{ fontSize: 12 }}>{h.object}{h.deal && <div className="muted">сделка {h.deal}</div>}</td><td>{h.action}</td>

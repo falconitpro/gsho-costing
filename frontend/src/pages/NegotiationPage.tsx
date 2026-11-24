@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
 import { STATUS_TITLES, type Deal, type Me } from "../types";
 import NegotiationTab from "../components/NegotiationTab";
+import { Loading } from "../components/States";
 
 /** Отдельная страница «Торги» (D-082): только данные торгов — без расчёта, вкладок сделки и прочего. КД и ЗГД. */
 export default function NegotiationPage({ me }: { me: Me }) {
@@ -16,7 +17,7 @@ export default function NegotiationPage({ me }: { me: Me }) {
   useEffect(() => { document.title = deal ? `Торги · ${deal.number}` : "Торги"; }, [deal]);
   if (!allowed) return <div className="card"><div className="alert warn">Торги доступны только КД и ЗГД.</div><Link to={`/deals/${id}`}>← к сделке</Link></div>;
   if (err) return <div className="card"><div className="alert error">{err}</div></div>;
-  if (!deal) return <div className="card muted">Загрузка…</div>;
+  if (!deal) return <Loading card />;
   return (
     <div className="ngp">
       <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Сделки", to: "/deals" }, { label: deal.number, to: `/deals/${deal.id}` }, { label: "Расчёт и утверждение", to: `/deals/${deal.id}?tab=pricing` }, { label: "Торги" }]} />

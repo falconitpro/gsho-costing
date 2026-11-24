@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import LinkedLetters from "./LinkedLetters";
 import { api } from "../api";
+import { Loading } from "./States";
 
 // Претензии по договорам: реестр, карточка (строки требований, подпись КД / ЗГД, отправка, ответ, суд / закрытие), печатная форма.
 
@@ -25,7 +26,7 @@ export default function ClaimsBlock() {
   const [msg, setMsg] = useState("");
   const load = () => api.get<{ items: ClaimRow[]; summary: Record<string, number> }>(`/api/legal/claims?${new URLSearchParams(f)}`).then(setData).catch((e) => setMsg((e as Error).message));
   useEffect(() => { load(); }, [f.direction, f.status, f.q]);
-  if (!data) return <div className="card">{msg || "Загрузка…"}</div>;
+  if (!data) return <Loading card muted={false} msg={msg} />;
   const s = data.summary;
   return (
     <div className="card">

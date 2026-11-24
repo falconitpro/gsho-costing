@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { Loading } from "./States";
 
 // Правила внутригрупповых цепочек по умолчанию (D-164): через какую компанию группы идёт закупка — по виду сделки, стране или поставщику.
 // Менеджер выбирает конечного поставщика, цепочку подставляет правило; ведут ФД и ЗГД.
@@ -20,7 +21,7 @@ export default function ChainRulesBlock() {
   const load = () => api.get<Data>("/api/parts/intragroup-rules").then((x) => { setD(x); setRows(x.rules); }).catch((e) => setMsg((e as Error).message));
   useEffect(() => { load(); api.get<Route[]>("/api/parts/routes").then((r) => setRoutes(r.filter((x) => x.is_active && x.steps.length >= 2))).catch(() => undefined);
     api.get<Sup[]>("/api/refs/factories").then((f) => setSups(f.filter((x) => x.supplier_status !== "group_company"))).catch(() => undefined); }, []);
-  if (!d) return <div className="muted">{msg || "Загрузка…"}</div>;
+  if (!d) return <Loading msg={msg} />;
   const ro = !d.can_edit;
   const set = (i: number, p: Partial<Rule>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
   const save = () => api.put<Data>("/api/parts/intragroup-rules", { rules: rows.map((r) => ({ ...r, route_id: r.route_id || null })) })

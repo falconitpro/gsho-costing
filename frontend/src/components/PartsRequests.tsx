@@ -7,6 +7,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
 import { askAlert, askConfirm, askPrompt } from "./Dialogs";
+import { Loading } from "./States";
 
 // Заявки клиентов на запчасти: попозиционный учёт, подбор по каталогу, цена, маржа и визы (ТЗ запчастей, разделы 5–6).
 
@@ -490,6 +491,6 @@ export function PartsRequestView({ me, id }: { me: Me; id: string }) {
             onClick={async () => { if ((await askConfirm(`Удалить заявку ${cur.number}${cur.client_name ? ` (${cur.client_name})` : ""}? Восстановить из системы нельзя, снимок останется в журнале.`)))
               api.del<{ deleted: string }>(`/api/parts/requests/${cur.id}`).then(() => nav("/deals?type=parts")).catch((e) => setMsg((e as Error).message)); }}>Удалить заявку</button>)}</div>
       {msg && <div className="alert info" onClick={() => setMsg("")}>{msg}</div>}
-      {cur && meta ? <RequestCard r={cur} meta={meta} seesCost={seesCost} approver={has("cd", "fd", "gd")} act={act} /> : !msg && <div className="card">Загрузка…</div>}
+      {cur && meta ? <RequestCard r={cur} meta={meta} seesCost={seesCost} approver={has("cd", "fd", "gd")} act={act} /> : !msg && <Loading card muted={false} />}
     </>);
 }
