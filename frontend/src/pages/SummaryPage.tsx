@@ -4,6 +4,8 @@ import { Crumbs } from "../components/Levels";
 
 import { api, fmtDate, fmtRub } from "../api";
 import type { Me } from "../types";
+import { isNewUi } from "../uiMode";
+import { Loading } from "../components/States";
 
 // Сводные экраны по всем сделкам: Отгрузки (логист), Деньги (ФД), Сервис, Закупки. Один компонент, вкладка по роли.
 
@@ -12,6 +14,8 @@ const TITLES: Record<Kind, string> = { shipments: "Отгрузки", money: "Д
 const load = <T,>(k: string, d: T): T => { try { return (JSON.parse(localStorage.getItem(k) || "") as T) ?? d; } catch { return d; } };
 
 function Kpi({ v, l, bad }: { v: string | number; l: string; bad?: boolean }) {
+  // новый вид: единая карточка показателя (значение, подпись; красным — только отклонение)
+  if (isNewUi()) return <div className={"sum-kpi" + (bad && Number(v) > 0 ? " bad" : "")}><b>{v ?? "нет данных"}</b><span>{l}</span></div>;
   return <div style={{ flex: "1 1 130px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", background: "#fff" }}>
     <div style={{ fontSize: 20, fontWeight: 700, color: bad && Number(v) > 0 ? "var(--bad)" : undefined }}>{v}</div><div className="muted" style={{ fontSize: 12 }}>{l}</div></div>;
 }
@@ -53,7 +57,7 @@ export default function SummaryPage({ me }: { me: Me }) {
       </div>
       {err && <div className="alert error">{err}</div>}
       {kind === "speed" && <Speed />}
-      {!data && !err && kind !== "speed" && <div className="muted">Загружаю…</div>}
+      {!data && !err && kind !== "speed" && <Loading text="Загружаю…" />}
       {data && kind === "shipments" && <Shipments data={data} t={t} />}
       {data && kind === "money" && <Money data={data} t={t} />}
       {data && kind === "service" && <Service data={data} t={t} />}
@@ -73,7 +77,7 @@ function Shipments({ data, t }: { data: Record<string, unknown>; t: Record<strin
   const [only, setOnly] = useState<"" | "late" | "transit">("");
   const shown = rows.filter((r) => (!q || [r.deal_number, r.client, r.site, r.route, r.manager].some((x) => (x || "").toLowerCase().includes(q.toLowerCase())))
     && (only !== "late" || r.overdue > 0) && (only !== "transit" || (r.stages.some((s) => s.code === "shipment" && s.done) && !r.stages.every((s) => s.done))));
-  const cell = (s: Stage | undefined) => s ? <td style={{ whiteSpace: "nowrap", background: s.done ? "var(--ok-bg)" : s.overdue_days > 0 ? "var(--late-bg)" : undefined }}>{d(s.on)}{s.done ? " ✓" : ""}{!s.done && late(s.overdue_days)}</td> : <td>—</td>;
+  const cell = (s: Stage | undefined, label = "") => s ? <td data-label={label} style={{ whiteSpace: "nowrap", background: s.done ? "var(--ok-bg)" : s.overdue_days > 0 ? "var(--late-bg)" : undefined }}>{d(s.on)}{s.done ? " ✓" : ""}{!s.done && late(s.overdue_days)}</td> : <td data-label={label}>—</td>;
   return (
     <>
       <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
@@ -86,22 +90,24 @@ function Shipments({ data, t }: { data: Record<string, unknown>; t: Record<strin
           <button className={only === "transit" ? "active" : ""} onClick={() => setOnly("transit")}>в пути</button>
           <button className={only === "late" ? "active" : ""} onClick={() => setOnly("late")}>с просрочкой</button></div>
       </div>
-      <div className="card" style={{ padding: 0, overflowX: "auto", marginTop: 10 }}>
+      <div className="card sum-ship" style={{ padding: 0, overflowX: "auto", marginTop: 10 }}>
         <table style={{ minWidth: 1000 }}>
           <thead><tr><th>Сделка</th><th>Клиент / объект</th><th>Партия · маршрут</th><th>Готовность завода</th><th>Отгрузка</th><th>Граница</th><th>ДТ</th><th>Доставка</th><th>Этап</th><th>Менеджер</th></tr></thead>
           <tbody>{shown.map((r, i) => {
             const st = (c: string) => r.stages.find((s) => s.code === c);
             return (
               <tr key={i} style={r.overdue > 0 ? { boxShadow: "inset 3px 0 0 var(--bad)" } : undefined}>
-                <td><Link to={`/deals/${r.deal_id}?tab=execution`} style={{ fontWeight: 600 }}>{r.deal_number}</Link></td>
-                <td><b>{r.client}</b>{r.site && <div className="muted" style={{ fontSize: 12 }}>{r.site}</div>}</td>
-                <td><b>{r.batch}</b><div className="muted" style={{ fontSize: 12 }}>{r.route}{r.units ? ` · ${r.units} ТС` : ""}{r.weight_kg ? ` · ${Math.round(r.weight_kg)} кг` : ""}</div></td>
-                <td style={{ fontSize: 12 }}>{r.readiness.map((x, j) => <div key={j}>{d(x.on)}{x.done ? " ✓" : ""}{!x.done && late(x.overdue_days)}</div>)}</td>
-                {cell(st("shipment"))}{cell(st("border"))}{cell(st("declaration"))}{cell(st("delivery"))}
-                <td style={{ fontSize: 12, fontWeight: 600 }}>{r.phase}</td><td style={{ whiteSpace: "nowrap" }}>{r.manager}</td>
+                <td data-label="Сделка"><Link to={`/deals/${r.deal_id}?tab=execution`} style={{ fontWeight: 600 }}>{r.deal_number}</Link></td>
+                <td data-label="Клиент"><b>{r.client}</b>{r.site && <div className="muted" style={{ fontSize: 12 }}>{r.site}</div>}</td>
+                <td data-label="Партия"><b>{r.batch}</b><div className="muted" style={{ fontSize: 12 }}>{r.route}{r.units ? ` · ${r.units} ТС` : ""}{r.weight_kg ? ` · ${Math.round(r.weight_kg)} кг` : ""}</div></td>
+                <td data-label="Готовность завода" style={{ fontSize: 12 }}>{r.readiness.map((x, j) => <div key={j}>{d(x.on)}{x.done ? " ✓" : ""}{!x.done && late(x.overdue_days)}</div>)}</td>
+                {cell(st("shipment"), "Отгрузка")}{cell(st("border"), "Граница")}{cell(st("declaration"), "ДТ")}{cell(st("delivery"), "Доставка")}
+                <td data-label="Этап" style={{ fontSize: 12, fontWeight: 600 }}>{r.phase}</td><td data-label="Менеджер" style={{ whiteSpace: "nowrap" }}>{r.manager}</td>
               </tr>);
           })}
-          {shown.length === 0 && <tr><td colSpan={10} className="muted" style={{ padding: 16 }}>Партий нет</td></tr>}</tbody>
+          {shown.length === 0 && <tr><td colSpan={10} className="muted" style={{ padding: 16 }}>{isNewUi() && (q || only) && rows.length > 0
+            ? <>По отбору{q ? ` «${q}»` : ""}{only ? ` · ${only === "late" ? "с просрочкой" : "в пути"}` : ""} партий нет. <button type="button" className="btn ghost" onClick={() => { setQ(""); setOnly(""); }}>Сбросить отбор</button></>
+            : "Партий нет"}</td></tr>}</tbody>
         </table>
       </div>
     </>
