@@ -425,7 +425,7 @@ def a10(_):
     sig = next(s for s in e["escalations"] if s["group"] == f"deal:{X.golden['deal_id']}" and ":pay:" in s["key"])
     X.golden["sig"] = sig
     code, js = H(GD).call("POST", "/api/management/assignments", {"title": "x", "assignee_id": X.ids[MGR], "due_on": (dt.date.today() + dt.timedelta(days=2)).isoformat()})
-    assert code == 422 and "ожидаемый результат" in js["detail"]
+    assert code == 422 and "ожидаемый результат" in str(js.get("detail")), f"сервер без ожидаемого результата: {code} {js}"
     p = X.page(GD)
     row = sig_row(p, sig["title"])
     row.locator("button:has-text('Поручить')").click()
@@ -434,7 +434,13 @@ def a10(_):
     p.select_option(".sec-modal select >> nth=0", "sales")
     p.select_option(".sec-modal select >> nth=1", value=X.ids[MGR])
     p.fill(".sec-modal textarea >> nth=0", "")
-    assert p.locator(".sec-modal .asg-actions button:has-text('Поручить')").is_disabled()
+    btn = p.locator(".sec-modal .asg-actions button:has-text('Поручить')")
+    for _ in range(20):                       # состояние кнопки — после перерисовки формы
+        if btn.is_disabled():
+            break
+        p.wait_for_timeout(100)
+    assert btn.is_disabled(), ("кнопка «Поручить» доступна без ожидаемого результата: "
+                               f"поля={p.eval_on_selector_all('.sec-modal textarea, .sec-modal input', 'els => els.map(e => (e.type||e.tagName)+\'=\'+(e.type===\'radio\'?e.checked:e.value))')}")
     X.shot(p, "A10")
 
 
