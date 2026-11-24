@@ -14,7 +14,7 @@ gsho-costing/
 │   │   ├── adapters/    SharePoint/Яндекс Диск/S3, Outlook/Яндекс 360, WeCom, ЦБ РФ — сменные по настройке
 │   │   ├── api/         REST (FastAPI) по блокам ролей
 │   │   └── main.py
-│   ├── tests/           pytest: ядро, workflow и права, RFQ, Excel, КП  (26 тестов)
+│   ├── tests/           pytest: расчёт, workflow и права, финансы, юр. блок, Канцелярия, поручения, безопасность (≈530 тестов)
 │   ├── scripts/seed.py  dev-данные
 │   ├── migrations/      SQL: неизменяемость журнала и версий, индексы
 │   ├── requirements.txt, Dockerfile, .env.example
@@ -68,6 +68,13 @@ docker compose exec backend python -m scripts.seed
 
 ## Что проверено
 
-CI на GitHub (`.github/workflows/ci.yml`) на каждый push: 26 автотестов backend — ядро расчёта, workflow и права, импорт RFQ,
-Excel, КП и сквозной сценарий API на живой PostgreSQL 16 (`tests/test_api_flow.py`) — плюс сборка фронтенда. Не проверено
-вручную: интерфейс в браузере против живого API и интеграции с Microsoft 365 / WeCom (адаптеры с заглушками). План — `docs/IMPLEMENTATION_PLAN.md`.
+CI на GitHub (`.github/workflows/ci.yml`) на каждый push и PR:
+- **backend** — около 530 тестов pytest на живой PostgreSQL 16 (отчёт JUnit — артефакт `backend-junit`);
+- **frontend** — проверка типов и сборка, «храповик» встроенных стилей и цветов (`scripts/ci/style_budget.py`);
+- **ui** — все экраны всех ролей в прежнем и «Новом виде» (`scripts/e2e/ui_smoke.py`: ошибки страницы, 5xx/403, одинаковые разделы меню
+  в обоих видах, порог числа экранов), 10 сквозных сценариев (`scripts/e2e/scenarios.py`) и автоматическая приёмка «Пульт ЗГД и поручения»
+  в обоих видах (`scripts/acceptance/`, 45 случаев; отчёт — артефакт `acceptance-report`);
+- **verified** — после зелёных проверок на `main` ветка `verified` указывает на проверенный коммит; рабочий сервер ставит только её (D-158).
+
+Локально — `make acceptance` (см. `scripts/acceptance/README.md`). Внешние интеграции (почта, ИИ, Microsoft 365, WeCom) работают через
+адаптеры; без настроек — заглушки с явной пометкой «не отправлено». План — `docs/IMPLEMENTATION_PLAN.md`.

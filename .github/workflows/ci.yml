@@ -121,6 +121,13 @@ jobs:
           API_URL: http://localhost:8000
           RUN_ID: ci-${{ github.run_id }}
         run: BROWSER_EXECUTABLE="$(command -v google-chrome || command -v chromium)" python3 scripts/acceptance/acceptance.py artifacts/acceptance
+      - name: та же приёмка в «Новом виде» (переключатель, D-159)
+        env:
+          BASE_URL: http://localhost:5173
+          API_URL: http://localhost:8000
+          RUN_ID: ci-new-${{ github.run_id }}
+          ACCEPT_UI: new
+        run: BROWSER_EXECUTABLE="$(command -v google-chrome || command -v chromium)" python3 scripts/acceptance/acceptance.py artifacts/acceptance/new-ui
       - name: журнал backend при ошибке
         if: failure()
         run: tail -100 /tmp/backend.log

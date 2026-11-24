@@ -1216,3 +1216,84 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .wp-exec-dl.overdue .wp-exec-dl-on { color: var(--bad); } .wp-exec-dl.today .wp-exec-dl-on { color: var(--warn); } .wp-exec-dl.soon .wp-exec-dl-on { color: var(--ink); }
 .wp-exec-dl .wp-exec-dl-on { font-weight: 600; } .wp-exec-dl.later .wp-exec-dl-on { font-weight: 400; }
 .dir-dlg-h { font-size: 15px; margin: 14px 0 2px; } .dir-dlg-t td { cursor: default; } .dir-dlg-t select { width: 100%; }
+
+/* =====================================================================================================
+   D-159 «Новый вид» (мастер-ТЗ UX/UI A–H, этап «Дизайн-основа»). Всё ниже действует только при body.ui-new
+   и разметке .app-shell — прежний вид не меняется. Токены нового вида — --nv-*; базовые --accent/--ok/--bad… общие.
+   ===================================================================================================== */
+.ui-new {
+  --bg: #f4f5f7;                 /* светлая рабочая область */
+  --nv-side: #16191f;            /* графит боковой панели */
+  --nv-side-hover: #232832;
+  --nv-side-text: #e8ebf0;
+  --nv-side-muted: #98a0ad;
+  --nv-side-line: rgba(255, 255, 255, .1);
+  --nv-surface: #ffffff;
+  --nv-radius: 10px;
+  --nv-side-w: 248px;
+  --nv-side-w-collapsed: 64px;
+  --nv-topbar-h: 56px;
+}
+.app-shell { display: grid; grid-template-columns: var(--nv-side-w) minmax(0, 1fr); min-height: 100vh; }
+.app-shell.collapsed { grid-template-columns: var(--nv-side-w-collapsed) minmax(0, 1fr); }
+.app-sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 14px;
+  padding: 14px 10px 12px; background: var(--nv-side); color: var(--nv-side-text); z-index: 30; scrollbar-width: thin; }
+.app-brand { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 2px 8px; color: var(--nv-side-text); text-decoration: none; }
+.app-brand img { height: 26px; width: auto; display: block; }
+.app-brand span { font-size: 13px; font-weight: 700; letter-spacing: .12em; color: var(--nv-side-muted); }
+.app-nav { display: flex; flex-direction: column; gap: 2px; }
+.app-nav a, .app-side-btn { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 8px 10px; border-radius: 8px; border: 0; background: none;
+  color: var(--nv-side-text); text-decoration: none; font: inherit; font-size: 14px; line-height: 1.2; cursor: pointer; text-align: left; width: 100%; }
+.app-nav a:hover, .app-side-btn:hover { background: var(--nv-side-hover); }
+.app-nav a.active { background: var(--accent); color: #fff; font-weight: 700; }
+.app-nav a:focus-visible, .app-side-btn:focus-visible, .app-brand:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.app-nav svg, .app-side-btn svg { flex: none; width: 20px; height: 20px; }
+.app-nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-count { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; }
+.app-nav a.active .app-count { background: #fff; color: var(--accent); }
+.app-side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; padding-top: 10px; border-top: 1px solid var(--nv-side-line); }
+.app-side-btn { color: var(--nv-side-muted); font-size: 13px; }
+.app-shell.collapsed .app-nav-label, .app-shell.collapsed .app-brand span { display: none; }
+.app-shell.collapsed .app-nav a, .app-shell.collapsed .app-side-btn { justify-content: center; padding-inline: 0; position: relative; }
+.app-shell.collapsed .app-count { position: absolute; top: 2px; right: 4px; min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; }
+.app-shell.collapsed .app-brand { justify-content: center; padding-inline: 0; }
+.app-shell.collapsed .app-brand img { height: 16px; }
+.app-main-column { min-width: 0; display: flex; flex-direction: column; }
+.ui-new header.top.app-topbar { position: sticky; top: 0; z-index: 20; padding: 0 20px; min-height: var(--nv-topbar-h); justify-content: center;
+  background: var(--nv-surface); border-bottom: 1px solid var(--line); }
+.ui-new .app-topbar .top-row { min-height: var(--nv-topbar-h); gap: 12px; }
+.app-topbar-title { flex: 1 1 auto; min-width: 0; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-topbar .account { flex: none; }
+.app-burger { display: none; flex: none; width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--line); background: var(--nv-surface); font-size: 18px; cursor: pointer; }
+.app-scrim { display: none; }
+.ui-new .app-shell main { width: 100%; max-width: 1600px; margin: 0 auto; padding: 20px 24px 40px; box-sizing: border-box; }
+.ui-new .card { border-radius: var(--nv-radius); }
+/* планшет и телефон: панель разделов выезжает по ☰, рабочая область — во всю ширину */
+@media (max-width: 1024px) {
+  .app-shell, .app-shell.collapsed { display: block; }
+  .app-sidebar { position: fixed; left: 0; top: 0; bottom: 0; height: auto; width: min(280px, 86vw); transform: translateX(-102%); transition: transform .2s ease;
+    box-shadow: 0 0 24px rgba(0, 0, 0, .25); z-index: 60; }
+  .app-shell.drawer-open .app-sidebar { transform: none; }
+  .app-shell.collapsed .app-nav-label, .app-shell.collapsed .app-brand span { display: inline; }
+  .app-shell.collapsed .app-nav a, .app-shell.collapsed .app-side-btn { justify-content: flex-start; padding-inline: 10px; }
+  .app-shell.collapsed .app-count { position: static; }
+  .app-collapse { display: none; }
+  .app-shell.drawer-open .app-scrim { display: block; position: fixed; inset: 0; z-index: 50; border: 0; background: rgba(15, 18, 23, .45); cursor: pointer; }
+  .app-burger { display: inline-flex; align-items: center; justify-content: center; }
+  .ui-new header.top.app-topbar { padding: 0 12px; }
+  .ui-new .app-topbar .dev-switch span { display: none; }
+  .ui-new .app-topbar .dev-switch select { max-width: 150px; }
+  .ui-new .app-shell main { padding: 16px 14px 32px; }
+}
+@media (max-width: 760px) {
+  .ui-new .app-topbar .top-row { gap: 6px; }
+  .ui-new .app-topbar .account { gap: 4px; }
+  .ui-new .app-topbar .dev-switch select { max-width: 96px; }
+  .ui-new .app-shell main { padding: 12px 10px 28px; }
+}
+@media (max-width: 400px) {
+  .app-topbar-title { font-size: 14px; }
+  .ui-new .app-topbar .dev-switch { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .app-sidebar { transition: none; } }

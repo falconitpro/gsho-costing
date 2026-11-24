@@ -33,6 +33,8 @@ import SupplyPage from "./pages/PartsSetupPage";
 import OfficePage from "./pages/OfficePage";
 import AssignmentsPage from "./pages/AssignmentsPage";
 import DirectionPage from "./pages/DirectionPage";
+import SideNav, { useSection } from "./components/SideNav";
+import { useNewUi, useSideCollapsed } from "./uiMode";
 import { PartsRequestView } from "./components/PartsRequests";
 import LoginPage from "./pages/LoginPage";
 
@@ -70,6 +72,9 @@ function RouteBoundary({ children }: { children: React.ReactNode }) {
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [checked, setChecked] = useState(false);          // сессия проверена: до этого ничего не показываем, чтобы рабочее место не мелькало
+  const newUi = useNewUi();                                 // D-159: переключатель «Новый вид»
+  const [sideCollapsed, setSideCollapsed] = useSideCollapsed();
+  const [drawer, setDrawer] = useState(false);              // «Новый вид» на планшете и телефоне: панель разделов выезжает
   const [aiOpen, setAiOpen] = useState(false);            // помощник CRM: открыт ли (черновик сохраняется, пока вкладка открыта)
   const [devUsers, setDevUsers] = useState<{ email: string; display_name: string; roles: string[] }[]>([]);
 
@@ -130,14 +135,7 @@ export default function App() {
   const has = (...roles: string[]) => !!me && me.roles.some((r) => roles.includes(r.code));
   const perm = (g: string, level = 1) => !!me && (me.perms?.[g] ?? 0) >= level;
 
-  return (
-    <BrowserRouter>
-      <header className="top">
-        <div className="top-row">
-          <NavLink to="/" className="brand">
-            <img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" />
-          </NavLink>
-          {me && <RoleNav me={me} />}
+  const accountBlock = (
           <div className="account">
             {me && has("cd", "fd", "gd") && <InfoBar />}
             {devUsers.length > 0 && (
@@ -154,14 +152,8 @@ export default function App() {
             {me && <HelpMenu userId={me.id} canAssistant={perm("assistant_use")} onAssistant={() => setAiOpen(true)} />}
             {me && <UserMenu me={me} onLogout={logout} />}
           </div>
-        </div>
-      </header>
-      <FloatingScrollbar />
-      <StepUpDialog />
-      {me && <FilePreviewHost me={me} />}
-      {me && perm("assistant_use") && <AssistantDrawer open={aiOpen} onClose={() => setAiOpen(false)} />}
-      <SessionExpiryWarning />
-      <main>
+  );
+  const routes = (<>
         {me && (
           <RouteBoundary>
           <Routes>
@@ -198,7 +190,63 @@ export default function App() {
           </Routes>
           </RouteBoundary>
         )}
+  </>);
+  const hosts = (<>
+      <FloatingScrollbar />
+      <StepUpDialog />
+      {me && <FilePreviewHost me={me} />}
+      {me && perm("assistant_use") && <AssistantDrawer open={aiOpen} onClose={() => setAiOpen(false)} />}
+      <SessionExpiryWarning />
+  </>);
+
+  if (newUi) {   // D-159 «Новый вид»: тёмная боковая панель со всеми разделами роли + светлая рабочая область; прежний вид ниже — без изменений
+    return (
+      <BrowserRouter>
+        <div className={`app-shell${sideCollapsed ? " collapsed" : ""}${drawer ? " drawer-open" : ""}`}>
+          <aside className="app-sidebar" aria-label="Основная навигация">
+            <NavLink to="/" className="app-brand" title="Рабочее место">
+              <img src="/brand/logo-white.svg" alt="Berghaus" /><span>CRM</span>
+            </NavLink>
+            <SideNav me={me} collapsed={sideCollapsed} onCollapse={setSideCollapsed} onNavigate={() => setDrawer(false)} />
+          </aside>
+          <button type="button" className="app-scrim" aria-label="Закрыть меню" tabIndex={drawer ? 0 : -1} onClick={() => setDrawer(false)} />
+          <div className="app-main-column">
+            <header className="top app-topbar">
+              <div className="top-row">
+                <button type="button" className="app-burger" aria-label="Меню разделов" aria-expanded={drawer} onClick={() => setDrawer(true)}>☰</button>
+                <SectionTitle me={me} />
+                {accountBlock}
+              </div>
+            </header>
+            {hosts}
+            <main>
+              {routes}
+            </main>
+          </div>
+        </div>
+      </BrowserRouter>);
+  }
+
+  return (
+    <BrowserRouter>
+      <header className="top">
+        <div className="top-row">
+          <NavLink to="/" className="brand">
+            <img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" />
+          </NavLink>
+          {me && <RoleNav me={me} />}
+          {accountBlock}
+        </div>
+      </header>
+      {hosts}
+      <main>
+        {routes}
       </main>
     </BrowserRouter>
   );
+}
+
+function SectionTitle({ me }: { me: Me }) {
+  const t = useSection(me);
+  return <div className="app-topbar-title" aria-live="polite">{t}</div>;
 }
