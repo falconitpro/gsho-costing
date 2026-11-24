@@ -27,7 +27,9 @@ if [ "${BACKUP_REQUIRED:-false}" = "true" ]; then
   fi
 fi
 
-timeout 120 git fetch -q origin main && git reset -q --hard origin/main
+# D-158: рабочий сервер передаёт проверенную версию (DEPLOY_REF = коммит ветки verified); тестовый стенд — origin/main
+REF="${DEPLOY_REF:-origin/main}"
+timeout 120 git fetch -q origin main && { timeout 120 git fetch -q origin verified 2>/dev/null || true; } && git reset -q --hard "$REF"
 # антивирус (deploy/clamav): если владелец его уже запустил — пересобираем вместе с остальными; сам деплой его не включает
 SERVICES=(backend worker frontend caddy); PROFILE=()   # worker — фоновые задания (D-143)
 if [ -n "$(docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile scanner ps -q clamav 2>/dev/null)" ]; then

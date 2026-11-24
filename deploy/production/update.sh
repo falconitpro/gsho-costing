@@ -3,6 +3,9 @@
 # Обновление РАБОЧЕГО сервера. Запускать вручную, после того как версия проверена на стенде:
 #   sudo bash /opt/gsho-costing/deploy/production/update.sh          # показать, что изменится, и спросить подтверждение
 #   sudo bash /opt/gsho-costing/deploy/production/update.sh --yes    # без вопроса
+# Ставится только ПРОВЕРЕННАЯ версия (D-158): ветка origin/verified — последний коммит main, прошедший в CI все проверки
+# (backend, сборка, интерфейс по ролям, сквозные сценарии, автоматическая приёмка). Непроверенную — только явно:
+#   sudo UNVERIFIED="причина" bash /opt/gsho-costing/deploy/production/update.sh   # причина пишется в /var/log/gsho-unverified-deploys.log
 # Порядок: копия в Yandex Object Storage → новые SQL из backend/migrations → новая версия → проверка.
 # Без успешной копии ничего не меняется. Автоматического обновления на рабочем сервере нет.
 set -euo pipefail
@@ -13,7 +16,26 @@ DC=(docker compose -f docker-compose.yml -f docker-compose.prod.yml)
 BIN="${GSHO_BACKUP_BIN:-/usr/local/sbin/gsho-backup.sh}"
 
 timeout 120 git fetch -q origin main
-CUR="$(git rev-parse HEAD)"; NEW="$(git rev-parse origin/main)"
+timeout 120 git fetch -q origin verified 2>/dev/null || true
+CUR="$(git rev-parse HEAD)"; MAIN="$(git rev-parse origin/main)"
+if [ -n "${UNVERIFIED:-}" ]; then
+  NEW="$MAIN"
+  echo "ВНИМАНИЕ: ставится версия БЕЗ проверки CI ($(git rev-parse --short "$NEW")). Причина: $UNVERIFIED"
+  printf '%s\t%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$(git rev-parse --short "$CUR")" "$(git rev-parse --short "$NEW")" "$UNVERIFIED" >> "${GSHO_UNVERIFIED_LOG:-/var/log/gsho-unverified-deploys.log}"
+elif git rev-parse -q --verify origin/verified >/dev/null; then
+  NEW="$(git rev-parse origin/verified)"
+  if [ "$NEW" != "$MAIN" ]; then
+    echo "В main есть версии, ещё не прошедшие проверку CI (или не прошедшие её):"
+    git log --oneline --no-merges "$NEW..$MAIN" | sed 's/^/  /' | head -20
+    echo "Ставится последняя проверенная: $(git rev-parse --short "$NEW"). Статус проверок: https://github.com/falconitpro/gsho-costing/actions"
+  fi
+  if [ "$CUR" != "$NEW" ] && git merge-base --is-ancestor "$NEW" "$CUR"; then
+    echo "На сервере уже версия новее проверенной ($(git rev-parse --short "$CUR")) — ничего не делаю."; exit 0
+  fi
+else
+  echo "ОСТАНОВЛЕНО: нет отметки проверенной версии (ветка verified). Дождитесь зелёного CI на main или запустите с UNVERIFIED=\"причина\"." >&2
+  exit 1
+fi
 if [ "$CUR" = "$NEW" ]; then echo "Обновлений нет: $(git rev-parse --short HEAD)"; exit 0; fi
 
 echo "Изменения $(git rev-parse --short "$CUR") → $(git rev-parse --short "$NEW"):"
@@ -60,7 +82,7 @@ if [ -n "$NEW_SQL" ]; then
 fi
 
 echo "== новая версия"
-BACKUP_REQUIRED=false bash deploy/deploy-remote.sh    # копия уже сделана выше
+DEPLOY_REF="$NEW" BACKUP_REQUIRED=false bash deploy/deploy-remote.sh    # копия уже сделана выше; ставится ровно выбранная версия
 echo "== антивирус"   # после пересборки clamd 1–2 мин загружает базы; пока он не готов, загрузки файлов получают 503 (D-068)
 CID="$("${DC[@]}" --profile scanner ps -q clamav 2>/dev/null || true)"
 if [ -n "$CID" ]; then

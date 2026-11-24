@@ -160,7 +160,10 @@ def box(tmp_path):
     _stub(bin_, "git", f'''echo "git $*" >> {log}
 case "$*" in
   "rev-parse HEAD") echo aaa111 ;;
-  "rev-parse origin/main") echo "${{STUB_NEW:-bbb222}}" ;;
+  "rev-parse origin/main") echo "${{STUB_MAIN:-${{STUB_NEW:-bbb222}}}}" ;;
+  "rev-parse -q --verify origin/verified") [ -n "${{STUB_NO_VERIFIED:-}}" ] && exit 1; echo "${{STUB_NEW:-bbb222}}" ;;
+  "rev-parse origin/verified") echo "${{STUB_NEW:-bbb222}}" ;;
+  "merge-base --is-ancestor"*) exit "${{STUB_ANCESTOR_RC:-1}}" ;;
   "rev-parse --short"*) echo short ;;
   *"--diff-filter=A"*) printf '%s' "${{STUB_NEW_SQL:-}}" ;;
   *"--diff-filter=MD"*) printf '%s' "${{STUB_CHANGED_SQL:-}}" ;;
@@ -173,9 +176,9 @@ exit 0
     _stub(bin_, "timeout", 'shift; exec "$@"\n')
     _stub(bin_, "backup", f'echo "backup $*" >> {log}; exit "${{STUB_BACKUP_RC:-0}}"\n')
     (tmp_path / "deploy").mkdir()
-    (tmp_path / "deploy/deploy-remote.sh").write_text(f'echo "deploy-remote BACKUP_REQUIRED=$BACKUP_REQUIRED" >> {log}\n')
+    (tmp_path / "deploy/deploy-remote.sh").write_text(f'echo "deploy-remote DEPLOY_REF=$DEPLOY_REF BACKUP_REQUIRED=$BACKUP_REQUIRED" >> {log}\n')
     env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "GSHO_DIR": str(tmp_path), "GSHO_BACKUP_BIN": str(bin_ / "backup"),
-           "GSHO_BACKUP_RETRY_SLEEP": "0"}
+           "GSHO_BACKUP_RETRY_SLEEP": "0", "GSHO_UNVERIFIED_LOG": str(tmp_path / "unverified.log")}
     return tmp_path, env, log
 
 
@@ -216,6 +219,30 @@ def test_update_stops_without_backup_or_on_changed_sql(box):
     assert p.returncode == 1 and "без копии не обновляется" in p.stderr and not any(x.startswith("deploy-remote") for x in _calls(log))
     p = _update(env, "--yes", STUB_CHANGED_SQL="backend/migrations/014_security_core.sql\n")
     assert p.returncode == 1 and "уже применённые" in p.stderr and not any(x.startswith(("backup", "deploy-remote")) for x in _calls(log))
+
+
+def test_update_installs_only_verified_version(box):
+    """D-158: ставится ветка verified (прошла CI); main новее — список непроверенного и проверенная версия; без verified — стоп."""
+    tmp, env, log = box
+    p = _update(env, "--yes", STUB_MAIN="ccc333", STUB_NEW="bbb222")
+    assert p.returncode == 0, p.stderr
+    assert "ещё не прошедшие проверку" in p.stdout and "последняя проверенная" in p.stdout
+    d = next(x for x in _calls(log) if x.startswith("deploy-remote"))
+    assert "DEPLOY_REF=bbb222" in d                                            # ровно проверенная версия, не main
+    log.unlink()
+    p = _update(env, "--yes", STUB_NO_VERIFIED="1")
+    assert p.returncode == 1 and "нет отметки проверенной версии" in p.stderr
+    assert not any(x.startswith(("backup", "deploy-remote")) for x in _calls(log))
+    p = _update(env, "--yes", STUB_ANCESTOR_RC="0", STUB_NEW="bbb222")       # на сервере уже новее проверенной
+    assert p.returncode == 0 and "новее проверенной" in p.stdout and not any(x.startswith("deploy-remote") for x in _calls(log))
+
+
+def test_update_unverified_only_explicitly_with_reason_logged(box):
+    tmp, env, log = box
+    p = _update(env, "--yes", STUB_MAIN="ccc333", STUB_NEW="bbb222", UNVERIFIED="срочно: исправление входа")
+    assert p.returncode == 0 and "БЕЗ проверки CI" in p.stdout
+    assert "DEPLOY_REF=ccc333" in next(x for x in _calls(log) if x.startswith("deploy-remote"))
+    assert "срочно: исправление входа" in (tmp / "unverified.log").read_text()
 
 
 def test_update_asks_and_cancels(box):

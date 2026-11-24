@@ -50,7 +50,12 @@ jobs:
       - name: pytest
         run: |
           set -o pipefail
-          cd backend && python -m pytest -q -x 2>&1 | tee /tmp/pytest.txt
+          mkdir -p artifacts
+          cd backend && python -m pytest -q -x --junitxml=../artifacts/backend-junit.xml 2>&1 | tee /tmp/pytest.txt
+      - name: отчёт backend (JUnit) — сохраняется при любом исходе (D-158)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: backend-junit, path: artifacts/backend-junit.xml, if-no-files-found: warn, retention-days: 30 }
       - name: Publish failure report as commit comment
         if: failure()
         env: { GH_TOKEN: "${{ github.token }}" }
@@ -110,9 +115,39 @@ jobs:
         run: python3 scripts/e2e/ui_smoke.py http://localhost:5173 http://localhost:8000 "$(command -v google-chrome || command -v chromium)"
       - name: сквозные сценарии — цифры на экране и в КП (D-119)
         run: python3 scripts/e2e/scenarios.py http://localhost:5173 http://localhost:8000 "$(command -v google-chrome || command -v chromium)"
+      - name: автоматическая приёмка «Пульт ЗГД и поручения» — 34 сценария, AUD-01…06, ширины (D-158)
+        env:
+          BASE_URL: http://localhost:5173
+          API_URL: http://localhost:8000
+          RUN_ID: ci-${{ github.run_id }}
+        run: BROWSER_EXECUTABLE="$(command -v google-chrome || command -v chromium)" python3 scripts/acceptance/acceptance.py artifacts/acceptance
       - name: журнал backend при ошибке
         if: failure()
         run: tail -100 /tmp/backend.log
+      - name: отчёт приёмки и журналы — сохраняются при любом исходе
+        if: always()
+        run: mkdir -p artifacts/acceptance && cp /tmp/backend.log /tmp/frontend.log artifacts/acceptance/ 2>/dev/null || true
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: acceptance-report, path: artifacts/acceptance, if-no-files-found: warn, retention-days: 30 }
+
+  verified:
+    # D-158: отметка «проверено» — ветка verified указывает на последний коммит main, прошедший все проверки.
+    # Рабочий сервер (deploy/production/update.sh) ставит только её; непроверенную версию — только явно, с причиной в журнале.
+    needs: [backend, frontend, ui]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: продвинуть verified на ${{ github.sha }}
+        run: |
+          git fetch -q origin verified || true
+          if git rev-parse -q --verify origin/verified >/dev/null && ! git merge-base --is-ancestor origin/verified "$GITHUB_SHA"; then
+            echo "verified ($(git rev-parse --short origin/verified)) не предок $GITHUB_SHA — более новая версия уже проверена, не откатываю"; exit 0
+          fi
+          git push origin "$GITHUB_SHA:refs/heads/verified" --force
+          echo "verified → $(git rev-parse --short "$GITHUB_SHA")"
 
   deploy:
     needs: [backend, frontend, ui]
