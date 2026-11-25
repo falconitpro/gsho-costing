@@ -1253,8 +1253,6 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .app-sidebar { position: sticky; top: 0; height: 100vh; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 14px;
   padding: 14px 10px 12px; background: var(--nv-side); color: var(--nv-side-text); z-index: 30; scrollbar-width: thin; }
 .app-brand { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 2px 8px; color: var(--nv-side-text); text-decoration: none; }
-.app-brand img { height: 26px; width: auto; display: block; }
-.app-brand span { font-size: 13px; font-weight: 700; letter-spacing: .12em; color: var(--nv-side-muted); }
 .app-nav { display: flex; flex-direction: column; gap: 2px; }
 .app-nav a, .app-side-btn { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 8px 10px; border-radius: 8px; border: 0; background: none;
   color: var(--nv-side-text); text-decoration: none; font: inherit; font-size: 14px; line-height: 1.2; cursor: pointer; text-align: left; width: 100%; }
@@ -1268,11 +1266,9 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .app-nav a.active .app-count { background: #fff; color: var(--nv-brand-strong); }
 .app-side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; padding-top: 10px; border-top: 1px solid var(--nv-side-line); }
 .app-side-btn { color: var(--nv-side-muted); font-size: 13px; }
-.app-shell.collapsed .app-nav-label, .app-shell.collapsed .app-brand span { display: none; }
+.app-shell.collapsed .app-nav-label { display: none; }
 .app-shell.collapsed .app-nav a, .app-shell.collapsed .app-side-btn { justify-content: center; padding-inline: 0; position: relative; }
 .app-shell.collapsed .app-count { position: absolute; top: 2px; right: 4px; min-width: 16px; height: 16px; font-size: 10px; padding: 0 4px; }
-.app-shell.collapsed .app-brand { justify-content: center; padding-inline: 0; }
-.app-shell.collapsed .app-brand img { height: 16px; }
 .app-main-column { min-width: 0; display: flex; flex-direction: column; }
 .ui-new header.top.app-topbar { position: sticky; top: 0; z-index: 20; padding: 0 20px; min-height: var(--nv-topbar-h); justify-content: center;
   background: var(--nv-surface); border-bottom: 1px solid var(--line); }
@@ -1289,7 +1285,7 @@ a.lv-stat:hover { background: var(--accent-soft); }
   .app-sidebar { position: fixed; left: 0; top: 0; bottom: 0; height: auto; width: min(280px, 86vw); transform: translateX(-102%); transition: transform .2s ease;
     box-shadow: 0 0 24px rgba(0, 0, 0, .25); z-index: 60; }
   .app-shell.drawer-open .app-sidebar { transform: none; }
-  .app-shell.collapsed .app-nav-label, .app-shell.collapsed .app-brand span { display: inline; }
+  .app-shell.collapsed .app-nav-label { display: inline; }
   .app-shell.collapsed .app-nav a, .app-shell.collapsed .app-side-btn { justify-content: flex-start; padding-inline: 10px; }
   .app-shell.collapsed .app-count { position: static; }
   .app-collapse { display: none; }
@@ -1973,3 +1969,48 @@ a.lv-stat:hover { background: var(--accent-soft); }
   .ui-new .asg-num { display: inline-flex; align-items: center; }
 }
 .ui-new :where(button, a, select, input, textarea, [role=tab]):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* D-174: Пульт — ровная строка действий и вкладок (оба вида): переключатель и «Создать поручение» одной высоты,
+   вкладки-ссылки «Поручения» / «Аналитика» на одной линии с вкладками-кнопками */
+.wp-exec-head-act { align-items: stretch; }
+.wp-exec-head-act > .btn { min-height: 38px; margin: 0; }
+.wp-exec-switch button { display: inline-flex; align-items: center; }
+.wp-exec-tabs { align-items: flex-end; }
+.wp-exec-tabs button, .wp-exec-tabs a { display: inline-flex; align-items: center; box-sizing: border-box; line-height: 1.3; margin-top: 0; }
+
+/* D-174: ТЗ H-BRAND-01 — оригинальный логотип BERGHAUS виден всегда (новый вид; на экране безопасности — в обоих видах).
+   Раскрытая панель — полный логотип в панели; свёрнутая панель — знак в панели и полный логотип в верхней строке;
+   планшет и телефон — полный логотип в верхней строке и в выезжающей панели. Пропорции — по исходнику. */
+:root { --brand-side-w: 180px; --brand-top-w: 112px; --brand-mark-w: 40px; }
+.brand-logo { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; border-radius: 8px; text-decoration: none; flex: none; }
+.brand-logo:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.brand-logo:hover { opacity: .92; }
+.brand-img { display: block; height: auto; max-width: none; object-fit: contain; }
+.app-brand { position: sticky; top: -14px; z-index: 2; margin: -14px -10px 4px; padding: 14px 10px 10px; background: var(--nv-side); display: flex; justify-content: center; }
+.brand-sidebar { padding: 6px 8px; }
+.brand-sidebar .brand-img-full-dark { width: var(--brand-side-w); }
+.brand-sidebar .brand-img-mark { display: none; width: var(--brand-mark-w); }
+.brand-sidebar:focus-visible { outline-color: #fff; }
+.app-shell.collapsed .brand-sidebar { padding: 6px 0; }
+.app-shell.collapsed .brand-sidebar .brand-img-full-dark { display: none; }
+.app-shell.collapsed .brand-sidebar .brand-img-mark { display: block; }
+.brand-topbar { display: none; padding: 4px 2px; }
+.brand-topbar .brand-img { width: var(--brand-top-w); }
+.app-shell.collapsed .brand-topbar { display: inline-flex; }
+.ui-new .app-shell.collapsed header.top.app-topbar, .ui-new .app-shell.collapsed .app-topbar .top-row { min-height: 64px; }
+header.top .brand.brand-gate .brand-img { width: 112px; height: auto; }
+@media (max-width: 1024px) {
+  .brand-topbar { display: inline-flex; }
+  .ui-new header.top.app-topbar, .ui-new .app-topbar .top-row { min-height: 64px; padding-top: env(safe-area-inset-top, 0px); }
+  .app-shell.collapsed .brand-sidebar .brand-img-full-dark { display: block; }
+  .app-shell.collapsed .brand-sidebar .brand-img-mark { display: none; }
+  .app-shell.collapsed .brand-sidebar { padding: 6px 8px; }
+}
+@media (max-width: 520px) {
+  .ui-new .app-topbar .top-row { gap: 8px; }
+  .ui-new .app-topbar .app-topbar-title { font-size: 13px; }
+}
+@media (max-width: 400px) {
+  :root { --brand-top-w: 104px; }
+  .ui-new .app-topbar .app-topbar-title { display: none; }
+}

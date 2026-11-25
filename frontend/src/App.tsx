@@ -7,6 +7,7 @@ import WhatsNewPage from "./pages/WhatsNewPage";
 import RoleNav from "./components/RoleNav";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { useEffect, useState } from "react";
+import BrandLogo, { BrandImg } from "./components/BrandLogo";
 import FloatingScrollbar from "./components/FloatingScrollbar";
 import NotificationBell from "./components/NotificationBell";
 import InfoBar from "./components/InfoBar";
@@ -125,7 +126,7 @@ export default function App() {
     return (
       <BrowserRouter>
         <header className="top"><div className="top-row">
-          <span className="brand"><img src="/brand/logo-main-96.png" srcSet="/brand/logo-main.png 2x" alt="Berghaus" /></span>
+          <span className="brand brand-gate"><BrandImg variant="full-light" /></span>
           <div className="account"><span className="muted">{me.display_name}</span><button className="btn ghost" style={{ padding: "4px 10px" }} onClick={logout}>Выйти</button></div>
         </div></header>
         <main><SecuritySettingsPage me={me} focus={gate} onChanged={load} /></main>
@@ -204,9 +205,7 @@ export default function App() {
       <BrowserRouter>
         <div className={`app-shell${sideCollapsed ? " collapsed" : ""}${drawer ? " drawer-open" : ""}`}>
           <aside className="app-sidebar" aria-label="Основная навигация">
-            <NavLink to="/" className="app-brand" title="Рабочее место">
-              <img src="/brand/logo-white.svg" alt="Berghaus" /><span>CRM</span>
-            </NavLink>
+            <div className="app-brand"><BrandLogo variant="full-dark" extra="mark" placement="sidebar" /></div>
             <SideNav me={me} collapsed={sideCollapsed} onCollapse={setSideCollapsed} onNavigate={() => setDrawer(false)} />
           </aside>
           <button type="button" className="app-scrim" aria-label="Закрыть меню" tabIndex={drawer ? 0 : -1} onClick={() => setDrawer(false)} />
@@ -214,6 +213,7 @@ export default function App() {
             <header className="top app-topbar">
               <div className="top-row">
                 <button type="button" className="app-burger" aria-label="Меню разделов" aria-expanded={drawer} onClick={() => setDrawer(true)}>☰</button>
+                <BrandLogo variant="full-light" placement="topbar" />
                 <SectionTitle me={me} />
                 {accountBlock}
               </div>
