@@ -210,8 +210,8 @@ export default function DealCard({ me }: { me: Me }) {
         : [{ label: "Рабочее место", to: "/" }, { label: "Сделки", to: "/deals" }, { label: deal.number, to: `/deals/${deal.id}` },
           ...(POST_WIN_STATUSES.includes(deal.status) && tab !== "feed" && tab !== "versions" ? [{ label: phase === "sale" ? "Продажа" : "Контракт и исполнение", to: `/deals/${deal.id}?tab=${phaseStart}` }] : []),
           { label: TAB_TITLES[tab] }]} />
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
+      <div className="row dc-head" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div className="dc-title">
           <div className="row" style={{ gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
             <h1 style={{ margin: 0 }}>{deal.number}</h1>
             <span style={{ fontSize: 15 }}>{deal.client_name}{deal.site && <span className="muted"> · {deal.site}</span>}</span>
@@ -225,7 +225,7 @@ export default function DealCard({ me }: { me: Me }) {
             {deal.contract_number && ` · контракт ${deal.contract_number}`}{deal.factory_contract_number && ` · с заводом ${deal.factory_contract_number}`}
           </div>
         </div>
-        <div className="row" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div className="row dc-acts" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
           {(editable || has("cd", "gd")) && ["draft", "rework"].includes(deal.status) && (
             <button className="btn" onClick={send} disabled={(deal.checks || []).length > 0 && !has("cd", "gd")} title={(deal.checks || []).join("\n")}>
               Отправить на расчёт{(deal.checks || []).length > 0 && has("cd", "gd") ? " (не всё заполнено)" : ""}</button>
@@ -234,7 +234,7 @@ export default function DealCard({ me }: { me: Me }) {
           {has("cd", "gd") && !deal.archived_at && (has("gd") || !["contract", "execution", "closed"].includes(deal.status)) && (
             <button className="btn secondary" onClick={removeOrArchive} title={deal.status === "draft" ? "удалить черновик сделки (КД, ЗГД)" : "удалить можно только черновик — сделка в другом статусе переносится в архив"}>
               {deal.status === "draft" ? "Удалить сделку" : "В архив"}</button>)}
-          <div className="row" style={{ gap: 8, marginLeft: 6, alignItems: "center" }}>
+          <div className="row dc-links" style={{ gap: 8, marginLeft: 6, alignItems: "center" }}>
             <ActionMenu label="Связано" onPick={(u) => nav(u)} items={[
               ...(deal.client_id ? [{ title: `Клиент ${deal.client_name}`, url: `/legal?tab=counterparties&type=clients&client=${deal.client_id}` }] : []),
               ...(can(me, "finance_section") ? [{ title: "Финансы по сделке", url: `/finance?tab=calendar&deal_id=${deal.id}` }] : []),
@@ -270,16 +270,16 @@ export default function DealCard({ me }: { me: Me }) {
 
       {(POST_WIN_STATUSES.includes(deal.status)) && (
         <div className="row" style={{ marginTop: 10, gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", background: "#e1e4e8", borderRadius: 8, padding: 3 }}>
+          <div className="dc-phase" role="group" aria-label="Фаза сделки" style={{ display: "flex", background: "#e1e4e8", borderRadius: 8, padding: 3 }}>
             {(["sale", "contract"] as Phase[]).map((p) => (
-              <button key={p} onClick={() => setPhase(p)} style={{ border: 0, cursor: "pointer", padding: "6px 16px", borderRadius: 6, fontSize: 13,
+              <button key={p} aria-pressed={phase === p} onClick={() => setPhase(p)} style={{ border: 0, cursor: "pointer", padding: "6px 16px", borderRadius: 6, fontSize: 13,
                 background: phase === p ? "#fff" : "transparent", color: phase === p ? "inherit" : "var(--muted)", fontWeight: phase === p ? 700 : 400, boxShadow: phase === p ? "0 1px 2px rgba(0,0,0,.08)" : "none" }}>
                 {p === "sale" ? "Продажа" : "Контракт и исполнение"}</button>))}
           </div>
           {phase === "contract" && <SaleSummary now={deal.now} />}
           {phase === "sale" && <span className="muted" style={{ fontSize: 12 }}>фаза продажи закрыта — данные только для чтения</span>}
         </div>)}
-      <div className="tabs">
+      <div className="tabs dc-tabs">
         {<button className={tab === "overview" ? "active" : ""} onClick={() => setTabState("overview")}>Обзор</button>}
         {(phase === "sale" ? saleTabs : contractTabs).map((t) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{TAB_TITLES[t]}</button>)}
       </div>

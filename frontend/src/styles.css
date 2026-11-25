@@ -1558,3 +1558,63 @@ a.lv-stat:hover { background: var(--accent-soft); }
   .ui-new .asg-table td { padding: 2px 4px; }
   .ui-new .asg-table tr { padding: 8px 4px; }
 }
+
+/* =====================================================================================================
+   D-164 «Новый вид», пакет B — реестр сделок и карточка сделки. Только .ui-new.
+   ===================================================================================================== */
+/* B1 реестр: загрузка отдельно от «сделок нет», найдено + снимаемые отборы, фильтры на телефоне свёрнуты */
+.dl-ftoggle { display: none; }
+.dl-fsel { display: contents; }
+.dl-sort { display: none; }
+.ui-new .dl-active { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; }
+.ui-new .dl-active > span { margin-right: 6px; color: var(--muted); } .ui-new .dl-active b { color: var(--ink); }
+.ui-new .dl-chip { border: 1px solid var(--nv-line-strong); background: #fff; border-radius: 14px; padding: 2px 10px; font-size: 12px; cursor: pointer; color: var(--ink); }
+.ui-new .dl-chip:hover { border-color: var(--accent); }
+.ui-new .dl-chip span { color: var(--muted); margin-left: 2px; }
+.ui-new .dl-chip-all { border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; text-decoration: underline; padding: 2px 4px; }
+.ui-new .deals-kinds .deals-kind { border-radius: var(--nv-radius); }
+.ui-new .dl-wrap { border-radius: var(--nv-radius); }
+@media (max-width: 760px) {
+  .ui-new .dl-ftoggle { display: inline-flex; }
+  .ui-new .dl-fsel { display: none; }
+  .ui-new .dl-fsel.open { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+  .ui-new .dl-fsel.open select { width: 100%; max-width: none !important; }
+  .ui-new .dl-sort { display: block; }
+  .ui-new .dl-stages { display: none !important; } .ui-new .dl-stages.open { display: flex !important; }
+  /* строки — карточками: номер и статус вверху, далее подписанные поля */
+  .ui-new .dl-wrap { overflow: visible !important; background: none; border: 0; box-shadow: none; }
+  .ui-new .dl-table { min-width: 0 !important; }
+  .ui-new .dl-table thead { display: none; }
+  .ui-new .dl-table tbody { display: flex; flex-direction: column; gap: 10px; }
+  .ui-new .dl-table tbody tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; background: #fff; border: 1px solid var(--line); border-radius: var(--nv-radius); padding: 10px 12px; }
+  .ui-new .dl-table tbody td { display: block; border: 0; padding: 0; min-width: 0 !important; width: auto !important; white-space: normal !important; background: none !important; }
+  .ui-new .dl-table tbody td[data-label]::before { content: attr(data-label); display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+  .ui-new .dl-table tbody td:first-child::before, .ui-new .dl-table tbody td:nth-child(2)::before { content: none; }
+  .ui-new .dl-table tbody td:nth-child(2), .ui-new .dl-table tbody td:nth-child(3) { grid-column: 1 / -1; }
+  .ui-new .dl-table tbody td[colspan] { grid-column: 1 / -1; }
+  .ui-new .deals-layout { display: block; }
+}
+
+/* B2 карточка: шапка, «Сейчас» — блок следующего шага, вкладки прилипают и прокручиваются */
+.ui-new .dc-head { gap: 12px; margin-bottom: 6px; }
+.ui-new .dc-title h1 { font-size: 26px; }
+.ui-new .dc-acts { gap: 8px; align-items: center; }
+.ui-new .dc-links a { color: var(--ink); }
+.ui-new .dh-box { border-radius: var(--nv-radius); border-color: var(--line); box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+.ui-new .dh-box .dh-now { border-left-color: var(--accent); }
+.ui-new .dc-phase { background: #eceef1 !important; }
+.ui-new .dc-tabs { position: sticky; top: var(--nv-topbar-h); z-index: 6; background: var(--bg); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+.ui-new .dc-tabs button { white-space: nowrap; }
+@media (max-width: 760px) {
+  .ui-new .dc-head { flex-direction: column; }
+  .ui-new .dc-title h1 { font-size: 22px; }
+  .ui-new .dc-acts { justify-content: flex-start !important; width: 100%; }
+  .ui-new .dc-links { margin-left: 0 !important; flex-wrap: wrap; }
+  .ui-new .dh-box .dh-now { font-size: 13px; }
+}
+/* реестр в новом виде: «ГШО / Запчасти» — строкой над списком, таблице остаётся вся ширина */
+.ui-new .deals-layout { display: block; }
+.ui-new .deals-kinds { display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px; width: auto; margin-bottom: 12px; position: static; }
+.ui-new .deals-kinds .deals-kind { flex: 0 1 240px; }
+@media (max-width: 760px) { .ui-new .dl-order { display: none !important; } .ui-new .deals-kinds .deals-kind { flex: 1 1 140px; } }
+.dl-client { max-width: 220px; }

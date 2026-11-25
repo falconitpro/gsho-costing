@@ -1,5 +1,8 @@
 import { Crumbs } from "../components/Levels";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNewUiFlag } from "../uiMode";
+import { useTableLabels } from "../components/useTableLabels";
+import { Loading } from "../components/States";
 import { PRIORITY_COLOR, toneOf } from "../colors";
 import { lbl, PRIORITY } from "../labels";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -129,6 +132,10 @@ const save = (k: string, v: unknown) => { try { localStorage.setItem(k, JSON.str
 
 export default function DealsList({ me }: { me: Me }) {
   const [deals, setDeals] = useState<Row[]>([]);
+  const nv = useNewUiFlag();
+  const [loaded, setLoaded] = useState(false);       // новый вид: «загрузка» отдельно от «сделок нет»
+  const [fOpen, setFOpen] = useState(false);         // новый вид, телефон: фильтры свёрнуты
+  const tblRef = useRef<HTMLTableElement>(null);
   const [clients, setClients] = useState<{ id: string; name: string; sites: { name: string }[] }[]>([]);
   const [showNew, setShowNew] = useState(new URLSearchParams(window.location.search).get("new") === "1");   // с рабочего места: сразу открыть форму
   const [newKind, setNewKind] = useState<"gsho" | "parts">((new URLSearchParams(window.location.search).get("new_type") as "parts") === "parts" ? "parts" : "gsho");
@@ -178,7 +185,7 @@ export default function DealsList({ me }: { me: Me }) {
   };
   const [archive, setArchive] = useState<Row[]>([]);
   const [parts, setParts] = useState<Row[]>([]);
-  useEffect(() => { api.get<Row[]>("/api/deals").then((rows) => setDeals(rows.map((d) => ({ ...d, kind: "gsho" as const })))); }, []);
+  useEffect(() => { api.get<Row[]>("/api/deals").then((rows) => setDeals(rows.map((d) => ({ ...d, kind: "gsho" as const })))).finally(() => setLoaded(true)); }, []);
   useEffect(() => { if (partsReader) api.get<PartsRow[]>("/api/parts/requests?open_only=false").then((rows) => setParts(rows.map(toRow))).catch(() => setParts([])); }, [partsReader]);
   const all = useMemo(() => [...deals, ...parts], [deals, parts]);
   useEffect(() => { if (block === "archive") api.get<Row[]>("/api/deals?archived=true").then((rows) => setArchive(rows.map((d) => ({ ...d, kind: "gsho" as const })))); }, [block]);
@@ -218,6 +225,18 @@ export default function DealsList({ me }: { me: Me }) {
     ["Машин / позиций", shown.reduce((s_, d) => s_ + (d.machines || 0), 0), ""],
     ...(fin && shown.some((d) => d.price_rub != null) ? [["Портфель, RUB без НДС", fmtRub(shown.reduce((s_, d) => s_ + (d.price_rub || 0), 0)), ""]] : [])]
     : [["Сделок", shown.length, ""]];
+  useTableLabels(tblRef, nv);
+  const nFilters = [f.q.trim(), f.manager, f.client, f.priority, f.flag].filter(Boolean).length + f.statuses.length;
+  const SORTS: [SortKey, string][] = [["date", "по дате заявки"], ["task", "по сроку моих задач"], ["prio_task", "по приоритету и сроку"], ["kp_due", "по сроку КП"], ["number", "по номеру"],
+    ["client", "по клиенту"], ["status", "по статусу"], ["priority", "по приоритету"], ["manager", "по менеджеру"], ["next", "по ближайшему этапу"], ["progress", "по исполнению"],
+    ["machines", "по количеству"], ...(fin ? [["price", "по сумме"] as [SortKey, string]] : [])];
+  const chips: [string, () => void][] = nv ? [
+    ...(f.q.trim() ? [[`«${f.q.trim()}»`, () => setF({ ...f, q: "" })] as [string, () => void]] : []),
+    ...(f.manager ? [[`менеджер: ${mgrs.find(([id]) => id === f.manager)?.[1] || "выбран"}`, () => setF({ ...f, manager: "" })] as [string, () => void]] : []),
+    ...(f.client ? [[`клиент: ${cls.find(([id]) => id === f.client)?.[1] || "выбран"}`, () => setF({ ...f, client: "" })] as [string, () => void]] : []),
+    ...(f.priority ? [[`приоритет: ${{ "3": "срочный", "2": "высокий", "1": "обычный", "0": "низкий" }[f.priority] || f.priority}`, () => setF({ ...f, priority: "" })] as [string, () => void]] : []),
+    ...(f.flag ? [[f.flag === "mine" ? "мои" : "с просрочкой", () => setF({ ...f, flag: "" })] as [string, () => void]] : []),
+    ...f.statuses.map((st) => [chipTitle(st), () => setF({ ...f, statuses: f.statuses.filter((x) => x !== st) })] as [string, () => void])] : [];
   const th = (k: SortKey, t: string, w?: number) => (
     <th key={k} onClick={() => toggleSort(k)} style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", width: w, minWidth: w }} title="сортировать по столбцу">
       {t} <span style={{ opacity: sort.key === k ? 1 : 0.35 }}>{sort.key === k ? (sort.dir === 1 ? "▲" : "▼") : "↕"}</span></th>);
@@ -333,17 +352,31 @@ export default function DealsList({ me }: { me: Me }) {
       <div className="card" style={{ padding: "10px 12px" }}>
         <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
           <input placeholder="🔍 номер, клиент, объект, оборудование, контракт…" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} style={{ flex: "1 1 260px", minWidth: 0 }} />
+          {nv && <button type="button" className="btn ghost dl-ftoggle" aria-expanded={fOpen} onClick={() => setFOpen(!fOpen)}>Фильтры{nFilters ? ` · ${nFilters}` : ""} {fOpen ? "▴" : "▾"}</button>}
+          {nv ? <div className={"dl-fsel" + (fOpen ? " open" : "")}>
+          <select value={f.manager} onChange={(e) => setF({ ...f, manager: e.target.value })}><option value="">все менеджеры</option>{mgrs.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
+          <select className="dl-client" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })}><option value="">все клиенты</option>{cls.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
+          <select value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}><option value="">любой приоритет</option>
+            <option value="3">срочный</option><option value="2">высокий</option><option value="1">обычный</option><option value="0">низкий</option></select>
+          {SORTS.length > 0 && <select className="dl-sort" aria-label="Порядок" value={`${sort.key}:${sort.dir}`} onChange={(e) => { const [k, d] = e.target.value.split(":"); const n = { key: k as SortKey, dir: Number(d) as 1 | -1 }; setSort(n); save("gsho.dealsSort2", n); }}>
+            {SORTS.flatMap(([k, t]) => [<option key={k + "1"} value={`${k}:1`}>{t} ↑</option>, <option key={k + "-1"} value={`${k}:-1`}>{t} ↓</option>])}</select>}
+          </div> : <>
           <select value={f.manager} onChange={(e) => setF({ ...f, manager: e.target.value })}><option value="">все менеджеры</option>{mgrs.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
           <select value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} style={{ maxWidth: 220 }}><option value="">все клиенты</option>{cls.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
           <select value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}><option value="">любой приоритет</option>
-            <option value="3">срочный</option><option value="2">высокий</option><option value="1">обычный</option><option value="0">низкий</option></select>
+            <option value="3">срочный</option><option value="2">высокий</option><option value="1">обычный</option><option value="0">низкий</option></select></>}
           <div className="tabs" style={{ margin: 0 }}>
             <button className={f.flag === "" ? "active" : ""} onClick={() => setF({ ...f, flag: "" })}>все</button>
             <button className={f.flag === "mine" ? "active" : ""} onClick={() => setF({ ...f, flag: "mine" })}>мои</button>
             <button className={f.flag === "overdue" ? "active" : ""} onClick={() => setF({ ...f, flag: "overdue" })}>с просрочкой</button></div>
           {anyFilter && <button className="btn ghost" onClick={() => setF({ ...EMPTY_F, type: f.type })}>сбросить фильтры</button>}
         </div>
-        {statusChips.length > 1 && <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+        {nv && (chips.length > 0 || loaded) && <div className="dl-active" aria-live="polite">
+          <span>Найдено: <b>{loaded ? sorted.length : "…"}</b></span>
+          {chips.map(([t, off]) => <button key={t} type="button" className="dl-chip" onClick={off} aria-label={`Убрать отбор ${t}`}>{t} <span aria-hidden>×</span></button>)}
+          {chips.length > 1 && <button type="button" className="dl-chip-all" onClick={() => setF({ ...EMPTY_F, type: f.type })}>сбросить все</button>}
+        </div>}
+        {statusChips.length > 1 && <div className={"row" + (nv ? " dl-stages" + (fOpen ? " open" : "") : "")} style={{ flexWrap: "wrap", gap: 6, marginTop: 8 }}>
           <span className="muted" style={{ fontSize: 12 }}>Этап:</span>
           {statusChips.map(([st, n]) => { const on = f.statuses.includes(st); const [bg, fg] = chipTone(st);
             return <button key={st} onClick={() => setF({ ...f, statuses: on ? f.statuses.filter((x) => x !== st) : [...f.statuses, st] })}
@@ -357,7 +390,7 @@ export default function DealsList({ me }: { me: Me }) {
               <div className="muted" style={{ fontSize: 12 }}>{t}</div></div>))}
         </div>
       </div>
-      <div className="row" style={{ gap: "6px 18px", margin: "0 0 8px", alignItems: "center", flexWrap: "wrap" }}>
+      <div className={"row" + (nv ? " dl-order" : "")} style={{ gap: "6px 18px", margin: "0 0 8px", alignItems: "center", flexWrap: "wrap" }}>
       {block === "work" && <div className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <span className="muted">Порядок:</span>
         <div className="seg" role="group" aria-label="Порядок">
@@ -375,8 +408,9 @@ export default function DealsList({ me }: { me: Me }) {
         {!allCols && <span className="muted" style={{ fontSize: 12 }}>скрыты: {block === "won" ? `количество, контракт, ${fin ? "сумма, " : ""}менеджер` : `количество, менеджер, ${fin && block !== "work" ? "сумма, " : ""}версия`}</span>}
       </div>}
       </div>
-      <div className="card" style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ minWidth: allCols ? 900 : 720 }}>
+      {nv && !loaded && block !== "archive" ? <Loading card /> :
+      <div className={"card" + (nv ? " dl-wrap" : "")} style={{ padding: 0, overflowX: "auto" }}>
+        <table ref={tblRef} className={nv ? "dl-table" : undefined} style={{ minWidth: allCols ? 900 : 720 }}>
           {block === "won" ? (
             <thead><tr>{th("number", "Сделка", 120)}{th("client", "Клиент / объект")}<th>Оборудование</th>{allCols && th("machines", "Кол-во", 70)}{allCols && <th>Контракт</th>}{allCols && fin && th("price", "Сумма")}
               {th("progress", "Исполнение", 130)}{th("next", "Ближайший этап")}{th("status", "Статус")}{allCols && th("manager", "Менеджер")}</tr></thead>
@@ -408,7 +442,7 @@ export default function DealsList({ me }: { me: Me }) {
             {sorted.length === 0 && <tr><td colSpan={10} className="muted" style={{ padding: 16 }}>{inBlock.length ? "Нет сделок по выбранным фильтрам" : block === "archive" ? "В архиве сделок нет" : f.type === "parts" ? "Заявок на запчасти нет — нажмите «Новая заявка на запчасти»" : "Сделок нет"}</td></tr>}
           </tbody>
         </table>
-      </div>
+      </div>}
       {me.roles.some((r) => r.code === "manager") && !me.roles.some((r) => ["cd", "fd", "gd"].includes(r.code)) && <ColleaguesDeals />}
       </div>
       </div>
