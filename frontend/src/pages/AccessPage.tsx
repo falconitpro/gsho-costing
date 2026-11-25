@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { Me } from "../types";
+import { useNewUiFlag } from "../uiMode";
 import { Loading } from "../components/States";
 
 type Matrix = {
@@ -12,6 +13,8 @@ type Matrix = {
 
 /** Задача 11: уровни доступа как данные — матрица «роль × группа полей», исключения для сотрудников, предпросмотр. Меняют администратор и ЗГД. */
 export default function AccessPage({ me, embedded = false }: { me: Me; embedded?: boolean }) {
+  const nv = useNewUiFlag();
+  const [mRole, setMRole] = useState("");
   const [m, setM] = useState<Matrix | null>(null);
   const [tab, setTab] = useState<"roles" | "overrides" | "preview" | "history" | "actions">("roles");
   const [acts, setActs] = useState<{ sections: { title: string; rules: string[]; silent: number }[]; ladder: { step: string; role: string; when: string }[]; total: number } | null>(null);
@@ -24,7 +27,8 @@ export default function AccessPage({ me, embedded = false }: { me: Me; embedded?
   const load = () => api.get<Matrix>("/api/admin/access").then(setM).catch((e) => setMsg(e.message));
   useEffect(() => { load(); }, []);
   if (!m) return <Loading msg={msg} />;
-  const colors = ["#ffe3e3", "#f4f4f4", "#ededed"];
+  // новый вид: 0 — нейтрально, 1 — «видит» (голубой), 2 — «редактирует» (зелёный); значения уровней — из сервера, как и раньше
+  const colors = nv ? ["var(--bg)", "var(--info-bg)", "var(--ok-bg)"] : ["#ffe3e3", "#f4f4f4", "#ededed"];
   async function setLevel(role: string, group: string, level: number) {
     try { await api.put(`/api/admin/access/${role}/${group}`, { level }); setMsg(""); load(); } catch (e) { setMsg((e as Error).message); }
   }
@@ -66,7 +70,7 @@ export default function AccessPage({ me, embedded = false }: { me: Me; embedded?
         </div>)}
       {tab === "roles" && (
         <div className="card" style={{ overflowX: "auto" }}>
-          <table>
+          <table className="acc-matrix">
             <thead><tr><th>Группа данных</th>{m.roles.map((r) => <th key={r.role} title={r.role}>{r.title}</th>)}</tr></thead>
             <tbody>{m.groups.map((g) => (
               <tr key={g.code}><td title={g.fields.join(", ")}>{g.title}<div className="muted" style={{ fontSize: 10 }}>{g.code}</div></td>
@@ -77,6 +81,19 @@ export default function AccessPage({ me, embedded = false }: { me: Me; embedded?
                       {m.levels.map((l) => <option key={l.level} value={l.level}>{l.level} — {l.title}</option>)}</select></td>);
                 })}</tr>))}</tbody>
           </table>
+          {nv && <div className="acc-mobile">
+            <label className="f">Роль<select value={mRole || m.roles[0]?.role || ""} onChange={(e) => setMRole(e.target.value)}>
+              {m.roles.map((r) => <option key={r.role} value={r.role}>{r.title}</option>)}</select></label>
+            {(() => {
+              const r = m.roles.find((x) => x.role === (mRole || m.roles[0]?.role));
+              return r ? <ul className="acc-mlist">{m.groups.map((g) => {
+                const lvl = r.levels[g.code] ?? 0, prot = r.protected.includes(g.code), changed = lvl !== (r.defaults[g.code] ?? 0);
+                return <li key={g.code} className={"acc-mrow lvl" + lvl}><span className="acc-mt"><b>{g.title}</b>{changed && <small>по умолчанию: {r.defaults[g.code] ?? 0}</small>}{prot && <small>нельзя снять</small>}</span>
+                  <select aria-label={`${g.title}: уровень для роли «${r.title}»`} value={lvl} disabled={prot} onChange={(e) => setLevel(r.role, g.code, Number(e.target.value))}>
+                    {m.levels.map((l) => <option key={l.level} value={l.level}>{l.level} — {l.title}</option>)}</select></li>;
+              })}</ul> : null;
+            })()}
+          </div>}
         </div>
       )}
       {tab === "overrides" && (

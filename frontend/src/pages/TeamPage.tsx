@@ -4,6 +4,8 @@ import type { Me } from "../types";
 import { DeputyBlock, ObserverScopeBlock } from "../components/TeamExtras";
 import { askConfirm } from "../components/Dialogs";
 import { InviteFields, LinkResultBox, type LinkResult } from "../components/PasswordLink";
+import { useNewUiFlag } from "../uiMode";
+import { Empty } from "../components/States";
 
 type Contacts = { position: string; department: string; mobile: string; work_phone: string; wechat: string; telegram: string; whatsapp: string; max: string; extra_email: string; note: string };
 type Card = { id: string; display_name: string; email: string; roles: string[]; role_titles: string[]; contacts: Contacts; wecom_user_id: string; can_manage?: boolean; pending_changes?: { fields?: Record<string, [string, string]>; requested_at?: string };
@@ -40,6 +42,13 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
   const [overrides, setOverrides] = useState<Override[]>([]);
   const [ovr, setOvr] = useState({ group: "", level: 1, valid_to: "", comment: "" });
   const [err, setErr] = useState("");
+  const nv = useNewUiFlag();
+  const [st, setSt] = useState<"all" | "active" | "off" | "pending">("all");
+  useEffect(() => {
+    if (!nv || !cur) return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape" && !(e.target as HTMLElement)?.closest?.("input, textarea, select")) setCur(null); };
+    window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h);
+  }, [nv, cur]);
   const load = () => api.get<{ users: Card[]; channels: Record<string, string>; can_manage?: boolean; roles?: RoleT[] }>("/api/team?include_inactive=true").then((r) => {
     setUsers(r.users); setChannels(r.channels); setCanManage(!!r.can_manage); setRoles(r.roles || []);
   });
@@ -104,50 +113,9 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
   }
   const shown = users.filter((u) => !q || `${u.display_name} ${u.email} ${u.contacts.position} ${u.contacts.mobile}`.toLowerCase().includes(q.toLowerCase()));
   const setC = (k: keyof Contacts, v: string) => cur && setCur({ ...cur, contacts: { ...cur.contacts, [k]: v } });
-
-  return (
-    <>
-      <div className="page-head">
-        {!embedded && <h1>Сотрудники</h1>}
-        <div className="push">
-          <input placeholder="поиск: имя, должность, телефон" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 260, maxWidth: "100%" }} />
-          {canManage && <button className="btn add" onClick={() => { setShowNew(!showNew); setErr(""); }}>Добавить сотрудника</button>}
-        </div>
-      </div>
-      {showNew && canManage && (
-        <div className="card">
-          <h2 style={{ marginTop: 0 }}>Новый сотрудник</h2>
-          <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-            <label className="f">ФИО<input value={nu.display_name} placeholder="Фамилия Имя" onChange={(e) => setNu({ ...nu, display_name: e.target.value })} /></label>
-            <label className="f">E-mail (логин)<input value={nu.email} placeholder="name@company.ru" onChange={(e) => setNu({ ...nu, email: e.target.value })} /></label>
-            <label className="f">Должность<input value={nu.position} onChange={(e) => setNu({ ...nu, position: e.target.value })} /></label>
-          </div>
-          <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>Роли (можно несколько) — определяют доступ по умолчанию; индивидуальные доступы настраиваются в карточке сотрудника:</div>
-          <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 4 }}>{roles.map((r) => (
-            <label key={r.code} className="row" style={{ border: "1px solid " + (nu.roles.includes(r.code) ? "var(--accent)" : "var(--line)"), borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>
-              <input type="checkbox" checked={nu.roles.includes(r.code)} onChange={() => setNu({ ...nu, roles: nu.roles.includes(r.code) ? nu.roles.filter((x) => x !== r.code) : [...nu.roles, r.code] })} /> {r.title}</label>))}</div>
-          <InviteFields login={nu.email} on={inv.on} email={inv.email} onChange={(on, email) => setInv({ on, email })} />
-          {err && <div className="alert error">{err}</div>}
-          <div className="row" style={{ marginTop: 10 }}>
-            <button className="btn" disabled={!nu.display_name.trim() || !nu.email.includes("@") || nu.roles.length === 0} onClick={createUser}>Добавить</button>
-            <button className="btn ghost" onClick={() => setShowNew(false)}>Отмена</button>
-          </div>
-        </div>)}
-      <p className="muted">При постановке задачи исполнитель сразу получает уведомление во все выбранные каналы. Каналы выбирают КД, ЗГД или администратор; контакты заполняет сам сотрудник. Каналы без подключённой интеграции отмечаются в журнале «ожидает подключения канала».</p>
-      {msg && <div className="alert info">{msg}</div>}
-      {linkRes && <LinkResultBox r={linkRes} onClose={() => setLinkRes(null)} />}
-      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)" }}>
-        <div className="card">
-          <table><thead><tr><th>Сотрудник</th><th>Контакты</th><th>Уведомления</th></tr></thead>
-            <tbody>{shown.map((u) => (
-              <tr key={u.id} style={{ cursor: "pointer", background: cur?.id === u.id ? "var(--accent-soft)" : undefined }} onClick={() => open(u)}>
-                <td style={{ opacity: u.is_active ? 1 : 0.5 }}><b>{u.display_name}</b>{!u.is_active && <span className="badge"> отключён</span>}<div className="muted" style={{ fontSize: 12 }}>{u.contacts.position || u.role_titles.join(", ")}</div></td>
-                <td style={{ fontSize: 12 }}>{u.contacts.mobile && <div>📱 {u.contacts.mobile}</div>}<div>✉ {u.email}</div>{u.contacts.wechat && <div>WeChat: {u.contacts.wechat}</div>}{u.contacts.telegram && <div>Telegram: {u.contacts.telegram}</div>}</td>
-                <td style={{ fontSize: 12 }}>{u.notify_channels.map((c) => channels[c] || c).join(", ")}</td>
-              </tr>))}</tbody></table>
-        </div>
-        <div>
-          {!cur ? <div className="card muted">Выберите сотрудника слева</div> : (
+  const hasPending = (u: Card) => !!u.pending_changes?.fields && Object.keys(u.pending_changes.fields).length > 0;
+  const nvShown = shown.filter((u) => st === "all" || (st === "active" ? u.is_active : st === "off" ? !u.is_active : hasPending(u)));
+  const cardEl = !cur ? null : (
             <div className="card">
               <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
                 <h2 style={{ margin: 0 }}>{cur.display_name}{!cur.is_active && <span className="badge" style={{ marginLeft: 8, fontSize: 12 }}>отключён</span>}</h2>
@@ -225,15 +193,91 @@ export default function TeamPage({ me, embedded = false }: { me: Me; embedded?: 
                     <tbody>{log.map((l, i) => <tr key={i}><td className="muted" style={{ fontSize: 12 }}>{l.at ? fmtDate(l.at) : ""}</td><td>{l.channel_title}</td><td style={{ fontSize: 12 }}>{l.text}</td>
                       <td style={{ fontSize: 12 }}><span className={"badge " + (l.status === "sent" ? "ok" : l.status === "failed" ? "bad" : "warn")}>{STATUS[l.status] || l.status}</span>{l.error && <div className="muted">{l.error}</div>}</td></tr>)}</tbody></table>
                 </>)}
-            </div>)}
+            </div>);
+
+  return (
+    <>
+      <div className="page-head">
+        {!embedded && <h1>Сотрудники</h1>}
+        <div className="push">
+          <input placeholder="поиск: имя, должность, телефон" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 260, maxWidth: "100%" }} />
+          {canManage && <button className="btn add" onClick={() => { setShowNew(!showNew); setErr(""); }}>Добавить сотрудника</button>}
         </div>
       </div>
+      {showNew && canManage && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Новый сотрудник</h2>
+          <div className="grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+            <label className="f">ФИО<input value={nu.display_name} placeholder="Фамилия Имя" onChange={(e) => setNu({ ...nu, display_name: e.target.value })} /></label>
+            <label className="f">E-mail (логин)<input value={nu.email} placeholder="name@company.ru" onChange={(e) => setNu({ ...nu, email: e.target.value })} /></label>
+            <label className="f">Должность<input value={nu.position} onChange={(e) => setNu({ ...nu, position: e.target.value })} /></label>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>Роли (можно несколько) — определяют доступ по умолчанию; индивидуальные доступы настраиваются в карточке сотрудника:</div>
+          <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 4 }}>{roles.map((r) => (
+            <label key={r.code} className="row" style={{ border: "1px solid " + (nu.roles.includes(r.code) ? "var(--accent)" : "var(--line)"), borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>
+              <input type="checkbox" checked={nu.roles.includes(r.code)} onChange={() => setNu({ ...nu, roles: nu.roles.includes(r.code) ? nu.roles.filter((x) => x !== r.code) : [...nu.roles, r.code] })} /> {r.title}</label>))}</div>
+          <InviteFields login={nu.email} on={inv.on} email={inv.email} onChange={(on, email) => setInv({ on, email })} />
+          {err && <div className="alert error">{err}</div>}
+          <div className="row" style={{ marginTop: 10 }}>
+            <button className="btn" disabled={!nu.display_name.trim() || !nu.email.includes("@") || nu.roles.length === 0} onClick={createUser}>Добавить</button>
+            <button className="btn ghost" onClick={() => setShowNew(false)}>Отмена</button>
+          </div>
+        </div>)}
+      <p className="muted">При постановке задачи исполнитель сразу получает уведомление во все выбранные каналы. Каналы выбирают КД, ЗГД или администратор; контакты заполняет сам сотрудник. Каналы без подключённой интеграции отмечаются в журнале «ожидает подключения канала».</p>
+      {msg && <div className="alert info">{msg}</div>}
+      {linkRes && <LinkResultBox r={linkRes} onClose={() => setLinkRes(null)} />}
+      {nv ? (
+        <div className={"pc-shell" + (cur ? " with-card" : "")}>
+          <div className="card tm-listcard">
+            <div className="dc-groups tm-filter" role="group" aria-label="Отбор сотрудников">
+              {([["all", "Все", users.length], ["active", "Активные", users.filter((u) => u.is_active).length], ["off", "Отключённые", users.filter((u) => !u.is_active).length],
+                ["pending", "Ждут подтверждения", users.filter(hasPending).length]] as const).map(([k, t, n]) => (n > 0 || k === "all") && (
+                <button key={k} type="button" className={st === k ? "on" : ""} aria-pressed={st === k} onClick={() => setSt(k)}>{t} <span className="tm-n">{n}</span></button>))}
+            </div>
+            {nvShown.length === 0 ? <Empty title="Никого не нашли" hint="Измените поиск или отбор." /> : (
+              <ul className="tm-list">{nvShown.map((u) => (
+                <li key={u.id}><button type="button" className={"tm-row" + (cur?.id === u.id ? " on" : "") + (u.is_active ? "" : " off")} aria-current={cur?.id === u.id ? "true" : undefined} onClick={() => open(u)}>
+                  <span className="tm-ava" aria-hidden="true">{initials(u.display_name)}</span>
+                  <span className="tm-main">
+                    <b>{u.display_name}</b>
+                    <span className="tm-sub">{u.contacts.position || u.role_titles.join(", ")}</span>
+                    <span className="tm-roles">{u.contacts.position && u.role_titles.filter((r) => r !== u.contacts.position).map((r) => <span key={r} className="badge">{r}</span>)}{!u.is_active && <span className="badge bad">отключён</span>}{hasPending(u) && <span className="badge warn">ждёт подтверждения</span>}</span>
+                  </span>
+                  <span className="tm-contacts">
+                    <span>{u.email}</span>{u.contacts.mobile && <span>{u.contacts.mobile}</span>}
+                    <span className="tm-ch">{u.notify_channels.map((c) => <span key={c} className="tm-chip">{channels[c] || c}</span>)}</span>
+                  </span>
+                </button></li>))}</ul>)}
+          </div>
+          {cur && <aside className="pc-panel tm-panel" aria-label={"Карточка сотрудника " + cur.display_name}>
+            <button type="button" className="btn ghost pc-close" aria-label="Закрыть карточку" title="Закрыть (Esc)" onClick={() => setCur(null)}>✕</button>
+            {cardEl}
+          </aside>}
+        </div>
+      ) : (
+      <div className="grid" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.2fr)" }}>
+          <div className="card">
+            <table><thead><tr><th>Сотрудник</th><th>Контакты</th><th>Уведомления</th></tr></thead>
+              <tbody>{shown.map((u) => (
+                <tr key={u.id} style={{ cursor: "pointer", background: cur?.id === u.id ? "var(--accent-soft)" : undefined }} onClick={() => open(u)}>
+                  <td style={{ opacity: u.is_active ? 1 : 0.5 }}><b>{u.display_name}</b>{!u.is_active && <span className="badge"> отключён</span>}<div className="muted" style={{ fontSize: 12 }}>{u.contacts.position || u.role_titles.join(", ")}</div></td>
+                  <td style={{ fontSize: 12 }}>{u.contacts.mobile && <div>📱 {u.contacts.mobile}</div>}<div>✉ {u.email}</div>{u.contacts.wechat && <div>WeChat: {u.contacts.wechat}</div>}{u.contacts.telegram && <div>Telegram: {u.contacts.telegram}</div>}</td>
+                  <td style={{ fontSize: 12 }}>{u.notify_channels.map((c) => channels[c] || c).join(", ")}</td>
+                </tr>))}</tbody></table>
+          </div>
+          <div>
+            {!cur ? <div className="card muted">Выберите сотрудника слева</div> : cardEl}
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
 
 /** Пароль для страницы входа: ЗГД / админ задаёт сотруднику новый пароль (например, при первом входе или если забыт). */
+const initials = (n: string) => n.replace(/\(.*?\)/g, "").trim().split(/\s+/).slice(0, 2).map((w) => w[0] || "").join("").toUpperCase();
+
 function PasswordBlock({ userId, isSelf, onMsg }: { userId: string; isSelf: boolean; onMsg: (m: string) => void }) {
   const [pw, setPw] = useState("");
   const [open, setOpen] = useState(false);
