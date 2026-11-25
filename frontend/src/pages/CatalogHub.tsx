@@ -69,7 +69,7 @@ export default function CatalogHub({ me }: { me: Me }) {
 
   return (
     <>
-      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Каталог", to: overview ? undefined : "/catalog" }, { label: visible.find(([k]) => k === sec)?.[1], to: (qs.get("model") || qs.get("part")) ? `/catalog?s=${sec}` : undefined }, ...((qs.get("model") || qs.get("part")) ? [{ label: "объект" }] : [])]} />
+      <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Каталог", to: overview ? undefined : "/catalog" }, { label: visible.find(([k]) => k === sec)?.[1], to: (qs.get("model") || qs.get("part")) ? `/catalog?s=${sec}` : undefined }, ...((qs.get("model") || qs.get("part")) ? [{ label: nv ? (qs.get("part") ? "карточка запчасти" : "модель") : "объект" }] : [])]} />
       <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 12, marginBottom: 6 }}>
         <h1 style={{ margin: 0 }}>Каталог</h1>
         <div style={{ position: "relative", maxWidth: "100%" }}>
