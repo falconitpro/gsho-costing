@@ -6,6 +6,7 @@ import { can, type Me } from "../types";
 import CatalogCard from "../components/CatalogCard";
 import CatalogAdd from "../components/CatalogAdd";
 import { askPrompt } from "../components/Dialogs";
+import { useNewUiFlag } from "../uiMode";
 
 type Tree = { factory_id: string; factory: string; types: { machine_type: string; models: { id: string; model: string; trademark?: string; brand_name: string; status: string; executions: { id: string; name: string; brand_name: string; status: string; params: number; images: number; source_deal_id: string | null }[] }[] }[] }[];
 type Exec = { id: string; name: string; brand_name: string; status: string; tech_params: { no: number; name_ru: string; unit: string; value_ru: string; required: boolean; local_ru: boolean }[]; images: unknown[];
@@ -34,6 +35,7 @@ export default function CatalogPage({ me, embedded, openModelId }: { me: Me; emb
   const [types, setTypes] = useState<{ id: string; name: string; status: string }[]>([]);
   const [msg, setMsg] = useState("");
   const editor = can(me, "catalog", 2);
+  const nv = useNewUiFlag();
   const contributor = me.roles.some((r) => ["manager", "cd", "gd"].includes(r.code));
   const loadTree = () => api.get<Tree>(`/api/catalog/tree?include_pending=${editor}`).then(setTree);
   const loadGl = () => api.get<Gl[]>(`/api/refs/glossary?q=${encodeURIComponent(glQ)}`).then(setGl).catch(() => setGl([]));
@@ -55,8 +57,8 @@ export default function CatalogPage({ me, embedded, openModelId }: { me: Me; emb
     <>
       {!embedded && <h1>Каталог оборудования</h1>}
       {msg && <div className="alert info">{msg}</div>}
-      <div className="tabs">
-        <button className={tab === "tree" ? "active" : ""} onClick={() => setTab("tree")}>Тип → бренд → модель → исполнение</button>
+      <div className={"tabs" + (nv ? " eq-subtabs" : "")}>
+        <button className={tab === "tree" ? "active" : ""} onClick={() => setTab("tree")}>{nv ? "Модели и исполнения" : "Тип → бренд → модель → исполнение"}</button>
         {contributor && <button className={tab === "add" ? "active" : ""} onClick={() => setTab("add")}>+ Добавить оборудование</button>}
         {editor && <button className={tab === "pending" ? "active" : ""} onClick={() => setTab("pending")}>На подтверждение ({pending.length + types.filter((t) => t.status === "pending").length})</button>}
         {can(me, "glossary") && <button className={tab === "glossary" ? "active" : ""} onClick={() => setTab("glossary")}>Глоссарий RU ↔ CN</button>}
@@ -70,6 +72,51 @@ export default function CatalogPage({ me, embedded, openModelId }: { me: Me; emb
         const brandList = [...new Set(byType.map(brandOf))].sort((a, b) => a.localeCompare(b, "ru"));
         const modelList = byType.filter((m) => !selBrand || brandOf(m) === selBrand).sort((a, b) => designation(a).localeCompare(designation(b), "ru"));
         const curModel = allModels.find((m) => m.id === modelId);
+        const cmpBar = nv && cmp.length > 0 && (
+          <div className="eq-cmpbar" role="region" aria-label="Сравнение исполнений">
+            <span className="eq-cmpbar-l">Сравнение:</span>
+            {cmp.map((id) => { const x = allExecs.find((e) => e.id === id); return <span key={id} className="eq-chip">{x ? `${x.model} › ${x.name}` : id.slice(0, 6)}<button type="button" aria-label="Убрать из сравнения" onClick={() => setCmp(cmp.filter((y) => y !== id))}>×</button></span>; })}
+            <button className="btn" disabled={cmp.length < 2} onClick={() => setShowCmp(true)}>{cmp.length < 2 ? "Добавьте ещё одно исполнение" : `Сравнить (${cmp.length})`}</button>
+            <button className="btn ghost" onClick={() => { setCmp([]); setShowCmp(false); }}>Очистить</button>
+          </div>);
+        if (nv) return (
+        <>
+          {showCmp && cmp.length > 1 && <CompareTable ids={cmp} onClose={() => setShowCmp(false)} />}
+          {!modelId ? <EqBrowser models={allModels} empty={tree.length === 0} onOpen={(id) => { setModelId(id); setExec(null); window.scrollTo({ top: 0 }); }} /> : (
+            <>
+              <div className="eq-head card">
+                <button type="button" className="btn ghost eq-back" onClick={() => { setModelId(""); setExec(null); }}>← Все модели</button>
+                {curModel && <div className="eq-head-t"><span className="muted">{curModel.machine_type} · {curModel.factory}</span>
+                  <b>{designation(curModel)}{curModel.brand_name && <span className="badge accent">{curModel.brand_name}</span>}{curModel.status === "pending" && <span className="badge warn">на проверке</span>}</b></div>}
+                {curModel && curModel.executions.length > 0 && <div className="eq-execs" role="group" aria-label="Исполнения">
+                  <span className="muted">Исполнения:</span>
+                  {curModel.executions.map((e) => (
+                    <span key={e.id} className={"eq-exec" + (exec?.id === e.id ? " on" : "")}>
+                      <button type="button" aria-pressed={exec?.id === e.id} onClick={() => (exec?.id === e.id ? setExec(null) : openExec(e.id))}>{e.name}<small>{e.params} парам.{e.images ? ` · ${e.images} фото` : ""}</small>{e.status === "pending" && <i className="badge warn">на проверке</i>}</button>
+                      <button type="button" className={"eq-cmp" + (cmp.includes(e.id) ? " on" : "")} title={cmp.includes(e.id) ? "убрать из сравнения" : "добавить к сравнению"} aria-pressed={cmp.includes(e.id)}
+                        onClick={() => setCmp(cmp.includes(e.id) ? cmp.filter((y) => y !== e.id) : [...cmp, e.id])}>{cmp.includes(e.id) ? "✓ в сравнении" : "+ сравнить"}</button>
+                    </span>))}
+                </div>}
+              </div>
+              {exec && editor && (exec.status === "pending" || exec.status === "approved") && <div className="card eq-admin">
+                <div className="row eq-exechead">
+                  <h2>{exec.name} {exec.brand_name && <span className="badge accent">{exec.brand_name}</span>} <span className={"badge " + (exec.status === "approved" ? "ok" : "warn")}>{lbl(CATALOG_STATUS, exec.status)}</span></h2>
+                  {exec.status === "pending" && <div className="row"><button className="btn" onClick={() => decide(exec.id, true)}>Подтвердить</button><button className="btn ghost" onClick={() => decide(exec.id, false)}>Отклонить</button></div>}
+                </div>
+                {exec.status === "pending" && <p className="muted eq-execnote">Перед подтверждением проверьте и при необходимости исправьте данные в карточке ниже — после подтверждения исполнение попадёт в подбор при вводе заявок.</p>}
+                {exec.status === "approved" && (
+                  <div className="row eq-execact">
+                    <select value={mergeExec} onChange={(e) => setMergeExec(e.target.value)} title="дубль: сделки и история цен перейдут в выбранное исполнение">
+                      <option value="">объединить дубль с исполнением…</option>
+                      {allExecs.filter((x) => x.id !== exec.id).map((x) => <option key={x.id} value={x.id}>{x.model} › {x.name}</option>)}</select>
+                    <button className="btn ghost" disabled={!mergeExec} onClick={() => act(() => api.post(`/api/catalog/executions/${exec.id}/merge`, { into_id: mergeExec }).then(() => { setExec(null); setMergeExec(""); }), "Исполнение объединено")}>объединить</button>
+                    <button className="btn ghost" onClick={() => act(() => api.patch(`/api/catalog/executions/${exec.id}`, { status: "archived" }).then(() => setExec(null)), "Исполнение в архиве")}>в архив</button>
+                  </div>)}
+              </div>}
+              <CatalogCard modelId={modelId} execId={exec?.id} onExec={(id) => openExec(id)} models={allModels.map((x) => ({ id: x.id, label: `${designation(x)} (${x.factory.slice(0, 24)})` }))} onChanged={() => { loadTree(); setModelId(""); setExec(null); }} />
+            </>)}
+          {cmpBar}
+        </>);
         return (
         <>
           <div className="card">
@@ -219,3 +266,56 @@ function PendingTypes({ types, reload }: { types: { id: string; name: string; st
     </div>);
 }
 
+
+type EqModel = { id: string; model: string; trademark?: string; brand_name: string; status: string; machine_type: string; factory: string;
+  executions: { id: string; name: string; brand_name: string; status: string; params: number; images: number }[] };
+
+/** «Новый вид» (D-169): каталог оборудования как витрина — слева типы техники, сверху бренды и поиск, справа карточки моделей
+ *  с исполнениями, числом параметров и фото, метка «на проверке». Данные — то же дерево /api/catalog/tree. */
+function EqBrowser({ models, empty, onOpen }: { models: EqModel[]; empty: boolean; onOpen: (id: string) => void }) {
+  const [type, setType] = useState("");
+  const [brand, setBrand] = useState("");
+  const [q, setQ] = useState("");
+  const brandOf = (m: EqModel) => (m.trademark || m.factory || "").trim();
+  const types = [...new Set(models.map((m) => m.machine_type || "без типа"))].sort((a, b) => a.localeCompare(b, "ru"));
+  const byType = models.filter((m) => !type || (m.machine_type || "без типа") === type);
+  const brands = [...new Set(byType.map(brandOf))].sort((a, b) => a.localeCompare(b, "ru"));
+  const ql = q.trim().toLowerCase();
+  const shown = byType.filter((m) => (!brand || brandOf(m) === brand) && (!ql || [designation(m), m.brand_name, m.factory, m.machine_type, ...m.executions.map((e) => e.name)].join(" ").toLowerCase().includes(ql)))
+    .sort((a, b) => designation(a).localeCompare(designation(b), "ru"));
+  if (empty) return <div className="card st-box st-empty"><div className="st-title">Каталог оборудования пуст</div><div className="muted">Модели появляются после отправки КП (менеджер предлагает, КД/ЗГД подтверждает) или через «+ Добавить оборудование».</div></div>;
+  const count = (t: string) => models.filter((m) => (m.machine_type || "без типа") === t).length;
+  return (
+    <div className="eq-browser">
+      <nav className="eq-types card" aria-label="Тип техники">
+        <div className="eq-types-h">Тип техники</div>
+        <button type="button" className={!type ? "on" : ""} aria-pressed={!type} onClick={() => { setType(""); setBrand(""); }}>Все типы<span>{models.length}</span></button>
+        {types.map((t) => <button key={t} type="button" className={type === t ? "on" : ""} aria-pressed={type === t} onClick={() => { setType(t); setBrand(""); }}>{t}<span>{count(t)}</span></button>)}
+      </nav>
+      <div className="eq-main">
+        <div className="eq-filters">
+          <input className="eq-q" placeholder="Модель, исполнение, завод…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Поиск по моделям" />
+          {brands.length > 1 && <div className="pc-groups" role="group" aria-label="Бренд">
+            <button type="button" className={!brand ? "on" : ""} aria-pressed={!brand} onClick={() => setBrand("")}>Все бренды</button>
+            {brands.map((b) => <button key={b} type="button" className={brand === b ? "on" : ""} aria-pressed={brand === b} onClick={() => setBrand(brand === b ? "" : b)}>{b}</button>)}
+          </div>}
+        </div>
+        <div className="pc-count">Моделей: <b>{shown.length}</b>{(q || brand || type) && <button type="button" className="dl-chip-all" onClick={() => { setQ(""); setBrand(""); setType(""); }}>сбросить отбор</button>}</div>
+        {shown.length === 0 ? <div className="card st-box st-empty"><div className="st-title">По отбору моделей нет</div><div className="muted">Измените тип, бренд или строку поиска.</div></div> : (
+          <div className="eq-grid">{shown.map((m) => {
+            const pend = m.status === "pending" || m.executions.some((e) => e.status === "pending");
+            const photos = m.executions.reduce((a, e) => a + (e.images || 0), 0);
+            const params = Math.max(0, ...m.executions.map((e) => e.params || 0));
+            return (
+              <button key={m.id} type="button" className="eq-card" onClick={() => onOpen(m.id)}>
+                <span className="eq-card-top"><span>{m.machine_type || "без типа"}</span>{pend && <i className="badge warn">на проверке</i>}</span>
+                <b className="eq-card-title">{designation(m)}</b>
+                {m.brand_name && <span className="eq-card-brand">под брендом: {m.brand_name}</span>}
+                <span className="eq-card-fac">{m.factory}</span>
+                <span className="eq-card-ex">{m.executions.slice(0, 3).map((e) => <i key={e.id}>{e.name.replace(designation(m), "").replace(/^\s*[—-]\s*/, "") || e.name}</i>)}{m.executions.length > 3 && <i>+{m.executions.length - 3}</i>}</span>
+                <span className="eq-card-facts"><span>{m.executions.length} {m.executions.length === 1 ? "исполнение" : m.executions.length < 5 ? "исполнения" : "исполнений"}</span>{params > 0 && <span>{params} парам.</span>}<span>{photos ? `${photos} фото` : "без фото"}</span></span>
+              </button>);
+          })}</div>)}
+      </div>
+    </div>);
+}

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { Me } from "../types";
+import { useNewUiFlag } from "../uiMode";
 import CatalogPage from "./CatalogPage";
 import PartsCatalog from "../components/PartsCatalog";
 import { KitsBlock, OtherModelsBlock, WarehousesBlock } from "../components/CatalogExtra";
@@ -43,6 +44,21 @@ export default function CatalogHub({ me }: { me: Me }) {
   const go = (s: Sec, extra = "") => nav(`/catalog?s=${s}${extra}`);   // смена раздела — новая запись истории («Назад» возвращает прежний)
   const [q, setQ] = useState("");
   const [found, setFound] = useState<Found | null>(null);
+  const nv = useNewUiFlag();
+  // новый вид: на обзоре — сколько моделей и запчастей (из тех же запросов, что и разделы)
+  const [stats, setStats] = useState<{ models?: number; execs?: number; pending?: number; parts?: number; inStock?: number }>({});
+  useEffect(() => {
+    if (!nv || !overview) return;
+    api.get<{ types: { models: { status: string; executions: { status: string }[] }[] }[] }[]>("/api/catalog/tree").then((t) => {
+      const ms = t.flatMap((f) => f.types.flatMap((x) => x.models));
+      setStats((s) => ({ ...s, models: ms.length, execs: ms.reduce((a, m) => a + m.executions.length, 0) }));
+    }).catch(() => undefined);
+    if (partsReader) {
+      api.get<{ total: number }>("/api/parts/catalog?limit=1").then((r) => setStats((s) => ({ ...s, parts: r.total }))).catch(() => undefined);
+      api.get<{ total: number }>("/api/parts/catalog?limit=1&in_stock=true").then((r) => setStats((s) => ({ ...s, inStock: r.total }))).catch(() => undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nv, overview]);
   useEffect(() => {
     if (q.trim().length < 2) { setFound(null); return; }
     const t = setTimeout(() => api.get<Found>(`/api/catalog/search?q=${encodeURIComponent(q.trim())}`).then(setFound).catch(() => setFound(null)), 300);
@@ -70,14 +86,29 @@ export default function CatalogHub({ me }: { me: Me }) {
             </div>)}
         </div>
       </div>
+      {nv ? (() => {
+        const MAIN: Sec[] = ["equipment", "parts", "kits", "other"];
+        const refs = visible.filter(([k]) => !MAIN.includes(k));
+        return (
+          <nav className="cat-nav" aria-label="Разделы каталога">
+            <div className="dc-groups">
+              <button type="button" className={overview ? "on" : ""} aria-current={overview ? "page" : undefined} onClick={() => nav("/catalog")}>Обзор</button>
+              {visible.filter(([k]) => MAIN.includes(k)).map(([k, t]) => <button key={k} type="button" className={sec === k ? "on" : ""} aria-current={sec === k ? "page" : undefined} onClick={() => go(k)}>{t}</button>)}
+            </div>
+            {refs.length > 0 && <div className="cat-refs"><span className="muted">Справочники:</span>
+              {refs.map(([k, t]) => <button key={k} type="button" className={sec === k ? "on" : ""} aria-current={sec === k ? "page" : undefined} onClick={() => go(k)}>{t}</button>)}</div>}
+          </nav>);
+      })() :
       <div className="row" style={{ gap: 2, borderBottom: "1px solid var(--line)", marginBottom: 12, flexWrap: "wrap" }}>
         {<button onClick={() => nav("/catalog")} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
           fontWeight: overview ? 700 : 500, color: overview ? "var(--ink)" : "var(--muted)", borderBottom: overview ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>Обзор</button>}
         {visible.map(([k, t]) => (
           <button key={k} onClick={() => go(k)} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 12px", fontSize: 14, fontFamily: "inherit",
             fontWeight: sec === k ? 700 : 500, color: sec === k ? "var(--ink)" : "var(--muted)", borderBottom: sec === k ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>{t}</button>))}
-      </div>
-      {overview && <EntryGrid entries={visible.map(([k, t]) => ({ key: k, title: t, to: `/catalog?s=${k}`, hint: HINTS[k] }))} />}
+      </div>}
+      {overview && <EntryGrid entries={visible.map(([k, t]) => ({ key: k, title: t, to: `/catalog?s=${k}`, hint: HINTS[k],
+        stats: !nv ? undefined : k === "equipment" && stats.models != null ? [{ value: stats.models, label: "моделей" }, { value: stats.execs ?? 0, label: "исполнений" }]
+          : k === "parts" && stats.parts != null ? [{ value: stats.parts, label: "карточек" }, { value: stats.inStock ?? "…", label: "в наличии", tone: "ok" as const }] : undefined }))} />}
       {sec === "equipment" && <CatalogPage me={me} embedded openModelId={qs.get("model") || undefined} />}
       {sec === "parts" && <PartsCatalog me={me} openId={qs.get("part") || undefined} />}
       {sec === "kits" && <KitsBlock me={me} />}

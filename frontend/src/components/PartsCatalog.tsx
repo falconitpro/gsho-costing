@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useNewUiFlag } from "../uiMode";
+import { useTableLabels } from "./useTableLabels";
+import { Loading } from "./States";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
 import { askConfirm } from "./Dialogs";
@@ -29,6 +32,25 @@ const EMPTY: Part = { article: "", name_ru: "", unit: "шт", part_group: "", st
   moq: null, multiple: null, weight_kg: null, length_mm: null, width_mm: null, height_mm: null, volume_m3: null, sale_price: null, sale_currency: "EUR",
   min_price: null, min_price_currency: "EUR", photos: [], spec_no: "", addendum_no: "", cross_refs: [], applicability: [], client_prices: [], stock: [] };
 const n = (v: string) => (v === "" ? null : Number(v.replace(",", ".")));
+const SECTIONS: [string, string][] = [["pc-main", "Основное"], ["pc-nums", "Номера и аналоги"], ["pc-appl", "Применимость"], ["pc-buy", "Закупка"], ["pc-log", "Логистика"],
+  ["pc-stock", "Склад"], ["pc-price", "Цены"], ["pc-files", "Фото и документы"]];
+
+/** Новый вид: главное о запчасти одной строкой — наличие по всем складам (остаток, резерв, доступно, в пути — как отдаёт сервер),
+ *  ниже минимума, цена, срок поставки. Ничего не пересчитывает, кроме сумм по складам. */
+function PartSummary({ cur }: { cur: Part }) {
+  const st = cur.stock || [];
+  const sum = (k: "qty" | "reserved" | "in_transit" | "available") => st.reduce((a, s) => a + (k === "available" ? (s.available ?? (s.qty || 0)) : (s[k] || 0)), 0);
+  const low = st.filter((s) => s.min_qty != null && (s.available ?? (s.qty || 0)) < (s.min_qty || 0));
+  const u = cur.unit || "шт";
+  return (
+    <div className="pc-sum">
+      <div className={"pc-sum-k" + (sum("available") > 0 ? " ok" : " none")}><b>{sum("available") > 0 ? `${sum("available")} ${u}` : "нет в наличии"}</b><span>доступно{sum("reserved") ? ` · резерв ${sum("reserved")}` : ""}{sum("qty") !== sum("available") ? ` · остаток ${sum("qty")}` : ""}</span></div>
+      {sum("in_transit") > 0 && <div className="pc-sum-k"><b>{sum("in_transit")} {u}</b><span>в пути</span></div>}
+      {low.length > 0 && <div className="pc-sum-k warn"><b>ниже минимума</b><span>{low.map((s) => `${s.warehouse || "склад"}: ${s.available ?? s.qty ?? 0} из ${s.min_qty}`).join("; ")}</span></div>}
+      <div className="pc-sum-k"><b>{cur.sale_price ? `${fmtRub(cur.sale_price, 2)} ${cur.sale_currency}` : "—"}</b><span>цена продажи</span></div>
+      <div className="pc-sum-k"><b>{cur.lead_days != null ? `${cur.lead_days} дн.` : "—"}</b><span>срок поставки</span></div>
+    </div>);
+}
 const PAGE = 50;
 
 export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }) {
@@ -48,10 +70,17 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
   const [warehouses, setWarehouses] = useState<{ id: string; name: string; kind: string }[]>([]);
   const [showImport, setShowImport] = useState(false);
   const seesPurchase = can(me, "factory_price_history");
+  // «Новый вид» (D-169): список и карточка рядом, группы — метками, наличие — понятной меткой, карточка — разделы с навигацией
+  const nv = useNewUiFlag();
+  const [loaded, setLoaded] = useState(false);
+  const [snap, setSnap] = useState("");                       // сохранённое состояние карточки — для «есть несохранённые изменения»
+  const [models, setModels] = useState<{ id: string; title: string }[]>([]);
+  const tblRef = useRef<HTMLTableElement>(null);
+  useTableLabels(tblRef, nv);
 
   const load = (p = page) => {
     const qs = new URLSearchParams({ q, group, status, in_stock: String(inStock), limit: String(PAGE), offset: String(p * PAGE) });
-    api.get<typeof list>(`/api/parts/catalog?${qs}`).then(setList).catch((e) => setMsg((e as Error).message));
+    api.get<typeof list>(`/api/parts/catalog?${qs}`).then(setList).catch((e) => setMsg((e as Error).message)).finally(() => setLoaded(true));
   };
   useEffect(() => {
     api.get<Meta>("/api/parts/meta/catalog").then(setMeta);
@@ -62,10 +91,24 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
   }, []);
   useEffect(() => { const t = setTimeout(() => { setPage(0); load(0); }, 300); return () => clearTimeout(t); }, [q, group, status, inStock]);
   useEffect(() => { if (openId) open(openId); }, [openId]);
+  useEffect(() => {      // новый вид: модели каталога ГШО для применимости (выбор из списка, а не текстом)
+    if (!nv) return;
+    api.get<{ factory: string; types: { machine_type: string; models: { id: string; model: string; trademark?: string }[] }[] }[]>("/api/catalog/tree")
+      .then((t) => setModels(t.flatMap((f) => f.types.flatMap((ty) => ty.models.map((m) => ({ id: m.id, title: `${ty.machine_type} ${m.trademark ? m.trademark + " " : ""}${m.model}` }))))))
+      .catch(() => setModels([]));
+  }, [nv]);
+  useEffect(() => {      // Esc закрывает карточку (новый вид)
+    if (!nv || !cur) return;
+    const f = (e: KeyboardEvent) => { if (e.key === "Escape" && !(e.target as HTMLElement)?.closest?.("input,textarea,select")) setCur(null); };
+    window.addEventListener("keydown", f);
+    return () => window.removeEventListener("keydown", f);
+  }, [nv, cur]);
 
   async function open(id: string) {
     const p = await api.get<Part>(`/api/parts/catalog/${id}`);
-    setCur({ ...EMPTY, ...p, names: p.names || {} }); setDups([]); setMsg("");
+    const c = { ...EMPTY, ...p, names: p.names || {} };
+    setCur(c); setSnap(JSON.stringify(c)); setDups([]); setMsg("");
+    if (nv) { const u = new URL(window.location.href); u.searchParams.set("s", "parts"); u.searchParams.set("part", id); window.history.replaceState(window.history.state, "", u); }
   }
   async function save(force = false) {
     if (!cur) return;
@@ -91,9 +134,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
   const curSel = (key: keyof Part) => (
     <select value={String(cur?.[key] || "EUR")} disabled={!edit} onChange={(e) => set({ [key]: e.target.value } as Partial<Part>)}>{CUR.map((c) => <option key={c}>{c}</option>)}</select>);
 
-  return (
-    <>
-      {msg && <div className="alert info">{msg}</div>}
+  const listEl = (
       <div className="card">
         <div className="row" style={{ flexWrap: "wrap" }}>
           <input style={{ minWidth: 280 }} placeholder="артикул, наименование, OEM или номер поставщика" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -102,7 +143,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
           <label className="row"><input type="checkbox" checked={inStock} onChange={(e) => setInStock(e.target.checked)} /> только в наличии</label>
           <div className="push" style={{ marginLeft: "auto" }}>
             {meta?.can_import && <button className="btn ghost" onClick={() => setShowImport(!showImport)}>Перенос из МойСклад</button>}
-            {edit && <button className="btn add" onClick={() => { setCur({ ...EMPTY }); setDups([]); setMsg(""); }}>Запчасть</button>}
+            {edit && <button className="btn add" onClick={() => { setCur({ ...EMPTY }); setSnap(""); setDups([]); setMsg(""); }}>Запчасть</button>}
           </div>
         </div>
         {showImport && <ImportPanel warehouses={warehouses} onDone={() => { load(); api.get<Meta>("/api/parts/meta/catalog").then(setMeta); api.get<typeof warehouses>("/api/parts/warehouses").then(setWarehouses); }} />}
@@ -121,15 +162,17 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
           <button className="btn ghost" disabled={(page + 1) * PAGE >= list.total} onClick={() => { setPage(page + 1); load(page + 1); }}>вперёд</button>
         </div>
       </div>
-
-      {cur && (
+  );
+  const cardEl = cur ? (
         <div className="card">
           <h2 style={{ marginTop: 0 }}>{cur.id ? `${cur.article} — ${cur.name_ru}` : "Новая запчасть"} {cur.source === "moysklad" && <span className="badge">из МойСклад</span>}</h2>
           {dups.length > 0 && (
             <div className="alert info">Похожие карточки: {dups.map((d) => <a key={d.id} href="#" style={{ marginRight: 8 }} onClick={(e) => { e.preventDefault(); open(d.id); }}>{d.article} {d.name_ru}{d.manufacturer && ` (${d.manufacturer})`}</a>)}
               <button className="btn ghost" onClick={() => save(true)}>всё равно сохранить новую</button></div>)}
 
-          <h3>Основное</h3>
+          {nv && cur.id && <PartSummary cur={cur} />}
+          {nv && <nav className="pc-secnav" aria-label="Разделы карточки">{SECTIONS.map(([id, t]) => <a key={id} href={`#${id}`} onClick={(e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>{t}</a>)}</nav>}
+          <h3 id="pc-main">Основное</h3>
           <div className="grid cols-3">
             {txt("Артикул (основной номер) *", "article")}{txt("Наименование *", "name_ru")}{txt("Единица измерения *", "unit", "шт")}
             <label className="f">Группа товара<input list="part-groups" value={cur.part_group} disabled={!edit} onChange={(e) => set({ part_group: e.target.value })} />
@@ -140,7 +183,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
           </div>
           <label className="f" style={{ marginTop: 6 }}>Описание, примечание<textarea rows={2} value={cur.description} disabled={!edit} onChange={(e) => set({ description: e.target.value })} /></label>
 
-          <h3>Номера</h3>
+          <h3 id="pc-nums">Номера</h3>
           <div className="grid cols-3">{txt("Производитель", "manufacturer")}{txt("Артикул производителя (OEM)", "oem_number")}</div>
           {cur.cross_refs.map((c, i) => (
             <div key={i} className="row" style={{ marginBottom: 4 }}>
@@ -152,18 +195,20 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
             </div>))}
           {edit && <button className="btn add" onClick={() => set({ cross_refs: [...cur.cross_refs, { kind: "supplier", number: "", supplier_id: null, manufacturer: "", comment: "" }] })}>Номер или аналог</button>}
 
-          <h3>Применимость</h3>
+          <h3 id="pc-appl">Применимость</h3>
           {cur.applicability.map((a, i) => (
             <div key={i} className="row" style={{ marginBottom: 4 }}>
-              {a.model_title ? <span className="badge">{a.model_title}</span> : <>
+              {a.model_title ? <span className="badge">{a.model_title}</span> : a.equipment_model_id ? <span className="badge">{models.find((m) => m.id === a.equipment_model_id)?.title || "модель каталога"}</span> : <>
                 <input placeholder="производитель машины" value={a.other_manufacturer} disabled={!edit} onChange={(e) => set({ applicability: cur.applicability.map((x, j) => (j === i ? { ...x, other_manufacturer: e.target.value } : x)) })} />
                 <input placeholder="модель" value={a.other_model} disabled={!edit} onChange={(e) => set({ applicability: cur.applicability.map((x, j) => (j === i ? { ...x, other_model: e.target.value } : x)) })} /></>}
               <input placeholder="узел / агрегат" value={a.assembly} disabled={!edit} onChange={(e) => set({ applicability: cur.applicability.map((x, j) => (j === i ? { ...x, assembly: e.target.value } : x)) })} />
               {edit && <button className="btn ghost" onClick={() => set({ applicability: cur.applicability.filter((_, j) => j !== i) })}>удалить</button>}
             </div>))}
-          {edit && <button className="btn add" onClick={() => set({ applicability: [...cur.applicability, { equipment_model_id: null, other_manufacturer: "", other_model: "", assembly: "" }] })}>Модель машины</button>}
+          {edit && nv && models.length > 0 && <select className="pc-addmodel" value="" aria-label="Добавить модель из каталога ГШО" onChange={(e) => { if (e.target.value) set({ applicability: [...cur.applicability, { equipment_model_id: e.target.value, other_manufacturer: "", other_model: "", assembly: "" }] }); }}>
+            <option value="">+ модель из каталога ГШО…</option>{models.filter((m) => !cur.applicability.some((a) => a.equipment_model_id === m.id)).map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}</select>}
+          {edit && <button className="btn add" onClick={() => set({ applicability: [...cur.applicability, { equipment_model_id: null, other_manufacturer: "", other_model: "", assembly: "" }] })}>{nv ? "Модель другого производителя" : "Модель машины"}</button>}
 
-          <h3>Закупка</h3>
+          <h3 id="pc-buy">Закупка</h3>
           <div className="grid cols-3">
             <label className="f">Основной поставщик<select value={cur.supplier_id || ""} disabled={!edit} onChange={(e) => set({ supplier_id: e.target.value || null })}><option value="">—</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.short_name || s.name}</option>)}</select></label>
             <label className="f">Маршрут по умолчанию<select value={cur.route_id || ""} disabled={!edit} onChange={(e) => set({ route_id: e.target.value || null })}><option value="">—</option>{routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
@@ -173,10 +218,10 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
             {numF("Минимальная партия", "moq")}{numF("Кратность", "multiple")}
           </div>
 
-          <h3>Логистика</h3>
+          <h3 id="pc-log">Логистика</h3>
           <div className="grid cols-3">{numF("Вес, кг", "weight_kg")}{numF("Длина, мм", "length_mm")}{numF("Ширина, мм", "width_mm")}{numF("Высота, мм", "height_mm")}{numF("Объём, м³ (если не заданы габариты)", "volume_m3")}</div>
 
-          <h3>Склад</h3>
+          <h3 id="pc-stock">Склад</h3>
           <table>
             <thead><tr><th>Склад</th><th className="num">Остаток</th><th className="num">Резерв</th><th className="num">В пути</th><th className="num">Доступно</th><th className="num">Минимальный остаток</th></tr></thead>
             <tbody>{warehouses.map((w) => {
@@ -191,7 +236,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
             })}{warehouses.length === 0 && <tr><td colSpan={6} className="muted">Склады появятся после переноса из МойСклад</td></tr>}</tbody>
           </table>
 
-          <h3>Цены</h3>
+          <h3 id="pc-price">Цены</h3>
           <div className="grid cols-3">
             <label className="f">Цена продажи<div className="row"><input type="number" value={cur.sale_price ?? ""} disabled={!edit} onChange={(e) => set({ sale_price: n(e.target.value) })} />{curSel("sale_currency")}</div></label>
             <label className="f">Минимальная цена продажи<div className="row"><input type="number" value={cur.min_price ?? ""} disabled={!edit} onChange={(e) => set({ min_price: n(e.target.value) })} />{curSel("min_price_currency")}</div></label>
@@ -209,7 +254,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
             </div>))}
           {edit && <button className="btn add" onClick={() => set({ client_prices: [...cur.client_prices, { client_id: null, client_name: "", price: 0, currency: "EUR", valid_from: null, valid_to: null }] })}>Договорная цена клиента</button>}
 
-          <h3>Файлы и сделки</h3>
+          <h3 id="pc-files">Файлы и сделки</h3>
           {cur.id && (cur.photo_files?.length ?? 0) > 0 && (
             <div className="row" style={{ flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
               {cur.photo_files!.map((f, i) => (
@@ -224,11 +269,66 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
             {txt("Спецификация, №", "spec_no")}{txt("Доп. соглашение, №", "addendum_no")}
           </div>
 
-          <div className="row" style={{ marginTop: 10 }}>
+          <div className={"row pc-footrow" + (nv ? " pc-foot" : "")}>
+            {nv && edit && <span className={"pc-dirty" + (JSON.stringify(cur) !== snap ? " on" : "")}>{!cur.id ? "новая карточка — не сохранена" : JSON.stringify(cur) !== snap ? "есть несохранённые изменения" : "изменений нет"}</span>}
             {edit && <button className="btn" onClick={() => save(false)} disabled={!cur.article || !cur.name_ru || !cur.unit.trim()}>Сохранить карточку</button>}
             <button className="btn ghost" onClick={() => setCur(null)}>закрыть</button>
           </div>
-        </div>)}
+        </div>) : null;
+  const inStockLbl = (r: Row) => r.stock_total > 0 ? <span className="pc-stock ok">{fmtRub(r.stock_total, 0)} {r.unit}</span> : <span className="pc-stock none">нет в наличии</span>;
+  const listNv = (
+    <div className="card pc-listcard">
+      <div className="pc-toolbar">
+        <input className="pc-search" placeholder="Артикул, наименование, OEM или номер поставщика" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Поиск запчастей" />
+        <div className="dc-groups" role="group" aria-label="Статус карточек">
+          {([["active", "Активные"], ["archive", "Архив"], ["", "Все"]] as const).map(([k, t]) => <button key={k} type="button" className={status === k ? "on" : ""} aria-pressed={status === k} onClick={() => setStatus(k)}>{t}</button>)}
+        </div>
+        <label className="pc-toggle"><input type="checkbox" checked={inStock} onChange={(e) => setInStock(e.target.checked)} /> только в наличии</label>
+        <span className="pc-actions">
+          {meta?.can_import && <button className="btn ghost" onClick={() => setShowImport(!showImport)}>Перенос из МойСклад</button>}
+          {edit && <button className="btn add primary" onClick={() => { setCur({ ...EMPTY }); setSnap(""); setDups([]); setMsg(""); }}>Запчасть</button>}
+        </span>
+      </div>
+      {(meta?.groups.length || 0) > 0 && <div className="pc-groups" role="group" aria-label="Группа товара">
+        <button type="button" className={!group ? "on" : ""} aria-pressed={!group} onClick={() => setGroup("")}>Все группы</button>
+        {meta!.groups.map((g) => <button key={g} type="button" className={group === g ? "on" : ""} aria-pressed={group === g} onClick={() => setGroup(group === g ? "" : g)}>{g}</button>)}
+      </div>}
+      {showImport && <ImportPanel warehouses={warehouses} onDone={() => { load(); api.get<Meta>("/api/parts/meta/catalog").then(setMeta); api.get<typeof warehouses>("/api/parts/warehouses").then(setWarehouses); }} />}
+      <div className="pc-count" aria-live="polite">{loaded ? <>Найдено: <b>{list.total}</b>{(q || group || inStock || status !== "active") && <button type="button" className="dl-chip-all" onClick={() => { setQ(""); setGroup(""); setInStock(false); setStatus("active"); }}>сбросить отбор</button>}</> : "…"}</div>
+      {!loaded ? <Loading /> : list.items.length === 0 ? (
+        <div className="st-box st-empty"><div className="st-title">{q ? `По запросу «${q}» запчастей нет` : "Запчастей нет"}</div>
+          <div className="muted">{q ? "Поиск идёт по артикулу, наименованию, OEM и номерам поставщиков." : edit ? "Добавьте карточку или перенесите каталог из МойСклад." : "Карточки заводят менеджер, КД и ЗГД."}</div></div>) : (
+        <table ref={tblRef} className="pc-table nv-cards">
+          <thead><tr><th>Артикул</th><th>Наименование</th><th>Производитель · OEM</th><th className="num">Наличие</th><th className="num">Цена продажи</th></tr></thead>
+          <tbody>{list.items.map((r) => (
+            <tr key={r.id} className={(cur?.id === r.id ? "cur " : "") + (r.status === "archive" ? "arch" : "")} tabIndex={0} onClick={() => open(r.id)} onKeyDown={(e) => { if (e.key === "Enter") open(r.id); }}>
+              <td className="pc-art">{r.article}</td>
+              <td><div className="pc-name">{r.name_ru}</div><div className="pc-sub">{r.part_group || "без группы"}{r.has_client_prices && <span className="badge info">договорная цена</span>}{r.status === "archive" && <span className="badge">архив</span>}</div></td>
+              <td>{r.manufacturer || <span className="muted">—</span>}{r.oem_number && <div className="pc-sub pc-mono">{r.oem_number}</div>}</td>
+              <td className="num">{inStockLbl(r)}</td>
+              <td className="num pc-price">{r.sale_price ? `${fmtRub(r.sale_price, 2)} ${r.sale_currency}` : <span className="muted">—</span>}</td></tr>))}</tbody>
+        </table>)}
+      {list.total > PAGE && <div className="row pc-pager">
+        <span className="muted">{`${page * PAGE + 1}–${Math.min((page + 1) * PAGE, list.total)} из ${list.total}`}</span>
+        <button className="btn ghost" disabled={page === 0} onClick={() => { setPage(page - 1); load(page - 1); }}>← назад</button>
+        <button className="btn ghost" disabled={(page + 1) * PAGE >= list.total} onClick={() => { setPage(page + 1); load(page + 1); }}>вперёд →</button>
+      </div>}
+    </div>);
+  if (nv) return (
+    <>
+      {msg && <div className="alert info">{msg}</div>}
+      <div className={"pc-shell" + (cur ? " with-card" : "")}>
+        {listNv}
+        {cur && <aside className="pc-panel" aria-label="Карточка запчасти">
+          <button type="button" className="btn ghost pc-close" onClick={() => setCur(null)} aria-label="Закрыть карточку">✕</button>
+          {cardEl}</aside>}
+      </div>
+    </>);
+  return (
+    <>
+      {msg && <div className="alert info">{msg}</div>}
+      {listEl}
+      {cardEl}
     </>
   );
 }
