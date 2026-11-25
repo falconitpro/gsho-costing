@@ -433,7 +433,12 @@ def a10(_):
     p.check(".asg-mode input >> nth=1")
     p.select_option(".sec-modal select >> nth=0", "sales")
     p.select_option(".sec-modal select >> nth=1", value=X.ids[MGR])
-    p.fill(".sec-modal textarea >> nth=0", "")
+    ta = p.locator(".sec-modal textarea >> nth=0")
+    for _ in range(10):                       # в CI поле изредка возвращало подсказку сигнала после очистки — чистим до подтверждения
+        ta.fill("")
+        p.wait_for_timeout(150)
+        if ta.input_value() == "":
+            break
     btn = p.locator(".sec-modal .asg-actions button:has-text('Поручить')")
     for _ in range(20):                       # состояние кнопки — после перерисовки формы
         if btn.is_disabled():
