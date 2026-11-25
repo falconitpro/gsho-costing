@@ -32,7 +32,8 @@ def get_db() -> Generator[Session, None, None]:
 
 def init_db() -> None:
     """Создание схемы (dev и тестовый стенд): новые таблицы — create_all, новые столбцы существующих таблиц —
-    ALTER TABLE … ADD COLUMN (без удаления и изменения типов). В проде — alembic upgrade head."""
+    ALTER TABLE … ADD COLUMN (без удаления и изменения типов). На рабочем сервере init_db не вызывается: схема меняется только
+    новыми SQL-файлами backend/migrations (deploy/production/update.sh), сверка — python -m scripts.schema_check."""
     from . import models  # noqa: F401
     sync_enums()
     Base.metadata.create_all(engine)
