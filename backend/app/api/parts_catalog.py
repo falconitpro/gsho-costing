@@ -92,10 +92,20 @@ def _stock_total(p: Part) -> float:
     return sum(s.qty or 0 for s in p.stock)
 
 
+def _below_min(s: PartStock) -> bool:
+    # то же правило, что в разделе «Снабжение и склад» (api/parts_stock.py): свободно = остаток − резерв < минимум
+    return bool(s.min_qty and s.min_qty > 0 and (s.qty or 0) - (s.reserved or 0) < s.min_qty)
+
+
 def _row(p: Part) -> dict:
+    reserved = sum(s.reserved or 0 for s in p.stock)
     return {"id": p.id, "article": p.article, "name_ru": p.name_ru, "unit": p.unit, "part_group": p.part_group, "manufacturer": p.manufacturer,
             "oem_number": p.oem_number, "status": p.status, "stock_total": _stock_total(p), "sale_price": p.sale_price,
-            "sale_currency": p.sale_currency, "has_client_prices": bool(p.prices)}
+            "sale_currency": p.sale_currency, "has_client_prices": bool(p.prices),
+            # D-170: сводка по складам для списка — только чтение, добавлена к прежним полям
+            "stock_reserved": reserved, "stock_available": _stock_total(p) - reserved,
+            "stock_in_transit": sum(s.in_transit or 0 for s in p.stock),
+            "below_min_count": sum(1 for s in p.stock if _below_min(s))}
 
 
 @router.get("/meta/catalog")
@@ -106,7 +116,7 @@ def catalog_meta(db: Session = Depends(get_db), user: CurrentUser = Depends(get_
 
 
 @router.get("/catalog")
-def catalog(q: str = "", group: str = "", status: str = "active", in_stock: bool = False, limit: int = 50, offset: int = 0,
+def catalog(q: str = "", group: str = "", status: str = "active", in_stock: bool = False, below_min: bool = False, limit: int = 50, offset: int = 0,
             db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     stmt = select(Part).options(selectinload(Part.stock), selectinload(Part.prices))
     if q.strip():
@@ -119,6 +129,10 @@ def catalog(q: str = "", group: str = "", status: str = "active", in_stock: bool
         stmt = stmt.where(Part.status == status)
     if in_stock:
         stmt = stmt.where(Part.id.in_(select(PartStock.part_id).where(PartStock.qty > 0)))
+    if below_min:
+        stmt = stmt.where(Part.id.in_(select(PartStock.part_id).where(
+            PartStock.min_qty.is_not(None), PartStock.min_qty > 0,
+            (func.coalesce(PartStock.qty, 0) - func.coalesce(PartStock.reserved, 0)) < PartStock.min_qty)))
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = db.scalars(stmt.order_by(Part.name_ru, Part.article).limit(min(max(limit, 1), 200)).offset(max(offset, 0))).all()
     return {"total": total, "items": [_row(p) for p in rows]}

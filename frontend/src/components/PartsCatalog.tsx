@@ -21,7 +21,8 @@ type Part = {
   cross_refs: Cross[]; applicability: Appl[]; client_prices: ClientPrice[]; stock?: Stock[]; stock_total?: number; source?: string;
 };
 type Row = { id: string; article: string; name_ru: string; unit: string; part_group: string; manufacturer: string; oem_number: string; status: string;
-  stock_total: number; sale_price: number | null; sale_currency: string; has_client_prices: boolean };
+  stock_total: number; sale_price: number | null; sale_currency: string; has_client_prices: boolean;
+  stock_reserved?: number; stock_available?: number; stock_in_transit?: number; below_min_count?: number };
 type Meta = { cross_kinds: Record<string, string>; status: Record<string, string>; groups: string[]; can_edit: boolean; can_import: boolean };
 type Ref = { id: string; name: string; short_name?: string };
 type Dup = { id: string; article: string; name_ru: string; manufacturer: string; oem_number: string };
@@ -59,6 +60,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
   const [group, setGroup] = useState("");
   const [status, setStatus] = useState("active");
   const [inStock, setInStock] = useState(false);
+  const [belowMin, setBelowMin] = useState(false);
   const [page, setPage] = useState(0);
   const [list, setList] = useState<{ total: number; items: Row[] }>({ total: 0, items: [] });
   const [cur, setCur] = useState<Part | null>(null);
@@ -80,6 +82,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
 
   const load = (p = page) => {
     const qs = new URLSearchParams({ q, group, status, in_stock: String(inStock), limit: String(PAGE), offset: String(p * PAGE) });
+    if (belowMin) qs.set("below_min", "true");
     api.get<typeof list>(`/api/parts/catalog?${qs}`).then(setList).catch((e) => setMsg((e as Error).message)).finally(() => setLoaded(true));
   };
   useEffect(() => {
@@ -89,7 +92,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
     api.get<Ref[]>("/api/refs/clients").then(setClients).catch(() => setClients([]));
     api.get<typeof warehouses>("/api/parts/warehouses").then(setWarehouses).catch(() => setWarehouses([]));
   }, []);
-  useEffect(() => { const t = setTimeout(() => { setPage(0); load(0); }, 300); return () => clearTimeout(t); }, [q, group, status, inStock]);
+  useEffect(() => { const t = setTimeout(() => { setPage(0); load(0); }, 300); return () => clearTimeout(t); }, [q, group, status, inStock, belowMin]);
   useEffect(() => { if (openId) open(openId); }, [openId]);
   useEffect(() => {      // новый вид: модели каталога ГШО для применимости (выбор из списка, а не текстом)
     if (!nv) return;
@@ -275,7 +278,17 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
             <button className="btn ghost" onClick={() => setCur(null)}>закрыть</button>
           </div>
         </div>) : null;
-  const inStockLbl = (r: Row) => r.stock_total > 0 ? <span className="pc-stock ok">{fmtRub(r.stock_total, 0)} {r.unit}</span> : <span className="pc-stock none">нет в наличии</span>;
+  const inStockLbl = (r: Row) => {
+    const avail = r.stock_available ?? r.stock_total;
+    const extra = [r.stock_reserved ? `резерв ${fmtRub(r.stock_reserved, 0)}` : "", r.stock_in_transit ? `в пути ${fmtRub(r.stock_in_transit, 0)}` : ""].filter(Boolean).join(" · ");
+    return <div className="pc-stockcell">
+      {r.stock_total > 0
+        ? <span className={"pc-stock " + (avail > 0 ? "ok" : "none")} title={`Остаток ${r.stock_total}, доступно ${avail}`}>{avail > 0 ? `${fmtRub(avail, 0)} ${r.unit}` : "всё в резерве"}{avail !== r.stock_total && <small> из {fmtRub(r.stock_total, 0)}</small>}</span>
+        : <span className={"pc-stock none"}>{r.stock_in_transit ? "ожидается" : "нет в наличии"}</span>}
+      {extra && <span className="pc-stock-sub">{extra}</span>}
+      {(r.below_min_count || 0) > 0 && <span className="pc-stock low" title="Свободный остаток ниже минимума хотя бы на одном складе">ниже минимума{(r.below_min_count || 0) > 1 ? ` · ${r.below_min_count} скл.` : ""}</span>}
+    </div>;
+  };
   const listNv = (
     <div className="card pc-listcard">
       <div className="pc-toolbar">
@@ -284,6 +297,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
           {([["active", "Активные"], ["archive", "Архив"], ["", "Все"]] as const).map(([k, t]) => <button key={k} type="button" className={status === k ? "on" : ""} aria-pressed={status === k} onClick={() => setStatus(k)}>{t}</button>)}
         </div>
         <label className="pc-toggle"><input type="checkbox" checked={inStock} onChange={(e) => setInStock(e.target.checked)} /> только в наличии</label>
+        <label className="pc-toggle"><input type="checkbox" checked={belowMin} onChange={(e) => setBelowMin(e.target.checked)} /> ниже минимума</label>
         <span className="pc-actions">
           {meta?.can_import && <button className="btn ghost" onClick={() => setShowImport(!showImport)}>Перенос из МойСклад</button>}
           {edit && <button className="btn add primary" onClick={() => { setCur({ ...EMPTY }); setSnap(""); setDups([]); setMsg(""); }}>Запчасть</button>}
@@ -294,7 +308,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
         {meta!.groups.map((g) => <button key={g} type="button" className={group === g ? "on" : ""} aria-pressed={group === g} onClick={() => setGroup(group === g ? "" : g)}>{g}</button>)}
       </div>}
       {showImport && <ImportPanel warehouses={warehouses} onDone={() => { load(); api.get<Meta>("/api/parts/meta/catalog").then(setMeta); api.get<typeof warehouses>("/api/parts/warehouses").then(setWarehouses); }} />}
-      <div className="pc-count" aria-live="polite">{loaded ? <>Найдено: <b>{list.total}</b>{(q || group || inStock || status !== "active") && <button type="button" className="dl-chip-all" onClick={() => { setQ(""); setGroup(""); setInStock(false); setStatus("active"); }}>сбросить отбор</button>}</> : "…"}</div>
+      <div className="pc-count" aria-live="polite">{loaded ? <>Найдено: <b>{list.total}</b>{(q || group || inStock || belowMin || status !== "active") && <button type="button" className="dl-chip-all" onClick={() => { setQ(""); setGroup(""); setInStock(false); setBelowMin(false); setStatus("active"); }}>сбросить отбор</button>}</> : "…"}</div>
       {!loaded ? <Loading /> : list.items.length === 0 ? (
         <div className="st-box st-empty"><div className="st-title">{q ? `По запросу «${q}» запчастей нет` : "Запчастей нет"}</div>
           <div className="muted">{q ? "Поиск идёт по артикулу, наименованию, OEM и номерам поставщиков." : edit ? "Добавьте карточку или перенесите каталог из МойСклад." : "Карточки заводят менеджер, КД и ЗГД."}</div></div>) : (
