@@ -2,7 +2,9 @@ import { Crumbs } from "./Levels";
 import PartsRequestCreate from "./PartsRequestCreate";
 import NewSupplierInline from "./NewSupplierInline";
 import { MeContext } from "../App";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useNewUiFlag } from "../uiMode";
+import { useTableLabels } from "./useTableLabels";
 import { Link, useNavigate } from "react-router-dom";
 import { api, fmtDate, fmtRub } from "../api";
 import { can, type Me } from "../types";
@@ -99,19 +101,62 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
   }
   const closed = !!r.closed;
   const kpSel = sel.filter((id) => r.lines.find((l) => l.id === id)?.price != null);
+  const nv = useNewUiFlag();
+  const tblRef = useRef<HTMLTableElement>(null);
+  useTableLabels(tblRef, nv);
+  // D-176 (B-07): сводка заявки — только из полей ответа сервера, без пересчёта
+  const live = r.lines.filter((l) => !["cancelled", "unavailable", "replaced"].includes(l.status));
+  const facts: [string, string | number, string][] = [
+    ["строк", r.lines.length, ""],
+    ["подобрано", live.filter((l) => l.part).length, ""],
+    ["не найдено", live.filter((l) => !l.part).length, live.some((l) => !l.part) ? "bad" : ""],
+    ["хватает на складах", live.filter((l) => l.available != null && l.available >= l.qty).length, ""],
+    ["с ценой", live.filter((l) => l.price != null).length, ""],
+    ["отгружено, шт", live.reduce((n, l) => n + (l.shipped_qty || 0), 0), ""],
+  ];
+  const nvHead = nv && (
+    <div className="pr-head">
+      <div className="pr-head-main">
+        <h2>{r.number} · {r.client_name}</h2>
+        <div className="pr-badges">
+          {r.stage_title && <span className="badge info">{r.stage_title}</span>}
+          {r.urgent && <span className="badge bad">машина стоит</span>}{r.warranty && <span className="badge">гарантия</span>}
+          {closed && <span className="badge">закрыта{r.close_reason ? `: ${r.close_reason}` : ""}</span>}
+          <span className="muted">{r.status_text}</span>
+        </div>
+        <dl className="pr-meta">
+          {r.machine && <><dt>Машина</dt><dd>{r.machine}</dd></>}
+          {r.contact && <><dt>Контакт</dt><dd>{r.contact}</dd></>}
+          <dt>Канал</dt><dd>{meta.channels[r.channel] || r.channel || "не указан"}</dd>
+          <dt>Менеджер</dt><dd>{r.manager_name || "не назначен"}</dd>
+          <dt>Создана</dt><dd>{r.created_at ? new Date(r.created_at).toLocaleDateString("ru-RU") : "—"}</dd>
+          {r.deal && <><dt>Сделка</dt><dd><Link to={`/deals/${r.deal.id}`}>{r.deal.number}</Link></dd></>}
+          {r.comment && <><dt>Комментарий</dt><dd>{r.comment}</dd></>}
+        </dl>
+      </div>
+      <ul className="pr-facts" aria-label="Сводка по строкам">
+        {facts.map(([t, v, tone]) => <li key={t} className={tone}><b>{v}</b><span>{t}</span></li>)}
+        <li><b>{r.summary.sum_rub ? `${fmtRub(r.summary.sum_rub)} ₽` : "—"}</b><span>сумма строк в работе</span></li>
+      </ul>
+      <nav className="pr-secnav" aria-label="Разделы заявки">
+        <a href="#pr-lines">Позиции</a>{!closed && <a href="#pr-sup">Поставщики</a>}<a href="#pr-total">Итого</a><a href="#pr-kp">КП{r.kps?.length ? ` · ${r.kps.length}` : ""}</a>
+      </nav>
+    </div>);
   return (
-    <div className="card">
-      <div className="row" style={{ justifyContent: "space-between" }}>
+    <div className={"card" + (nv ? " pr-card" : "")}>
+      {nvHead}
+      {!nv && <><div className="row" style={{ justifyContent: "space-between" }}>
         <h2 style={{ margin: 0 }}>{r.number} · {r.client_name} {r.urgent && <span className="badge bad">машина стоит</span>} {r.warranty && <span className="badge">гарантия</span>}{r.stage_title && <span className="badge" style={{ marginLeft: 6 }}>{r.stage_title}</span>}{r.deal && <Link to={`/deals/${r.deal.id}`} className="badge" style={{ marginLeft: 6 }} title="сделка ГШО, по которой поставлена машина">сделка {r.deal.number}</Link>}</h2>
         <span className="muted">{r.status_text}</span>
       </div>
       <p className="muted" style={{ marginTop: 4 }}>{[r.machine, r.contact, meta.channels[r.channel], r.manager_name && `менеджер ${r.manager_name}`].filter(Boolean).join(" · ")}{r.comment && ` · ${r.comment}`}</p>
-      <div className="row" style={{ marginBottom: 6 }}>
+      </>}
+      <div className="row" id="pr-lines" style={{ marginBottom: 6 }}>
         {!closed && <button className="btn ghost" onClick={() => act(() => api.post<Req>(`${base}/match`), "Подбор повторён")}>Подобрать по каталогу</button>}
         {!closed && <button className="btn ghost" onClick={() => act(() => api.post<Req>(`${base}/reprice`), "Цены пересчитаны")}>Пересчитать цены</button>}
       </div>
       <div style={{ overflowX: "auto" }}>
-        <table>
+        <table ref={tblRef} className={nv ? "nv-cards pr-lines" : undefined}>
           <thead><tr><th title="отметить для КП или запроса поставщикам">✓</th><th>№</th><th>Запрос клиента</th><th>Подобрано</th><th className="num">Кол-во</th><th>Источник</th><th className="num">Срок, дн</th><th className="num">Цена</th><th className="num">Сумма, ₽</th>
             {seesCost && <><th className="num">Себест., ₽/ед</th><th className="num">Маржа</th></>}<th className="num">Порог</th><th>Статус</th></tr></thead>
           <tbody>{r.lines.map((l) => (
@@ -167,11 +212,11 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
             .then((x) => { if (x.reserve_short?.length) void askAlert(`Свободного остатка не хватило для строк: ${x.reserve_short.join(", ")}`); return x; }), "Заказ клиента отмечен, строки «со склада» в жёстком резерве")}>Клиент заказал отмеченные</button>
           <span className="muted" style={{ fontSize: 11 }}>строки «со склада» — жёсткий резерв; «под заказ» — в «Заказы поставщикам» → «К заказу»</span>
         </div>)}
-      {!closed && <SupplierPanel r={r} sel={sel} act={act} />}
+      {!closed && <div id="pr-sup"><SupplierPanel r={r} sel={sel} act={act} /></div>}
       {r.warranty && <ClaimFromRequest r={r} />}
       {!closed && r.lines.some((l) => ["ordered", "po", "transit", "in_stock"].includes(l.status)) && <ShipPanel r={r} act={act} />}
 
-      <h3>Итого по строкам в работе</h3>
+      <h3 id="pr-total">Итого по строкам в работе</h3>
       <div className="grid cols-3">
         <div>Сумма: <b>{fmtRub(r.summary.sum_rub)} ₽</b> ({r.summary.lines} строк)</div>
         {seesCost && <div>Маржа: <b>{r.summary.profit_rub != null ? `${fmtRub(r.summary.profit_rub)} ₽` : "—"}</b>{r.summary.margin_pct != null && ` (${r.summary.margin_pct} %)`}
@@ -184,7 +229,7 @@ function RequestCard({ r, meta, seesCost, approver, act }: { r: Req; meta: Meta;
             <button className="btn" onClick={() => act(() => api.post<Req>(`${base}/approve`, { comment }), "Виза поставлена").then(() => setComment(""))}>Утвердить цены</button></div>}</div>)}
       {r.approvals?.length > 0 && <div className="muted" style={{ marginTop: 6 }}>Визы: {r.approvals.map((a) => `${a.level === "fd" ? "ФД" : "КД"} ${a.name}, ${fmtDate(a.at)}${a.comment ? ` — ${a.comment}` : ""}`).join("; ")}</div>}
 
-      <h3>Коммерческое предложение</h3>
+      <h3 id="pr-kp">Коммерческое предложение</h3>
       {!closed && (
         <div className="row" style={{ flexWrap: "wrap" }}>
           <span className="muted">В КП пойдут строки с ценой: {kpSel.length} из {sel.length}</span>

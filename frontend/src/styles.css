@@ -2084,3 +2084,51 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
   .wp-act-who { text-align: left; }
 }
 @media (max-width: 1024px) { .ui-new .wp-act { order: 9; } }
+
+/* D-176: пакет B2 — таблицы карточки сделки (B-04/B-05/B-08), новый вид. В прежнем виде обёртка прозрачна для вёрстки. */
+.dc-body { display: contents; }
+.ui-new .dc-body { display: block; min-width: 0; }
+.ui-new .dc-body .card { overflow-x: auto; }
+.ui-new .dc-body table th { background: var(--nv-th); font-size: 12px; font-weight: 600; color: var(--muted); text-align: left; vertical-align: bottom; }
+.ui-new .dc-body table td { vertical-align: top; }
+.ui-new .dc-body table td input:not([type=checkbox]):not([type=radio]), .ui-new .dc-body table td select { max-width: 100%; min-width: 0; box-sizing: border-box; }
+.ui-new .dc-body table td input[type=date] { width: 150px; }
+.ui-new .dc-body table td input[type=file] { max-width: 220px; }
+.ui-new .dc-body table td.num, .ui-new .dc-body table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .ui-new .dc-body .card { overflow-x: visible; }
+  .ui-new .dc-body table.nv-cards td input[type=date] { width: 100%; }
+  .ui-new .dc-body table.nv-cards td.num { text-align: left; }
+  .ui-new .dc-body .btn { white-space: normal; max-width: 100%; height: auto; text-align: center; }
+  .ui-new .dc-body input:not([type=checkbox]):not([type=radio]), .ui-new .dc-body select, .ui-new .dc-body textarea { max-width: 100% !important; box-sizing: border-box; }
+  .ui-new .dc-body input[type=file] { width: 100%; }
+}
+/* D-176 (B-07): заявка на запчасти — шапка со сводкой, навигация по разделам, позиции карточками на телефоне */
+.pr-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 24px; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.pr-head h2 { margin: 0 0 6px; font-size: 20px; }
+.pr-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; font-size: 13px; }
+.pr-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; font-size: 13px; }
+.pr-meta dt { color: var(--muted); } .pr-meta dd { margin: 0; overflow-wrap: anywhere; }
+.pr-facts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(92px, auto)); gap: 8px; align-content: start; }
+.pr-facts li { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; background: #fff; }
+.pr-facts li b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.pr-facts li span { font-size: 11px; color: var(--muted); }
+.pr-facts li.bad b { color: var(--bad); }
+.pr-facts li:last-child { grid-column: span 2; }
+.pr-secnav { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.pr-secnav a { font-size: 13px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; color: var(--ink); background: #fff; min-height: 32px; display: inline-flex; align-items: center; }
+.pr-secnav a:hover { border-color: var(--nv-line-strong); }
+.pr-card [id^="pr-"] { scroll-margin-top: 80px; }
+.ui-new table.pr-lines th { background: var(--nv-th); font-size: 12px; }
+.ui-new table.pr-lines td { vertical-align: top; }
+@media (max-width: 1100px) { .pr-head { grid-template-columns: minmax(0, 1fr); } .pr-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); } .pr-facts li:last-child { grid-column: span 3; } }
+@media (max-width: 760px) {
+  .pr-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pr-facts li:last-child { grid-column: span 2; }
+  .ui-new .pr-card input:not([type=checkbox]), .ui-new .pr-card select, .ui-new .pr-card textarea { max-width: 100% !important; box-sizing: border-box; }
+  .ui-new .pr-card .btn { white-space: normal; height: auto; }
+}
+/* D-176 (B-06): торги на телефоне — показатели в две колонки, значения целиком */
+@media (max-width: 760px) {
+  .ui-new .ng-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .ui-new .ng-kpi b { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; font-size: 17px; }
+}
