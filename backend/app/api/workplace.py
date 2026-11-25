@@ -693,3 +693,10 @@ def executive_direction(key: str, db: Session = Depends(get_db), user: CurrentUs
     d["history"] = sorted(hist, key=lambda h: h["at"] or "", reverse=True)[:50]
     d["meta"] = out["executive"]["meta"]
     return d
+
+
+@router.get("/activity")
+def workplace_activity(limit: int = 15, before: Optional[datetime] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """D-175: последняя активность по видимым сотруднику сделкам — только чтение (services/activity.py)."""
+    from ..services import activity
+    return activity.build(db, user, can_see_deal, limit=limit, before=before)

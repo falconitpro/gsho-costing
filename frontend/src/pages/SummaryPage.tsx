@@ -6,11 +6,12 @@ import { api, fmtDate, fmtRub } from "../api";
 import type { Me } from "../types";
 import { isNewUi } from "../uiMode";
 import { Loading } from "../components/States";
+import SummaryOverview from "../components/SummaryOverview";
 
 // Сводные экраны по всем сделкам: Отгрузки (логист), Деньги (ФД), Сервис, Закупки. Один компонент, вкладка по роли.
 
-type Kind = "shipments" | "money" | "service" | "purchasing" | "rework" | "speed";
-const TITLES: Record<Kind, string> = { shipments: "Отгрузки", money: "Деньги", service: "Сервис", purchasing: "Закупки", rework: "Возвраты на доработку", speed: "Скорость процесса" };
+type Kind = "overview" | "shipments" | "money" | "service" | "purchasing" | "rework" | "speed";
+const TITLES: Record<Kind, string> = { overview: "Показатели", shipments: "Отгрузки", money: "Деньги", service: "Сервис", purchasing: "Закупки", rework: "Возвраты на доработку", speed: "Скорость процесса" };
 const load = <T,>(k: string, d: T): T => { try { return (JSON.parse(localStorage.getItem(k) || "") as T) ?? d; } catch { return d; } };
 
 function Kpi({ v, l, bad }: { v: string | number; l: string; bad?: boolean }) {
@@ -26,6 +27,7 @@ export default function SummaryPage({ me }: { me: Me }) {
   const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
   const fin = (me.perms?.finance_analytics ?? 0) >= 1;
   const kinds = ([
+    isNewUi() && has("cd", "gd", "fd", "manager") && "overview",   // D-175: период, динамика, сравнение, план/факт — только новый вид
     has("logistician", "cd", "gd", "fd", "manager", "purchasing") && "shipments",
     fin && "money",
     has("service_head", "cd", "gd", "manager", "fd") && "service",
@@ -33,7 +35,7 @@ export default function SummaryPage({ me }: { me: Me }) {
     has("cd", "gd", "fd") && "rework",   // D-100: возвраты по причинам из справочника
     has("cd", "gd", "fd") && "speed",    // D-144: время на этапах сделки
   ].filter(Boolean)) as Kind[];
-  const pref = load<Kind>("gsho.summaryKind", has("logistician") ? "shipments" : has("fd") ? "money" : has("service_head") ? "service" : has("purchasing") ? "purchasing" : kinds[0]);
+  const pref = load<Kind>("gsho.summaryKind", isNewUi() && has("cd", "gd", "fd", "manager") ? "overview" : has("logistician") ? "shipments" : has("fd") ? "money" : has("service_head") ? "service" : has("purchasing") ? "purchasing" : kinds[0]);
   // вид сводки — в адресе (?kind=…): «Назад» возвращает прежний вид, ссылка открывает нужный; без параметра — запомненный выбор
   const [sp, setSp] = useSearchParams();
   const urlKind = sp.get("kind") as Kind | null;
@@ -43,7 +45,7 @@ export default function SummaryPage({ me }: { me: Me }) {
   const [loaded, setLoaded] = useState<{ kind: Kind; data: Record<string, unknown> } | null>(null);
   const data = loaded && loaded.kind === kind ? loaded.data : null;
   const [err, setErr] = useState("");
-  useEffect(() => { setErr(""); if (kind && kind !== "speed") api.get<Record<string, unknown>>(kind === "rework" ? "/api/reports/rework" : `/api/summary/${kind}`).then((d) => setLoaded({ kind, data: d })).catch((e) => setErr((e as Error).message)); }, [kind]);
+  useEffect(() => { setErr(""); if (kind && kind !== "speed" && kind !== "overview") api.get<Record<string, unknown>>(kind === "rework" ? "/api/reports/rework" : `/api/summary/${kind}`).then((d) => setLoaded({ kind, data: d })).catch((e) => setErr((e as Error).message)); }, [kind]);
   if (!kinds.length) return <div className="card muted">Сводные экраны для вашей роли не предусмотрены.</div>;
   // D-130: у кого открыт раздел «Финансы» — «Деньги» там; остальным (КД с финансовой аналитикой) — сводка на общем сервисе
   if (kind === "money" && (me.perms?.finance_section ?? 0) >= 1) return <Navigate to="/finance?tab=overview" replace />;
@@ -57,7 +59,8 @@ export default function SummaryPage({ me }: { me: Me }) {
       </div>
       {err && <div className="alert error">{err}</div>}
       {kind === "speed" && <Speed />}
-      {!data && !err && kind !== "speed" && <Loading text="Загружаю…" />}
+      {kind === "overview" && <SummaryOverview />}
+      {!data && !err && kind !== "speed" && kind !== "overview" && <Loading text="Загружаю…" />}
       {data && kind === "shipments" && <Shipments data={data} t={t} />}
       {data && kind === "money" && <Money data={data} t={t} />}
       {data && kind === "service" && <Service data={data} t={t} />}

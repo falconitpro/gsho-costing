@@ -2014,3 +2014,73 @@ header.top .brand.brand-gate .brand-img { width: 112px; height: auto; }
   :root { --brand-top-w: 104px; }
   .ui-new .app-topbar .app-topbar-title { display: none; }
 }
+
+/* D-175: пакет A2 — «Сводка → Показатели» (новый вид) */
+.so-loading { opacity: .65; transition: opacity .15s; }
+.so-params { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 12px; margin-bottom: 12px; }
+.so-params .dc-groups { margin: 0; }
+.so-nav { display: inline-flex; align-items: center; gap: 4px; }
+.so-nav .btn { min-width: 36px; min-height: 36px; font-size: 18px; padding: 0 8px; }
+.so-nav .so-now { font-size: 13px; }
+.so-title { min-width: 150px; text-align: center; font-size: 15px; }
+.so-dir { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.so-dir select { min-height: 36px; }
+.so-asof { margin-left: auto; font-size: 12px; }
+.so-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.so-kpi { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; margin: 0; text-decoration: none; color: inherit; min-height: 118px; }
+a.so-kpi:hover { border-color: var(--nv-line-strong); }
+.so-kt { font-size: 13px; color: var(--muted); }
+.so-kv { font-size: 24px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.so-kv small { font-size: 13px; font-weight: 500; color: var(--muted); }
+.so-kc { font-size: 12px; color: var(--muted); }
+.so-kc.good { color: var(--ok); } .so-kc.bad { color: var(--bad); }
+.so-kn { font-size: 12px; color: var(--warn); }
+.so-kd { display: none; }
+.so-cmp { font-size: 12px; margin: 8px 2px 14px; }
+.so-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 12px; }
+.so-grid .card, .so-table, .so-devs { margin: 0 0 12px; }
+.so-chart h2, .so-struct h2, .so-table h2, .so-devs h2 { font-size: 16px; margin: 0 0 8px; }
+.so-legend { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.so-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-left: 8px; }
+.so-sw.created, .so-bar.created { background: var(--nv-line-strong); }
+.so-sw.won, .so-bar.won { background: var(--ok); }
+.so-bars { display: flex; align-items: stretch; gap: 6px; height: 190px; border-bottom: 1px solid var(--line); padding-top: 4px; }
+.so-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; }
+.so-col.future { opacity: .35; }
+.so-pair { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 3px; }
+.so-bar { width: 40%; max-width: 26px; min-height: 2px; border-radius: 3px 3px 0 0; }
+.so-x { font-size: 12px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
+.so-y { font-size: 11px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.so-say { font-size: 13px; margin: 8px 0 0; }
+.so-struct ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.so-struct li { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; font-size: 13px; }
+.so-st { color: var(--ink); }
+.so-track { height: 10px; background: var(--bg); border-radius: 5px; overflow: hidden; }
+.so-fill { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
+.so-note { font-size: 12px; margin: 10px 0 0; }
+.so-table td.num, .so-devs td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.so-neg { color: var(--bad); } .so-pos { color: var(--ok); }
+@media (max-width: 1024px) { .so-grid { grid-template-columns: minmax(0, 1fr); } .so-asof { margin-left: 0; width: 100%; } }
+@media (max-width: 760px) {
+  .so-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .so-kv { font-size: 20px; }
+  .so-struct li { grid-template-columns: 110px minmax(0, 1fr) auto; }
+  .so-struct li small { display: none; }
+  .so-title { min-width: 0; }
+  .so-table td.num, .so-devs td.num { text-align: left; }
+}
+/* D-175: «Последняя активность» на Пульте (новый вид) */
+.wp-act { margin-top: 12px; }
+.wp-act-list { list-style: none; margin: 0; padding: 0; }
+.wp-act-list li { display: grid; grid-template-columns: 110px minmax(0, 1fr) minmax(120px, 220px); gap: 12px; align-items: baseline; padding: 8px 0; border-top: 1px solid #f0f1f3; font-size: 13px; }
+.wp-act-list li:first-child { border-top: 0; }
+.wp-act-list time { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wp-act-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wp-act-main a { font-weight: 600; }
+.wp-act-who { color: var(--muted); text-align: right; overflow-wrap: anywhere; }
+.wp-act-more { margin-top: 6px; min-height: 36px; }
+@media (max-width: 760px) {
+  .wp-act-list li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .wp-act-who { text-align: left; }
+}
+@media (max-width: 1024px) { .ui-new .wp-act { order: 9; } }

@@ -178,3 +178,17 @@ def purchasing(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cu
     return {"options": options, "requests": req_rows, "orders": po_rows,
             "totals": {"options_late": sum(1 for o in options if o["late"]), "options_to_order": sum(1 for o in options if not o["ordered_at"]),
                        "requests_open": len(req_rows), "orders_open": len(po_rows), "orders_overdue": sum(1 for p in po_rows if p["overdue"])}}
+
+
+# ------------------------------------------------------------------ Показатели (D-175, пакет A2)
+
+@router.get("/overview")
+def overview(kind: str = "quarter", anchor: Optional[date] = None, direction: str = "all",
+             db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Период, направление, динамика, сравнение с прошлым периодом, план/факт/отклонение — только чтение (services/summary_overview.py)."""
+    if not user.has(Role.CD, Role.GD, Role.FD, Role.MANAGER):
+        raise HTTPException(403, "Показатели сводки доступны КД, ЗГД, ФД и менеджерам (по своим сделкам)")
+    from ..services import summary_overview
+    from .workplace import _price
+    today = date.today()
+    return summary_overview.build(db, user, kind=kind, anchor=anchor or today, direction=direction, today=today, can_see=can_see_deal, price=_price)

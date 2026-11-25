@@ -6,6 +6,7 @@ import SecurityModal from "../SecurityModal";
 import AssignmentDialog, { type AsgPrefill } from "./AssignmentDialog";
 import DirectionsDialog from "./DirectionsDialog";
 import { Loading } from "../States";
+import RecentActivity from "./RecentActivity";
 import { useNewUiFlag } from "../../uiMode";
 
 // Рабочее место ЗГД, вид «Пульт» (D-153; v2 — D-154 по ТЗ «Berghaus CRM 2.0»).
@@ -284,6 +285,7 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
             {!x.deadlines.length && <li className="muted">В ближайшие 14 дней сроков нет.</li>}</ul>
         </div>
       </section>
+      {nv && <RecentActivity />}
       <p className="muted wp-exec-note wp-exec-foot">Обновлено {new Date(x.meta.generated_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" })} МСК. Нажатие на показатель открывает список с теми же условиями; подсказка — источник.</p>
       {modals}
     </div>);
