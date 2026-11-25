@@ -71,8 +71,6 @@ CHECK_JS = r"""
     if (res.lowContrast.length >= 15) return;
     const own = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim().length > 1);
     if (!own || !vis(el) || el.closest("[disabled], .disabled, option")) return;
-    // решение владельца 24.11 (D-160): фирменный #ff3131 для активного пункта меню и счётчиков — осознанное исключение
-    if (el.closest(".app-nav a.active, .app-count")) return;
     const cs = getComputedStyle(el); if (parseFloat(cs.opacity) < 0.9) return;
     const fg = parse(cs.color), bg = bgOf(el); if (!fg || !bg || fg.a < 0.9) return;
     const L1 = lum(fg), L2 = lum(bg), ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
