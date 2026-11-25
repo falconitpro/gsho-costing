@@ -1,5 +1,6 @@
 """D-175 (пакет A2): «Последняя активность» на рабочем месте и «Сводка → Показатели» — только чтение и только в пределах прав."""
 from datetime import date
+from urllib.parse import quote
 
 from tests.test_api_flow import client, _ok, H, MGR, LOG, CD  # noqa: F401
 
@@ -27,7 +28,7 @@ def test_activity_visible_deals_only_and_whitelist(client):
     # постраничность: next_before ведёт на более ранние события, без повторов
     p1 = _ok(client.get("/api/workplace/activity?limit=3", headers=H(GD)))
     if p1["next_before"]:
-        p2 = _ok(client.get(f"/api/workplace/activity?limit=3&before={p1['next_before']}", headers=H(GD)))
+        p2 = _ok(client.get(f"/api/workplace/activity?limit=3&before={quote(p1['next_before'])}", headers=H(GD)))
         assert not ({i["id"] for i in p1["items"]} & {i["id"] for i in p2["items"]})
         assert all(i["at"] <= p1["items"][-1]["at"] for i in p2["items"])
 
