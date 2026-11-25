@@ -10,6 +10,10 @@ import FinanceDebt from "../components/FinanceDebt";
 import FinanceIntragroup from "../components/FinanceIntragroup";
 import FinanceExportButton from "../components/FinanceExportButton";
 import { askPrompt } from "../components/Dialogs";
+import { Loading } from "../components/States";
+import { useNewUiFlag, isNewUi } from "../uiMode";
+import { useTableLabels } from "../components/useTableLabels";
+import FinancePlanFact from "../components/FinancePlanFact";
 
 // Раздел «Финансы», вариант Б (docs/finance/05_UI_UX_в_стилистике_CRM.md). Первый вертикальный срез:
 // «Обзор», «Платёжный календарь», «Ликвидность и валюта» (счета, остатки, операции, разнесение), «Экономика сделок», «Обеспечение и неустойки», «Сверка и уточнения».
@@ -63,6 +67,7 @@ function StatusBadge({ o }: { o: Pick<Obligation, "status" | "status_title" | "d
 }
 
 function Kpi({ label, children, bad }: { label: string; children: ReactNode; bad?: boolean }) {
+  if (isNewUi()) return <div className={"card kpi fin-kpi" + (bad ? " bad" : "")}><div className="v">{children}</div><div className="l">{label}</div></div>;
   return <div className="card kpi" style={{ flex: "1 1 200px", margin: 0, borderLeft: bad ? "4px solid var(--bad)" : undefined }}><div className="v" style={{ fontSize: 17 }}>{children}</div><div className="l">{label}</div></div>;
 }
 
@@ -92,7 +97,7 @@ export default function FinancePage({ me }: { me: Me }) {
       </div>
       {err && <div className="alert error">{err}</div>}
       <div className="tabs">{tabs.map(([k, t]) => <button key={k} className={tab === k ? "active" : ""} onClick={() => go({ tab: k })}>{t}</button>)}</div>
-      {!meta && !err && <div className="muted">Загружаю…</div>}
+      {!meta && !err && <Loading text="Загружаю…" />}
       {meta && tab === "overview" && <Overview stamp={stamp} go={go} tabs={tabs.map(([k, t]) => [k, t])} />}
       {meta && tab === "debt" && <FinanceDebt sp={sp} go={go} stamp={stamp} />}
       {meta && tab === "calendar" && <Calendar meta={meta} sp={sp} go={go} stamp={stamp} onChanged={() => setStamp((x) => x + 1)} />}
@@ -126,7 +131,7 @@ function Overview({ stamp, go, tabs }: { stamp: number; go: (p: Record<string, s
   const [err, setErr] = useState("");
   useEffect(() => { setErr(""); api.get<OverviewData>("/api/finance/overview").then(setD).catch((e) => setErr(errText(e))); }, [stamp]);
   if (err) return <div className="alert error">{err}</div>;
-  if (!d) return <div className="muted">Загружаю…</div>;
+  if (!d) return <Loading text="Загружаю…" />;
   const rec = d.reconciliation;
   const recCount = rec.transactions_needs_reconciliation + rec.obligation_conflicts + rec.provisional_allocations;
   const byCcy = (m: Record<string, { in: string; out: string }>, k: "in" | "out") => {
@@ -162,6 +167,7 @@ function Overview({ stamp, go, tabs }: { stamp: number; go: (p: Record<string, s
           {rec.transactions_needs_reconciliation > 0 && <button className="btn ghost" style={{ padding: "2px 8px", marginTop: 4, fontSize: 12 }} onClick={() => go({ tab: "liquidity", tx_status: "needs_reconciliation" })}>Открыть записи на сверке</button>}
         </Kpi>
       </div>
+      {isNewUi() && <FinancePlanFact stamp={stamp} />}
       {<EntryGrid entries={tabs.filter(([k]) => k !== "overview").map(([k, t]): Entry => {
         const stats: NonNullable<Entry["stats"]> = [];
         if (k === "calendar") stats.push({ value: d.upcoming.count, label: `платежей за ${d.horizon_days} дн.`, to: "/finance?tab=calendar&status=open" },
@@ -257,6 +263,10 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
   const [data, setData] = useState<List<Obligation> | null>(null);
   const [err, setErr] = useState("");
   const [q, setQ] = useState(f.search);
+  const nv = useNewUiFlag();
+  const [fOpen, setFOpen] = useState(false);          // новый вид, телефон: фильтры свёрнуты
+  const calRef = useRef<HTMLTableElement>(null);
+  useTableLabels(calRef, nv);
   const qs = useMemo(() => {
     const p = new URLSearchParams({ limit: "500" });
     Object.entries(f).forEach(([k, v]) => { if (v === true) p.set(k, "true"); else if (v) p.set(k, String(v)); });
@@ -267,8 +277,9 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
   const active = [f.direction, f.status, f.currency, f.legal_entity_id, f.search, f.contract_id, f.deal_id, f.date_from, f.date_to, f.reconciliation, f.include_inactive, f.source_type].filter(Boolean).length;
   return (
     <>
-      <div className="card" style={{ padding: 10 }}>
-        <div className="row">
+      <div className={"card" + (nv ? " fin-filters" + (fOpen ? " open" : "") : "")} style={{ padding: 10 }}>
+        {nv && <button type="button" className="btn ghost fin-ftoggle" aria-expanded={fOpen} onClick={() => setFOpen(!fOpen)}>Фильтры{active ? ` · ${active}` : ""} {fOpen ? "▴" : "▾"}</button>}
+        <div className="row fin-frow">
           <select value={f.direction} onChange={(e) => go({ direction: e.target.value })} aria-label="Направление">
             <option value="">все направления</option><option value="in">нам платят</option><option value="out">мы платим</option></select>
           <select value={f.status} onChange={(e) => go({ status: e.target.value })} aria-label="Статус">
@@ -295,13 +306,13 @@ function Calendar({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSearc
         </div>
       </div>
       {err && <div className="alert error">{err}</div>}
-      {!data && !err && <div className="muted">Загружаю…</div>}
+      {!data && !err && <Loading text="Загружаю…" />}
       {data && data.totals && Object.keys(data.totals).length > 0 && (
         <div className="row" style={{ gap: 10, marginBottom: 10 }}>{Object.entries(data.totals).map(([c, t]) => (
           <div key={c} className="card" style={{ margin: 0, padding: "8px 12px", fontSize: 13 }}><b>{c}</b> · к получению <b>{fmtMoney(t.in_remaining, c)}</b> из {fmtMoney(t.in)} · к оплате <b>{fmtMoney(t.out_remaining, c)}</b> из {fmtMoney(t.out)}</div>))}</div>)}
       {data && (
-        <div className="card" style={{ padding: 0, overflowX: "auto" }}>
-          <table className="fin-cal">
+        <div className={"card" + (nv ? " fin-cal-wrap" : "")} style={{ padding: 0, overflowX: "auto" }}>
+          <table className="fin-cal" ref={calRef}>
             <thead><tr><th>Срок по договору</th><th className="sec">Ожидаемая дата</th><th className="sec">Сделка / документ</th><th>Контрагент</th><th className="sec">Строка графика</th><th className="sec">Направление</th>
               <th className="num sec">Сумма</th><th className="num sec">Оплачено</th><th className="num">Остаток</th><th>Статус</th><th className="sec">Источник</th><th></th></tr></thead>
             <tbody>{data.items.map((o) => (
@@ -494,7 +505,7 @@ function Liquidity({ meta, sp, go, stamp, onChanged }: { meta: Meta; sp: URLSear
         <div className="section-head"><h2>Счета и остатки</h2>{meta.can_edit && <button className="btn add" onClick={() => setNewAcc((x) => !x)}>Счёт</button>}</div>
         {err && <div className="alert error">{err}</div>}
         {newAcc && <AccountForm onDone={() => { setNewAcc(false); onChanged(); }} />}
-        {!accounts ? <div className="muted">Загружаю…</div> : accounts.length === 0 ? <div className="muted">Финансовых счетов нет. {meta.can_edit ? "Добавьте счёт на банковском профиле компании группы." : "Их заводят ФД или ЗГД."}</div> : (
+        {!accounts ? <Loading text="Загружаю…" /> : accounts.length === 0 ? <div className="muted">Финансовых счетов нет. {meta.can_edit ? "Добавьте счёт на банковском профиле компании группы." : "Их заводят ФД или ЗГД."}</div> : (
           <div style={{ overflowX: "auto" }}><table>
             <thead><tr><th>Счёт</th><th>Компания группы</th><th>Банк</th><th className="num">Остаток</th><th>Подтверждён</th><th></th></tr></thead>
             <tbody>{accounts.map((a) => (
@@ -536,7 +547,7 @@ function AccountForm({ onDone }: { onDone: () => void }) {
     <div className="card" style={{ background: "#fcfcfc" }}>
       <b>Новый финансовый счёт</b> <span className="muted">— на существующем банковском профиле компании группы; реквизиты не копируются</span>
       {err && <div className="alert error">{err}</div>}
-      {!opts ? <div className="muted">Загружаю…</div> : opts.length === 0 ? <div className="muted">У компаний группы нет действующих банковских профилей. Добавьте их в «Юридический блок» → карточка БЕРГ-ХАУС.</div> : (
+      {!opts ? <Loading text="Загружаю…" /> : opts.length === 0 ? <div className="muted">У компаний группы нет действующих банковских профилей. Добавьте их в «Юридический блок» → карточка БЕРГ-ХАУС.</div> : (
         <div className="row" style={{ marginTop: 8, alignItems: "flex-end" }}>
           <label className="f" style={{ flex: "1 1 320px" }}>Банковский профиль
             <select value={sel} onChange={(e) => setSel(e.target.value)}><option value="">— выберите —</option>
@@ -610,7 +621,7 @@ function Transactions({ meta, accounts, sp, go, stamp, onChanged }: { meta: Meta
       {importing && <ImportForm accounts={accounts} onDone={() => { onChanged(); }} />}
       {creating && <TxForm accounts={accounts} onDone={(id) => { setCreating(false); onChanged(); go({ tx: id }); }} />}
       {err && <div className="alert error">{err}</div>}
-      {!data ? <div className="muted">Загружаю…</div> : (
+      {!data ? <Loading text="Загружаю…" /> : (
         <div style={{ overflowX: "auto" }}><table style={{ minWidth: 900 }}>
           <thead><tr><th>Дата</th><th>Счёт</th><th>Направление</th><th>Контрагент / назначение</th><th>Банковский №</th><th className="num">Сумма</th><th className="num">Не разнесено</th><th>Статус</th><th></th></tr></thead>
           <tbody>{data.items.map((t) => (
@@ -680,7 +691,7 @@ function TxCard({ id, canEdit, stamp, onChanged }: { id: string; canEdit: boolea
   const load = useCallback(() => api.get<Tx>(`/api/finance/transactions/${id}`).then(setT).catch((e) => setErr(errText(e))), [id]);
   useEffect(() => { load(); }, [load, stamp]);
   if (err && !t) return <div className="alert error">{err}</div>;
-  if (!t) return <div className="muted">Загружаю…</div>;
+  if (!t) return <Loading text="Загружаю…" />;
   const changed = () => { load(); onChanged(); };
   const run = async (f: () => Promise<unknown>) => { setBusy(true); setErr(""); try { await f(); changed(); } catch (e) { setErr(errText(e)); } finally { setBusy(false); } };
   const reverse = async () => {

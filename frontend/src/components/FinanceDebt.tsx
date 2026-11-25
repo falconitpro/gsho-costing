@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtMoney } from "../api";
 import FinanceExportButton from "./FinanceExportButton";
+import { Loading } from "./States";
 
 // «Финансы → Дебиторка и кредиторка» (docs/finance/05, раздел 9; D-143). Остатки по валютам и ageing от юридического срока;
 // группы по контрагенту или сделке; без согласованной даты — отдельный блок.
@@ -28,7 +29,7 @@ export default function FinanceDebt({ sp, go, stamp }: { sp: URLSearchParams; go
     api.get<Data>(`/api/finance/debt?${q}`).then((x) => { setD(x); setErr(""); }).catch((e) => setErr(errText(e)));
   }, [direction, group, stamp]);
   if (err) return <div className="alert error">{err}</div>;
-  if (!d) return <div className="muted">Загружаю…</div>;
+  if (!d) return <Loading text="Загружаю…" />;
   const sides = (direction ? [direction] : ["in", "out"]) as ("in" | "out")[];
   return (
     <>

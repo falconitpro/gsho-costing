@@ -14,7 +14,7 @@ gsho-costing/
 │   │   ├── adapters/    SharePoint/Яндекс Диск/S3, Outlook/Яндекс 360, WeCom, ЦБ РФ — сменные по настройке
 │   │   ├── api/         REST (FastAPI) по блокам ролей
 │   │   └── main.py
-│   ├── tests/           pytest: расчёт, workflow и права, финансы, юр. блок, Канцелярия, поручения, безопасность (≈530 тестов)
+│   ├── tests/           pytest: расчёт, workflow и права, финансы, юр. блок, Канцелярия, поручения, безопасность (≈535 тестов)
 │   ├── scripts/seed.py  dev-данные
 │   ├── migrations/      SQL: неизменяемость журнала и версий, индексы
 │   ├── requirements.txt, Dockerfile, .env.example

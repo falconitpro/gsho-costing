@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, ApiError, fmtDate } from "../api";
+import { Loading } from "../components/States";
 
 // Уточнение «Финансов» для ответственного (D-141): только вопрос и показанный ему контекст, ответ и файл.
 // Права на раздел «Финансы» не нужно; чужой вопрос сервер не отдаёт.
@@ -27,7 +28,7 @@ export default function FinanceQuestionPage() {
     try { setQ(await api.post<Scoped>(`/api/finance/questions/${id}/answer`, { answer: text })); setMsg("Ответ отправлен — спасибо"); } catch (e) { setMsg(errText(e)); } finally { setBusy(false); }
   }
   if (err) return <div className="card"><div className="alert error">{err}</div><Link to="/tasks">← Мои задачи</Link></div>;
-  if (!q) return <div className="muted">Загружаю…</div>;
+  if (!q) return <Loading text="Загружаю…" />;
   return (
     <>
       <div className="page-head"><h1>Уточнение по «Финансам»</h1><span className="muted">{q.status_title}</span><div className="push"><Link to="/tasks">← Мои задачи</Link></div></div>

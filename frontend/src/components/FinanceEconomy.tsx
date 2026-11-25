@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtMoney, fmtPct, fmtRub, newKey } from "../api";
 import FinanceExportButton from "./FinanceExportButton";
 import { askPrompt } from "./Dialogs";
+import { Loading } from "./States";
 
 // «Финансы → Экономика сделок» (docs/finance/05, раздел 11). План — утверждённая версия расчёта (без второго калькулятора),
 // текущий прогноз, факт P&L (признание) и факт денег — разными блоками. Признание вводится здесь и в карточке сделки.
@@ -56,7 +57,7 @@ export default function FinanceEconomy({ sp, go, stamp }: { sp: URLSearchParams;
         {dealId && <FinanceExportButton kind="economy" params={{ deal_id: dealId }} />}
       </div>
       {err && <div className="alert error">{err}</div>}
-      {dealId && !eco && !err && <div className="muted">Загружаю…</div>}
+      {dealId && !eco && !err && <Loading text="Загружаю…" />}
       {eco && eco.deal.id === dealId && <EconomyView e={eco} onChanged={() => setReload((x) => x + 1)} />}
     </div>
   );
