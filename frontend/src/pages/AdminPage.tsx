@@ -73,7 +73,7 @@ function Users({ me }: { me: Me }) {
       <p className="muted">Роли определяют права (матрица — на экране «Уровни доступа»). У сотрудника может быть несколько ролей. При входе через Microsoft 365 роли назначаются по группам (OIDC_GROUP_ROLE_MAP), а здесь их можно уточнить. Отключённый сотрудник не может войти; его история сохраняется.</p>
       {msg && <div className="alert info">{msg}</div>}
       <input placeholder="поиск: имя, e-mail" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 260, marginBottom: 8 }} />
-      <table>
+      <table className="adm-roles">
         <thead><tr><th>Сотрудник</th>{roles.map((r) => <th key={r.code} style={{ fontSize: 11 }}>{r.title}</th>)}<th>Лимит визы, ₽</th><th>Активен</th><th>Был в системе</th></tr></thead>
         <tbody>{shown.map((u) => (
           <tr key={u.id} style={{ opacity: u.is_active ? 1 : 0.5 }}>

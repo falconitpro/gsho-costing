@@ -3,6 +3,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, getLastError } from "../api";
 import SecurityModal from "../components/SecurityModal";
+import { useNewUiFlag } from "../uiMode";
 
 /** Поддержка внутри CRM (docs/operations/05, 10 §5): «Мои обращения», карточка с перепиской, очередь специалиста.
  *  Только «в системе» — никакой почты. Тексты выводятся как текст (React экранирует), HTML не вставляется. */
@@ -110,13 +111,23 @@ function NewTicket({ meta, onClose, onCreated }: { meta: Meta; onClose: () => vo
   );
 }
 
-function TicketRow({ t, onOpen, admin }: { t: Ticket; onOpen: () => void; admin?: boolean }) {
+/** Новый вид: срок первого ответа из t.sla (сервер), без пересчёта правил. */
+function Sla({ t }: { t: Ticket }) {
+  if (t.sla.answered) return <span className="muted sup-sla">ответ дан</span>;
+  if (t.sla.overdue) return <span className="badge bad">просрочено</span>;
+  if (!t.sla.due_at) return <span className="muted">—</span>;
+  const left = (new Date(t.sla.due_at).getTime() - Date.now()) / 3600000;
+  return <span className={"sup-sla" + (left < 4 ? " soon" : "")} title={`${t.sla.hours} ч · ${t.sla.note}`}>до {dt(t.sla.due_at).replace(/\.\d{4},/, ",")}</span>;
+}
+
+function TicketRow({ t, onOpen, admin, nv }: { t: Ticket; onOpen: () => void; admin?: boolean; nv?: boolean }) {
   return (
     <tr className={t.unread ? "sup-unread" : ""} onClick={onOpen} style={{ cursor: "pointer" }}>
       <td style={{ whiteSpace: "nowrap" }}><b>{t.number}</b>{t.unread > 0 && <span className="badge info" style={{ marginLeft: 6 }}>новое</span>}</td>
       <td><Link to="#" onClick={(e) => { e.preventDefault(); onOpen(); }} className="sup-subj">{t.subject}</Link><div className="muted" style={{ fontSize: 12 }}>{t.category_title}</div></td>
       {admin && <td>{t.reporter_name}</td>}
-      <td><span className={`badge ${ST[t.status]}`}>{t.status_title}</span>{t.sla.overdue && <span className="badge bad" style={{ marginLeft: 4 }}>просрочено</span>}</td>
+      <td><span className={`badge ${ST[t.status]}`}>{t.status_title}</span>{!nv && t.sla.overdue && <span className="badge bad" style={{ marginLeft: 4 }}>просрочено</span>}</td>
+      {nv && <td><Sla t={t} /></td>}
       {admin && <td><span className={`badge ${PR[t.priority]}`}>{t.priority_title}</span></td>}
       {admin && <td>{t.assignee_name || <span className="muted">не назначено</span>}</td>}
       <td style={{ whiteSpace: "nowrap" }}>{dt(t.last_activity_at)}</td>
@@ -125,16 +136,18 @@ function TicketRow({ t, onOpen, admin }: { t: Ticket; onOpen: () => void; admin?
 }
 
 function TicketCards({ items, onOpen, admin }: { items: Ticket[]; onOpen: (t: Ticket) => void; admin?: boolean }) {
+  const nv = useNewUiFlag();
   return (
     <>
       <div className="backup-table sup-desktop"><table className="aud-table">
-        <thead><tr><th>Номер</th><th>Тема</th>{admin && <th>Автор</th>}<th>Статус</th>{admin && <th>Приоритет</th>}{admin && <th>Назначено</th>}<th>Обновлено</th></tr></thead>
-        <tbody>{items.map((t) => <TicketRow key={t.id} t={t} admin={admin} onOpen={() => onOpen(t)} />)}</tbody>
+        <thead><tr><th>Номер</th><th>Тема</th>{admin && <th>Автор</th>}<th>Статус</th>{nv && <th>Срок ответа</th>}{admin && <th>Приоритет</th>}{admin && <th>Назначено</th>}<th>Обновлено</th></tr></thead>
+        <tbody>{items.map((t) => <TicketRow key={t.id} t={t} admin={admin} nv={nv} onOpen={() => onOpen(t)} />)}</tbody>
       </table></div>
       <div className="sup-mobile">{items.map((t) => <button key={t.id} className={`sup-card ${t.unread ? "sup-unread" : ""}`} onClick={() => onOpen(t)}>
         <div className="row" style={{ justifyContent: "space-between", gap: 6 }}><b>{t.number}</b><span className={`badge ${ST[t.status]}`}>{t.status_title}</span></div>
         <div className="sup-subj">{t.subject}</div>
-        <div className="muted" style={{ fontSize: 12 }}>{admin ? `${t.reporter_name} · ${t.priority_title} · ` : ""}{dt(t.last_activity_at)}{t.sla.overdue ? " · просрочено" : ""}{t.unread ? " · новое" : ""}</div>
+        <div className="muted" style={{ fontSize: 12 }}>{admin ? `${t.reporter_name} · ${t.priority_title} · ` : ""}{dt(t.last_activity_at)}{!nv && t.sla.overdue ? " · просрочено" : ""}{t.unread ? " · новое" : ""}</div>
+        {nv && <div className="sup-card-sla">Срок ответа: <Sla t={t} /></div>}
       </button>)}</div>
     </>
   );
@@ -153,6 +166,7 @@ export function SupportList() {
     .then((r) => { setData(r); setErr(""); }).catch((x) => setErr(errText(x))), [tab]);
   useEffect(() => { load(); }, [load]);
   const TABS: [string, string][] = [["active", "Активные"], ["waiting", "Ждут меня"], ["resolved", "Решённые"], ["all", "Все"]];
+  const nv = useNewUiFlag();
   return (
     <div className="card">
       <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Поддержка" }]} />
@@ -165,8 +179,10 @@ export function SupportList() {
       </div>
       <p className="muted" style={{ marginTop: 4 }}>Ответ появится здесь и в уведомлениях CRM (колокольчик). Писем не будет.</p>
       {done && <div className="alert ok">Обращение {done} создано. Ответ появится здесь и в уведомлениях CRM.</div>}
-      <div className="row aud-tabs" role="tablist">{TABS.map(([k, t]) => <button key={k} role="tab" aria-selected={tab === k} className={`btn ${tab === k ? "" : "secondary"}`}
-        onClick={() => setTab(k)}>{t}{data?.tabs[k] ? ` · ${data.tabs[k]}` : ""}</button>)}</div>
+      {nv ? <div className="dc-groups sup-tabs" role="tablist">{TABS.map(([k, t]) => <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""}
+        onClick={() => setTab(k)}>{t}{data?.tabs[k] ? <span className="tm-n">{data.tabs[k]}</span> : null}</button>)}</div>
+      : <div className="row aud-tabs" role="tablist">{TABS.map(([k, t]) => <button key={k} role="tab" aria-selected={tab === k} className={`btn ${tab === k ? "" : "secondary"}`}
+        onClick={() => setTab(k)}>{t}{data?.tabs[k] ? ` · ${data.tabs[k]}` : ""}</button>)}</div>}
       {err && <div className="alert error" role="alert">{err}</div>}
       {data && (data.items.length === 0 ? <div className="sup-empty"><p>{tab === "active" ? "Активных обращений нет." : "Ничего не найдено."}</p>
         <button className="btn" onClick={() => setCreating(true)}>Сообщить о проблеме</button></div>
@@ -293,6 +309,7 @@ export function SupportTicketRoute() {
 }
 
 export function SupportAdmin() {
+  const nv = useNewUiFlag();
   const meta = useMeta();
   const nav = useNavigate();
   const loc = useLocation();
@@ -311,6 +328,7 @@ export function SupportAdmin() {
   if (open) return <TicketView id={open} admin onBack={() => nav("/support/admin")} />;
   return (
     <div className="card">
+      {nv && <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Поддержка", to: "/support" }, { label: "Очередь" }]} />}
       <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <h1 style={{ margin: 0 }}>Очередь поддержки</h1>
         <button className="btn secondary" onClick={() => nav("/support")}>Мои обращения</button>
