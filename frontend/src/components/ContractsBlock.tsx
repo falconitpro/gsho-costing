@@ -89,7 +89,7 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
             <input placeholder="номер, контрагент, предмет…" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} style={{ width: 200 }} />
             <select value={f.direction} onChange={(e) => setF({ ...f, direction: e.target.value })}><option value="">все направления</option>{Object.entries(cat.directions).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
             <select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}><option value="">все виды</option>{Object.entries(cat.kinds).map(([k, v]) => <option key={k} value={k}>{v.title}</option>)}</select>
-            <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">все статусы</option>{Object.entries(cat.statuses).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+            <select aria-label="Статус" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">все статусы</option>{Object.entries(cat.statuses).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
             <select value={f.flag} onChange={(e) => setF({ ...f, flag: e.target.value })} aria-label="Отметка"><option value="">все отметки</option>{Object.entries(FLAGS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
           </MobileFilters>}
           <button className="btn add" onClick={() => setCreating(true)}>Договор</button>

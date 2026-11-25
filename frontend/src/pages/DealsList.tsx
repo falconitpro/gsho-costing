@@ -354,16 +354,16 @@ export default function DealsList({ me }: { me: Me }) {
           <input placeholder="🔍 номер, клиент, объект, оборудование, контракт…" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} style={{ flex: "1 1 260px", minWidth: 0 }} />
           {nv && <button type="button" className="btn ghost dl-ftoggle" aria-expanded={fOpen} onClick={() => setFOpen(!fOpen)}>Фильтры{nFilters ? ` · ${nFilters}` : ""} {fOpen ? "▴" : "▾"}</button>}
           {nv ? <div className={"dl-fsel" + (fOpen ? " open" : "")}>
-          <select value={f.manager} onChange={(e) => setF({ ...f, manager: e.target.value })}><option value="">все менеджеры</option>{mgrs.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
-          <select className="dl-client" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })}><option value="">все клиенты</option>{cls.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
-          <select value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}><option value="">любой приоритет</option>
+          <select aria-label="Менеджер" value={f.manager} onChange={(e) => setF({ ...f, manager: e.target.value })}><option value="">все менеджеры</option>{mgrs.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
+          <select aria-label="Клиент" className="dl-client" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })}><option value="">все клиенты</option>{cls.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
+          <select aria-label="Приоритет" value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}><option value="">любой приоритет</option>
             <option value="3">срочный</option><option value="2">высокий</option><option value="1">обычный</option><option value="0">низкий</option></select>
           {SORTS.length > 0 && <select className="dl-sort" aria-label="Порядок" value={`${sort.key}:${sort.dir}`} onChange={(e) => { const [k, d] = e.target.value.split(":"); const n = { key: k as SortKey, dir: Number(d) as 1 | -1 }; setSort(n); save("gsho.dealsSort2", n); }}>
             {SORTS.flatMap(([k, t]) => [<option key={k + "1"} value={`${k}:1`}>{t} ↑</option>, <option key={k + "-1"} value={`${k}:-1`}>{t} ↓</option>])}</select>}
           </div> : <>
-          <select value={f.manager} onChange={(e) => setF({ ...f, manager: e.target.value })}><option value="">все менеджеры</option>{mgrs.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
-          <select value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} style={{ maxWidth: 220 }}><option value="">все клиенты</option>{cls.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
-          <select value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}><option value="">любой приоритет</option>
+          <select aria-label="Менеджер" value={f.manager} onChange={(e) => setF({ ...f, manager: e.target.value })}><option value="">все менеджеры</option>{mgrs.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
+          <select aria-label="Клиент" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} style={{ maxWidth: 220 }}><option value="">все клиенты</option>{cls.map(([id, n]) => <option key={id} value={id}>{n}</option>)}</select>
+          <select aria-label="Приоритет" value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}><option value="">любой приоритет</option>
             <option value="3">срочный</option><option value="2">высокий</option><option value="1">обычный</option><option value="0">низкий</option></select></>}
           <div className="tabs" style={{ margin: 0 }}>
             <button className={f.flag === "" ? "active" : ""} onClick={() => setF({ ...f, flag: "" })}>все</button>

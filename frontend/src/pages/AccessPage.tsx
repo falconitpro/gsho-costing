@@ -77,7 +77,7 @@ export default function AccessPage({ me, embedded = false }: { me: Me; embedded?
                 {m.roles.map((r) => {
                   const lvl = r.levels[g.code] ?? 0, prot = r.protected.includes(g.code), changed = lvl !== (r.defaults[g.code] ?? 0);
                   return (<td key={r.role} style={{ background: colors[lvl], textAlign: "center" }}>
-                    <select value={lvl} disabled={prot} onChange={(e) => setLevel(r.role, g.code, Number(e.target.value))} title={prot ? "нельзя снять" : changed ? `по умолчанию: ${r.defaults[g.code] ?? 0}` : ""} style={{ padding: 2, fontWeight: changed ? 700 : 400 }}>
+                    <select aria-label={`${g.title} — ${r.title}`} value={lvl} disabled={prot} onChange={(e) => setLevel(r.role, g.code, Number(e.target.value))} title={prot ? "нельзя снять" : changed ? `по умолчанию: ${r.defaults[g.code] ?? 0}` : ""} style={{ padding: 2, fontWeight: changed ? 700 : 400 }}>
                       {m.levels.map((l) => <option key={l.level} value={l.level}>{l.level} — {l.title}</option>)}</select></td>);
                 })}</tr>))}</tbody>
           </table>

@@ -78,7 +78,7 @@ function Users({ me }: { me: Me }) {
         <tbody>{shown.map((u) => (
           <tr key={u.id} style={{ opacity: u.is_active ? 1 : 0.5 }}>
             <td><b>{u.display_name}</b><div className="muted" style={{ fontSize: 12 }}>{u.email}</div></td>
-            {roles.map((r) => <td key={r.code} style={{ textAlign: "center" }}><input type="checkbox" checked={u.roles.includes(r.code)}
+            {roles.map((r) => <td key={r.code} style={{ textAlign: "center" }}><input type="checkbox" aria-label={`${u.display_name}: ${r.title}`} checked={u.roles.includes(r.code)}
               disabled={u.id === me.id && ["admin", "gd"].includes(r.code)} onChange={() => patch(u, { roles: toggle(u.roles, r.code) })} /></td>)}
             <td><input inputMode="decimal" defaultValue={u.visa_limit_rub ?? ""} style={{ width: 110 }} placeholder="—"
               onBlur={(e) => { const v = e.target.value.trim(); const n = v ? Number(v.replace(/\s/g, "").replace(",", ".")) : null; if (n !== u.visa_limit_rub) patch(u, { visa_limit_rub: n }); }} /></td>

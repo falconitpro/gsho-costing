@@ -43,8 +43,8 @@ export default function ClaimsBlock() {
         <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
           <MobileFilters count={[f.q, f.direction, f.status].filter(Boolean).length}>
           <input placeholder="номер, договор, контрагент…" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} style={{ width: 200 }} />
-          <select value={f.direction} onChange={(e) => setF({ ...f, direction: e.target.value })}><option value="">все</option><option value="outgoing">исходящие</option><option value="incoming">входящие</option></select>
-          <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">все статусы</option>
+          <select aria-label="Направление" value={f.direction} onChange={(e) => setF({ ...f, direction: e.target.value })}><option value="">все</option><option value="outgoing">исходящие</option><option value="incoming">входящие</option></select>
+          <select aria-label="Статус" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">все статусы</option>
             {[["draft", "черновик"], ["signing", "на подписи"], ["signed", "подписана"], ["sent", "отправлена"], ["received", "получена"], ["answered", "ответ"], ["court", "суд"], ["closed", "закрыта"]].map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
           </MobileFilters>
         </div>
