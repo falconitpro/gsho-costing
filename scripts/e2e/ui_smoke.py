@@ -105,10 +105,19 @@ async def check_role(browser, user, title, mode, did):
     deals = json.loads(await (await ctx.request.get(BE + "/api/deals")).text()) if (await ctx.request.get(BE + "/api/deals")).ok else []
     if any(d.get("id") == did for d in deals):
         await visit("сделка", f"/deals/{did}")
-        n = await pg.locator(".tabs button").count()
-        for i in range(n):
-            b = pg.locator(".tabs button").nth(i)
-            await visit(f"сделка, вкладка «{(await b.inner_text()).strip()}»", click=b)
+        if await pg.locator(".dc-groups button").count():   # D-165: новый вид — группы разделов, внутри — вкладки группы
+            for gi in range(await pg.locator(".dc-groups button").count()):
+                g = pg.locator(".dc-groups button").nth(gi)
+                gt = (await g.inner_text()).strip()
+                await visit(f"сделка, группа «{gt}»", click=g)
+                for i in range(await pg.locator(".dc-nav .dc-tabs button").count()):
+                    b = pg.locator(".dc-nav .dc-tabs button").nth(i)
+                    await visit(f"сделка, {gt} → «{(await b.inner_text()).strip()}»", click=b)
+        else:
+            n = await pg.locator(".tabs button").count()
+            for i in range(n):
+                b = pg.locator(".tabs button").nth(i)
+                await visit(f"сделка, вкладка «{(await b.inner_text()).strip()}»", click=b)
     await ctx.close()
 
 

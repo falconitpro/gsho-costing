@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNewUiFlag } from "../uiMode";
 import { ActionMenu, Crumbs, EntryGrid, type Entry } from "../components/Levels";
 import { toneOf } from "../colors";
 import ChecksPanel from "../components/ChecksPanel";
@@ -41,6 +42,15 @@ const POST_WIN = ["contract", "execution", "closed"];
 type Phase = "sale" | "contract";
 const SALE_TABS: Tab[] = ["main", "positions", "offers", "logistics", "service", "pricing", "catalog"];
 const CONTRACT_TABS: Tab[] = ["execution", "acceptance", "planfact", "documents", "legal"];
+// D-165 (ТЗ пакет B, B-03; решение владельца 25.11): «Новый вид» — разделы сделки сгруппированы по смыслу поверх фаз.
+// Набор вкладок, условия показа, права и адреса ?tab=… — прежние; группы только упорядочивают навигацию.
+const TAB_GROUPS: [string, string, Tab[]][] = [
+  ["commerce", "Коммерция", ["main", "positions", "offers", "pricing", "catalog"]],
+  ["exec", "Исполнение", ["logistics", "service", "execution", "acceptance"]],
+  ["fin", "Финансы", ["planfact"]],
+  ["docs", "Документы", ["documents", "legal", "versions"]],
+  ["talk", "Обсуждения", ["feed"]],
+];
 const TAB_TITLES: Record<Tab, string> = { main: "Шапка и условия", positions: "Позиции и характеристики", offers: "Заводы и ответы", logistics: "Логистика и таможня",
   service: "Сервис", pricing: "Расчёт и утверждение", catalog: "В каталог", execution: "Контракт, этапы и даты", acceptance: "Приёмка машин",
   planfact: "Платежи и план/факт", documents: "Документы", legal: "Юридические документы", feed: "Лента и обсуждения", versions: "Версии и файлы", overview: "Обзор" };
@@ -54,6 +64,7 @@ const TAB_HINTS: Partial<Record<Tab, string>> = { main: "клиент, конт�
 export default function DealCard({ me }: { me: Me }) {
   const { id } = useParams();
   const nav = useNavigate();
+  const nv = useNewUiFlag();
   const wantTab = new URLSearchParams(useLocation().search).get("tab") as Tab | null;   // /deals/:id?tab=execution — из задач и уведомлений
   const [deal, setDeal] = useState<Deal | null>(null);
   const [tab, setTabState] = useState<Tab>("main");
@@ -188,6 +199,10 @@ export default function DealCard({ me }: { me: Me }) {
   const contractTabs = ([["execution", true], ["acceptance", ["contract", "execution", "closed"].includes(deal.status) && has("manager", "service_head", "cd", "gd", "fd", "logistician")],
     ["planfact", true], ["documents", can(me, "legal_docs")], ["legal", can(me, "legal_docs")]] as [Tab, boolean][]).filter((x) => x[1]).map((x) => x[0]);
   const historyTabs = ([["feed", true], ["versions", true], ["documents", !POST_WIN_STATUSES.includes(deal.status) && can(me, "legal_docs")]] as [Tab, boolean][]).filter((x) => x[1]).map((x) => x[0]);
+  const nvAvail: Tab[] = [...new Set<Tab>(POST_WIN_STATUSES.includes(deal.status) ? [...saleTabs, ...contractTabs, "feed", "versions"] : [...saleTabs, ...historyTabs])];
+  const nvGroups = TAB_GROUPS.map(([k, t, list]) => [k, t, list.filter((x) => nvAvail.includes(x))] as [string, string, Tab[]]).filter(([, , l]) => l.length > 0);
+  const nvGroup = nvGroups.find(([, , l]) => l.includes(tab));
+  const nvPick = (t: Tab) => (t === "feed" || t === "versions" || (t === "documents" && !POST_WIN_STATUSES.includes(deal.status)) ? setTabState(t) : setTab(t));
   const missing = (t: Tab) => (["draft", "rework"].includes(deal.status) ? (deal.check_items || []).filter((x) => x.tab === t) : []);
   const entryOf = (t: Tab): Entry => {
     const miss = missing(t);
@@ -240,9 +255,9 @@ export default function DealCard({ me }: { me: Me }) {
               ...(can(me, "finance_section") ? [{ title: "Финансы по сделке", url: `/finance?tab=calendar&deal_id=${deal.id}` }] : []),
               ...(can(me, "legal_docs") ? [POST_WIN_STATUSES.includes(deal.status) ? { title: "Договоры и юридические документы", url: `/deals/${deal.id}?tab=legal` } : { title: "Документы клиента и юридические", url: `/deals/${deal.id}?tab=documents` }] : []),
               { title: "Реестр договоров", url: "/legal?tab=contracts" }, { title: "Мои задачи", url: "/tasks" }]} />
-            <a href="#" style={{ fontSize: 12, fontWeight: tab === "feed" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("feed"); }}>Лента</a>
-            <a href="#" style={{ fontSize: 12, fontWeight: tab === "versions" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("versions"); }}>Версии и файлы</a>
-            {phase === "sale" && can(me, "legal_docs") && <a href="#" style={{ fontSize: 12, fontWeight: tab === "documents" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("documents"); }}>Документы</a>}
+            {!nv && <a href="#" style={{ fontSize: 12, fontWeight: tab === "feed" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("feed"); }}>Лента</a>}
+            {!nv && <a href="#" style={{ fontSize: 12, fontWeight: tab === "versions" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("versions"); }}>Версии и файлы</a>}
+            {!nv && phase === "sale" && can(me, "legal_docs") && <a href="#" style={{ fontSize: 12, fontWeight: tab === "documents" ? 700 : 400 }} onClick={(e) => { e.preventDefault(); setTabState("documents"); }}>Документы</a>}
           </div>
         </div>
       </div>
@@ -268,7 +283,9 @@ export default function DealCard({ me }: { me: Me }) {
         <ChecksPanel items={deal.check_items!} onGo={(it) => { setTab(it.tab as Tab); if (it.position_id) openPos(it.position_id); }} />}
       <RelatedDeals dealId={deal.id} me={me} />
 
-      {(POST_WIN_STATUSES.includes(deal.status)) && (
+      {nv && POST_WIN_STATUSES.includes(deal.status) && <div className="dc-sale-sum"><SaleSummary now={deal.now} />
+        {SALE_TABS.includes(tab) && <span className="badge">продажа закрыта — раздел только для чтения</span>}</div>}
+      {!nv && (POST_WIN_STATUSES.includes(deal.status)) && (
         <div className="row" style={{ marginTop: 10, gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div className="dc-phase" role="group" aria-label="Фаза сделки" style={{ display: "flex", background: "#e1e4e8", borderRadius: 8, padding: 3 }}>
             {(["sale", "contract"] as Phase[]).map((p) => (
@@ -279,10 +296,20 @@ export default function DealCard({ me }: { me: Me }) {
           {phase === "contract" && <SaleSummary now={deal.now} />}
           {phase === "sale" && <span className="muted" style={{ fontSize: 12 }}>фаза продажи закрыта — данные только для чтения</span>}
         </div>)}
+      {nv ? <nav className="dc-nav" aria-label="Разделы сделки">
+        <div className="dc-groups">
+          <button type="button" className={tab === "overview" ? "on" : ""} aria-current={tab === "overview" ? "page" : undefined} onClick={() => setTabState("overview")}>Обзор</button>
+          {nvGroups.map(([k, t, l]) => <button key={k} type="button" className={nvGroup?.[0] === k ? "on" : ""} aria-current={nvGroup?.[0] === k && l.length === 1 ? "page" : undefined}
+            onClick={() => { if (nvGroup?.[0] !== k) nvPick(l[0]); }}>{t}{l.length > 1 && <span className="dc-gn">{l.length}</span>}</button>)}
+        </div>
+        {nvGroup && nvGroup[2].length > 1 && <div className="tabs dc-tabs">
+          {nvGroup[2].map((t) => <button key={t} className={tab === t ? "active" : ""} aria-current={tab === t ? "page" : undefined} onClick={() => nvPick(t)}>{TAB_TITLES[t]}</button>)}
+        </div>}
+      </nav> :
       <div className="tabs dc-tabs">
         {<button className={tab === "overview" ? "active" : ""} onClick={() => setTabState("overview")}>Обзор</button>}
         {(phase === "sale" ? saleTabs : contractTabs).map((t) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{TAB_TITLES[t]}</button>)}
-      </div>
+      </div>}
       {tab === "overview" && (
         <>
           {POST_WIN_STATUSES.includes(deal.status) && <h2 style={{ margin: "4px 0 8px" }}>Контракт и исполнение</h2>}
