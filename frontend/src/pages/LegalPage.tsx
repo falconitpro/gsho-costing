@@ -58,7 +58,7 @@ export default function LegalPage({ me }: { me: Me }) {
       <Crumbs items={overview ? [{ label: "Рабочее место", to: "/" }, { label: "Юридический блок" }] : [{ label: "Рабочее место", to: "/" }, { label: "Юридический блок", to: "/legal" }, { label: tabs.find(([k]) => k === tab)?.[1] }]} />
       <div className="row" style={{ alignItems: "baseline", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
         <h1 style={{ margin: 0 }}>Юридический блок</h1>
-        <div className="row" style={{ gap: 2, borderBottom: "1px solid var(--line)" }}>
+        <div className="row lg-tabs" style={{ gap: 2, borderBottom: "1px solid var(--line)" }}>
           {<button onClick={() => nav("/legal")} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "8px 14px", fontSize: 15, fontFamily: "inherit",
             fontWeight: overview ? 700 : 500, color: overview ? "var(--ink)" : "var(--muted)", borderBottom: overview ? "3px solid var(--accent)" : "3px solid transparent", marginBottom: -1 }}>Обзор</button>}
           {tabs.map(([k, t, ready]) => (

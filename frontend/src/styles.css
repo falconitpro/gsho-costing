@@ -1704,3 +1704,48 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .pf-defs { margin-top: 10px; font-size: 12px; color: var(--muted); } .pf-defs summary { cursor: pointer; }
 @media (max-width: 760px) { .pf-chart { height: 130px; } .pf-col { min-width: 34px; } }
 .pf-items { max-height: 520px; overflow: auto; }
+
+/* =====================================================================================================
+   D-168 «Новый вид», пакет E — юридический блок и Канцелярия; общие приёмы для всех реестров. Только .ui-new.
+   ===================================================================================================== */
+/* фильтры реестра под кнопкой на телефоне (components/MobileFilters.tsx) */
+.mf-toggle { display: none; }
+.mf-body { display: contents; }
+@media (max-width: 760px) {
+  .ui-new .mf-toggle { display: inline-flex; }
+  .ui-new .mf-body { display: none; }
+  .ui-new .mf-body.open { display: flex; flex-direction: column; gap: 8px; width: 100%; flex-basis: 100%; }
+  .ui-new .mf-body.open > input, .ui-new .mf-body.open > select, .ui-new .mf-body.open > label, .ui-new .mf-body.open > span { width: 100% !important; max-width: none; }
+}
+/* таблица-реестр — карточками на телефоне (подписи из заголовков: useTableLabels) */
+@media (max-width: 760px) {
+  .ui-new table.nv-cards { min-width: 0 !important; }
+  .ui-new table.nv-cards thead { display: none; }
+  .ui-new table.nv-cards, .ui-new table.nv-cards tbody { display: block; }
+  .ui-new table.nv-cards tbody tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; background: #fff; border: 1px solid var(--line); border-radius: var(--nv-radius); padding: 10px 12px; margin-bottom: 10px; }
+  .ui-new table.nv-cards tbody td { display: block; border: 0; padding: 0; min-width: 0; white-space: normal !important; background: none !important; }
+  .ui-new table.nv-cards tbody td:first-child { grid-column: 1 / -1; font-weight: 600; }
+  .ui-new table.nv-cards tbody td[data-label]:not(:first-child)::before { content: attr(data-label); display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+  .ui-new table.nv-cards tbody td[colspan] { grid-column: 1 / -1; }
+  .ui-new table.nv-cards tbody td.num { text-align: left; }
+  .ui-new table.nv-cards tbody td:empty { display: none; }
+}
+/* юр. блок: вкладки на телефоне — строкой с прокруткой */
+@media (max-width: 760px) {
+  .ui-new .lg-tabs { flex-wrap: nowrap !important; overflow-x: auto; max-width: 100%; scrollbar-width: thin; }
+  .ui-new .lg-tabs > * { white-space: nowrap; flex: 0 0 auto; }
+}
+/* Канцелярия: журнал карточками уже с планшета (≤1024) — на 768 страница больше не шире экрана */
+@media (min-width: 761px) and (max-width: 1024px) {
+  .ui-new .office-table { display: block; overflow-x: auto; max-width: 100%; }
+  .ui-new .office-journal, .ui-new .office-journal tbody { display: block; overflow: visible; }
+  .ui-new .office-journal thead { display: none; }
+  .ui-new .office-journal tr { display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 10px 6px; border-bottom: 1px solid var(--line); }
+  .ui-new .office-journal td { display: block; border: 0; padding: 0; font-size: 13px; }
+  .ui-new .office-journal td:nth-child(4) { order: -1; flex-basis: 100%; font-size: 15px; font-weight: 600; }
+  .ui-new .office-journal td:nth-child(3), .ui-new .office-journal td:nth-child(6) { color: var(--muted); }
+  .ui-new .office-journal td:nth-child(7):not(:empty)::before { content: "срок "; color: var(--muted); }
+  .ui-new .office-journal tr.late td, .ui-new .office-journal tr.sel td { background: none; }
+  .ui-new .office-journal tr.late { box-shadow: inset 3px 0 0 var(--bad); }
+}
+@media (max-width: 760px) { .ui-new .office-journal tr.late { background: none; box-shadow: inset 3px 0 0 var(--bad); } .ui-new .office-bar { flex-wrap: wrap; } }
