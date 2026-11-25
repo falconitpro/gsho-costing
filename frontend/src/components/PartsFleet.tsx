@@ -75,7 +75,7 @@ export default function PartsFleet({ me, fixedClient }: { me: Me; fixedClient?: 
       <div className="card">
         <div className="row" style={{ flexWrap: "wrap" }}>
           <input placeholder="клиент, модель, зав. №, место" value={q} onChange={(e) => setQ(e.target.value)} />
-          {!fixedClient && <select value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">все клиенты</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
+          {!fixedClient && <select aria-label="Клиент" value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">все клиенты</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
           <label className="row"><input type="checkbox" checked={soon} onChange={(e) => setSoon(e.target.checked)} /> ТО в ближайшие 30 дней</label>
           {edit && <><button className="btn add" style={{ marginLeft: "auto" }} onClick={() => { setCur(null); setEditingId(null); setForm({ ...EMPTY, client_id: clientId }); }}>Машина</button>
             <button className="btn ghost" onClick={() => act(() => api.post<{ created: number }>("/api/parts/fleet/sync-deals"), "").then((r) => r && setMsg(`Из закрытых сделок ГШО добавлено машин: ${r.created}`))}>из сделок ГШО</button></>}

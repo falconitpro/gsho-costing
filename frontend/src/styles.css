@@ -1963,3 +1963,11 @@ a.lv-stat:hover { background: var(--accent-soft); }
   .acc-mt { display: flex; flex-direction: column; gap: 2px; }
   .acc-mt small { color: var(--muted); font-size: 11px; }
 }
+
+/* D-172: пакет H4 — доступность и адаптивность (новый вид) */
+@media (max-width: 760px) {
+  .ui-new .wp-exec-more, .ui-new .asg-num, .ui-new .cat-refs button, .ui-new .cat-refs a, .ui-new .news-x, .ui-new .section-head .btn.ghost, .ui-new .btn.fin-mini { min-height: 32px; min-width: 32px; }
+  .ui-new .pf-link { min-height: 28px; display: inline-flex; align-items: center; }
+  .ui-new .asg-num { display: inline-flex; align-items: center; }
+}
+.ui-new :where(button, a, select, input, textarea, [role=tab]):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

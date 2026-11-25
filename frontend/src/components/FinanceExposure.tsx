@@ -69,7 +69,7 @@ export default function FinanceExposure({ sp, go, stamp }: { sp: URLSearchParams
       <div className="card" style={{ padding: 0, overflowX: "auto", marginTop: 12 }}>
         <div className="row" style={{ padding: "10px 12px 8px", flexWrap: "wrap", gap: 8 }}><h2 style={{ margin: "0 8px 0 0" }}>Неустойки</h2>
           <select value={direction} onChange={(e) => go({ direction: e.target.value || null })}><option value="">к получению и к уплате</option><option value="receivable">к получению</option><option value="payable">к уплате</option></select>
-          <select value={status} onChange={(e) => go({ pstatus: e.target.value || null })}><option value="">все статусы</option>{Object.entries(d.statuses).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+          <select aria-label="Статус" value={status} onChange={(e) => go({ pstatus: e.target.value || null })}><option value="">все статусы</option>{Object.entries(d.statuses).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
         </div>
         {pens.length === 0 ? <div className="muted" style={{ padding: 12 }}>Неустоек по выбранным условиям нет.</div> : (
           <table style={{ minWidth: 1000 }}>

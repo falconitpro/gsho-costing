@@ -128,6 +128,8 @@ jobs:
           RUN_ID: ci-new-${{ github.run_id }}
           ACCEPT_UI: new
         run: BROWSER_EXECUTABLE="$(command -v google-chrome || command -v chromium)" python3 scripts/acceptance/acceptance.py artifacts/acceptance/new-ui
+      - name: доступность и переполнение «Нового вида» — 1440 и 390 px (пакет H5, D-172)
+        run: WIDTHS=1440,390 python3 scripts/e2e/a11y_sweep.py artifacts/acceptance/a11y http://localhost:5173 "$(command -v google-chrome || command -v chromium)"
       - name: журнал backend при ошибке
         if: failure()
         run: tail -100 /tmp/backend.log

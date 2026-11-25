@@ -147,7 +147,7 @@ function Overview({ stamp, go, tabs }: { stamp: number; go: (p: Record<string, s
           {d.data_quality.unallocated && <> есть неразнесённые поступления/списания.</>}{" "}
           {d.data_quality.unknown_balance || d.data_quality.unallocated
             ? <button className="btn ghost" style={{ padding: "2px 8px" }} onClick={() => go({ tab: "liquidity" })}>Перейти к счетам и операциям</button>
-            : <button className="btn ghost" style={{ padding: "2px 8px" }} onClick={() => go({ tab: "calendar", reconciliation: "1" })}>Показать строки на сверке</button>}
+            : <button className="btn ghost fin-mini" style={{ padding: "2px 8px" }} onClick={() => go({ tab: "calendar", reconciliation: "1" })}>Показать строки на сверке</button>}
         </div>)}
       <div className="row" style={{ alignItems: "stretch", gap: 10, marginBottom: 14 }}>
         <Kpi label="доступно сейчас, по валютам">
@@ -164,7 +164,7 @@ function Overview({ stamp, go, tabs }: { stamp: number; go: (p: Record<string, s
         </Kpi>
         <Kpi label="требует сверки" bad={recCount > 0}>
           <div>{recCount}</div><div className="muted" style={{ fontSize: 12, fontWeight: 400 }}>записей на сверке {rec.transactions_needs_reconciliation} · временных разнесений {rec.provisional_allocations} · конфликтов {rec.obligation_conflicts}</div>
-          {rec.transactions_needs_reconciliation > 0 && <button className="btn ghost" style={{ padding: "2px 8px", marginTop: 4, fontSize: 12 }} onClick={() => go({ tab: "liquidity", tx_status: "needs_reconciliation" })}>Открыть записи на сверке</button>}
+          {rec.transactions_needs_reconciliation > 0 && <button className="btn ghost fin-mini" style={{ padding: "2px 8px", marginTop: 4, fontSize: 12 }} onClick={() => go({ tab: "liquidity", tx_status: "needs_reconciliation" })}>Открыть записи на сверке</button>}
         </Kpi>
       </div>
       {isNewUi() && <FinancePlanFact stamp={stamp} />}

@@ -58,7 +58,7 @@ export default function PoaBlock({ entityId, compact }: { entityId?: string; com
         <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
           <MobileFilters count={[q, status].filter(Boolean).length}>
           <input placeholder="номер, представитель…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 180 }} />
-          <select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">все статусы</option>{Object.entries(reg.statuses).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          <select aria-label="Статус" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">все статусы</option>{Object.entries(reg.statuses).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
           </MobileFilters>
           {reg.can_issue && <button className="btn add" onClick={() => setCreating(true)}>Доверенность</button>}
         </div>
