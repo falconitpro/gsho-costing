@@ -13,6 +13,7 @@ import { askPrompt } from "../components/Dialogs";
 import { Loading } from "../components/States";
 import { useNewUiFlag, isNewUi } from "../uiMode";
 import { useTableLabels } from "../components/useTableLabels";
+import FinancePlanFact from "../components/FinancePlanFact";
 
 // Раздел «Финансы», вариант Б (docs/finance/05_UI_UX_в_стилистике_CRM.md). Первый вертикальный срез:
 // «Обзор», «Платёжный календарь», «Ликвидность и валюта» (счета, остатки, операции, разнесение), «Экономика сделок», «Обеспечение и неустойки», «Сверка и уточнения».
@@ -166,6 +167,7 @@ function Overview({ stamp, go, tabs }: { stamp: number; go: (p: Record<string, s
           {rec.transactions_needs_reconciliation > 0 && <button className="btn ghost" style={{ padding: "2px 8px", marginTop: 4, fontSize: 12 }} onClick={() => go({ tab: "liquidity", tx_status: "needs_reconciliation" })}>Открыть записи на сверке</button>}
         </Kpi>
       </div>
+      {isNewUi() && <FinancePlanFact stamp={stamp} />}
       {<EntryGrid entries={tabs.filter(([k]) => k !== "overview").map(([k, t]): Entry => {
         const stats: NonNullable<Entry["stats"]> = [];
         if (k === "calendar") stats.push({ value: d.upcoming.count, label: `платежей за ${d.horizon_days} дн.`, to: "/finance?tab=calendar&status=open" },

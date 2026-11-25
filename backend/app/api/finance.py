@@ -19,7 +19,7 @@ from ..core.files import safe_filename
 from ..core.auth import CurrentUser, get_current_user
 from ..db import get_db
 from ..models import AuditLog, FinanceAccount, FinanceAllocation, FinanceBalanceSnapshot, FinanceObligation, FinanceTransaction, LegalEntity
-from ..services.finance import access, accounts as acc, obligations as obl, overview as ov, transactions as txs
+from ..services.finance import access, accounts as acc, obligations as obl, overview as ov, planfact as pf, transactions as txs
 from ..services.finance import imports as imp_fields
 from ..services.finance.money import ccy, dec, s
 
@@ -78,6 +78,25 @@ def meta(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_
 def overview(as_of: Optional[date] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     access.require_read(user)
     return ov.build(db, access.Visibility(db, user), as_of or date.today())
+
+
+@router.get("/planfact")
+def planfact(as_of: Optional[date] = None, currency: Optional[str] = None, direction: Optional[str] = Query(None, pattern="^(in|out)$"),
+             back: int = Query(5, ge=0, le=24), forward: int = Query(2, ge=0, le=12),
+             db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """D-167: план/факт по месяцам и сравнение с прошлым периодом (определения — в ответе, раздел definitions)."""
+    access.require_read(user)
+    return pf.build(db, access.Visibility(db, user), as_of or date.today(), back=back, forward=forward,
+                    currency=currency.upper() if currency else None, direction=direction)
+
+
+@router.get("/planfact/items")
+def planfact_items(period: str = Query(..., pattern=r"^\d{4}-\d{2}$"), currency: str = Query(..., min_length=3, max_length=3),
+                   direction: str = Query(..., pattern="^(in|out)$"), kind: str = Query(..., pattern="^(plan|fact)$"), as_of: Optional[date] = None,
+                   db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Расшифровка ячейки план/факт: обязательства (план) или разнесённые оплаты (факт) за месяц."""
+    access.require_read(user)
+    return pf.items(db, access.Visibility(db, user), as_of or date.today(), period, currency.upper(), direction, kind)
 
 
 # ------------------------------------------------------------------ обязательства
