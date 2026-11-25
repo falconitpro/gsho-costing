@@ -1630,3 +1630,37 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .dc-nav .dc-tabs { position: static; margin: 6px 0 0; }
 .dc-sale-sum { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-top: 8px; }
 @media (max-width: 760px) { .dc-groups { width: auto; } .dc-groups button { padding: 8px 12px; } }
+
+/* =====================================================================================================
+   D-166 «Новый вид», пакет C — «Финансы». Только .ui-new; формулы, валюты, статусы, права — с сервера.
+   ===================================================================================================== */
+:where(.ui-new) select { background-color: #fff; }
+.fin-ftoggle { display: none; }
+.ui-new .fin-kpi { flex: 1 1 200px; margin: 0; }
+.ui-new .fin-kpi .v { font-size: 17px; font-variant-numeric: tabular-nums; }
+.ui-new .fin-kpi.bad { box-shadow: inset 3px 0 0 var(--bad), 0 1px 2px rgba(16, 24, 40, .04); }
+.ui-new .fin-cal td.num, .ui-new .fin-cal th.num { font-variant-numeric: tabular-nums; }
+.ui-new .fin-cal .badge { white-space: nowrap; }
+.ui-new .fin-cal tbody tr:hover > td { background: var(--nv-row-hover); }
+@media (max-width: 760px) {
+  .ui-new .fin-ftoggle { display: inline-flex; }
+  .ui-new .fin-filters:not(.open) .fin-frow, .ui-new .fin-filters:not(.open) .fin-frow + .row label { display: none; }
+  .ui-new .fin-filters .fin-frow { flex-direction: column; align-items: stretch; gap: 8px; margin-top: 8px; }
+  .ui-new .fin-filters .fin-frow select, .ui-new .fin-filters .fin-frow form { width: 100%; }
+  .ui-new .fin-filters .fin-frow + .row { flex-wrap: wrap; gap: 8px; }
+  /* обязательство — карточкой: срок, контрагент, остаток с валютой, статус */
+  .ui-new .fin-cal-wrap { overflow: visible !important; background: none; border: 0; box-shadow: none; }
+  .ui-new .fin-cal-wrap .fin-cal { min-width: 0; }
+  .ui-new .fin-cal-wrap .fin-cal thead { display: none; }
+  .ui-new .fin-cal-wrap .fin-cal tbody { display: flex; flex-direction: column; gap: 10px; }
+  .ui-new .fin-cal-wrap .fin-cal tbody tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; background: #fff; border: 1px solid var(--line); border-radius: var(--nv-radius); padding: 10px 12px; }
+  .ui-new .fin-cal-wrap .fin-cal tbody td { display: block; border: 0; padding: 0; background: none !important; max-width: none; }
+  .ui-new .fin-cal-wrap .fin-cal tbody td.sec { display: none; }
+  .ui-new .fin-cal-wrap .fin-cal tbody td[data-label]::before { content: attr(data-label); display: block; font-size: 11px; color: var(--muted); }
+  .ui-new .fin-cal-wrap .fin-cal tbody td:nth-child(4) { grid-column: 1 / -1; order: -1; font-weight: 600; }
+  .ui-new .fin-cal-wrap .fin-cal tbody td:nth-child(4)::before { content: none; }
+  .ui-new .fin-cal-wrap .fin-cal tbody td.num { text-align: left; }
+  .ui-new .fin-cal-wrap .fin-cal tbody td:last-child { grid-column: 1 / -1; }
+  .ui-new .fin-cal-wrap .fin-cal tbody td:last-child .btn { width: 100%; min-height: 40px; }
+  .ui-new .fin-cal-wrap .fin-cal tbody td[colspan] { grid-column: 1 / -1; }
+}

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtMoney } from "../api";
 import FinanceExportButton from "./FinanceExportButton";
+import { Loading } from "./States";
 
 // «Финансы → Сверка и уточнения» (docs/finance/05, раздел 13). Очереди проблем со ссылкой на место исправления
 // и «Запросить уточнение»: ответственный получает только показанный перед отправкой контекст.
@@ -32,7 +33,7 @@ export default function FinanceReconciliation({ sp, go, stamp, canEdit }: { sp: 
     api.get<Data>(`/api/finance/reconciliation${queue ? `?queue=${queue}` : ""}`).then((x) => { setD(x); setErr(""); }).catch((e) => setErr(errText(e)));
   }, [queue, stamp, reload]);
   if (err) return <div className="alert error">{err}</div>;
-  if (!d) return <div className="muted">Загружаю…</div>;
+  if (!d) return <Loading text="Загружаю…" />;
   const key = (i: Item) => `${i.queue}:${i.object.type}:${i.object.id}`;
   return (
     <>

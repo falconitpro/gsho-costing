@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtMoney, fmtRub } from "../api";
+import { Loading } from "./States";
 
 // «Финансы → Обеспечение и неустойки» (docs/finance/05, раздел 12). Только чтение юридического блока и исполнения:
 // условия и решения меняются в договоре и претензии, здесь — сводка, деньги и ссылки.
@@ -32,7 +33,7 @@ export default function FinanceExposure({ sp, go, stamp }: { sp: URLSearchParams
     api.get<Data>(`/api/finance/legal-exposure?${q}`).then((x) => { setD(x); setErr(""); }).catch((e) => setErr(errText(e)));
   }, [direction, sp.get("deal"), stamp]);
   if (err) return <div className="alert error">{err}</div>;
-  if (!d) return <div className="muted">Загружаю…</div>;
+  if (!d) return <Loading text="Загружаю…" />;
   const pens = d.penalties.filter((p) => !status || p.status === status);
   const ref = (r: Ref, label?: string) => (r ? <Link to={r.url}>{label || r.number}</Link> : null);
   return (
