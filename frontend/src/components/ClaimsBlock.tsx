@@ -1,7 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode, useRef } from "react";
 import LinkedLetters from "./LinkedLetters";
 import { api } from "../api";
 import { Loading } from "./States";
+import MobileFilters from "./MobileFilters";
+import { useTableLabels } from "./useTableLabels";
+import { useNewUiFlag } from "../uiMode";
 
 // Претензии по договорам: реестр, карточка (строки требований, подпись КД / ЗГД, отправка, ответ, суд / закрытие), печатная форма.
 
@@ -38,10 +41,12 @@ export default function ClaimsBlock() {
             {s.outgoing_rub ? <> · наши требования: <b>{money(s.outgoing_rub, "₽")}</b></> : null}{s.incoming_rub ? <> · к нам: <b style={{ color: "var(--bad)" }}>{money(s.incoming_rub, "₽")}</b></> : null}</div>
         </div>
         <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+          <MobileFilters count={[f.q, f.direction, f.status].filter(Boolean).length}>
           <input placeholder="номер, договор, контрагент…" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} style={{ width: 200 }} />
           <select value={f.direction} onChange={(e) => setF({ ...f, direction: e.target.value })}><option value="">все</option><option value="outgoing">исходящие</option><option value="incoming">входящие</option></select>
           <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">все статусы</option>
             {[["draft", "черновик"], ["signing", "на подписи"], ["signed", "подписана"], ["sent", "отправлена"], ["received", "получена"], ["answered", "ответ"], ["court", "суд"], ["closed", "закрыта"]].map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+          </MobileFilters>
         </div>
       </div>
       {msg && <div className="alert error" style={{ marginTop: 8 }}>{msg}</div>}
@@ -51,9 +56,12 @@ export default function ClaimsBlock() {
 }
 
 export function ClaimsTable({ items, onOpen, empty }: { items: ClaimRow[]; onOpen: (id: string) => void; empty: string }) {
+  const nv = useNewUiFlag();
+  const tblRef = useRef<HTMLTableElement>(null);
+  useTableLabels(tblRef, nv);
   return (
     <div style={{ overflowX: "auto" }}>
-      <table className="table" style={{ marginTop: 8, fontSize: 13 }}>
+      <table ref={tblRef} className={"table" + (nv ? " nv-cards" : "")} style={{ marginTop: 8, fontSize: 13 }}>
         <thead><tr><th>Номер</th><th>Договор · контрагент</th><th>Суть</th><th className="num">Сумма</th><th>Отправлена</th><th>Ответ до</th><th>Статус</th></tr></thead>
         <tbody>
           {items.length === 0 && <tr><td colSpan={7} className="muted">{empty}</td></tr>}

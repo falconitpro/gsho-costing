@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import MobileFilters from "./MobileFilters";
+import { useTableLabels } from "./useTableLabels";
+import { useNewUiFlag } from "../uiMode";
 import { api } from "../api";
 import { askConfirm } from "./Dialogs";
 import { Loading } from "./States";
@@ -27,6 +30,9 @@ const d = (s?: string | null) => (s ? new Date(s).toLocaleDateString("ru-RU") : 
 const ACTION: Record<string, string> = { created: "создана", edited: "изменена", issued: "оформлена", file: "файл", file_removed: "файл удалён", revoked: "отозвана", cancelled: "аннулирована", expired: "срок истёк" };
 
 export default function PoaBlock({ entityId, compact }: { entityId?: string; compact?: boolean }) {
+  const nv = useNewUiFlag();
+  const tblRef = useRef<HTMLTableElement>(null);
+  useTableLabels(tblRef, nv);
   const [reg, setReg] = useState<Registry | null>(null);
   const [cat, setCat] = useState<Catalog | null>(null);
   const [msg, setMsg] = useState("");
@@ -50,14 +56,16 @@ export default function PoaBlock({ entityId, compact }: { entityId?: string; com
           </div>
         </div>
         <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+          <MobileFilters count={[q, status].filter(Boolean).length}>
           <input placeholder="номер, представитель…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 180 }} />
           <select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">все статусы</option>{Object.entries(reg.statuses).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          </MobileFilters>
           {reg.can_issue && <button className="btn add" onClick={() => setCreating(true)}>Доверенность</button>}
         </div>
       </div>
       {msg && <div className="alert error" style={{ marginTop: 8 }}>{msg}</div>}
       {!reg.can_issue && <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>Оформляет и отзывает доверенности юрист, ЗГД или ФД. {reg.sensitive_visible ? "" : "Паспортные данные представителей скрыты."}</p>}
-      <table className="table" style={{ marginTop: 8, fontSize: 13 }}>
+      <table ref={tblRef} className={"table" + (nv ? " nv-cards" : "")} style={{ marginTop: 8, fontSize: 13 }}>
         <thead><tr><th>Номер</th>{!entityId && <th>Компания</th>}<th>Представитель</th><th>Вид</th><th>Выдана</th><th>Действует до</th><th>Статус</th><th>Копии</th></tr></thead>
         <tbody>
           {reg.items.length === 0 && <tr><td colSpan={8} className="muted">Доверенностей пока нет{reg.can_issue ? " — нажмите «+ Доверенность»" : ""}.</td></tr>}

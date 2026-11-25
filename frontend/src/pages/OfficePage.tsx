@@ -6,6 +6,7 @@ import type { Me } from "../types";
 import OfficeAi from "../components/OfficeAi";
 import OfficeGuide from "../components/OfficeGuide";
 import { Loading } from "../components/States";
+import MobileFilters from "../components/MobileFilters";
 
 /** Канцелярия (D-128): журналы входящих и исходящих писем, приказов, распоряжений, служебных записок и внутренних документов.
  *  Регистрирует делопроизводитель (офис-менеджер) или ЗГД; исполнитель видит свои документы; подписантов ведёт ЗГД. */
@@ -98,11 +99,13 @@ export default function OfficePage({ me }: { me: Me }) {
         <>
           <div className="office-bar">
             <input placeholder="№, тема, контрагент" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} />
+            <MobileFilters count={(onlyOpen ? 1 : 0) + (exFrom || exTo ? 1 : 0)}>
             <label><input type="checkbox" checked={onlyOpen} onChange={(e) => setOnlyOpen(e.target.checked)} /> только в работе и черновики</label>
             {journal && <span className="office-export">
               <input type="date" value={exFrom} onChange={(e) => setExFrom(e.target.value)} aria-label="Выгрузка с" />—<input type="date" value={exTo} onChange={(e) => setExTo(e.target.value)} aria-label="по" />
               <a className="btn ghost" href={`/api/office/export?${new URLSearchParams({ kind: cur.kinds, ...(exFrom ? { date_from: exFrom } : {}), ...(exTo ? { date_to: exTo } : {}), ...(q.trim() ? { q: q.trim() } : {}), ...(onlyOpen ? { status: "registered,review,assigned,in_work,draft,approval,approved" } : {}) })}`}>В Excel</a>
             </span>}
+            </MobileFilters>
             {journal && (meta.can_edit || meta.can_hr) && !creating && (
               <span className="push row">
                 {cur.kinds.split(",").filter((k) => meta.can_edit || k === "order").map((k) => (

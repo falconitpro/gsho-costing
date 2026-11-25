@@ -1,11 +1,14 @@
 import { useAllColumns } from "./Levels";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode, useRef } from "react";
 import { Link } from "react-router-dom";
 import LinkedLetters from "./LinkedLetters";
 import { api } from "../api";
 import { ClaimCard, ClaimsTable, NewClaimDialog, type ClaimRow } from "./ClaimsBlock";
 import { askConfirm } from "./Dialogs";
 import { Loading } from "./States";
+import MobileFilters from "./MobileFilters";
+import { useTableLabels } from "./useTableLabels";
+import { useNewUiFlag } from "../uiMode";
 
 // Реестр договоров (юридический блок, этап 1): договоры с клиентами, поставщиками, подрядчиками и прочие.
 // По каждому договору обязательны условия оплаты «сколько — через сколько дней — после какого события»; неустойки — для потока и претензий.
@@ -52,6 +55,9 @@ const ACTION: Record<string, string> = { created: "создан", edited: "из�
 export default function ContractsBlock({ dealId, compact }: { dealId?: string; compact?: boolean }) {
   const [reg, setReg] = useState<Registry | null>(null);
   const [cat, setCat] = useState<Catalog | null>(null);
+  const nv = useNewUiFlag();
+  const tblRef = useRef<HTMLTableElement>(null);
+  useTableLabels(tblRef, nv);
   const qs = new URLSearchParams(window.location.search);
   // flag — отметка из сводки (ссылки «Хвосты» ЗГД и обзора юр. блока, D-150): без скана, с просрочкой, истекают, без условий оплаты
   const [f, setF] = useState({ q: "", status: "", direction: "", kind: "", flag: dealId ? "" : qs.get("flag") || "" });
@@ -79,20 +85,20 @@ export default function ContractsBlock({ dealId, compact }: { dealId?: string; c
             {s.penalties_in_rub ? <> · неустойки к получению: <b>{money(s.penalties_in_rub, "₽")}</b></> : null}{s.penalties_out_rub ? <> · к уплате: <b style={{ color: "var(--bad)" }}>{money(s.penalties_out_rub, "₽")}</b></> : null}</div>
         </div>
         <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-          {!compact && <>
+          {!compact && <MobileFilters count={[f.q, f.direction, f.kind, f.status, f.flag].filter(Boolean).length}>
             <input placeholder="номер, контрагент, предмет…" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} style={{ width: 200 }} />
             <select value={f.direction} onChange={(e) => setF({ ...f, direction: e.target.value })}><option value="">все направления</option>{Object.entries(cat.directions).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
             <select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}><option value="">все виды</option>{Object.entries(cat.kinds).map(([k, v]) => <option key={k} value={k}>{v.title}</option>)}</select>
             <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">все статусы</option>{Object.entries(cat.statuses).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
             <select value={f.flag} onChange={(e) => setF({ ...f, flag: e.target.value })} aria-label="Отметка"><option value="">все отметки</option>{Object.entries(FLAGS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-          </>}
+          </MobileFilters>}
           <button className="btn add" onClick={() => setCreating(true)}>Договор</button>
         </div>
       </div>
       {msg && <div className="alert error" style={{ marginTop: 8 }}>{msg}</div>}
       {colsEl}
       <div style={{ overflowX: "auto" }}>
-        <table className="table" style={{ marginTop: 8, fontSize: 13 }}>
+        <table ref={tblRef} className={"table" + (nv ? " nv-cards" : "")} style={{ marginTop: 8, fontSize: 13 }}>
           <thead><tr><th>Номер</th><th>Вид</th><th>Контрагент</th>{allC && !compact && <th>Компания</th>}{allC && <th className="num">Сумма</th>}<th>Условия оплаты</th><th>Подписан</th><th>Статус</th></tr></thead>
           <tbody>
             {reg.items.length === 0 && <tr><td colSpan={8} className="muted">Договоров нет — нажмите «+ Договор». Проекты договоров сделки появляются и при формировании юридического пакета.</td></tr>}
