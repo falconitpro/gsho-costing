@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useAutoTableCards } from "../components/useTableLabels";
 import { useNewUiFlag } from "../uiMode";
 import { ActionMenu, Crumbs, EntryGrid, type Entry } from "../components/Levels";
 import { toneOf } from "../colors";
@@ -65,9 +66,20 @@ export default function DealCard({ me }: { me: Me }) {
   const { id } = useParams();
   const nav = useNavigate();
   const nv = useNewUiFlag();
+  // D-176 (B-04, B-08): в новом виде таблицы всех вкладок карточки — единый стиль; на телефоне — карточками с подписями полей
+  const bodyRef = useRef<HTMLDivElement>(null);
   const wantTab = new URLSearchParams(useLocation().search).get("tab") as Tab | null;   // /deals/:id?tab=execution — из задач и уведомлений
   const [deal, setDeal] = useState<Deal | null>(null);
   const [tab, setTabState] = useState<Tab>("main");
+  useAutoTableCards(bodyRef, nv, deal ? `${deal.id}|${tab}` : "", "table.acc-matrix, table.adm-roles, table.no-cards");
+  // на телефоне группы и вкладки — строкой с прокруткой: выбранная всегда в поле зрения
+  useEffect(() => {
+    if (!nv || !deal) return;
+    document.querySelectorAll<HTMLElement>(".dc-groups button.on, .dc-tabs button.active").forEach((b) => {
+      const p = b.parentElement;   // только по горизонтали: страница не прокручивается
+      if (p && p.scrollWidth > p.clientWidth) p.scrollLeft = b.offsetLeft - p.offsetLeft - (p.clientWidth - b.offsetWidth) / 2;
+    });
+  }, [nv, tab, deal ? deal.id : ""]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [phase, setPhaseState] = useState<Phase>("sale");
   // вкладка задаёт фазу: «Продажа» (до выигрыша) или «Контракт и исполнение» (после)
   const setTab = (t: Tab) => { setTabState(t); if (SALE_TABS.includes(t)) setPhaseState("sale"); else if (CONTRACT_TABS.includes(t)) setPhaseState("contract"); };
@@ -310,6 +322,7 @@ export default function DealCard({ me }: { me: Me }) {
         {<button className={tab === "overview" ? "active" : ""} onClick={() => setTabState("overview")}>Обзор</button>}
         {(phase === "sale" ? saleTabs : contractTabs).map((t) => <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>{TAB_TITLES[t]}</button>)}
       </div>}
+      <div className="dc-body" ref={bodyRef}>
       {tab === "overview" && (
         <>
           {POST_WIN_STATUSES.includes(deal.status) && <h2 style={{ margin: "4px 0 8px" }}>Контракт и исполнение</h2>}
@@ -485,6 +498,7 @@ export default function DealCard({ me }: { me: Me }) {
                 <td>{v.kp_path && <a href={`/api/files/${v.kp_path}`}>КП.docx</a>}{!!v.kp_meta?.kp_brand && <span className="muted"> · {v.kp_meta.kp_brand === "company" ? "бренд компании" : "марка завода"}{Number(v.kp_meta.images_in_document) > 0 && `, изображений ${String(v.kp_meta.images_in_document)}`}</span>}</td></tr>))}</tbody></table>
         </div>
       )}
+      </div>
     </>
   );
 }

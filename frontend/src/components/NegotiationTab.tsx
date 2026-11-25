@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, fmtDate, fmtRub } from "../api";
 import { EVENT_TITLES, type PaymentLine, type Variant } from "../types";
 import CompetitorsTab from "./CompetitorsTab";
+import { STATUS_TITLES } from "../types";
 import KpRevisions from "./KpRevisions";
 
 // Торги (D-074): шаги снижения цены и изменения условий после КП, данные для решения, КП на каждом шаге, конкуренты, аналитика.
@@ -121,7 +122,7 @@ export default function NegotiationTab({ dealId, variants, onChanged }: { dealId
         <Kpi t={`Текущая цена${per}, ${vatLbl(fx)}`} v={inCur(fx, a.current_rub)} s={[rubRef(fx, a.current_rub), totRef(fx, a.current_rub), a.steps ? `шагов: ${a.steps}${a.days ? ` · ${a.days} дн.` : ""}` : "торгов ещё не было"].filter(Boolean).join(" · ")} />
         <Kpi t={`Снижение${per}`} v={a.discount_rub > 0 ? inCur(fx, -a.discount_rub, true) : "—"} s={a.discount_rub > 0 ? [rubRef(fx, a.discount_rub), totRef(fx, a.discount_rub)].filter(Boolean).join(" · ") : ""} tone={a.discount_rub > 0 ? "warn" : ""} />
         <Kpi t="Процент утарговывания" v={a.discount_pct != null ? pct(a.discount_pct) : "—"} s="снижение от первой цены КП" tone={a.discount_rub > 0 ? "warn" : ""} />
-        <Kpi t="Маржа" v={pct(a.margin_now_pct)} s={a.margin_lost_pp ? `была ${pct(a.margin_first_pct)}, −${a.margin_lost_pp.toFixed(2).replace(".", ",")} п.п.` : `в КП ${pct(a.margin_first_pct)}`}
+        <Kpi t="Маржа" v={pct(a.margin_now_pct)} s={a.margin_lost_pp ? `была ${pct(a.margin_first_pct)}, ${a.margin_lost_pp > 0 ? "−" : "+"}${Math.abs(a.margin_lost_pp).toFixed(2).replace(".", ",")} п.п.` : `в КП ${pct(a.margin_first_pct)}`}
           tone={mcls(a.margin_now_pct, Object.values(d.decision)[0]?.threshold_pct ?? 3).replace("ng-", "")} />
         <Kpi t="Лучший конкурент" v={a.best_competitor_rub ? inCur(fx, a.best_competitor_rub) : "—"} s={a.gap_to_competitor_pct != null ? `мы ${a.gap_to_competitor_pct > 0 ? "дороже" : "дешевле"} на ${pct(Math.abs(a.gap_to_competitor_pct))}` : "сведений нет"} />
       </div>
@@ -195,7 +196,7 @@ export default function NegotiationTab({ dealId, variants, onChanged }: { dealId
             </div>
             <Decision dec={show} preview={!!prev} vars={d.variants} comps={d.competitors} gross={gross} client={d.client_rates} />
           </div>
-        ) : <><div className="alert info">Торги закрыты: сделка на этапе «{d.status}». История и аналитика — ниже.</div><Decision dec={d.decision} preview={false} vars={d.variants} comps={d.competitors} gross={gross} client={d.client_rates} /></>}
+        ) : <><div className="alert info">Торги закрыты: сделка на этапе «{(STATUS_TITLES as Record<string, string>)[d.status] || d.status}». История и аналитика — ниже.</div><Decision dec={d.decision} preview={false} vars={d.variants} comps={d.competitors} gross={gross} client={d.client_rates} /></>}
         <History d={d} dealId={dealId} reload={load} fx={fx} />
       </>}
       {section === "competitors" && <CompetitorsTab dealId={dealId} variants={variants} />}
