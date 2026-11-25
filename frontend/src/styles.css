@@ -1236,6 +1236,8 @@ a.lv-stat:hover { background: var(--accent-soft); }
   /* D-160: решение владельца 24.11 — кнопки и текст акцента тёмно-красные (контраст ≥ 4.5:1 с белым),
      фирменный #ff3131 — логотип, активный раздел панели, счётчики */
   --nv-brand: #ff3131;
+  /* D-173: фон активного раздела и счётчиков под белым текстом — #d32f2f (контраст ≈ 5:1 вместо 3.66:1); логотип остаётся #ff3131 */
+  --nv-brand-strong: #d32f2f;
   --accent: #c62828;
   --accent-hover: #a91f1f;
   --accent-soft: #fdeeee;
@@ -1257,13 +1259,13 @@ a.lv-stat:hover { background: var(--accent-soft); }
 .app-nav a, .app-side-btn { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 8px 10px; border-radius: 8px; border: 0; background: none;
   color: var(--nv-side-text); text-decoration: none; font: inherit; font-size: 14px; line-height: 1.2; cursor: pointer; text-align: left; width: 100%; }
 .app-nav a:hover, .app-side-btn:hover { background: var(--nv-side-hover); }
-.app-nav a.active { background: var(--nv-brand); color: #fff; font-weight: 700; }
+.app-nav a.active { background: var(--nv-brand-strong); color: #fff; font-weight: 700; }
 .app-nav a:focus-visible, .app-side-btn:focus-visible, .app-brand:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
 .app-nav svg, .app-side-btn svg { flex: none; width: 20px; height: 20px; }
 .app-nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-count { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--nv-brand); color: #fff; font-size: 11px; font-weight: 700;
+.app-count { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--nv-brand-strong); color: #fff; font-size: 11px; font-weight: 700;
   display: inline-flex; align-items: center; justify-content: center; }
-.app-nav a.active .app-count { background: #fff; color: var(--nv-brand); }
+.app-nav a.active .app-count { background: #fff; color: var(--nv-brand-strong); }
 .app-side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 2px; padding-top: 10px; border-top: 1px solid var(--nv-side-line); }
 .app-side-btn { color: var(--nv-side-muted); font-size: 13px; }
 .app-shell.collapsed .app-nav-label, .app-shell.collapsed .app-brand span { display: none; }
