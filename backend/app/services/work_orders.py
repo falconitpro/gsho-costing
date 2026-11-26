@@ -276,6 +276,24 @@ def _resolve(db: Session, wo: WorkOrder, actor: Actor, payload: dict) -> tuple[s
     return result, reason or "Принято руководителем"
 
 
+def actions(wo: WorkOrder, actor: Actor) -> list[str]:
+    """Какие действия сейчас доступны пользователю — для кнопок карточки (сервер всё равно проверяет каждое событие)."""
+    own = actor.is_head or (bool(wo.engineer_id) and wo.engineer_id == actor.id)
+    out: list[str] = []
+    if actor.is_head and wo.status not in FINAL:
+        out += ["assign", "plan"]
+    for kind, (src, _dst) in TRANSITIONS.items():
+        if wo.status in src and (actor.is_head if kind in HEAD_ONLY else own) and not (kind == "start" and not wo.engineer_id):
+            out.append(kind)
+    if own:
+        out.append("note")
+        if wo.status in ("assigned", "in_progress", "on_hold"):
+            out.append("checklist")
+    if actor.is_head:
+        out.append("resolve")
+    return out
+
+
 def open_conflicts(db: Session, order_id: str, only_ids: bool = False) -> list:
     evs = db.scalars(select(WorkOrderEvent).where(WorkOrderEvent.work_order_id == order_id).order_by(WorkOrderEvent.received_at)).all()
     done = {str(e.payload.get("event_id")) for e in evs if e.kind == "resolve" and e.result == "applied"}

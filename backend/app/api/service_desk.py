@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser, get_current_user
@@ -218,7 +218,7 @@ def requests_list(status: str = "", client_id: str = "", q: str = "", limit: int
 @router.post("/requests", status_code=201)
 def request_create(body: RequestIn, user: CurrentUser = Depends(_desk), db: Session = Depends(get_db)):
     if not user.can("service_orders", EDIT):
-        raise HTTPException(403, "Обращения заводит сервис или менеджер")
+        raise HTTPException(403, "Обращения заводит сервисная служба")
     if body.channel not in wos.CHANNELS or body.kind not in wos.CATEGORIES:
         raise HTTPException(422, "Канал и вид — из списка")
     if body.sla_code and not db.scalar(select(ServiceSlaLevel).where(ServiceSlaLevel.code == body.sla_code)):
@@ -265,7 +265,7 @@ def _get_order(db: Session, user: CurrentUser, order_id: str) -> WorkOrder:
     return wo
 
 
-def _order_payload(db: Session, wo: WorkOrder, full: bool = False) -> dict:
+def _order_payload(db: Session, wo: WorkOrder, full: bool = False, user: Optional[CurrentUser] = None) -> dict:
     d = serialize(wo)
     c = db.get(Client, wo.client_id)
     s = db.get(ClientSite, wo.site_id) if wo.site_id else None
@@ -277,7 +277,20 @@ def _order_payload(db: Session, wo: WorkOrder, full: bool = False) -> dict:
              machine_title=" ".join(x for x in ((m.manufacturer, m.model, m.serial) if m else ()) if x),
              work_type_name=wt.name if wt else "", norm_hours=wt.norm_hours if wt else None,
              engineer_name=names.get(wo.engineer_id or "", ""), conflicts=len(wos.open_conflicts(db, wo.id)))
+    if user is not None:
+        d["actions"] = wos.actions(wo, wos.actor_of(user))
     if full:
+        # площадка и машина — в объёме, нужном исполнителю (инженер видит их только через свой наряд)
+        from .client_sites import ACCESS_MODES, _map_url
+        d["site"] = ({"id": s.id, "name": s.name, "address": s.address, "access_mode_title": ACCESS_MODES.get(s.access_mode, ""),
+                      "hse_notes": s.hse_notes, "map_url": _map_url(s)} if s else None)
+        d["machine"] = ({"id": m.id, "manufacturer": m.manufacturer, "model": m.model, "serial": m.serial,
+                         "commissioned_on": m.commissioned_on.isoformat() if m.commissioned_on else None,
+                         "warranty_until": m.warranty_until.isoformat() if m.warranty_until else None} if m else None)
+        r = db.get(ServiceRequest, wo.request_id) if wo.request_id else None
+        d["request"] = ({"id": r.id, "number": r.number, "machine_down": r.machine_down, "sla_code": r.sla_code,
+                         "received_at": r.received_at.isoformat() if r.received_at else None} if r else None)
+        d["assigned_by_name"] = names.get(wo.assigned_by or "", "")
         items = db.scalars(select(WorkOrderChecklistItem).where(WorkOrderChecklistItem.work_order_id == wo.id)
                            .order_by(WorkOrderChecklistItem.position)).all()
         evs = db.scalars(select(WorkOrderEvent).where(WorkOrderEvent.work_order_id == wo.id).order_by(WorkOrderEvent.received_at)).all()
@@ -300,7 +313,11 @@ def orders_list(status: str = "", engineer_id: str = "", client_id: str = "", li
     if client_id:
         st = st.where(WorkOrder.client_id == client_id)
     rows = db.scalars(st.order_by(WorkOrder.created_at.desc()).offset(offset).limit(limit)).all()
-    return {"items": [_order_payload(db, o) for o in rows]}
+    counts = {k: 0 for k in wos.STATUSES}
+    sq = _visible(user).subquery()
+    for st_, n in db.execute(select(sq.c.status, func.count()).group_by(sq.c.status)).all():
+        counts[st_] = n
+    return {"items": [_order_payload(db, o, user=user) for o in rows], "statuses": wos.STATUSES, "counts": counts}
 
 
 class OrderIn(BaseModel):
@@ -336,12 +353,22 @@ def order_create(body: OrderIn, user: CurrentUser = Depends(_head), db: Session 
             r.status = "accepted"
             audit(db, user.id, None, "service_request", r.id, "accept", after={"order": wo.number})
     db.commit()
-    return _order_payload(db, wo, full=True)
+    return _order_payload(db, wo, full=True, user=user)
 
 
 @router.get("/orders/{order_id}")
 def order_get(order_id: str, user: CurrentUser = Depends(_orders_reader), db: Session = Depends(get_db)):
-    return _order_payload(db, _get_order(db, user, order_id), full=True)
+    return _order_payload(db, _get_order(db, user, order_id), full=True, user=user)
+
+
+@router.get("/engineers")
+def engineers(user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
+    """Кого можно назначить: действующие инженеры и руководители сервиса, с числом открытых нарядов."""
+    users = [u for u in db.scalars(select(User).where(User.is_active.is_(True)).order_by(User.display_name)).all()
+             if {"engineer", "service_head"} & set(u.roles or [])]
+    open_ = dict(db.execute(select(WorkOrder.engineer_id, func.count()).where(WorkOrder.status.not_in(wos.FINAL))
+                            .group_by(WorkOrder.engineer_id)).all())
+    return [{"id": u.id, "name": u.display_name, "is_engineer": "engineer" in (u.roles or []), "open_orders": open_.get(u.id, 0)} for u in users]
 
 
 class EventIn(BaseModel):
@@ -369,7 +396,7 @@ def order_event(order_id: str, body: EventIn, user: CurrentUser = Depends(_order
     wo = _get_order(db, user, order_id)
     ev = _submit(db, user, wo, body)
     db.commit()
-    return {"event": wos.event_payload(ev), "order": _order_payload(db, wo, full=True)}
+    return {"event": wos.event_payload(ev), "order": _order_payload(db, wo, full=True, user=user)}
 
 
 # ─────────────── синхронизация (протокол — docs/operations/21) ───────────────
@@ -408,4 +435,4 @@ def sync_pull(cursor: int = Query(0, ge=0), limit: int = Query(500, ge=1, le=200
     events, nxt = change_events.settled(db, after=cursor, limit=limit, entity="work_order")
     ids = list(dict.fromkeys(e.entity_id for e in events))
     vis = {o.id: o for o in db.scalars(_visible(user).where(WorkOrder.id.in_(ids))).all()} if ids else {}
-    return {"cursor": nxt, "orders": [_order_payload(db, vis[i], full=True) for i in ids if i in vis]}
+    return {"cursor": nxt, "orders": [_order_payload(db, vis[i], full=True, user=user) for i in ids if i in vis]}

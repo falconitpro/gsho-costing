@@ -58,6 +58,7 @@ def make_deal() -> str:
 
 fails: list[str] = []
 visited = 0
+NEW_ONLY = {"/service"}   # D-192: разделы, которые есть только в новом виде (решение владельца «всё — только в новом виде»)
 
 
 VIEWS = [v for v in os.environ.get("UI_VIEWS", "classic,new").split(",") if v]
@@ -132,8 +133,8 @@ async def main():
         await browser.close()
     # одинаковые разделы в обоих видах: новый вид не должен терять пункты меню роли
     for user, title in ROLES:
-        if len(VIEWS) == 2 and MENUS.get((title, VIEWS[0])) != MENUS.get((title, VIEWS[1])):
-            a, b = set(MENUS.get((title, VIEWS[0]), [])), set(MENUS.get((title, VIEWS[1]), []))
+        a, b = set(MENUS.get((title, VIEWS[0]), [])), set(MENUS.get((title, VIEWS[-1]), [])) - NEW_ONLY
+        if len(VIEWS) == 2 and a != b:
             fails.append(f"{title}: разделы меню различаются — только в прежнем {sorted(a - b)}, только в новом {sorted(b - a)}")
     # защита от тихого сокращения покрытия (смена оболочки, селекторов): экранов не меньше порога
     if visited < MIN_SCREENS:
