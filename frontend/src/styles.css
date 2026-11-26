@@ -2163,3 +2163,14 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
   .ui-new .cl-layout { grid-template-columns: minmax(0, 1fr) !important; }
   .ui-new .cl-layout > :last-child { order: -1; }   /* открытая карточка — сверху, список — под ней */
 }
+/* D-184 (K-1): контактные лица клиента */
+.cs-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: 14px; }
+.cs-links a { overflow-wrap: anywhere; }
+.cs-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.cs-views { margin: 0; padding-left: 18px; font-size: 13px; max-height: 220px; overflow: auto; }
+.cs-danger { color: var(--bad); }
+.cs-del { grid-column: 1 / -1; padding-top: 8px; border-top: 1px dashed var(--line); }
+.cs-check { justify-content: flex-end; }
+.cs-roles { border: 0; padding: 0; margin: 8px 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.cs-roles legend { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.btn.cs-danger-btn { background: var(--bad); border-color: var(--bad); color: #fff; }

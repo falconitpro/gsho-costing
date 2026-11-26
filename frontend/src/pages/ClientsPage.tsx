@@ -8,6 +8,7 @@ import { toneOf } from "../colors";
 import LegalProfileBlock from "../components/LegalProfileBlock";
 import PartsFleet from "../components/PartsFleet";
 import ClientSites from "../components/ClientSites";
+import ClientContacts from "../components/ClientContacts";
 import { useNewUiFlag } from "../uiMode";
 import type { Me } from "../types";
 import { payText } from "../components/PaymentTermsEditor";
@@ -266,6 +267,7 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
               {card.sum_won_rub !== undefined && <div className="kpi"><span className="v">{fmtRub(card.sum_won_rub)}</span><span className="l">сумма выигранных, RUB</span></div>}
             </div>
             {nu && <ClientSites clientId={card.id} />}
+            {nu && <ClientContacts clientId={card.id} />}
             <details style={{ marginTop: 10 }}>
               <summary style={{ cursor: "pointer", fontWeight: 600 }}>Парк машин клиента <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>· наработка, ТО, заявки на комплекты</span></summary>
               <div style={{ marginTop: 8 }}><PartsFleet me={me} fixedClient={card.id} /></div>
