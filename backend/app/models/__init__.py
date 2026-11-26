@@ -2223,6 +2223,30 @@ class OtherMachineModel(TimestampMixin, Base):
     machine_type: Mapped[str] = mapped_column(String(255), default="")
 
 
+class ClientSite(TimestampMixin, Base):
+    """Площадка клиента (D-182, K-2): карьер, рудник, фабрика, ремонтная база, склад, офис. Контакты — отдельно (K-1)."""
+    __tablename__ = "client_sites"
+    __table_args__ = (
+        Index("ix_client_sites_client_active", "client_id", "is_active"),
+        Index("ix_client_sites_name", "name"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    site_type: Mapped[str] = mapped_column(String(32), default="other")     # SITE_TYPES в api/client_sites.py
+    code: Mapped[str] = mapped_column(String(64), default="")
+    address: Mapped[str] = mapped_column(Text, default="")
+    country: Mapped[str] = mapped_column(String(2), default="")
+    latitude: Mapped[Optional[float]] = mapped_column(Float)
+    longitude: Mapped[Optional[float]] = mapped_column(Float)
+    timezone: Mapped[str] = mapped_column(String(64), default="")
+    access_mode: Mapped[str] = mapped_column(String(32), default="")        # ACCESS_MODES в api/client_sites.py
+    hse_notes: Mapped[str] = mapped_column(Text, default="")               # требования охраны труда и допуска
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
 class ClientMachine(TimestampMixin, Base):
     """Машина клиента: из закрытой сделки ГШО (по позиции и номеру единицы) или заведённая вручную."""
     __tablename__ = "client_machines"
@@ -2242,6 +2266,9 @@ class ClientMachine(TimestampMixin, Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     comment: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    site_id: Mapped[Optional[str]] = mapped_column(ForeignKey("client_sites.id", ondelete="SET NULL"), index=True)   # D-182
+    origin: Mapped[str] = mapped_column(String(24), default="unknown")   # berghaus | third_party | rental | other | unknown
+    warranty_until: Mapped[Optional[date]] = mapped_column(Date)
 
 
 class MachineHours(Base):

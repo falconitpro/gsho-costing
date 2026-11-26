@@ -7,6 +7,8 @@ import { STATUS_TITLES } from "../types";
 import { toneOf } from "../colors";
 import LegalProfileBlock from "../components/LegalProfileBlock";
 import PartsFleet from "../components/PartsFleet";
+import ClientSites from "../components/ClientSites";
+import { useNewUiFlag } from "../uiMode";
 import type { Me } from "../types";
 import { payText } from "../components/PaymentTermsEditor";
 import type { PaymentLine } from "../types";
@@ -53,6 +55,7 @@ function verDiff(newer: KpVer, older?: KpVer): string[] {
 }
 
 export default function ClientsPage({ me, embedded = false }: { me: Me; embedded?: boolean }) {
+  const nu = useNewUiFlag();   // D-182: площадки — только в новом виде
   const [clients, setClients] = useState<Client[]>([]);
   const [card, setCard] = useState<Card | null>(null);
   useEffect(() => { setConfirmDel(false); }, [card?.id]);
@@ -262,6 +265,7 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
               {card.avg_margin_pct !== undefined && <div className="kpi"><span className="v">{fmtPct(card.avg_margin_pct)}</span><span className="l">средняя маржа (закрытые)</span></div>}
               {card.sum_won_rub !== undefined && <div className="kpi"><span className="v">{fmtRub(card.sum_won_rub)}</span><span className="l">сумма выигранных, RUB</span></div>}
             </div>
+            {nu && <ClientSites clientId={card.id} />}
             <details style={{ marginTop: 10 }}>
               <summary style={{ cursor: "pointer", fontWeight: 600 }}>Парк машин клиента <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>· наработка, ТО, заявки на комплекты</span></summary>
               <div style={{ marginTop: 8 }}><PartsFleet me={me} fixedClient={card.id} /></div>

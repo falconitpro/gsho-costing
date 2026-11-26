@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate } from "../api";
 import type { Me } from "../types";
+import { useNewUiFlag } from "../uiMode";
 
 // Парк машин клиентов: машины из сделок ГШО и других производителей, наработка, ТО-комплекты, напоминания и заявка на комплект (ТЗ запчастей, раздел 9).
 
@@ -9,13 +10,18 @@ type Forecast = { per_day: number | null; hours_now: number | null; last_reading
 type Kit = { id: string; name: string; interval_hours: number; source: string; active: boolean; lines: { part_id: string | null; article: string; name: string; qty: number }[] };
 type Machine = { id: string; deal_id: string | null; client_id: string; client_name: string; deal_number: string; equipment_model_id: string | null; other_model_id: string | null;
   manufacturer: string; model: string; serial: string; commissioned_on: string | null; site: string; hours_per_day: number | null; comment: string; active: boolean;
+  site_id?: string | null; site_name?: string; origin?: string; origin_title?: string; warranty_until?: string | null;
   forecast: Forecast; readings?: { id: string; on: string; hours: number; comment: string }[]; kits?: Kit[];
   requests?: { id: string; number: string; created_at: string }[] };
 type Reminder = { id: string; machine_id: string; to_hours: number; due_on: string | null; manager_name: string; machine: Machine };
 type Models = { gsho: { id: string; title: string }[]; other: { id: string; title: string; manufacturer: string; model: string }[] };
 type Ref = { id: string; name: string };
 
-const EMPTY = { client_id: "", equipment_model_id: "", other_manufacturer: "", other_model: "", serial: "", commissioned_on: "", site: "", hours_per_day: "", comment: "" };
+const EMPTY = { client_id: "", equipment_model_id: "", other_manufacturer: "", other_model: "", serial: "", commissioned_on: "", site: "", hours_per_day: "", comment: "",
+  site_id: "", origin: "unknown", warranty_until: "" };
+// D-182: происхождение машины и площадка из справочника — только в новом виде
+const ORIGINS: [string, string][] = [["unknown", "Не указано"], ["berghaus", "Поставка BERGHAUS"], ["third_party", "Чужая поставка"], ["rental", "Аренда"], ["other", "Другое"]];
+type SiteRef = { id: string; name: string; site_type_title: string };
 
 export default function PartsFleet({ me, fixedClient }: { me: Me; fixedClient?: string }) {
   const edit = me.roles.some((r) => ["manager", "service_head", "cd", "gd", "admin"].includes(r.code));
@@ -30,6 +36,12 @@ export default function PartsFleet({ me, fixedClient }: { me: Me; fixedClient?: 
   const [cur, setCur] = useState<Machine | null>(null);
   const [form, setForm] = useState<typeof EMPTY | null>(null);
   const [msg, setMsg] = useState("");
+  const nu = useNewUiFlag();
+  const [sites, setSites] = useState<SiteRef[] | null>(null);   // null — справочник недоступен: остаётся текстовое поле
+  useEffect(() => {
+    if (!nu || !form?.client_id) { setSites(null); return; }
+    api.get<{ items: SiteRef[] }>(`/api/clients/sites?client_id=${form.client_id}`).then((r) => setSites(r.items)).catch(() => setSites(null));
+  }, [nu, form?.client_id]);
   const load = () => {
     api.get<Machine[]>(`/api/parts/fleet/machines?client_id=${clientId}&q=${encodeURIComponent(q)}${soon ? "&due_days=30" : ""}`).then(setList).catch((e) => setMsg((e as Error).message));
     api.get<Reminder[]>("/api/parts/fleet/reminders").then((rs) => setRem(fixedClient ? rs.filter((r) => r.machine.client_id === fixedClient) : rs)).catch(() => setRem([]));
@@ -47,14 +59,18 @@ export default function PartsFleet({ me, fixedClient }: { me: Me; fixedClient?: 
   }
   function save() {
     if (!form) return;
-    const body = { ...form, equipment_model_id: form.equipment_model_id || null, commissioned_on: form.commissioned_on || null,
-      hours_per_day: form.hours_per_day ? Number(form.hours_per_day.replace(",", ".")) : null, active: true };
+    const { site_id, origin, warranty_until, ...rest } = form;
+    const body = { ...rest, equipment_model_id: form.equipment_model_id || null, commissioned_on: form.commissioned_on || null,
+      hours_per_day: form.hours_per_day ? Number(form.hours_per_day.replace(",", ".")) : null, active: true,
+      // прежний вид присылает только текст «Место работы», как раньше
+      ...(nu ? { origin, warranty_until: warranty_until || null, ...(sites ? { site_id: site_id || null } : {}) } : {}) };
     act(() => (editingId ? api.put<Machine>(`/api/parts/fleet/machines/${editingId}`, body) : api.post<Machine>("/api/parts/fleet/machines", body)), "Сохранено")
       .then((m) => { if (m) setForm(null); });
   }
   const [editingId, setEditingId] = useState<string | null>(null);
   const startEdit = (m: Machine) => { const f = { ...EMPTY, client_id: m.client_id, equipment_model_id: m.equipment_model_id || "", other_manufacturer: m.other_model_id ? m.manufacturer : "",
-    other_model: m.other_model_id ? m.model : "", serial: m.serial, commissioned_on: m.commissioned_on || "", site: m.site, hours_per_day: m.hours_per_day != null ? String(m.hours_per_day) : "", comment: m.comment };
+    other_model: m.other_model_id ? m.model : "", serial: m.serial, commissioned_on: m.commissioned_on || "", site: m.site, hours_per_day: m.hours_per_day != null ? String(m.hours_per_day) : "", comment: m.comment,
+    site_id: m.site_id || "", origin: m.origin || "unknown", warranty_until: m.warranty_until || "" };
     setEditingId(m.id); setForm(f); };
 
   return (
@@ -85,7 +101,7 @@ export default function PartsFleet({ me, fixedClient }: { me: Me; fixedClient?: 
           <tbody>{list.map((m) => (
             <tr key={m.id} style={{ cursor: "pointer", background: cur?.id === m.id ? "var(--accent-soft)" : undefined }} onClick={() => open(m.id)}>
               <td>{m.client_name}</td><td>{m.manufacturer} {m.model}{m.deal_number && <div className="muted" style={{ fontSize: 11 }}>сделка {m.deal_number}</div>}</td>
-              <td>{m.serial || <span className="muted">—</span>}</td><td>{m.site}</td><td className="num">{m.forecast.hours_now ?? "—"}</td><td className="num">{m.forecast.per_day ?? "—"}</td>
+              <td>{m.serial || <span className="muted">—</span>}</td><td>{nu ? m.site_name ?? m.site : m.site}</td><td className="num">{m.forecast.hours_now ?? "—"}</td><td className="num">{m.forecast.per_day ?? "—"}</td>
               <td>{m.forecast.next ? `${m.forecast.next.to_hours} м·ч${m.forecast.next.due_on ? ` ≈ ${fmtDate(m.forecast.next.due_on)}` : ""}` : <span className="muted">—</span>}</td></tr>))}
             {list.length === 0 && <tr><td colSpan={7} className="muted">Машин нет</td></tr>}</tbody>
         </table>
@@ -105,7 +121,15 @@ export default function PartsFleet({ me, fixedClient }: { me: Me; fixedClient?: 
                 <datalist id="fleet-model">{models.other.filter((o) => !form.other_manufacturer || o.manufacturer === form.other_manufacturer).map((o) => <option key={o.id} value={o.model} />)}</datalist></label></>}
             <label className="f">Заводской №<input value={form.serial} onChange={(e) => setForm({ ...form, serial: e.target.value })} /></label>
             <label className="f">Дата ввода<input type="date" value={form.commissioned_on} onChange={(e) => setForm({ ...form, commissioned_on: e.target.value })} /></label>
-            <label className="f">Место работы<input value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} /></label>
+            {nu && sites ? <>
+              <label className="f">Площадка<select value={form.site_id} onChange={(e) => setForm({ ...form, site_id: e.target.value })}>
+                <option value="">— не выбрана —</option>{sites.map((x) => <option key={x.id} value={x.id}>{x.name} · {x.site_type_title}</option>)}</select>
+                {sites.length === 0 && <span className="muted cs-note">у клиента нет площадок — добавьте в карточке клиента</span>}</label>
+              {!form.site_id && <label className="f">Место работы (текстом)<input value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} /></label>}</>
+              : <label className="f">Место работы<input value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} /></label>}
+            {nu && <>
+              <label className="f">Происхождение<select value={form.origin} onChange={(e) => setForm({ ...form, origin: e.target.value })}>{ORIGINS.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+              <label className="f">Гарантия до<input type="date" value={form.warranty_until} onChange={(e) => setForm({ ...form, warranty_until: e.target.value })} /></label></>}
             <label className="f">м·ч в день (если замеров мало)<input inputMode="decimal" value={form.hours_per_day} onChange={(e) => setForm({ ...form, hours_per_day: e.target.value })} /></label>
             <label className="f">Комментарий<input value={form.comment} onChange={(e) => setForm({ ...form, comment: e.target.value })} /></label>
           </div>
@@ -113,12 +137,12 @@ export default function PartsFleet({ me, fixedClient }: { me: Me; fixedClient?: 
             <button className="btn ghost" onClick={() => setForm(null)}>отмена</button></div>
         </div>)}
 
-      {cur && !form && <MachineCard m={cur} edit={edit} act={act} onEdit={() => startEdit(cur)} onKit={() => kitRequest(cur)} />}
+      {cur && !form && <MachineCard m={cur} edit={edit} act={act} nu={nu} onEdit={() => startEdit(cur)} onKit={() => kitRequest(cur)} />}
     </>
   );
 }
 
-function MachineCard({ m, edit, act, onEdit, onKit }: { m: Machine; edit: boolean; act: <T>(fn: () => Promise<T>, ok?: string) => Promise<T | undefined>; onEdit: () => void; onKit: () => void }) {
+function MachineCard({ m, edit, act, nu, onEdit, onKit }: { m: Machine; edit: boolean; act: <T>(fn: () => Promise<T>, ok?: string) => Promise<T | undefined>; nu?: boolean; onEdit: () => void; onKit: () => void }) {
   const [hrs, setHrs] = useState({ on: new Date().toISOString().slice(0, 10), hours: "", comment: "" });
   const [kit, setKit] = useState<{ id?: string; name: string; interval_hours: string; text: string } | null>(null);
   const [parts, setParts] = useState<{ id: string; article: string; name_ru: string; assembly: string; stock_total: number }[] | null>(null);
@@ -134,7 +158,8 @@ function MachineCard({ m, edit, act, onEdit, onKit }: { m: Machine; edit: boolea
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h2 style={{ margin: 0 }}>{m.manufacturer} {m.model}{m.serial && ` · зав. № ${m.serial}`}</h2>{edit && <button className="btn ghost" onClick={onEdit}>изменить</button>}</div>
-      <p className="muted" style={{ marginTop: 4 }}>{[m.client_name, m.site, m.deal_number && `сделка ${m.deal_number}`, m.commissioned_on && `ввод ${fmtDate(m.commissioned_on)}`].filter(Boolean).join(" · ")}{m.comment && ` · ${m.comment}`}</p>
+      <p className="muted" style={{ marginTop: 4 }}>{[m.client_name, nu ? m.site_name ?? m.site : m.site, m.deal_number && `сделка ${m.deal_number}`, m.commissioned_on && `ввод ${fmtDate(m.commissioned_on)}`,
+        nu && m.origin && m.origin !== "unknown" && m.origin_title, nu && m.warranty_until && `гарантия до ${fmtDate(m.warranty_until)}`].filter(Boolean).join(" · ")}{m.comment && ` · ${m.comment}`}</p>
       <div className="grid cols-3">
         <div>Наработка сейчас: <b>{fc.hours_now != null ? `≈ ${fc.hours_now} м·ч` : "нет замеров"}</b>{fc.last_reading && <div className="muted" style={{ fontSize: 12 }}>замер {fc.last_reading.hours} м·ч на {fmtDate(fc.last_reading.on)}</div>}</div>
         <div>В среднем: <b>{fc.per_day != null ? `${fc.per_day} м·ч/день` : "—"}</b></div>

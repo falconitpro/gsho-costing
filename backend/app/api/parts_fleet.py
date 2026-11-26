@@ -14,7 +14,7 @@ from ..core.files import file_response
 from ..core.roles import Role
 from ..db import get_db
 from ..models import (Client, ClientMachine, Deal, EquipmentModel, Factory, MachineHours, MachineReminder, MaintenanceKit, OtherMachineModel, Part,
-                      PartApplicability, PartRequest, Position, User)
+                      PartApplicability, PartRequest, Position, User, ClientSite)
 from ..services import settings_service
 from ..services.deal_service import audit, notify
 from ..services.parts_fleet import avg_per_day, due_date, hours_now, kit_lines, next_to
@@ -89,6 +89,9 @@ def _payload(db: Session, m: ClientMachine, full: bool = False) -> dict:
     d["manufacturer"], d["model"] = _model_title(db, m)
     d["client_name"], d["deal_number"] = cl.name if cl else "", deal.number if deal else ""
     d["forecast"] = _forecast(db, m)
+    site_obj = db.get(ClientSite, m.site_id) if m.site_id else None   # D-182: площадка из справочника, иначе — прежний текст
+    d["site_name"] = site_obj.name if site_obj else m.site
+    d["origin_title"] = ORIGINS.get(m.origin or "unknown", "")
     if full:
         d["readings"] = [serialize(h) for h in db.scalars(select(MachineHours).where(MachineHours.machine_id == m.id).order_by(MachineHours.on.desc())).all()]
         d["kits"] = [serialize(k) for k in _kits_for(db, m)]
@@ -102,11 +105,13 @@ def _payload(db: Session, m: ClientMachine, full: bool = False) -> dict:
 # ------------------------------------------------------------------ парк
 
 @router.get("/machines")
-def machines(client_id: str = "", q: str = "", due_days: Optional[int] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
+def machines(client_id: str = "", q: str = "", due_days: Optional[int] = None, site_id: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
     """Парк: фильтр по клиенту и строке поиска; due_days — только машины с ТО в ближайшие N дней."""
     stmt = select(ClientMachine).where(ClientMachine.active.is_(True)).order_by(ClientMachine.created_at.desc())
     if client_id:
         stmt = stmt.where(ClientMachine.client_id == client_id)
+    if site_id:
+        stmt = stmt.where(ClientMachine.site_id == site_id)
     out = []
     for m in db.scalars(stmt).all():
         d = _payload(db, m)
@@ -117,6 +122,9 @@ def machines(client_id: str = "", q: str = "", due_days: Optional[int] = None, d
             continue
         out.append(d)
     return out
+
+
+ORIGINS = {"berghaus": "Поставка BERGHAUS", "third_party": "Чужая поставка", "rental": "Аренда", "other": "Другое", "unknown": "Не указано"}
 
 
 class MachineIn(BaseModel):
@@ -131,6 +139,9 @@ class MachineIn(BaseModel):
     hours_per_day: Optional[float] = Field(default=None, ge=0)
     comment: str = ""
     active: bool = True
+    site_id: Optional[str] = None         # D-182: площадка клиента из справочника
+    origin: str = Field(default="unknown", pattern="^(berghaus|third_party|rental|other|unknown)$")
+    warranty_until: Optional[date] = None
 
 
 def _apply(db: Session, m: ClientMachine, body: MachineIn) -> None:
@@ -152,8 +163,27 @@ def _apply(db: Session, m: ClientMachine, body: MachineIn) -> None:
         m.manufacturer, m.model = om.manufacturer, om.model
     elif not m.equipment_model_id and not m.other_model_id:
         raise HTTPException(422, "Укажите модель: из каталога ГШО или производителя и модель")
-    for k in ("serial", "commissioned_on", "site", "hours_per_day", "comment", "active"):
+    for k in ("serial", "commissioned_on", "hours_per_day", "comment", "active"):
         setattr(m, k, getattr(body, k))
+    sent = body.model_fields_set
+    if "site_id" in sent:
+        if body.site_id:
+            site = db.get(ClientSite, body.site_id)
+            if site is None or site.client_id != body.client_id or not site.is_active:
+                raise HTTPException(422, "Площадка не найдена, в архиве или принадлежит другому клиенту")
+            m.site_id, m.site = site.id, site.name
+        else:
+            m.site_id, m.site = None, body.site
+    else:
+        # прежний вид передаёт только текст: совпадает с названием привязанной площадки — связь сохраняется
+        linked = db.get(ClientSite, m.site_id) if m.site_id else None
+        m.site = body.site
+        if linked and (linked.client_id != body.client_id or body.site.strip().lower() != linked.name.strip().lower()):
+            m.site_id = None
+    if "origin" in sent:
+        m.origin = body.origin
+    if "warranty_until" in sent:
+        m.warranty_until = body.warranty_until
 
 
 @router.post("/machines", status_code=201)
@@ -264,7 +294,7 @@ def sync_from_deals(db: Session, deal_id: Optional[str] = None, user_id: Optiona
             for unit in range(1, int(pos.qty or 1) + 1):
                 if unit in have:
                     continue
-                db.add(ClientMachine(client_id=deal.client_id, deal_id=deal.id, position_id=pos.id, unit_no=unit, equipment_model_id=pos.equipment_model_id,
+                db.add(ClientMachine(client_id=deal.client_id, deal_id=deal.id, position_id=pos.id, unit_no=unit, origin="berghaus", equipment_model_id=pos.equipment_model_id,
                                      manufacturer=(f.short_name or f.name) if f else "", model=pos.model, commissioned_on=deal.execution_closed_at,
                                      created_by=user_id, comment="из сделки ГШО — укажите серийный номер"))
                 n += 1

@@ -2132,3 +2132,26 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
   .ui-new .ng-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .ui-new .ng-kpi b { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; font-size: 17px; }
 }
+
+/* D-182 (K-2): площадки клиента в карточке клиента (только новый вид) */
+.cs-block { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.cs-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.cs-head h3 { margin: 0; font-size: 16px; }
+.cs-head .btn.add { margin-left: auto; }
+.cs-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.cs-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 16px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface, #fff); }
+.cs-item.cs-archived { opacity: .65; }
+.cs-main .muted { font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+.cs-hse { font-size: 13px; margin-top: 4px; }
+.cs-act { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.cs-form { margin-top: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.cs-form h4 { margin: 0 0 8px; }
+.cs-form .row { margin-top: 8px; }
+.cs-form .cs-wide { grid-column: span 3; }
+@media (max-width: 760px) {
+  .cs-item { grid-template-columns: minmax(0, 1fr); }
+  .cs-act { justify-content: flex-start; }
+  .cs-form .cs-wide { grid-column: auto; }
+  .cs-form .grid.cols-3 { grid-template-columns: minmax(0, 1fr); }
+}
+.cs-note { font-size: 12px; }
