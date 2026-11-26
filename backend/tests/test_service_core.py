@@ -182,3 +182,28 @@ def test_sync_push_pull_and_append_only(client):  # noqa: F811
         with pytest.raises(Exception, match="только добавление"):
             db.execute(text("UPDATE work_order_events SET reason = 'x' WHERE id = :i"), {"i": e1})
         db.rollback()
+
+
+def test_i1_card_actions_engineers_and_site_for_engineer(client):  # noqa: F811
+    _, wo = _order(client)
+    lst = _ok(client.get("/api/service/orders", headers=H(SVC)))
+    assert lst["statuses"]["ready_to_close"] == "Готов к закрытию" and lst["counts"]["draft"] >= 1
+    row = next(x for x in lst["items"] if x["id"] == wo["id"])
+    assert "assign" in row["actions"] and "start" not in row["actions"]                   # инженер не назначен
+    engs = _ok(client.get("/api/service/engineers", headers=H(SVC)))
+    me = _me(client, ENG)
+    assert any(e["id"] == me and e["is_engineer"] for e in engs) and not any(e["id"] == _me(client, MGR) for e in engs)
+    assert client.get("/api/service/engineers", headers=H(ENG)).status_code == 403
+    _assign(client, wo)
+    card = _ok(client.get(f"/api/service/orders/{wo['id']}", headers=H(ENG)))
+    assert card["site"]["name"] and "map_url" in card["site"] and card["request"]["machine_down"] is True
+    assert set(card["actions"]) >= {"start", "note", "checklist"} and "assign" not in card["actions"] and "cancel" not in card["actions"]
+    assert _ok(client.get("/api/service/orders", headers=H(ENG)))["counts"]["assigned"] >= 1
+
+
+def test_counts_match_visible_orders(client):  # noqa: F811
+    lst = _ok(client.get("/api/service/orders", headers=H(SVC), params={"limit": 500}))
+    by = {}
+    for o in lst["items"]:
+        by[o["status"]] = by.get(o["status"], 0) + 1
+    assert {k: v for k, v in lst["counts"].items() if v} == by

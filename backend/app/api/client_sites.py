@@ -87,9 +87,13 @@ def _payload(site: ClientSite, client_name: str, machines: int) -> dict:
     d["site_type_title"] = SITE_TYPES.get(site.site_type, site.site_type)
     d["access_mode_title"] = ACCESS_MODES.get(site.access_mode, site.access_mode)
     d["machines_count"] = machines
-    d["map_url"] = (f"https://yandex.ru/maps/?pt={site.longitude},{site.latitude}&z=14&l=map"
-                    if site.latitude is not None and site.longitude is not None else "")
+    d["map_url"] = _map_url(site)
     return d
+
+
+def _map_url(site: ClientSite) -> str:
+    return (f"https://yandex.ru/maps/?pt={site.longitude},{site.latitude}&z=14&l=map"
+            if site.latitude is not None and site.longitude is not None else "")
 
 
 def _duplicate(db: Session, client_id: str, name: str, exclude: str = "") -> Optional[ClientSite]:

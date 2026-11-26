@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import type { Me } from "../types";
+import { isNewUi } from "../uiMode";
 
 /** Меню по роли (D-097): 4–5 главных пунктов роли в строке, остальные доступные — в «Ещё».
  *  Права не меняются: в «Ещё» те же разделы, что были в меню; у нескольких ролей главные пункты объединяются. */
@@ -17,6 +18,7 @@ const ITEMS: Item[] = [
   { key: "finance", to: "/finance", label: "Финансы" },
   { key: "legal", to: "/legal", label: "Юридический блок" },
   { key: "office", to: "/office", label: "Канцелярия" },
+  { key: "service", to: "/service", label: "Сервис" },
   { key: "catalog", to: "/catalog", label: "Каталог" },
   { key: "supply", to: "/supply", label: "Снабжение и склад" },
   { key: "settings", to: "/settings", label: "Настройки" },
@@ -24,7 +26,7 @@ const ITEMS: Item[] = [
 const PRIMARY: Record<string, string[]> = {
   manager: ["work", "deals", "tasks", "catalog"],
   logistician: ["work", "deals", "tasks", "supply", "summary"],
-  service_head: ["work", "deals", "tasks", "supply"],
+  service_head: ["work", "service", "deals", "tasks", "supply"],
   purchasing: ["work", "supply", "catalog", "tasks"],
   cd: ["work", "deals", "tasks", "board", "summary"],
   fd: ["work", "finance", "deals", "board", "tasks"],
@@ -33,7 +35,7 @@ const PRIMARY: Record<string, string[]> = {
   admin: ["work", "settings", "deals"],
   observer: ["work", "deals", "board"],
   clerk: ["work", "office", "tasks"],
-  engineer: ["work", "tasks", "catalog"],   // D-181: сделок и юр. блока инженер не видит
+  engineer: ["work", "service", "tasks", "catalog"],   // D-181: сделок и юр. блока инженер не видит
 };
 
 /** Разделы роли: все доступные и «главные» (D-097). Один источник для верхнего меню и боковой панели «Нового вида» (D-159). */
@@ -48,7 +50,8 @@ export function navItems(me: Me): { items: NavItem[]; primary: Set<string> } {
     summary: has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager"),
     finance: perm("finance_section"),
     supply: has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head"),
-    office: perm("office") || perm("office_hr"),   // D-128: исполнитель без права видит свои документы через «Что сделать»
+    office: perm("office") || perm("office_hr"),
+    service: perm("service_orders") && isNewUi(),   // D-192: раздел «Сервис» — только в новом виде   // D-128: исполнитель без права видит свои документы через «Что сделать»
   };
   const primary = new Set(codes.flatMap((c) => PRIMARY[c] || []));
   if (primary.size === 0) ["work", "deals", "tasks"].forEach((k) => primary.add(k));

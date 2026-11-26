@@ -432,8 +432,15 @@ def build(db: Session, user: CurrentUser, executive: bool = False) -> tuple[dict
     in_work_sum = sum(_price(d) or 0 for d in open_deals) + sum(p["price_rub"] for p in open_parts)
     won_sum = sum(_price(d) or 0 for d in won_q) + sum(p["price_rub"] for p in won_q_parts)
     urgent_parts = [p for p in my_open_parts if p["urgent"]]
-    if role == "engineer":   # D-181: только свои задачи; наряды появятся в I-1
-        kpis = [{"title": "Задачи на мне", "value": str(len(tasks)), "sub": "", "tone": "", "url": "/tasks"},
+    if role == "engineer":   # D-181: только свои задачи; D-192: и свои наряды
+        from ..models import WorkOrder
+        mine = dict(db.execute(select(WorkOrder.status, func.count()).where(WorkOrder.engineer_id == user.id,
+                                                                            WorkOrder.status.in_(("assigned", "in_progress", "on_hold", "ready_to_close")))
+                               .group_by(WorkOrder.status)).all())
+        kpis = [{"title": "Наряды в работе", "value": str(mine.get("in_progress", 0) + mine.get("on_hold", 0)),
+                 "sub": f"готовы к закрытию: {mine['ready_to_close']}" if mine.get("ready_to_close") else "", "tone": "", "url": "/service"},
+                {"title": "Ждут начала", "value": str(mine.get("assigned", 0)), "sub": "назначенные наряды", "tone": "warn" if mine.get("assigned") else "", "url": "/service?tab=orders"},
+                {"title": "Задачи на мне", "value": str(len(tasks)), "sub": "", "tone": "", "url": "/tasks"},
                 {"title": "Просрочено задач", "value": str(len(overdue_tasks)), "sub": "", "tone": "bad" if overdue_tasks else "ok", "url": "/tasks"}]
     elif role in ("manager", "observer", "logistician", "service_head", "purchasing"):
         kp_week = [d for d in open_deals if d.kp_due and today <= d.kp_due <= today + timedelta(days=7) and (d.manager_id == user.id or d.manager_id in user.acting_for or role != "manager")]
