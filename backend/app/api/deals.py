@@ -834,8 +834,10 @@ def send_to_calc_ep(deal_id: str, body: Optional[SendToCalcIn] = None, db: Sessi
 
 
 class KpSentIn(BaseModel):
-    recipients: list[str]
+    recipients: list[str]                  # «Кому»
+    cc: list[str] = []
     sent_via: str = "outlook"   # outlook | system
+    dispatch_key: str = ""      # D-188: повтор не создаёт второй снимок
 
 
 @router.post("/{deal_id}/kp-sent")
@@ -844,7 +846,12 @@ def kp_sent_ep(deal_id: str, body: KpSentIn, db: Session = Depends(get_db), user
     _editable_by_manager(deal, user)
     from ..services.mirror_offers import require_chain_visa
     require_chain_visa(db, deal)
-    mark_kp_sent(db, deal, user, body.recipients, body.sent_via)
+    from ..services import kp_dispatch as kd
+    if kd.existing(db, body.dispatch_key) is not None:
+        return {"status": deal.status.value, "repeated": True}
+    items = kd.resolve(db, deal, body.recipients, body.cc)   # D-188: только контакты клиента, «Кому» и «Копия» раздельно
+    mark_kp_sent(db, deal, user, [i["email"] for i in items], body.sent_via)
+    kd.record(db, deal, items, "manual", user.id, subject=f"КП по сделке {deal.number}", version_id=deal.approved_version_id, key=body.dispatch_key)
     db.commit()
     return {"status": deal.status.value}
 

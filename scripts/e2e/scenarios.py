@@ -42,6 +42,16 @@ def api(user, method, path, body=None, raw=False):
         raise SystemExit(f"{method} {path} → {e.code}: {e.read()[:400]!r}")
 
 
+
+def kp_rcpt(did):
+    """D-188: адресат КП — только контакт клиента сделки из справочника; заводит его один раз на клиента."""
+    cid = api(GD, "GET", f"/api/deals/{did}")["client_id"]
+    em = f"e2e.{cid[:8]}@example.com"
+    have = api(GD, "GET", f"/api/clients/contacts?client_id={cid}")["items"]
+    if not any(em in (c.get("emails") or []) for c in have):
+        api(GD, "POST", "/api/clients/contacts", {"client_id": cid, "full_name": "Закупщик E2E", "work_email": em, "roles": ["purchasing"]})
+    return em
+
 def num(text: str) -> float:
     """«2 277 545 CNY», «17,63 %», «≈ 29 194 032 ₽» → число (первое в строке)."""
     m = re.search(r"-?\d[\d\s  ]*(?:[.,]\d+)?", text or "")
@@ -331,7 +341,7 @@ async def s5_bargain_contract(browser):
     check_kp(scn, did, m, rev_id=last["id"], label="КП редакции торгов")
     check_kp(scn, did, m, label="КП текущее")
     check_screen(scn, await screen(browser, did), m)
-    api(MGR, "POST", f"/api/deals/{did}/kp-sent", {"recipients": ["e2e@example.com"]})
+    api(MGR, "POST", f"/api/deals/{did}/kp-sent", {"recipients": [kp_rcpt(did)]})
     check_true(scn, "выигрыш → договор", api(CD, "POST", f"/api/deals/{did}/outcome", {"outcome": "won", "reason": "e2e"})["status"] == "contract")
     st = api(CD, "GET", f"/api/deals/{did}/execution/stages")
     pay_in = [s for s in st["stages"] if s["code"] in ("client_advance", "client_final")]
@@ -438,7 +448,7 @@ async def s7_execution(browser):
     api(CD, "POST", f"/api/deals/{did}/price", {"variant_id": var["id"], "mode": "margin", "value": 20})
     terms_and_submit(did, pos)
     m = money(did, var["id"])
-    api(MGR, "POST", f"/api/deals/{did}/kp-sent", {"recipients": ["e2e@example.com"]})
+    api(MGR, "POST", f"/api/deals/{did}/kp-sent", {"recipients": [kp_rcpt(did)]})
     api(CD, "POST", f"/api/deals/{did}/outcome", {"outcome": "won", "reason": "e2e"})
     base = f"/api/deals/{did}/execution"
     check_true(scn, "подэтап контракта будущей датой не принят",
@@ -526,7 +536,7 @@ async def s8_execution_branches(browser):
     api(CD, "POST", f"/api/deals/{did}/payment-terms", {"client_payments": lines, "factory_payments": {p["id"]: calc["payment_terms"]["default_factory"] for p in pos}})
     api(CD, "POST", f"/api/deals/{did}/price", {"variant_id": var["id"], "mode": "margin", "value": 20})
     api(CD, "POST", f"/api/deals/{did}/submit")
-    api(MGR, "POST", f"/api/deals/{did}/kp-sent", {"recipients": ["e2e@example.com"]})
+    api(MGR, "POST", f"/api/deals/{did}/kp-sent", {"recipients": [kp_rcpt(did)]})
     api(CD, "POST", f"/api/deals/{did}/outcome", {"outcome": "won", "reason": "e2e"})
     base = f"/api/deals/{did}/execution"
     for code, u in {"draft": MGR, "legal_review": LAW, "client_review": MGR, "internal_approval": CD}.items():

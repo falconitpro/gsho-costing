@@ -2268,6 +2268,68 @@ class ClientContact(TimestampMixin, Base):
     consent_source: Mapped[str] = mapped_column(String(255), default="")
     comment: Mapped[str] = mapped_column(Text, default="")
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    # D-188: дополнительные рабочие адреса [{email, label}] и обезличивание по запросу (запись и связи остаются)
+    extra_emails: Mapped[list[dict]] = mapped_column(JSONType, default=list)
+    anonymized_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class ClientContactLink(TimestampMixin, Base):
+    """Связь контакта (человека) с клиентом (D-188): роли, площадка, основной, период. Один человек — несколько организаций.
+    client_contacts.client_id — клиент, у которого контакт заведён; списки клиента строятся по связям."""
+    __tablename__ = "client_contact_links"
+    __table_args__ = (Index("ix_client_contact_links_client_active", "client_id", "is_active"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    contact_id: Mapped[str] = mapped_column(ForeignKey("client_contacts.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    site_id: Mapped[Optional[str]] = mapped_column(ForeignKey("client_sites.id", ondelete="SET NULL"))
+    roles: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    valid_from: Mapped[Optional[date]] = mapped_column(Date)
+    valid_to: Mapped[Optional[date]] = mapped_column(Date)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class ClientContactHistory(Base):
+    """История изменений контакта (D-188): было / стало по полям. Доступ — по группе «Клиенты: контактные лица» (правка);
+    при обезличивании стирается. В общем журнале действий персональных данных нет."""
+    __tablename__ = "client_contact_history"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    contact_id: Mapped[str] = mapped_column(String(36), index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    user_id: Mapped[Optional[str]] = mapped_column(String(36))
+    field: Mapped[str] = mapped_column(String(64))
+    old_value: Mapped[str] = mapped_column(Text, default="")
+    new_value: Mapped[str] = mapped_column(Text, default="")
+
+
+class KpDispatch(Base):
+    """Отправка КП (D-188): неизменяемый снимок — кто, когда, как (из системы / вручную), номер письма. Ключ повтора — без дублей."""
+    __tablename__ = "kp_dispatches"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    version_id: Mapped[Optional[str]] = mapped_column(String(36))
+    revision_no: Mapped[Optional[int]] = mapped_column(Integer)
+    method: Mapped[str] = mapped_column(String(16))                 # system | manual
+    sent_by: Mapped[Optional[str]] = mapped_column(String(36))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    subject: Mapped[str] = mapped_column(Text, default="")
+    message_id: Mapped[str] = mapped_column(String(255), default="")
+    dispatch_key: Mapped[str] = mapped_column(String(64), unique=True)
+
+
+class KpDispatchRecipient(Base):
+    __tablename__ = "kp_dispatch_recipients"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    dispatch_id: Mapped[str] = mapped_column(ForeignKey("kp_dispatches.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(4))                    # to | cc
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    contact_id: Mapped[Optional[str]] = mapped_column(String(36))
+    link_id: Mapped[Optional[str]] = mapped_column(String(36))
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    job_title: Mapped[str] = mapped_column(String(255), default="")
+    email: Mapped[str] = mapped_column(String(255))
 
 
 class ClientContactView(Base):

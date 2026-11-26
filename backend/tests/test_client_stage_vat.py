@@ -1,12 +1,12 @@
 """D-120: платежи клиента в этапах исполнения — в валюте договора с НДС; рубли без НДС — справочно; факт — в валюте этапа."""
-from tests.test_api_flow import client, _ok, H, MGR, CD  # noqa: F401
+from tests.test_api_flow import kp_rcpt, client, _ok, H, MGR, CD  # noqa: F401
 from tests.test_negotiation import _approved
 
 
 def test_client_stages_gross_in_contract_currency(client):
     did, vid, _ = _approved(client)
     v = next(x for x in _ok(client.get(f"/api/deals/{did}", headers=H(CD)))["variants"] if x["id"] == vid)
-    _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": ["a@example.com"]}))
+    _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": [kp_rcpt(client, did)]}))
     _ok(client.post(f"/api/deals/{did}/outcome", headers=H(CD), json={"outcome": "won", "reason": "цена"}))
     st = _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(CD)))["stages"]
     pay = [s for s in st if s["code"] in ("client_advance", "client_final")]

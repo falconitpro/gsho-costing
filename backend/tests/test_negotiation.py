@@ -1,5 +1,5 @@
 """Торги (D-074): шаги снижения цены и условий, пересчёт, редакция КП на шаге, отправка, конкуренты, аналитика, доступ КД / ЗГД."""
-from tests.test_api_flow import client, _ok, H, MGR, LOG, CD, FD, GD  # noqa: F401
+from tests.test_api_flow import kp_rcpt, client, _ok, H, MGR, LOG, CD, FD, GD  # noqa: F401
 
 
 def _approved(client, margin=20.0, currency=None):
@@ -84,10 +84,11 @@ def test_terms_step_changes_payments_in_kp(client):
 def test_send_step_kp_marks_sent(client):
     did, vid, _ = _approved(client)
     s = _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD), json={"prices": {vid: {"mode": "pct", "value": 1}}, "reason": "client"}), 201)
-    body = {"to": ["buyer@client.example"]}
+    em = kp_rcpt(client, did)
+    body = {"to": [em]}
     assert client.post(f"/api/deals/{did}/negotiation/steps/{s['id']}/send", headers=H(CD), json=body).status_code == 409   # почта не подключена
     out = _ok(client.post(f"/api/deals/{did}/negotiation/steps/{s['id']}/send", headers=H(CD), json={**body, "manual": True}))
-    assert out["sent_at"] and out["sent_to"] == ["buyer@client.example"]
+    assert out["sent_at"] and out["sent_to"] == [em]
     assert _ok(client.get(f"/api/deals/{did}", headers=H(CD)))["status"] == "kp_sent"
     _ok(client.put(f"/api/deals/{did}/negotiation/steps/{s['id']}/answer", headers=H(CD), json={"client_answer": "просит ещё 2 %"}))
     assert _ok(client.get(f"/api/deals/{did}/negotiation", headers=H(CD)))["steps"][0]["client_answer"] == "просит ещё 2 %"

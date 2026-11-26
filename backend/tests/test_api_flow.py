@@ -1081,3 +1081,13 @@ def test_factory_with_offers_is_archived_not_error(client):
         db.commit()
     r = _ok(client.delete(f"/api/refs/factories/{f['id']}", headers=H(GD)))
     assert r["archived"] and not r["deleted"]
+
+
+def kp_rcpt(c, did: str) -> str:
+    """D-188: адресат КП — только контакт клиента сделки из справочника. Заводит контакт с уникальной почтой и возвращает её."""
+    import uuid as _uuid
+    cid = _ok(c.get(f"/api/deals/{did}", headers=H("evgeniy@dobrov.pro")))["client_id"]
+    email = f"kp.{_uuid.uuid4().hex[:8]}@client.example"
+    _ok(c.post("/api/clients/contacts", headers=H("evgeniy@dobrov.pro"), json={"client_id": cid, "full_name": f"Адресат КП {email[3:11]}",
+                                                                            "work_email": email, "roles": ["purchasing"]}), 201)
+    return email

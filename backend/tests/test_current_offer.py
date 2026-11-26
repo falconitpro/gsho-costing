@@ -1,5 +1,5 @@
 """«Действующее предложение» (D-103): цена, которую видит клиент, и сверка мест хранения цены. Только чтение."""
-from tests.test_api_flow import client, _ok, H, MGR, LOG, CD  # noqa: F401
+from tests.test_api_flow import kp_rcpt, client, _ok, H, MGR, LOG, CD  # noqa: F401
 from tests.test_negotiation import _approved
 
 
@@ -62,7 +62,7 @@ def test_contract_change_keeps_negotiated_price(client):
     """D-104: при изменении условий контракта цена после торгов переходит в предложение и в новую версию."""
     did, vid, _ = _approved(client)
     s = _ok(client.post(f"/api/deals/{did}/negotiation/steps", headers=H(CD), json={"prices": {vid: {"mode": "pct", "value": 5}}, "reason": "client"}), 201)
-    _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": ["a@b.example"]}))
+    _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": [kp_rcpt(client, did)]}))
     assert _ok(client.post(f"/api/deals/{did}/outcome", headers=H(CD), json={"outcome": "won", "reason": "цена"}))["status"] == "contract"
     assert _ok(client.post(f"/api/deals/{did}/execution/terms-changed", headers=H(CD), json={"reason": "аванс 40 %"}))["status"] == "cd_approval"
     calc = _ok(client.get(f"/api/deals/{did}/calc", headers=H(CD)))

@@ -40,7 +40,20 @@ def init_db() -> None:
     add_missing_columns()
     from .services.change_events import ensure_guard
     ensure_guard(engine)   # реестр событий — только добавление (D-181)
+    backfill_contact_links()
     vat_22_once()
+
+
+def backfill_contact_links() -> None:
+    """Dev и стенд (D-188): у контактов без связи с клиентом — связь «свой клиент», как делает migrations/057 на рабочем сервере."""
+    if engine.dialect.name != "postgresql":
+        return
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO client_contact_links (id, contact_id, client_id, site_id, roles, is_primary, is_active, comment, created_by, created_at, updated_at) "
+            "SELECT gen_random_uuid()::text, c.id, c.client_id, c.site_id, c.roles, c.is_primary, c.is_active, '', c.created_by, now(), now() "
+            "FROM client_contacts c WHERE NOT EXISTS (SELECT 1 FROM client_contact_links l WHERE l.contact_id = c.id)"))
 
 
 def vat_22_once() -> None:

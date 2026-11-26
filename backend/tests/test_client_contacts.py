@@ -36,7 +36,7 @@ def test_crud_primary_and_validation(client):  # noqa: F811
     assert _new(client, cl["id"], full_name="   ").status_code == 422
     # перенос к другому клиенту — нельзя; в архив — можно
     r = client.put(f"/api/clients/contacts/{a['id']}", headers=H(MGR), json={**{k: a[k] for k in ("full_name", "work_email", "work_phone")}, "client_id": "other"})
-    assert r.status_code == 409
+    assert r.status_code == 409          # к клиенту без связи — только через «привязать»
     _ok(client.put(f"/api/clients/contacts/{a['id']}", headers=H(MGR), json={"client_id": cl["id"], "full_name": a["full_name"], "is_active": False}))
     assert a["id"] not in [x["id"] for x in _ok(client.get(f"/api/clients/contacts?client_id={cl['id']}", headers=H(MGR)))["items"]]
 
@@ -88,9 +88,10 @@ def test_views_journal_and_no_pd_in_audit(client):  # noqa: F811
     assert client.get("/api/clients/contacts/views", headers=H(MGR)).status_code == 403
 
 
-def test_delete_on_request_removes_everywhere(client):  # noqa: F811
+def test_delete_on_request_anonymizes_everywhere(client):  # noqa: F811
+    """D-188: удаление по запросу — обезличивание: запись и id остаются, персональные данные стёрты, связи закрыты."""
     from app.db import SessionLocal
-    from app.models import AuditLog, Client, ClientContact
+    from app.models import AuditLog, Client, ClientContact, ClientContactLink
     cl = _client(client)
     c = _ok(_new(client, cl["id"]), 201)
     with SessionLocal() as db:
@@ -100,11 +101,16 @@ def test_delete_on_request_removes_everywhere(client):  # noqa: F811
     assert client.post(f"/api/clients/contacts/{c['id']}/delete", headers=H(MGR), json={"reason": ""}).status_code == 422
     _ok(client.post(f"/api/clients/contacts/{c['id']}/delete", headers=H(MGR), json={"reason": "запрос субъекта от 26.11"}))
     with SessionLocal() as db:
-        assert db.get(ClientContact, c["id"]) is None
+        x = db.get(ClientContact, c["id"])
+        assert x is not None and x.anonymized_at is not None
+        assert (x.full_name, x.work_email, x.work_phone, x.messenger, x.extra_emails) == ("Обезличено по запросу", "", "", "", [])
+        assert all(not l.is_active for l in db.query(ClientContactLink).filter(ClientContactLink.contact_id == c["id"]).all())
         legacy = db.get(Client, cl["id"]).contacts
         assert not [x for x in legacy if x.get("email") == c["work_email"]] and [x for x in legacy if x.get("email") == "keep@x.example"]
-        log = db.query(AuditLog).filter(AuditLog.entity_id == c["id"], AuditLog.action == "delete").one()
+        log = db.query(AuditLog).filter(AuditLog.entity_id == c["id"], AuditLog.action == "anonymize").one()
         assert log.comment == "запрос субъекта от 26.11" and c["work_email"] not in repr((log.before, log.after))
+    assert c["id"] not in [x["id"] for x in _ok(client.get(f"/api/clients/contacts?client_id={cl['id']}&include_archived=true", headers=H(MGR)))["items"]]
+    assert client.put(f"/api/clients/contacts/{c['id']}", headers=H(MGR), json={"client_id": cl["id"], "full_name": "Вернуть"}).status_code == 409
 
 
 def test_consent_required_switch(client):  # noqa: F811

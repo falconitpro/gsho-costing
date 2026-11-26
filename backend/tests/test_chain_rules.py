@@ -113,7 +113,7 @@ def test_rules_route_requests_and_visa_before_kp():
                 with pytest.raises(HTTPException) as e:
                     require_chain_visa(db, db.get(Deal, did))
                 assert e.value.status_code == 409
-            assert c.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": ["a@b.c"], "sent_via": "manual"}).status_code == 409
+            assert c.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": ["mech@rudnik.example"], "sent_via": "manual"}).status_code == 409
             assert c.post(f"/api/deals/{did}/chain/approve", headers=H(CD)).status_code == 403
             ok = c.post(f"/api/deals/{did}/chain/approve", headers=H(FD)).json()
             assert ok["approved"] and not ok["needed"]

@@ -578,9 +578,7 @@ def _finalize_approval(db: Session, deal: Deal, user_id: str) -> DealVersion:
         ver.kp_path = stored.path
         db.add(Attachment(deal_id=deal.id, folder="05_kp", entity="version", entity_id=ver.id, file_name=os.path.basename(kp_path),
                           storage_path=stored.path, storage_url=stored.url, sha256=stored.sha256, size=stored.size, uploaded_by=user_id))
-        from ..adapters.mail import OutgoingMail
-        adapters.mail().create_draft(OutgoingMail(to=[c.get("email", "") for c in (deal.client.contacts or [])], subject=f"Коммерческое предложение {deal.number}",
-                                                  body_html="<p>Добрый день! Направляем коммерческое предложение.</p>", attachments=[kp_path]))
+        # D-188: черновик письма всем контактам клиента больше не создаётся — адресатов выбирает менеджер при отправке
     except Exception as e:
         audit(db, user_id, deal.id, "kp", ver.id, "kp_failed", comment=str(e)[:500])
     return ver
@@ -855,14 +853,28 @@ def kp_file(deal_id: str, format: str = "docx", original: bool = False, db: Sess
 
 @router.get("/kp/recipients")
 def kp_recipients(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    """Получатели КП: контакты клиента с e-mail (отмечены те, что относятся к объекту сделки)."""
+    """Адресаты КП (D-188): контакты клиента из единого справочника с адресами — для явного выбора; ничего не отмечено."""
+    from ..services import kp_dispatch as kd
     deal = get_deal_or_404(db, deal_id, user)
-    out = []
-    for c in (deal.client.contacts if deal.client else []) or []:
-        if c.get("email"):
-            out.append({"name": c.get("name") or "", "position": c.get("position") or "", "email": c["email"], "phone": c.get("phone") or ""})
-    return {"recipients": out, "mail_configured": _mail_provider() != "console", "subject": f"Коммерческое предложение {deal.number}",
-            "body": "Добрый день!\n\nНаправляем коммерческое предложение во вложении. Будем рады ответить на вопросы.\n\nС уважением,"}
+    cand = kd.candidates(db, deal)
+    return {"candidates": cand, "recipients": [{"name": c["name"], "position": c["position"], "email": e, "phone": c["phone"]} for c in cand for e in c["emails"]],
+            "mail_configured": _mail_provider() != "console", "subject": f"Коммерческое предложение {deal.number}", "client_id": deal.client_id,
+            "body": "Добрый день!\n\nНаправляем коммерческое предложение во вложении. Будем рады ответить на вопросы.\n\nС уважением,",
+            "dispatches": kd.history(db, deal.id)}
+
+
+class RecipientsIn(BaseModel):
+    to: list[str] = []
+    cc: list[str] = []
+
+
+@router.post("/kp/recipients/preview")
+def kp_recipients_preview(deal_id: str, body: RecipientsIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Проверка адресатов без отправки: кто, адрес, организация, роль, Кому / Копия."""
+    from ..services import kp_dispatch as kd
+    deal = get_deal_or_404(db, deal_id, user)
+    items = kd.resolve(db, deal, body.to, body.cc)
+    return {"client_name": deal.client.name if deal.client else "", "items": items}
 
 
 class KpSendIn(BaseModel):
@@ -871,17 +883,23 @@ class KpSendIn(BaseModel):
     subject: str = ""
     body: str = ""
     format: str = "pdf"            # pdf | docx | both
+    dispatch_key: str = ""         # D-188: повтор с тем же ключом не отправляет письмо второй раз
 
 
 @router.post("/kp/send")
 def kp_send(deal_id: str, body: KpSendIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """«Отправить клиенту»: письмо из системы с КП во вложении выбранным получателям и отметка «КП отправлено»."""
     import html
-    import re
     from ..adapters.mail import OutgoingMail
+    from ..services import kp_dispatch as kd
     from .deals import mark_kp_sent
     deal = get_deal_or_404(db, deal_id, user)
     _kp_access(deal, user)
+    prev = kd.existing(db, body.dispatch_key)
+    if prev is not None and prev.deal_id == deal.id:   # повтор того же нажатия — без второго письма
+        from ..models import KpDispatchRecipient
+        sent = [r.email for r in db.scalars(select(KpDispatchRecipient).where(KpDispatchRecipient.dispatch_id == prev.id).order_by(KpDispatchRecipient.position)).all()]
+        return {"status": deal.status.value, "sent_to": sent, "message_id": prev.message_id, "provider": _mail_provider(), "repeated": True}
     from ..services.mirror_offers import require_chain_visa
     require_chain_visa(db, deal)
     ver = _approved_version(db, deal)
@@ -889,10 +907,9 @@ def kp_send(deal_id: str, body: KpSendIn, db: Session = Depends(get_db), user: C
         raise HTTPException(409, "Почта не подключена — выгрузите КП и отправьте из своей почты, затем отметьте «КП отправлено вручную»")
     if deal.status != DealStatus.APPROVED:
         raise HTTPException(409, "КП уже отправлено — повторная отправка без смены статуса: выгрузите файл и отправьте вручную")
-    to = [a.strip() for a in body.to + body.cc if a and a.strip()]
-    bad = [a for a in to if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", a)]
-    if not body.to or bad:
-        raise HTTPException(422, "Укажите получателей с корректными e-mail" + (f": {', '.join(bad)}" if bad else ""))
+    items = kd.resolve(db, deal, body.to, body.cc)
+    to = [i["email"] for i in items if i["kind"] == "to"]
+    cc = [i["email"] for i in items if i["kind"] == "cc"]
     last = _last_revision(db, deal, ver)
     docx = (adapters.storage().download(last.kp_path, os.path.join(tempfile.mkdtemp(), os.path.basename(last.kp_path))) if last
             else _kp_local(db, deal, ver))
@@ -901,15 +918,16 @@ def kp_send(deal_id: str, body: KpSendIn, db: Session = Depends(get_db), user: C
     subject = body.subject or f"Коммерческое предложение {deal.number}"
     html_body = "".join(f"<p>{html.escape(par).replace(chr(10), '<br>')}</p>" for par in (body.body or "").split("\n\n"))
     try:
-        msg_id = adapters.mail().send(OutgoingMail(to=to, subject=subject, body_html=html_body, attachments=files, sender=user.email or ""))
+        msg_id = adapters.mail().send(OutgoingMail(to=to, cc=cc, subject=subject, body_html=html_body, attachments=files, sender=user.email or ""))
     except Exception as e:
         audit(db, user.id, deal.id, "kp", ver.id, "kp_send_failed", comment=str(e)[:500])
         db.commit()
         raise HTTPException(502, f"Письмо не отправлено: {e}")
-    mark_kp_sent(db, deal, user, to, "система", subject=subject, body_text=f"{body.body}\n\nВложение: {', '.join(os.path.basename(f) for f in files)}")
-    audit(db, user.id, deal.id, "kp", ver.id, "kp_sent_from_system", after={"to": to, "format": body.format, "message_id": msg_id})
+    mark_kp_sent(db, deal, user, to + cc, "система", subject=subject, body_text=f"{body.body}\n\nВложение: {', '.join(os.path.basename(f) for f in files)}")
+    kd.record(db, deal, items, "system", user.id, subject=subject, message_id=msg_id, version_id=ver.id, key=body.dispatch_key)
+    audit(db, user.id, deal.id, "kp", ver.id, "kp_sent_from_system", after={"to": to, "cc": cc, "format": body.format, "message_id": msg_id})
     db.commit()
-    return {"status": deal.status.value, "sent_to": to, "message_id": msg_id, "provider": _mail_provider()}
+    return {"status": deal.status.value, "sent_to": to + cc, "message_id": msg_id, "provider": _mail_provider()}
 
 
 def _mail_provider() -> str:

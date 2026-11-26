@@ -135,6 +135,16 @@ def H(email):
     return Http(email)
 
 
+
+def kp_rcpt(did):
+    """D-188: адресат КП — только контакт клиента сделки из справочника; заводит его один раз на клиента."""
+    cid = H(GD).get(f"/api/deals/{did}")["client_id"]
+    em = f"acc.{cid[:8]}@example.com"
+    have = H(GD).get(f"/api/clients/contacts?client_id={cid}")["items"]
+    if not any(em in (c.get("emails") or []) for c in have):
+        H(GD).post("/api/clients/contacts", {"client_id": cid, "full_name": "Закупщик (приёмка)", "work_email": em, "roles": ["purchasing"]})
+    return em
+
 def pult(page):
     page.goto(BASE + "/")
     page.wait_for_selector(".wp-exec-queue", timeout=45000)
@@ -224,7 +234,7 @@ def s01(_):
     X.golden["before"] = {k["key"]: k["value"] for k in e0["kpis"]}
     X.golden["active_before"] = kpi(e0, "active")
     did = _approved_deal("CNY", 17.5)
-    H(MGR).post(f"/api/deals/{did}/kp-sent", {"recipients": ["client@example.com"]})
+    H(MGR).post(f"/api/deals/{did}/kp-sent", {"recipients": [kp_rcpt(did)]})
     H(CD).post(f"/api/deals/{did}/outcome", {"outcome": "won", "reason": "цена"})
     stages = H(CD).get(f"/api/deals/{did}/execution/stages")["stages"]
     pays = [s for s in stages if s["code"] in ("client_advance", "client_final")]

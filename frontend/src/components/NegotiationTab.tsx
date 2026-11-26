@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import KpRecipients, { newDispatchKey, type Candidate, type Picked } from "./KpRecipients";
 import { api, fmtDate, fmtRub } from "../api";
 import { EVENT_TITLES, type PaymentLine, type Variant } from "../types";
 import CompetitorsTab from "./CompetitorsTab";
@@ -305,8 +306,9 @@ function PriceChart({ steps, first }: { steps: Step[]; first: number }) {
 /** История: первая цена КП и шаги — цена, изменение, маржа, условия, КП (Word / PDF), отправка, ответ клиента. */
 function History({ d, dealId, reload, fx }: { d: Data; dealId: string; reload: () => void; fx: Fx }) {
   const [send, setSend] = useState<string | null>(null);
-  const [rcp, setRcp] = useState<{ recipients: { name: string; email: string }[]; mail_configured: boolean; body: string } | null>(null);
-  const [to, setTo] = useState("");
+  const [rcp, setRcp] = useState<{ candidates: Candidate[]; client_id: string | null; mail_configured: boolean; body: string } | null>(null);
+  const [picked, setPicked] = useState<{ p: Picked; ok: boolean }>({ p: { to: [], cc: [] }, ok: false });   // D-188: без заранее отмеченных
+  const [key, setKey] = useState("");
   const [text, setText] = useState("");
   const [ans, setAns] = useState<Record<string, string>>({});
   const [e, setE] = useState("");
@@ -317,9 +319,10 @@ function History({ d, dealId, reload, fx }: { d: Data; dealId: string; reload: (
   const closeReview = (id: string) => api.post(`/api/deals/${dealId}/negotiation/steps/${id}/review/close`, { client_answer: ans[id] ?? "" }).then(reload).catch((x) => setE(x.message));
   const open = (id: string) => {
     setSend(id); setE("");
-    api.get<typeof rcp>(`/api/deals/${dealId}/kp/recipients`).then((r) => { setRcp(r); setTo((r?.recipients || []).map((x) => x.email).join(", ")); setText(r?.body || ""); }).catch(() => setRcp(null));
+    setPicked({ p: { to: [], cc: [] }, ok: false }); setKey(newDispatchKey());
+    api.get<typeof rcp>(`/api/deals/${dealId}/kp/recipients`).then((r) => { setRcp(r); setText(r?.body || ""); }).catch(() => setRcp(null));
   };
-  const doSend = (id: string, manual: boolean) => api.post(`/api/deals/${dealId}/negotiation/steps/${id}/send`, { to: to.split(/[,;\s]+/).filter(Boolean), body: text, manual })
+  const doSend = (id: string, manual: boolean) => api.post(`/api/deals/${dealId}/negotiation/steps/${id}/send`, { to: picked.p.to, cc: picked.p.cc, body: text, manual, dispatch_key: key })
     .then(() => { setSend(null); reload(); }).catch((x) => setE(x.message));
   const saveAns = (id: string) => api.put(`/api/deals/${dealId}/negotiation/steps/${id}/answer`, { client_answer: ans[id] ?? "" }).then(reload).catch((x) => setE(x.message));
   const first = d.analytics.first_rub;
@@ -359,11 +362,11 @@ function History({ d, dealId, reload, fx }: { d: Data; dealId: string; reload: (
             {Object.entries(s.terms).map(([vid, t]) => <div key={vid} className="muted ng-tl-line">{t.client_payments && <>оплата: {pay(t.client_payments)}</>}{t.delivery_term && <> · срок: {t.delivery_term}</>}</div>)}
             {s.comment && <div className="ng-tl-line">{s.comment}</div>}
             {send === s.id && <div className="ng-send">
-              <input value={to} placeholder="e-mail получателей через запятую" onChange={(x) => setTo(x.target.value)} />
+              {rcp && <KpRecipients dealId={dealId} candidates={rcp.candidates} clientId={rcp.client_id} onChange={(p, ok) => setPicked({ p, ok })} />}
               <textarea rows={3} value={text} onChange={(x) => setText(x.target.value)} />
               <div className="row" style={{ gap: 8 }}>
-                <button className="btn" disabled={!rcp?.mail_configured || !to.trim()} title={rcp?.mail_configured ? "" : "почта не подключена"} onClick={() => doSend(s.id, false)}>Отправить из системы (PDF)</button>
-                <button className="btn ghost" disabled={!to.trim()} onClick={() => doSend(s.id, true)}>Отправил своей почтой — отметить</button>
+                <button className="btn" disabled={!rcp?.mail_configured || !picked.ok} title={rcp?.mail_configured ? "" : "почта не подключена"} onClick={() => doSend(s.id, false)}>Отправить из системы (PDF)</button>
+                <button className="btn ghost" disabled={!picked.ok} onClick={() => doSend(s.id, true)}>Отправил своей почтой — отметить</button>
                 <button className="btn ghost" onClick={() => setSend(null)}>Отмена</button></div>
               {!rcp?.mail_configured && <span className="muted" style={{ fontSize: 12 }}>Почта не подключена: скачайте PDF или Word выше, отправьте и отметьте отправку.</span>}</div>}
             <div className="ng-answer"><input placeholder="ответ клиента: принял / просит ещё / ушёл к конкуренту…" value={ans[s.id] ?? s.client_answer} disabled={!d.can_edit}
