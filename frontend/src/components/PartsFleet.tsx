@@ -11,6 +11,7 @@ type Kit = { id: string; name: string; interval_hours: number; source: string; a
 type Machine = { id: string; deal_id: string | null; client_id: string; client_name: string; deal_number: string; equipment_model_id: string | null; other_model_id: string | null;
   manufacturer: string; model: string; serial: string; commissioned_on: string | null; site: string; hours_per_day: number | null; comment: string; active: boolean;
   site_id?: string | null; site_name?: string; origin?: string; origin_title?: string; warranty_until?: string | null;
+  parties?: Party[]; client_roles?: string[]; client_is_main?: boolean;
   forecast: Forecast; readings?: { id: string; on: string; hours: number; comment: string }[]; kits?: Kit[];
   requests?: { id: string; number: string; created_at: string }[] };
 type Reminder = { id: string; machine_id: string; to_hours: number; due_on: string | null; manager_name: string; machine: Machine };
@@ -22,6 +23,10 @@ const EMPTY = { client_id: "", equipment_model_id: "", other_manufacturer: "", o
 // D-182: происхождение машины и площадка из справочника — только в новом виде
 const ORIGINS: [string, string][] = [["unknown", "Не указано"], ["berghaus", "Поставка BERGHAUS"], ["third_party", "Чужая поставка"], ["rental", "Аренда"], ["other", "Другое"]];
 type SiteRef = { id: string; name: string; site_type_title: string };
+// D-186 (K-3): стороны по машине — собственник, лизингодатель, эксплуатант; главная — на неё сервис и счета
+type Party = { id: string; client_id: string; client_name: string; role: string; role_title: string; valid_from: string | null; valid_to: string | null;
+  is_primary: boolean; active: boolean; comment: string };
+const PARTY_ROLES: [string, string][] = [["owner", "Собственник"], ["lessor", "Лизингодатель"], ["operator", "Эксплуатант"], ["other", "Другое"]];
 
 export default function PartsFleet({ me, fixedClient }: { me: Me; fixedClient?: string }) {
   const edit = me.roles.some((r) => ["manager", "service_head", "cd", "gd", "admin"].includes(r.code));
@@ -100,7 +105,7 @@ export default function PartsFleet({ me, fixedClient }: { me: Me; fixedClient?: 
           <thead><tr><th>Клиент</th><th>Машина</th><th>Зав. №</th><th>Место</th><th className="num">Наработка, м·ч</th><th className="num">м·ч/день</th><th>Следующее ТО</th></tr></thead>
           <tbody>{list.map((m) => (
             <tr key={m.id} style={{ cursor: "pointer", background: cur?.id === m.id ? "var(--accent-soft)" : undefined }} onClick={() => open(m.id)}>
-              <td>{m.client_name}</td><td>{m.manufacturer} {m.model}{m.deal_number && <div className="muted" style={{ fontSize: 11 }}>сделка {m.deal_number}</div>}</td>
+              <td>{m.client_name}{nu && fixedClient && m.client_roles && m.client_roles.length > 0 && !m.client_is_main && <div className="muted cs-note">{m.client_roles.join(", ").toLowerCase()} · главный — {m.client_name}</div>}</td><td>{m.manufacturer} {m.model}{m.deal_number && <div className="muted" style={{ fontSize: 11 }}>сделка {m.deal_number}</div>}</td>
               <td>{m.serial || <span className="muted">—</span>}</td><td>{nu ? m.site_name ?? m.site : m.site}</td><td className="num">{m.forecast.hours_now ?? "—"}</td><td className="num">{m.forecast.per_day ?? "—"}</td>
               <td>{m.forecast.next ? `${m.forecast.next.to_hours} м·ч${m.forecast.next.due_on ? ` ≈ ${fmtDate(m.forecast.next.due_on)}` : ""}` : <span className="muted">—</span>}</td></tr>))}
             {list.length === 0 && <tr><td colSpan={7} className="muted">Машин нет</td></tr>}</tbody>
@@ -137,12 +142,13 @@ export default function PartsFleet({ me, fixedClient }: { me: Me; fixedClient?: 
             <button className="btn ghost" onClick={() => setForm(null)}>отмена</button></div>
         </div>)}
 
-      {cur && !form && <MachineCard m={cur} edit={edit} act={act} nu={nu} onEdit={() => startEdit(cur)} onKit={() => kitRequest(cur)} />}
+      {cur && !form && <MachineCard m={cur} edit={edit} act={act} nu={nu} clients={clients} onEdit={() => startEdit(cur)} onKit={() => kitRequest(cur)} />}
     </>
   );
 }
 
-function MachineCard({ m, edit, act, nu, onEdit, onKit }: { m: Machine; edit: boolean; act: <T>(fn: () => Promise<T>, ok?: string) => Promise<T | undefined>; nu?: boolean; onEdit: () => void; onKit: () => void }) {
+function MachineCard({ m, edit, act, nu, clients, onEdit, onKit }: { m: Machine; edit: boolean; act: <T>(fn: () => Promise<T>, ok?: string) => Promise<T | undefined>; nu?: boolean;
+  clients?: Ref[]; onEdit: () => void; onKit: () => void }) {
   const [hrs, setHrs] = useState({ on: new Date().toISOString().slice(0, 10), hours: "", comment: "" });
   const [kit, setKit] = useState<{ id?: string; name: string; interval_hours: string; text: string } | null>(null);
   const [parts, setParts] = useState<{ id: string; article: string; name_ru: string; assembly: string; stock_total: number }[] | null>(null);
@@ -167,6 +173,7 @@ function MachineCard({ m, edit, act, nu, onEdit, onKit }: { m: Machine; edit: bo
       </div>
       {edit && fc.next && <button className="btn" style={{ marginTop: 6 }} onClick={onKit}>Заявка на ТО-комплект</button>}
 
+      {nu && m.parties && <Parties m={m} edit={edit} act={act} clients={clients || []} />}
       <h3>Наработка</h3>
       {edit && <div className="row" style={{ flexWrap: "wrap" }}>
         <input type="date" value={hrs.on} onChange={(e) => setHrs({ ...hrs, on: e.target.value })} />
@@ -222,4 +229,53 @@ function MachineDocs({ id }: { id: string }) {
     {d.media.length > 0 && <div className="row" style={{ flexWrap: "wrap", gap: 6, marginTop: 4, fontSize: 12 }}>Фото / видео приёмки:
       {d.media.map((x, i) => <a key={i} href={x.url} target="_blank" rel="noreferrer">{x.kind === "video" ? "🎬" : "📷"} {x.name}</a>)}</div>}
   </>);
+}
+
+/** D-186 (K-3): владение и эксплуатация машины — действующие стороны и история передач. Только новый вид. */
+function Parties({ m, edit, act, clients }: { m: Machine; edit: boolean; act: <T>(fn: () => Promise<T>, ok?: string) => Promise<T | undefined>; clients: Ref[] }) {
+  const [hist, setHist] = useState(false);
+  const [add, setAdd] = useState<{ client_id: string; role: string; valid_from: string; valid_to: string; make_primary: boolean } | null>(null);
+  const ps = m.parties || [];
+  const cur = ps.filter((p) => p.active);
+  const old = ps.filter((p) => !p.active);
+  const period = (p: Party) => [p.valid_from && `с ${fmtDate(p.valid_from)}`, p.valid_to && `по ${fmtDate(p.valid_to)}`].filter(Boolean).join(" ");
+  const base = `/api/parts/fleet/machines/${m.id}/parties`;
+  return (
+    <section className="cs-block" aria-label="Владение и эксплуатация">
+      <div className="cs-head">
+        <h3>Владение и эксплуатация</h3>
+        {old.length > 0 && <label className="row muted"><input type="checkbox" checked={hist} onChange={(e) => setHist(e.target.checked)} /> история · {old.length}</label>}
+        {edit && !add && <button className="btn add" onClick={() => setAdd({ client_id: "", role: "operator", valid_from: new Date().toISOString().slice(0, 10), valid_to: "", make_primary: false })}>Сторона</button>}
+      </div>
+      <ul className="cs-list">
+        {[...cur, ...(hist ? old : [])].map((p) => (
+          <li key={p.id} className={"cs-item" + (p.active ? "" : " cs-archived")}>
+            <div className="cs-main">
+              <b>{p.client_name}</b> <span className="badge">{p.role_title}</span>{p.is_primary && <span className="badge ok">главный — сервис и счета</span>}{!p.active && <span className="badge">завершено</span>}
+              <div className="muted">{[period(p), p.comment].filter(Boolean).join(" · ") || "срок не указан"}</div>
+            </div>
+            {edit && p.active && !p.is_primary && (
+              <div className="cs-act">
+                <button className="btn ghost" onClick={() => act(() => api.post<Machine>(`${base}/${p.id}/primary`), "Главная сторона изменена: сервис и счета — на неё")}>сделать главным</button>
+                <button className="btn ghost" onClick={() => act(() => api.post<Machine>(`${base}/${p.id}/close`, {}), "Запись завершена, она осталась в истории")}>завершить</button>
+              </div>)}
+          </li>))}
+      </ul>
+      {add && (
+        <div className="cs-form">
+          <h4>Новая сторона по машине</h4>
+          <div className="grid cols-3">
+            <label className="f">Клиент *<select value={add.client_id} onChange={(e) => setAdd({ ...add, client_id: e.target.value })}><option value="">— выберите —</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+            <label className="f">Роль<select value={add.role} onChange={(e) => setAdd({ ...add, role: e.target.value })}>{PARTY_ROLES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+            <label className="f cs-check"><span><input type="checkbox" checked={add.make_primary} onChange={(e) => setAdd({ ...add, make_primary: e.target.checked })} /> сделать главным (сервис и счета)</span></label>
+            <label className="f">С<input type="date" value={add.valid_from} onChange={(e) => setAdd({ ...add, valid_from: e.target.value })} /></label>
+            <label className="f">По (если известно)<input type="date" value={add.valid_to} onChange={(e) => setAdd({ ...add, valid_to: e.target.value })} /></label>
+          </div>
+          <div className="row">
+            <button className="btn" disabled={!add.client_id} onClick={() => act(() => api.post<Machine>(base, { ...add, valid_from: add.valid_from || null, valid_to: add.valid_to || null }), "Сторона добавлена").then((r) => { if (r) setAdd(null); })}>Добавить</button>
+            <button className="btn ghost" onClick={() => setAdd(null)}>отмена</button>
+          </div>
+        </div>)}
+    </section>
+  );
 }

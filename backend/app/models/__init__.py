@@ -2305,6 +2305,22 @@ class ClientMachine(TimestampMixin, Base):
     warranty_until: Mapped[Optional[date]] = mapped_column(Date)
 
 
+class MachineParty(TimestampMixin, Base):
+    """Сторона по машине (D-186, K-3; решение 2 владельца): собственник, лизингодатель, эксплуатант — с датами «с — по».
+    Главная действующая сторона одна; её клиент = client_machines.client_id (сервис и счета). Закрытые записи — история передач."""
+    __tablename__ = "machine_parties"
+    __table_args__ = (Index("ix_machine_parties_machine_active", "machine_id", "valid_to"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    machine_id: Mapped[str] = mapped_column(ForeignKey("client_machines.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), index=True)
+    role: Mapped[str] = mapped_column(String(16), default="owner")           # owner | lessor | operator | other
+    valid_from: Mapped[Optional[date]] = mapped_column(Date)
+    valid_to: Mapped[Optional[date]] = mapped_column(Date)                    # пусто — действует
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
 class MachineHours(Base):
     """Замер наработки (моточасы) — сервис или менеджер со слов клиента."""
     __tablename__ = "machine_hours"

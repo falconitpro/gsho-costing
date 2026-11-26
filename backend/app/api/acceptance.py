@@ -240,12 +240,14 @@ def _to_park(db: Session, u: AcceptanceUnit, pos: Position, user: CurrentUser) -
     if m is None:
         f = db.get(Factory, pos.factory_id)
         m = ClientMachine(client_id=deal.client_id, deal_id=deal.id, position_id=pos.id, unit_no=u.unit_no, equipment_model_id=pos.equipment_model_id,
-                          manufacturer=pos.trademark or ((f.short_name or f.name) if f else ""), model=pos.model, created_by=user.id)
+                          manufacturer=pos.trademark or ((f.short_name or f.name) if f else ""), model=pos.model, created_by=user.id, origin="berghaus")
         db.add(m)
     m.serial = u.serial
     m.comment = f"принята на заводе {date.today():%d.%m.%Y}" + ("" if not m.comment or m.comment.startswith("из сделки") else f"; {m.comment}")
     db.flush()
     u.machine_id = m.id
+    from ..services.fleet_parties import ensure_primary
+    ensure_primary(db, m)   # D-186: главная сторона — клиент сделки
 
 
 def _mark_stage(db: Session, deal: Deal, pos: Position, user: CurrentUser) -> bool:
