@@ -2247,6 +2247,40 @@ class ClientSite(TimestampMixin, Base):
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
 
 
+class ClientContact(TimestampMixin, Base):
+    """Контактное лицо клиента (D-184, K-1). Персональные данные: только рабочие телефон и почта (решение 1, D-180);
+    просмотры — в client_contact_views; удаление по запросу — без следов значений в журнале."""
+    __tablename__ = "client_contacts"
+    __table_args__ = (Index("ix_client_contacts_client_active", "client_id", "is_active"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    site_id: Mapped[Optional[str]] = mapped_column(ForeignKey("client_sites.id", ondelete="SET NULL"), index=True)
+    full_name: Mapped[str] = mapped_column(String(255))
+    position: Mapped[str] = mapped_column(String(255), default="")
+    department: Mapped[str] = mapped_column(String(255), default="")
+    roles: Mapped[list[str]] = mapped_column(JSONType, default=list)        # CONTACT_ROLES в api/client_contacts.py
+    work_phone: Mapped[str] = mapped_column(String(64), default="")
+    work_email: Mapped[str] = mapped_column(String(255), default="")
+    messenger: Mapped[str] = mapped_column(String(255), default="")          # рабочий мессенджер (Telegram, WeCom…)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    consent_on: Mapped[Optional[date]] = mapped_column(Date)                 # отметка о согласии — когда включена в настройках
+    consent_source: Mapped[str] = mapped_column(String(255), default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class ClientContactView(Base):
+    """Журнал просмотров контактов клиентов (152-ФЗ, D-184): кто и когда открыл контакты какого клиента. Только добавление."""
+    __tablename__ = "client_contact_views"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+    client_id: Mapped[str] = mapped_column(String(36), index=True)
+    contact_id: Mapped[Optional[str]] = mapped_column(String(36))           # пусто — просмотр списка контактов клиента
+    kind: Mapped[str] = mapped_column(String(16), default="list")           # list | card | export
+
+
 class ClientMachine(TimestampMixin, Base):
     """Машина клиента: из закрытой сделки ГШО (по позиции и номеру единицы) или заведённая вручную."""
     __tablename__ = "client_machines"
