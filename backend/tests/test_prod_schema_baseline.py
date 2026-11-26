@@ -35,7 +35,8 @@ def _psql(url, *args, stdin=None):
     assert r.returncode == 0, f"psql {' '.join(args)}: {r.stderr[-2000:]}"
 
 
-@pytest.mark.skipif(not shutil.which("psql"), reason="нет psql")
+# в CI не пропускается: без psql тест упадёт, а не тихо пропустится
+@pytest.mark.skipif(not shutil.which("psql") and not os.environ.get("CI"), reason="нет psql (локально)")
 def test_prod_baseline_plus_new_migrations_matches_code():
     from scripts.schema_check import collect
 
