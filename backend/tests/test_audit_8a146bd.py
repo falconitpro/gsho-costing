@@ -1,7 +1,7 @@
 """D-157: исправления по аудиту версии 8a146bd (AUD-01…06), закрепление сотрудника за направлением, замещение и несколько ролей."""
 from datetime import date, timedelta
 
-from tests.test_api_flow import client, _ok, H, MGR, CD  # noqa: F401
+from tests.test_api_flow import kp_rcpt, client, _ok, H, MGR, CD  # noqa: F401
 from tests.test_negotiation import _approved
 from tests.test_workplace import FD, GD
 
@@ -61,7 +61,7 @@ def test_aud03_each_overdue_payment_is_own_signal_and_aud06_partial(client):
     from app.db import SessionLocal
     from app.models import ExecutionStage
     did, _vid, _ = _approved(client)
-    _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": ["a@example.com"]}))
+    _ok(client.post(f"/api/deals/{did}/kp-sent", headers=H(MGR), json={"recipients": [kp_rcpt(client, did)]}))
     _ok(client.post(f"/api/deals/{did}/outcome", headers=H(CD), json={"outcome": "won", "reason": "цена"}))
     _ok(client.get(f"/api/deals/{did}/execution/stages", headers=H(CD)))
     with SessionLocal() as db:

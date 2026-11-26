@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api";
-
-type Rcpt = { name: string; position: string; email: string };
+import KpRecipients, { newDispatchKey, type Candidate, type Picked } from "./KpRecipients";
 
 /** КП в карточке сделки: «Сформировать КП», «Выгрузить КП» (Word / PDF), «Отправить клиенту» (письмо из системы, отметка «КП отправлено»). */
 export default function KpActions({ dealId, status, canAct, canMark = canAct, onDone }: { dealId: string; status: string; canAct: boolean; canMark?: boolean; onDone: () => void }) {
   const [open, setOpen] = useState(false);
-  const [rcpts, setRcpts] = useState<Rcpt[]>([]);
-  const [sel, setSel] = useState<Set<string>>(new Set());
-  const [extra, setExtra] = useState("");
+  const [cand, setCand] = useState<Candidate[]>([]);   // D-188: контакты клиента из справочника, ничего не отмечено
+  const [clientId, setClientId] = useState<string | null>(null);
+  const [picked, setPicked] = useState<{ p: Picked; ok: boolean }>({ p: { to: [], cc: [] }, ok: false });
+  const [key, setKey] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [format, setFormat] = useState("pdf");
@@ -25,25 +25,27 @@ export default function KpActions({ dealId, status, canAct, canMark = canAct, on
     catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
   }
   async function openSend() {
-    const r = await api.get<{ recipients: Rcpt[]; subject: string; body: string }>(`/api/deals/${dealId}/kp/recipients`);
-    setRcpts(r.recipients); setSel(new Set(r.recipients.slice(0, 1).map((x) => x.email))); setSubject(r.subject); setBody(r.body); setOpen(true); setMsg("");
+    const r = await api.get<{ candidates: Candidate[]; subject: string; body: string; client_id: string | null }>(`/api/deals/${dealId}/kp/recipients`);
+    setCand(r.candidates); setClientId(r.client_id); setPicked({ p: { to: [], cc: [] }, ok: false }); setKey(newDispatchKey());
+    setSubject(r.subject); setBody(r.body); setOpen(true); setMsg("");
   }
   async function send() {
-    const to = [...sel, ...extra.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean)];
     setBusy(true);
     try {
-      const r = await api.post<{ sent_to: string[]; provider: string }>(`/api/deals/${dealId}/kp/send`, { to, subject, body, format });
-      setMsg(`КП отправлено: ${r.sent_to.join(", ")}${r.provider === "console" ? " (почта на сервере не подключена — письмо записано в журнал, не доставлено)" : ""}`);
+      const r = await api.post<{ sent_to: string[]; provider: string }>(`/api/deals/${dealId}/kp/send`, { to: picked.p.to, cc: picked.p.cc, subject, body, format, dispatch_key: key });
+      setMsg(`КП отправлено: ${r.sent_to.join(", ")}`);
       setOpen(false); onDone();
     } catch (e) { const d = (e as ApiError).detail as { message?: string } | string; setMsg(typeof d === "string" ? d : d?.message || (e as Error).message); }
     finally { setBusy(false); }
   }
 
   async function markSent() {
-    const to = [...sel, ...extra.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean)];
     setBusy(true);
-    try { await api.post(`/api/deals/${dealId}/kp-sent`, { recipients: to, sent_via: "outlook" }); setMsg(`Отмечено: КП отправлено (${to.join(", ")})`); setOpen(false); onDone(); }
-    catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+    try {
+      await api.post(`/api/deals/${dealId}/kp-sent`, { recipients: picked.p.to, cc: picked.p.cc, sent_via: "outlook", dispatch_key: key });
+      setMsg(`Отмечено: КП отправлено (${[...picked.p.to, ...picked.p.cc].join(", ")})`); setOpen(false); onDone();
+    } catch (e) { const d = (e as ApiError).detail as { message?: string } | string; setMsg(typeof d === "string" ? d : d?.message || (e as Error).message); }
+    finally { setBusy(false); }
   }
 
   return (
@@ -60,19 +62,14 @@ export default function KpActions({ dealId, status, canAct, canMark = canAct, on
         <div className="card" style={{ marginTop: 8, borderColor: "var(--accent)" }}>
           <h2 style={{ marginTop: 0 }}>{mailOn ? "Отправить КП клиенту" : "КП отправлено клиенту"}</h2>
           {!mailOn && <div className="muted" style={{ marginBottom: 4 }}>Почта на сервере не подключена: отметьте, кому вы отправили КП своей почтой, — статус, лента, задачи и история цен обновятся так же, как при отправке из системы.</div>}
-          <div className="muted" style={{ marginBottom: 4 }}>Получатели — контакты клиента; можно добавить адреса вручную через запятую.</div>
-          {rcpts.length === 0 && <div className="alert warn">В карточке клиента нет контактов с e-mail — добавьте адрес вручную.</div>}
-          {rcpts.map((r) => (
-            <label key={r.email} className="row"><input type="checkbox" checked={sel.has(r.email)} onChange={(e) => { const n = new Set(sel); if (e.target.checked) n.add(r.email); else n.delete(r.email); setSel(n); }} />
-              {r.name || r.email}{r.position && <span className="muted">, {r.position}</span>} <span className="muted">&lt;{r.email}&gt;</span></label>))}
-          <label className="f" style={{ marginTop: 6 }}>{mailOn ? "Ещё адреса" : "Другие адреса"}<input value={extra} placeholder="name@company.ru, …" onChange={(e) => setExtra(e.target.value)} /></label>
+          <KpRecipients dealId={dealId} candidates={cand} clientId={clientId} onChange={(p, ok) => setPicked({ p, ok })} />
           {mailOn && <>
             <label className="f">Тема<input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
             <label className="f">Текст письма<textarea rows={6} style={{ width: "100%" }} value={body} onChange={(e) => setBody(e.target.value)} /></label>
             <label className="row">Вложение
               <select value={format} onChange={(e) => setFormat(e.target.value)}><option value="pdf">КП в PDF</option><option value="docx">КП в Word</option><option value="both">Word и PDF</option></select></label></>}
           <div className="row" style={{ marginTop: 8 }}>
-            <button className="btn" disabled={busy || (sel.size === 0 && !extra.trim())} onClick={mailOn ? send : markSent}>{mailOn ? "Отправить и отметить «КП отправлено»" : "Отметить «КП отправлено»"}</button>
+            <button className="btn" disabled={busy || !picked.ok} title={picked.ok ? "" : "сначала проверьте получателей"} onClick={mailOn ? send : markSent}>{mailOn ? "Отправить и отметить «КП отправлено»" : "Отметить «КП отправлено»"}</button>
             <button className="btn ghost" onClick={() => setOpen(false)}>Отмена</button>
           </div>
         </div>)}

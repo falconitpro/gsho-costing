@@ -1,8 +1,8 @@
 """Перенос контактов из карточек клиентов (clients.contacts) в справочник client_contacts (D-184, K-1).
 По умолчанию — пробный прогон: ничего не меняет и выводит только количества (персональные данные в вывод не попадают).
 
-Совпадение у одного клиента — по рабочей почте, иначе по телефону (последние 10 цифр), иначе по ФИО: такой контакт
-не создаётся повторно, поэтому повторный запуск ничего не дублирует. Исходный clients.contacts не меняется.
+Совпадение у одного клиента — по рабочей почте или телефону (последние 10 цифр); совпадение только по ФИО — в ручной разбор
+(не переносится); уже перенесённые не создаются повторно, поэтому повторный запуск ничего не дублирует. Исходный clients.contacts не меняется.
 Если включена настройка «Требовать отметку о согласии», перенесённые контакты получают источник
 «перенесено из карточки клиента» и дату переноса — юрист решает, достаточно ли этого основания.
 
@@ -37,30 +37,27 @@ def _items(raw) -> list[dict]:
 
 
 def plan(db) -> dict:
-    from app.models import Client, ClientContact
-    have: dict[str, list] = {}
-    for c in db.scalars(select(ClientContact)).all():
-        have.setdefault(c.client_id, []).append(c)
-    res = {"clients": 0, "create": [], "same": 0}
+    """Сопоставление по решению «Единый справочник контактов» v1.0 (п. 5): почта → телефон у того же клиента;
+    совпадение только по ФИО — «неоднозначно», в ручной разбор (не создаётся и не объединяется)."""
+    from app.api.client_contacts import client_contacts, emails_of
+    from app.models import Client
+    res = {"clients": 0, "create": [], "same": 0, "ambiguous": 0}
     for cl in db.scalars(select(Client)).all():
         items = _items(cl.contacts)
         if not items:
             continue
         res["clients"] += 1
-        known = have.get(cl.id, [])
-        seen: list[dict] = []
+        known = [{"emails": set(emails_of(c)), "phone": _digits(c.work_phone), "name": c.full_name.lower()} for c, _ in client_contacts(db, cl.id, True)]
         for it in items:
-            def match(o) -> bool:
-                oe, op, on = (o.work_email, o.work_phone, o.full_name) if not isinstance(o, dict) else (o["work_email"], o["work_phone"], o["full_name"])
-                if it["work_email"] and oe:
-                    return it["work_email"] == oe
-                if _digits(it["work_phone"]) and _digits(op):
-                    return _digits(it["work_phone"]) == _digits(op)
-                return it["full_name"].lower() == on.lower()
-            if any(match(o) for o in known) or any(match(o) for o in seen):
+            em, ph, nm = it["work_email"], _digits(it["work_phone"]), it["full_name"].lower()
+            pool = known
+            if em and any(em in k["emails"] for k in pool) or ph and any(k["phone"] and k["phone"] == ph for k in pool):
                 res["same"] += 1
                 continue
-            seen.append(it)
+            if not em and not ph and any(k["name"] == nm for k in pool):
+                res["ambiguous"] += 1      # только ФИО — вручную
+                continue
+            known.append({"emails": {em} if em else set(), "phone": ph, "name": nm})
             res["create"].append((cl.id, it))
     return res
 
@@ -69,12 +66,13 @@ def run(yes: bool = False) -> int:
     from datetime import date
 
     from app.db import SessionLocal
-    from app.models import ClientContact
+    from app.models import ClientContact, ClientContactLink
     from app.services import settings_service
     from app.services.deal_service import audit
     with SessionLocal() as db:
         p = plan(db)
-        print(f"клиентов с контактами в карточке: {p['clients']}; новых контактов: {len(p['create'])}; уже есть или повторяются: {p['same']}")
+        print(f"клиентов с контактами в карточке: {p['clients']}; новых контактов: {len(p['create'])}; уже есть или повторяются: {p['same']}; "
+              f"совпадают только по ФИО (вручную, не переносятся): {p['ambiguous']}")
         if not yes:
             print("Пробный прогон: ничего не изменено. Чтобы перенести, добавьте --yes")
             return 0
@@ -83,6 +81,7 @@ def run(yes: bool = False) -> int:
             c = ClientContact(client_id=client_id, **it, **({"consent_on": date.today(), "consent_source": "перенесено из карточки клиента"} if consent else {}))
             db.add(c)
             db.flush()
+            db.add(ClientContactLink(contact_id=c.id, client_id=client_id))
             audit(db, None, None, "client_contact", c.id, "create", None, {"client_id": client_id}, comment="contacts_import")
         db.commit()
         print(f"Готово: перенесено контактов {len(p['create'])}.")

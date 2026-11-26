@@ -219,6 +219,8 @@ def step_answer(deal_id: str, step_id: str, body: AnswerIn, db: Session = Depend
 
 class SendIn(BaseModel):
     to: list[str] = Field(default_factory=list)
+    cc: list[str] = Field(default_factory=list)   # D-188: копия отдельно
+    dispatch_key: str = ""                         # D-188: повтор не отправляет второй раз
     subject: str = ""
     body: str = ""
     format: str = "pdf"          # pdf | docx | both
@@ -239,10 +241,13 @@ def step_send(deal_id: str, step_id: str, body: SendIn, db: Session = Depends(ge
     rev = db.get(KpRevision, s.kp_revision_id) if s.kp_revision_id else None
     if rev is None:
         raise HTTPException(404, "КП шага не найдено")
-    to = [a.strip() for a in body.to if a and a.strip()]
-    bad = [a for a in to if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", a)]
-    if not to or bad:
-        raise HTTPException(422, "Укажите получателей с корректными e-mail" + (f": {', '.join(bad)}" if bad else ""))
+    from ..services import kp_dispatch as kd
+    if kd.existing(db, body.dispatch_key) is not None:
+        return ng.step_dict(s, ng.names(db))
+    items = kd.resolve(db, deal, body.to, body.cc)   # D-188: только контакты клиента; «Кому» и «Копия» раздельно
+    to = [i["email"] for i in items if i["kind"] == "to"]
+    cc = [i["email"] for i in items if i["kind"] == "cc"]
+    msg_id = ""
     via = "вручную"
     if not body.manual:
         if _mail_provider() == "console":
@@ -252,18 +257,20 @@ def step_send(deal_id: str, step_id: str, body: SendIn, db: Session = Depends(ge
         subject = body.subject or f"Коммерческое предложение {deal.number} (ред. {rev.no})"
         html_body = "".join(f"<p>{html.escape(par).replace(chr(10), '<br>')}</p>" for par in (body.body or "").split("\n\n"))
         try:
-            adapters.mail().send(OutgoingMail(to=to, subject=subject, body_html=html_body, attachments=files, sender=user.email or ""))
+            msg_id = adapters.mail().send(OutgoingMail(to=to, cc=cc, subject=subject, body_html=html_body, attachments=files, sender=user.email or ""))
         except Exception as e:
             raise HTTPException(502, f"Письмо не отправлено: {e}")
         via = "система"
     s.sent_at = rev.sent_at = ng.now()
-    s.sent_to = to
+    s.sent_to = to + cc
     if deal.status == DealStatus.APPROVED:
-        mark_kp_sent(db, deal, user, to, via, subject=f"КП ред. {rev.no}")
+        mark_kp_sent(db, deal, user, to + cc, via, subject=f"КП ред. {rev.no}")
     else:
-        db.add(FeedEntry(deal_id=deal.id, kind="mail_out", direction="out", counterparty=", ".join(to), subject=f"КП ред. {rev.no} (торги, шаг {s.no})",
+        db.add(FeedEntry(deal_id=deal.id, kind="mail_out", direction="out", counterparty=", ".join(to + cc), subject=f"КП ред. {rev.no} (торги, шаг {s.no})",
                          body=f"Отправлено: {via}", user_id=user.id))
-    audit(db, user.id, deal.id, "negotiation", s.id, "negotiation_kp_sent", after={"to": to, "via": via, "revision": rev.no})
+    kd.record(db, deal, items, "manual" if body.manual else "system", user.id, subject=f"КП ред. {rev.no} (торги, шаг {s.no})", message_id=msg_id or "",
+              revision_no=rev.no, key=body.dispatch_key)
+    audit(db, user.id, deal.id, "negotiation", s.id, "negotiation_kp_sent", after={"to": to, "cc": cc, "via": via, "revision": rev.no})
     db.commit()
     return ng.step_dict(s, ng.names(db))
 

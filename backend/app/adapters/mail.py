@@ -15,6 +15,7 @@ class OutgoingMail:
     body_html: str
     attachments: list[str] = field(default_factory=list)   # локальные пути
     sender: str = ""                                        # от имени менеджера (Graph: Mail.Send as user)
+    cc: list[str] = field(default_factory=list)             # D-188: копия отдельно от «Кому»
 
 
 @dataclass
@@ -44,7 +45,7 @@ class ConsoleMail(MailAdapter):
     sent: list[OutgoingMail] = []
 
     def send(self, msg: OutgoingMail) -> str:
-        log.info("MAIL → %s: %s", msg.to, msg.subject)
+        log.info("MAIL → %s (копия %s): %s", msg.to, msg.cc, msg.subject)
         self.sent.append(msg)
         return f"console-{len(self.sent)}"
 
@@ -93,6 +94,8 @@ class YandexSmtpMail(MailAdapter):
         m = EmailMessage()
         m["From"] = self.s.smtp_from or self.s.smtp_user
         m["To"] = ", ".join(a for a in msg.to if a)
+        if msg.cc:
+            m["Cc"] = ", ".join(a for a in msg.cc if a)
         m["Subject"] = msg.subject
         if msg.sender and msg.sender != m["From"]:
             m["Reply-To"] = msg.sender
