@@ -16,6 +16,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg://gsho:gsho@localhost:5432/gsho
       APP_ENV: dev
+      TZ: Europe/Moscow   # D-193: «сегодня» тестов = «сегодня» сервера (иначе после 21:00 UTC даты расходятся)
       AUTH_PROVIDER: dev
       STORAGE_PROVIDER: local
       STORAGE_LOCAL_ROOT: /tmp/gsho-storage
@@ -94,6 +95,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg://gsho:gsho@localhost:5432/gsho
       APP_ENV: dev
+      TZ: Europe/Moscow   # D-193: «сегодня» тестов = «сегодня» сервера (иначе после 21:00 UTC даты расходятся)
       AUTH_PROVIDER: dev
       STORAGE_PROVIDER: local
       STORAGE_LOCAL_ROOT: /tmp/gsho-storage
