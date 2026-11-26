@@ -135,8 +135,8 @@ export default function FactoriesPage({ me, embedded = false }: { me: Me; embedd
               <div className="row" style={{ gap: 2 }}>{([["all", "все"], ["active", "с активными"], ["won", showG ? "с выигранными" : "с заказами"], ["none", "без сделок"]] as const).map(([k, t]) => (
                 <button key={k} onClick={() => setView(k)} style={{ border: 0, background: "transparent", cursor: "pointer", padding: "6px 10px", fontWeight: view === k ? 700 : 500, borderBottom: view === k ? "2px solid var(--accent)" : "2px solid transparent", fontFamily: "inherit", fontSize: 13 }}>{t}</button>))}</div>
             </div>
-            {!cur && <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
-              {kpis.map(([t, v]) => <div key={t} style={{ flex: "1 1 120px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", background: "#fff" }}><div style={{ fontSize: 20, fontWeight: 700 }}>{v}</div><div className="muted" style={{ fontSize: 12 }}>{t}</div></div>)}
+            {!cur && <div className="cp-kpis">
+              {kpis.map(([t, v]) => <div key={t} className="cp-kpi"><div className="cp-kpi-v">{v}</div><div className="muted cp-kpi-l">{t}</div></div>)}
             </div>}
             <div style={{ overflowX: "auto", marginTop: 10 }}>
               <table style={{ fontSize: 13 }}>

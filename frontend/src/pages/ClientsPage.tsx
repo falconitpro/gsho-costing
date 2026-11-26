@@ -165,8 +165,8 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
                 {canDelete && <label className="row muted" style={{ fontSize: 12, gap: 4 }}><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> архив</label>}
                 {canCreate && <button className="btn add" style={{ marginLeft: "auto" }} onClick={() => setShowNew(!showNew)}>{showNew ? "скрыть форму" : "Новый клиент"}</button>}
               </div>
-              <div className="row" style={{ flexWrap: "wrap", gap: 10, marginTop: 10 }}>
-                {kpis.map(([t, v]) => <div key={t} style={{ flex: "1 1 120px", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px", background: "#fff" }}><div style={{ fontSize: 20, fontWeight: 700 }}>{v}</div><div className="muted" style={{ fontSize: 12 }}>{t}</div></div>)}
+              <div className="cp-kpis">
+                {kpis.map(([t, v]) => <div key={t} className="cp-kpi"><div className="cp-kpi-v">{v}</div><div className="muted cp-kpi-l">{t}</div></div>)}
               </div>
               {colsEl}
               <div style={{ overflowX: "auto", marginTop: 10 }}>
