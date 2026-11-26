@@ -34,9 +34,9 @@ def _type(t) -> str:
     return s.split("(")[0]
 
 
-def collect() -> dict:
+def collect(eng=None) -> dict:
     from app import models  # noqa: F401  — регистрирует все модели
-    insp = inspect(engine)
+    insp = inspect(eng or engine)
     db_tables = set(insp.get_table_names())
     orm = Base.metadata.tables
     out: dict = {"missing_tables": [], "extra_tables": sorted(db_tables - set(orm) - {"alembic_version"}),
