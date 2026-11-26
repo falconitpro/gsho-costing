@@ -32,6 +32,10 @@ def _order(c, wt_code="DIAG-GEN"):
 
 
 def _assign(c, wo, who=ENG):
+    return _assign_with_permits(c, wo, who)
+
+
+def _assign_plain(c, wo, who=ENG):
     r = _ok(_ev(c, wo, "assign", who=SVC, payload={"engineer_id": _me(c, who)}))
     return r["order"]
 
@@ -207,3 +211,111 @@ def test_counts_match_visible_orders(client):  # noqa: F811
     for o in lst["items"]:
         by[o["status"]] = by.get(o["status"], 0) + 1
     assert {k: v for k, v in lst["counts"].items() if v} == by
+
+
+# ─────────────── I-2 (D-195) ───────────────
+
+def _jpeg_with_gps() -> bytes:
+    import io
+
+    from PIL import Image
+    im = Image.new("RGB", (8, 8), (200, 30, 30))
+    ex = Image.Exif()
+    ex[0x8825] = {1: "N", 2: (55.0, 21.0, 0.0), 3: "E", 4: (86.0, 5.0, 0.0)}
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", exif=ex)
+    return buf.getvalue()
+
+
+def test_i2_works_diagnosis_and_conflicts(client):  # noqa: F811
+    _, wo = _order(client, "DIAG-HYD")
+    wo = _assign_with_permits(client, wo)
+    refs = _ok(client.get("/api/service/refs", headers=H(SVC)))
+    hyd = next(x for x in refs["work_types"] if x["code"] == "RPR-HYD")
+    wo = _ok(_ev(client, wo, "start"))["order"]
+    wo = _ok(_ev(client, wo, "work_add", payload={"work_type_id": hyd["id"]}))["order"]
+    w = wo["works"][0]
+    assert w["title"] == hyd["name"] and w["norm_hours"] == 8 and w["performer_name"] and w["actual_hours"] is None
+    assert wo["hours"] == {"norm": 8, "actual": None}
+    stale = wo
+    wo = _ok(_ev(client, wo, "work_update", payload={"work_id": w["id"], "actual_hours": 9.5, "done": True}))["order"]
+    assert wo["works"][0]["actual_hours"] == 9.5 and wo["hours"]["actual"] == 9.5
+    r = _ok(_ev(client, stale, "work_update", who=SVC, payload={"work_id": w["id"], "actual_hours": 7}))
+    assert r["event"]["result"] == "conflict"                                     # часы уже указали иначе
+    r = _ok(_ev(client, stale, "work_update", who=SVC, payload={"work_id": w["id"], "note": "заменён уплотнитель"}))
+    assert r["event"]["result"] == "merged" and r["order"]["works"][0]["actual_hours"] == 9.5
+    assert _ok(_ev(client, r["order"], "work_update", payload={"work_id": w["id"], "actual_hours": -1}))["event"]["result"] == "rejected"
+    d = _ok(_ev(client, r["order"], "diagnosis", payload={"text": "Износ уплотнений штока"}))["order"]
+    assert d["diagnosis"] == "Износ уплотнений штока"
+    assert _ok(_ev(client, stale, "diagnosis", who=SVC, payload={"text": "другое"}))["event"]["result"] == "conflict"
+    # допуски: у вида работ RPR-HYD есть GPM — нужен и наряду
+    assert "GPM" in d["permits"]["required"]
+
+
+def _assign_with_permits(client, wo, who=ENG):
+    me = _me(client, who)
+    refs = _ok(client.get("/api/service/refs", headers=H(SVC)))
+    for p in refs["permits"]:
+        _ok(client.put("/api/service/permits", headers=H(SVC), json={"user_id": me, "permit_code": p["code"], "issued_on": "2026-01-15"}))
+    return _ok(_ev(client, wo, "assign", who=SVC, payload={"engineer_id": me}))["order"]
+
+
+def test_i2_permits_block_assignment_unless_reason(client):  # noqa: F811
+    _, wo = _order(client, "RPR-WELD")                                             # нужен допуск HOT (огневые)
+    svc = _me(client, SVC)
+    perms = _ok(client.get("/api/service/permits", headers=H(SVC), params={"user_id": svc}))["items"]
+    for p in perms:
+        _ok(client.delete(f"/api/service/permits/{p['id']}", headers=H(SVC)))
+    engs = _ok(client.get("/api/service/engineers", headers=H(SVC), params={"order_id": wo["id"]}))
+    me = next(e for e in engs if e["id"] == svc)
+    assert {g["code"] for g in me["gaps"]} >= {"HOT", "OT"}
+    r = _ok(_ev(client, wo, "assign", who=SVC, payload={"engineer_id": svc}))
+    assert r["event"]["result"] == "rejected" and "Нет допусков" in r["event"]["reason"] and "HOT" in r["event"]["reason"]
+    r = _ok(_ev(client, r["order"], "assign", who=SVC, payload={"engineer_id": svc, "override_reason": "срочно, допуск оформляется"}))
+    assert r["event"]["result"] == "applied" and "без допусков" in r["event"]["reason"] and r["order"]["status"] == "assigned"
+    assert {g["code"] for g in r["order"]["permits"]["gaps"]} >= {"HOT"}
+    # допуск со сроком из справочника: огневые — 12 мес. от выдачи; просроченный — тоже пробел
+    p = _ok(client.put("/api/service/permits", headers=H(SVC), json={"user_id": svc, "permit_code": "HOT", "issued_on": "2024-01-10"}))
+    assert p["valid_until"] == "2025-01-10" and p["state"] == "expired"
+    assert any(g["code"] == "HOT" and g["problem"] == "expired" for g in _ok(client.get(f"/api/service/orders/{wo['id']}", headers=H(SVC)))["permits"]["gaps"])
+    assert client.put("/api/service/permits", headers=H(ENG), json={"user_id": svc, "permit_code": "HOT"}).status_code == 403
+    mine = _ok(client.get("/api/service/permits", headers=H(ENG), params={"user_id": svc}))
+    assert all(x["user_id"] == _me(client, ENG) for x in mine["items"]) and mine["can_edit"] is False   # инженер — только свои
+
+
+def test_i2_photo_upload_geo_limits_and_rights(client):  # noqa: F811
+    _, wo = _order(client)
+    wo = _assign_with_permits(client, wo)
+    img = _jpeg_with_gps()
+    eid = str(uuid.uuid4())
+    up = lambda o, data=img, who=ENG, name="f.jpg", **form: client.post(  # noqa: E731
+        f"/api/service/orders/{o['id']}/photos", headers=H(who), files={"file": (name, data, "image/jpeg")},
+        data={"base_version": str(o["version"]), **{k: str(v) for k, v in form.items()}})
+    r = _ok(up(wo, event_id=eid, caption="течь", checklist_item_id=wo["checklist"][0]["id"]))
+    ph = r["order"]["photos"][0]
+    assert r["event"]["kind"] == "photo" and ph["geo_source"] == "exif" and round(ph["latitude"], 2) == 55.35 and ph["map_url"]
+    assert ph["retain_until"][:4] == str(int(ph["uploaded_at"][:4]) + 10) and ph["size_bytes"] == len(img)
+    assert "storage_path" not in ph
+    again = _ok(up(r["order"], event_id=eid))                                       # повтор очереди — второй копии нет
+    assert len(again["order"]["photos"]) == 1
+    r2 = _ok(up(again["order"], latitude=69.35, longitude=88.2, accuracy_m=12))
+    assert r2["order"]["photos"][1]["geo_source"] == "device" and r2["order"]["photos"][1]["accuracy_m"] == 12
+    assert client.get(ph["url"], headers=H(ENG)).status_code == 200
+    assert up(wo, data=b"x" * (10 * 1024 * 1024 + 1)).status_code == 413          # больше 10 МБ
+    assert up(wo, name="a.exe").status_code == 415
+    assert up(wo, latitude=55).status_code == 422
+    other = _order(client)[1]
+    assert up(other).status_code == 404                                            # чужой наряд инженер не видит
+    assert client.get(ph["url"], headers=H("logist@example.com")).status_code == 403
+
+
+def test_i2_plan(client):  # noqa: F811
+    _, wo = _order(client)
+    wo = _assign_with_permits(client, wo)
+    _ok(_ev(client, wo, "plan", who=SVC, payload={"planned_start": "2026-12-02T09:00:00+03:00", "planned_end": "2026-12-03T18:00:00+03:00"}))
+    pl = _ok(client.get("/api/service/plan", headers=H(SVC), params={"start": "2026-12-01", "days": 7}))
+    assert len(pl["days"]) == 7 and pl["days"][0] == "2026-12-01"
+    eng = next(e for e in pl["engineers"] if e["id"] == _me(client, ENG))
+    o = next(x for x in eng["orders"] if x["id"] == wo["id"])
+    assert o["start"] == "2026-12-02" and o["end"] == "2026-12-03"
+    assert client.get("/api/service/plan", headers=H(ENG)).status_code == 403

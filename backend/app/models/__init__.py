@@ -2891,6 +2891,7 @@ class WorkOrder(TimestampMixin, Base):
     planned_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     description: Mapped[str] = mapped_column(Text, default="")
     version: Mapped[int] = mapped_column(Integer, default=0)
+    diagnosis: Mapped[str] = mapped_column(Text, default="")                   # I-2: заключение диагностики (событие diagnosis)
     signed_by_name: Mapped[str] = mapped_column(String(255), default="")      # подпись представителя клиента при закрытии
     signed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -2930,3 +2931,61 @@ class WorkOrderChecklistItem(TimestampMixin, Base):
     done_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     done_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     note: Mapped[str] = mapped_column(Text, default="")
+
+
+# ───────────────────────── I-2 (D-195): работы наряда, допуски инженеров, фото ─────────────────────────
+
+class EngineerPermit(TimestampMixin, Base):
+    """Допуск сотрудника по справочнику service_permits: номер удостоверения и срок. Одна запись на допуск — продление
+    меняет её (прежние значения — в журнале действий). Пустой срок — бессрочно."""
+    __tablename__ = "engineer_permits"
+    __table_args__ = (UniqueConstraint("user_id", "permit_code", name="uq_engineer_permit"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    permit_code: Mapped[str] = mapped_column(String(32))
+    number: Mapped[str] = mapped_column(String(64), default="")
+    issued_on: Mapped[Optional[date]] = mapped_column(Date)
+    valid_until: Mapped[Optional[date]] = mapped_column(Date)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class WorkOrderWork(TimestampMixin, Base):
+    """Работа в наряде: вид работ с нормативом, исполнитель, фактические часы. Меняется событиями work_add / work_update."""
+    __tablename__ = "work_order_works"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    work_order_id: Mapped[str] = mapped_column(ForeignKey("work_orders.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=1)
+    work_type_id: Mapped[Optional[str]] = mapped_column(ForeignKey("service_work_types.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(String(255))
+    norm_hours: Mapped[Optional[float]] = mapped_column(Float)                 # из справочника на момент добавления
+    actual_hours: Mapped[Optional[float]] = mapped_column(Float)               # пусто — не указано (не 0)
+    performer_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class WorkOrderPhoto(Base):
+    """Фото наряда (решение владельца 27.11: хранить 10 лет, до 10 МБ, с геолокацией). Только добавление;
+    файл — в хранилище, здесь — где и когда снято, кем загружено, до какой даты хранить."""
+    __tablename__ = "work_order_photos"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    work_order_id: Mapped[str] = mapped_column(ForeignKey("work_orders.id"), index=True)
+    event_id: Mapped[Optional[str]] = mapped_column(String(36))
+    storage_path: Mapped[str] = mapped_column(Text)
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(64), default="")
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    sha256: Mapped[str] = mapped_column(String(64), default="")
+    caption: Mapped[str] = mapped_column(Text, default="")
+    checklist_item_id: Mapped[Optional[str]] = mapped_column(ForeignKey("work_order_checklist_items.id", ondelete="SET NULL"))
+    work_id: Mapped[Optional[str]] = mapped_column(ForeignKey("work_order_works.id", ondelete="SET NULL"))
+    taken_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    latitude: Mapped[Optional[float]] = mapped_column(Float)
+    longitude: Mapped[Optional[float]] = mapped_column(Float)
+    accuracy_m: Mapped[Optional[float]] = mapped_column(Float)
+    geo_source: Mapped[str] = mapped_column(String(8), default="")             # device | exif | пусто — нет координат
+    uploaded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    retain_until: Mapped[date] = mapped_column(Date)
