@@ -877,6 +877,24 @@ class Approval(Base):
     reset_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))   # сброс при изменении цены
 
 
+class ChangeEvent(Base):
+    """Реестр событий изменений (D-181): только добавление, без значений полей — сущность, id, действие, кто.
+
+    Основа истории и синхронизации приложения без сети: клиент читает события после своего курсора и
+    перезапрашивает изменившиеся записи через обычные API (с его правами). Изменение и удаление строк
+    запрещены триггером в базе. xid — номер транзакции: читаются только события завершённых транзакций,
+    поэтому медленная транзакция с меньшим номером не «проскочит» мимо курсора."""
+    __tablename__ = "change_events"
+    seq: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    xid: Mapped[int] = mapped_column(BigInteger, server_default=sa_text("(pg_current_xact_id()::text)::bigint"))
+    actor_id: Mapped[Optional[str]] = mapped_column(String(36))
+    entity: Mapped[str] = mapped_column(String(64), index=True)
+    entity_id: Mapped[str] = mapped_column(String(128))
+    action: Mapped[str] = mapped_column(String(32))
+    deal_id: Mapped[Optional[str]] = mapped_column(String(36), index=True)
+
+
 class AuditLog(Base):
     """Журнал действий: кто, когда, что было / стало. Только вставка."""
     __tablename__ = "audit_log"
