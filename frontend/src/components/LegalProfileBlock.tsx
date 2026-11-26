@@ -13,7 +13,8 @@ export type Hist = { at: string; by_name: string; action: string; fields: Record
 export type Profile = { id: string; owner_kind: string; owner_id: string; kind: string; kind_title: string; title: string; is_default: boolean; country: string; names: Names;
   opf: string; reg_number: string; tax_number: string; kpp: string; legal_address: string; actual_address: string; postal_address: string; director: string;
   signatory_name: string; signatory_position: string; signatory_basis: string; contacts: { name: string; position: string; phone: string; email: string }[];
-  documents: { id?: string; title: string; number: string; issued_on: string; valid_until: string; file?: { id: string; name: string; size: number; uploaded_at: string } }[]; powers_of_attorney: { person: string; number: string; issued_on: string; valid_until: string; scope: string }[];
+  documents: { id?: string; title: string; number: string; issued_on: string; valid_until: string; file?: { id: string; name: string; size: number; uploaded_at: string } }[]; powers_of_attorney: { person: string; number: string; issued_on: string; valid_until: string; scope: string; contact_id?: string | null; status?: string }[];
+  org_phone: string; org_email: string; contacts_readonly?: boolean;
   extra: Record<string, string>; check_status: string; check_status_title: string; checked_at: string | null; checked_by_name: string; lawyer_comment: string; is_active: boolean;
   country_fields: { key: string; title: string }[]; banks: Bank[]; summary: string; history: Hist[] };
 type Resp = { owner_name: string; items: Profile[]; can_edit: boolean; can_check: boolean; can_verify_bank: boolean; can_delete?: boolean };
@@ -21,7 +22,7 @@ type Dicts = { profile_kinds: Record<string, string>; check_status: Record<strin
 
 const FIELD_T: Record<string, string> = { kind: "тип", title: "название", is_default: "по умолчанию", country: "страна", names: "наименования", opf: "ОПФ", reg_number: "рег. номер", tax_number: "налоговый номер",
   kpp: "КПП", legal_address: "юр. адрес", actual_address: "факт. адрес", postal_address: "почтовый адрес", director: "руководитель", signatory_name: "подписант", signatory_position: "должность",
-  signatory_basis: "основание", contacts: "контакты", documents: "документы", powers_of_attorney: "доверенности", extra: "страновые поля", lawyer_comment: "комментарий юриста", is_active: "активен",
+  signatory_basis: "основание", org_phone: "телефон организации", org_email: "почта организации", contacts: "контакты", documents: "документы", powers_of_attorney: "доверенности", extra: "страновые поля", lawyer_comment: "комментарий юриста", is_active: "активен",
   check_status: "проверка", currency: "валюта", beneficiary: "получатель", bank_name: "банк", bank_address: "адрес банка", account: "счёт", bik: "БИК", swift: "SWIFT", corr_account: "к/с",
   corr_bank: "банк-корреспондент", purpose: "назначение", status: "статус", valid_from: "с", valid_to: "по" };
 const ACTION_T: Record<string, string> = { auto_created: "создан из карточки", created: "создан", update: "изменение", check: "проверка", archived: "в архив", verified: "реквизиты подтверждены" };
@@ -132,13 +133,19 @@ function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, canDelete, onSave
             {inp("director", isCn ? "Законный представитель / руководитель" : "Руководитель")}{inp("signatory_name", "ФИО подписанта")}{inp("signatory_position", "Должность подписанта")}
             {inp("signatory_basis", "Действует на основании", "Устава / доверенности № … от …")}
           </div>
+          <div className="muted lp-sect">Телефон и почта организации — для договоров</div>
+          <div className="grid cols-3">{inp("org_phone", "Телефон организации")}{inp("org_email", "Почта организации")}</div>
           <div className="muted" style={{ fontSize: 11, letterSpacing: ".4px", textTransform: "uppercase", margin: "8px 0 2px" }}>Доверенности и регистрационные документы</div>
-          <table className="lp-scroll" style={{ fontSize: 12 }}><thead><tr><th>Доверенность: кому</th><th>№</th><th>Выдана</th><th>Действует до</th><th>Полномочия</th>{canEdit && <th />}</tr></thead>
+          <table className="lp-scroll" style={{ fontSize: 12 }}><thead><tr><th>Доверенность: кому</th><th>№</th><th>Выдана</th><th>Действует до</th><th>Полномочия</th><th>Статус и контакт</th>{canEdit && <th />}</tr></thead>
             <tbody>{(f.powers_of_attorney || []).map((d, i) => <tr key={i}>
               {(["person", "number", "issued_on", "valid_until", "scope"] as const).map((k) => <td key={k}><input type={k.includes("_on") || k.includes("until") ? "date" : "text"} value={d[k] || ""} disabled={!canEdit} style={{ width: k === "scope" ? 220 : k === "person" ? 180 : 120 }}
                 onChange={(e) => set({ powers_of_attorney: f.powers_of_attorney.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x)) })} /></td>)}
+              <td className="lp-poa">{d.status === "expired" ? <span className="badge bad" title="полномочия по этой доверенности не действуют">истекла</span>
+                : d.status === "active" ? <span className="badge ok">действует</span> : <span className="badge warn">срок не указан</span>}
+                {f.contacts_readonly && <ContactPick clientId={p.owner_id} value={d.contact_id || ""} disabled={!canEdit}
+                  onChange={(cid, name) => set({ powers_of_attorney: f.powers_of_attorney.map((x, j) => (j === i ? { ...x, contact_id: cid || null, person: x.person || name } : x)) })} />}</td>
               {canEdit && <td><button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => set({ powers_of_attorney: f.powers_of_attorney.filter((_, j) => j !== i) })}>×</button></td>}</tr>)}
-              {canEdit && <tr><td colSpan={6}><button className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => set({ powers_of_attorney: [...(f.powers_of_attorney || []), { person: "", number: "", issued_on: "", valid_until: "", scope: "" }] })}>+ доверенность</button></td></tr>}</tbody></table>
+              {canEdit && <tr><td colSpan={7}><button className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => set({ powers_of_attorney: [...(f.powers_of_attorney || []), { person: "", number: "", issued_on: "", valid_until: "", scope: "" }] })}>+ доверенность</button></td></tr>}</tbody></table>
           <table className="lp-scroll" style={{ fontSize: 12, marginTop: 4 }}><thead><tr><th>Документ</th><th>№</th><th>Дата</th><th>Действует до</th><th>Скан</th>{canEdit && <th />}</tr></thead>
             <tbody>{(f.documents || []).map((d, i) => <tr key={d.id || i}>
               {(["title", "number", "issued_on", "valid_until"] as const).map((k) => <td key={k}><input type={k.includes("_on") || k.includes("until") ? "date" : "text"} value={d[k] || ""} disabled={!canEdit} style={{ width: k === "title" ? 240 : 120 }}
@@ -153,12 +160,14 @@ function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, canDelete, onSave
                 <button className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => set({ documents: [...(f.documents || []), { id: crypto.randomUUID().replace(/-/g, ""), title: "", number: "", issued_on: "", valid_until: "" }] })}>+ документ (устав, свидетельство, лицензия…)</button>
                 <label className="btn ghost" style={{ padding: "2px 8px", fontSize: 12, cursor: "pointer" }} title="загрузить скан — строка документа создастся по имени файла">+ скан файлом<input type="file" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.docx,.zip" style={{ display: "none" }}
                   onChange={(e) => { const fl = e.target.files?.[0]; if (fl) api.upload(`/api/legal/profiles/${p.id}/documents`, fl, {}).then(onSaved).catch((er) => onMsg((er as Error).message)); e.target.value = ""; }} /></label></div></td></tr>}</tbody></table>
+          {f.contacts_readonly ? <ClientLegalContacts clientId={p.owner_id} legacy={f.contacts || []} /> : <>
           <div className="muted" style={{ fontSize: 11, letterSpacing: ".4px", textTransform: "uppercase", margin: "8px 0 2px" }}>Контактные лица</div>
           <table className="lp-scroll" style={{ fontSize: 12 }}><tbody>{(f.contacts || []).map((c, i) => <tr key={i}>
             {(["name", "position", "phone", "email"] as const).map((k) => <td key={k}><input placeholder={{ name: "имя", position: "должность", phone: "телефон", email: "e-mail" }[k]} value={c[k] || ""} disabled={!canEdit} style={{ width: 170 }}
               onChange={(e) => set({ contacts: f.contacts.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x)) })} /></td>)}
             {canEdit && <td><button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => set({ contacts: f.contacts.filter((_, j) => j !== i) })}>×</button></td>}</tr>)}
             {canEdit && <tr><td colSpan={5}><button className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => set({ contacts: [...(f.contacts || []), { name: "", position: "", phone: "", email: "" }] })}>+ контакт</button></td></tr>}</tbody></table>
+          </>}
           <label className="f" style={{ marginTop: 6 }}>Комментарий юриста<textarea rows={2} value={f.lawyer_comment} disabled={!canEdit && !canCheck} onChange={(e) => set({ lawyer_comment: e.target.value })} /></label>
           <div className="row" style={{ marginTop: 8, gap: 6, flexWrap: "wrap" }}>
             {canEdit && <button className="btn" disabled={!dirty} onClick={save}>Сохранить профиль</button>}
@@ -218,4 +227,29 @@ export default function LegalProfileBlock({ ownerKind, ownerId, title = "Юри�
       {msg && <div className="muted" style={{ fontSize: 12 }}>{msg}</div>}
       {data.items.map((p) => <ProfileCard key={p.id} p={p} dicts={dicts} canEdit={data.can_edit} canCheck={data.can_check} canVerify={data.can_verify_bank} canDelete={!!data.can_delete} onSaved={load} onMsg={setMsg} open={open === p.id} onToggle={() => setOpen(open === p.id ? null : p.id)} />)}
     </div>);
+}
+
+/** D-189: контакты клиента с юридическими ролями — из единого справочника (правка — в карточке клиента, «Контактные лица»). */
+function ClientLegalContacts({ clientId, legacy }: { clientId: string; legacy: { name: string; position: string; phone: string; email: string }[] }) {
+  type C = { id: string; full_name: string; position: string; work_phone: string; work_email: string; roles_titles: string[] };
+  const [items, setItems] = useState<C[] | null>(null);
+  useEffect(() => { api.get<{ items: C[] }>(`/api/clients/contacts?client_id=${clientId}&role=legal_any`).then((r) => setItems(r.items)).catch(() => setItems(null)); }, [clientId]);
+  return (
+    <div className="lp-contacts">
+      <div className="muted lp-sect">Контакты с юридическими ролями</div>
+      {items === null ? <p className="muted">Нет доступа к контактам клиента.</p>
+        : items.length === 0 ? <p className="muted">Контактов с юридическими ролями нет. Роли («Руководитель», «Представитель по доверенности», «Договоры и документы»…) назначаются в карточке клиента.</p>
+        : <ul className="lp-list">{items.map((c) => <li key={c.id}><b>{c.full_name}</b>{c.position && <span className="muted"> · {c.position}</span>} {c.roles_titles.map((t) => <span key={t} className="badge">{t}</span>)}
+          <div className="muted">{[c.work_phone, c.work_email].filter(Boolean).join(" · ")}</div></li>)}</ul>}
+      <a href={`/legal?tab=counterparties&type=clients&client=${clientId}`}>Открыть контакты в карточке клиента</a>
+      {legacy.length > 0 && <details className="lp-legacy"><summary className="muted">прежний список профиля · {legacy.length} — только просмотр</summary>
+        <ul className="lp-list">{legacy.map((c, i) => <li key={i}>{c.name}{c.position && ` · ${c.position}`}<div className="muted">{[c.phone, c.email].filter(Boolean).join(" · ")}</div></li>)}</ul></details>}
+    </div>);
+}
+
+function ContactPick({ clientId, value, disabled, onChange }: { clientId: string; value: string; disabled: boolean; onChange: (id: string, name: string) => void }) {
+  const [opts, setOpts] = useState<{ id: string; full_name: string }[]>([]);
+  useEffect(() => { api.get<{ items: { id: string; full_name: string }[] }>(`/api/clients/contacts?client_id=${clientId}&role=poa`).then((r) => setOpts(r.items)).catch(() => setOpts([])); }, [clientId]);
+  return <select aria-label="Контакт-представитель" value={value} disabled={disabled} onChange={(e) => onChange(e.target.value, opts.find((o) => o.id === e.target.value)?.full_name || "")}>
+    <option value="">— контакт не выбран —</option>{opts.map((o) => <option key={o.id} value={o.id}>{o.full_name}</option>)}</select>;
 }

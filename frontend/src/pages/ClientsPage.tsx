@@ -282,7 +282,7 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
                   <label className="row muted">с <input type="date" value={filter.from} onChange={(e) => setFilter({ ...filter, from: e.target.value })} /></label>
                   <label className="row muted">по <input type="date" value={filter.to} onChange={(e) => setFilter({ ...filter, to: e.target.value })} /></label>
                   {(filter.model || filter.outcome || filter.factory || filter.from || filter.to) && <button className="btn ghost" onClick={() => setFilter({ model: "", outcome: "", factory: "", from: "", to: "" })}>сбросить</button>}</div>
-                <table><thead><tr><th>Дата</th><th>Сделка</th><th>Оборудование</th><th className="num">Кол-во</th><th className="num">Цена за ед. без НДС</th><th className="num">Итого за кол-во</th><th>Оплата</th><th>Срок</th><th>Результат</th><th>Менеджер</th><th>Файл</th></tr></thead>
+                <table className="lp-scroll"><thead><tr><th>Дата</th><th>Сделка</th><th>Оборудование</th><th className="num">Кол-во</th><th className="num">Цена за ед. без НДС</th><th className="num">Итого за кол-во</th><th>Оплата</th><th>Срок</th><th>Результат</th><th>Менеджер</th><th>Файл</th></tr></thead>
                   <tbody>{card.kp_history.filter((h) => (!filter.model || h.model.toLowerCase().includes(filter.model.toLowerCase())) && (!filter.outcome || (filter.outcome === "open" ? !h.outcome : h.outcome === filter.outcome))
                     && (!filter.factory || h.factory === filter.factory) && (!filter.from || String(h.latest.on) >= filter.from) && (!filter.to || String(h.latest.on) <= filter.to)).map((h, i) => {
                     const latestDiff = verDiff(h.versions[0] || h.latest, h.versions[1]);

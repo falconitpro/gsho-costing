@@ -2201,3 +2201,11 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
 .kr-note { font-size: 12px; margin-bottom: 6px; }
 .kr-preview { margin-top: 8px; font-size: 13px; }
 @media (max-width: 760px) { .kr-list li { grid-template-columns: minmax(0, 1fr); } }
+
+/* D-189: юр. профиль клиента — контакты из справочника, статус доверенности */
+.lp-sect { font-size: 11px; letter-spacing: .4px; text-transform: uppercase; margin: 8px 0 2px; }
+.lp-list { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.lp-list .badge { margin-left: 4px; }
+.lp-legacy { margin-top: 6px; }
+.lp-poa { white-space: nowrap; }
+.lp-poa select { margin-left: 6px; max-width: 200px; }
