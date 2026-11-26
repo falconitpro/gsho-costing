@@ -27,6 +27,7 @@ class Role(str, Enum):
     PURCHASING = "purchasing"      # закупки (заготовка роли, задача 6)
     LAWYER = "lawyer"              # юрист: тендерная документация, договор, протокол разногласий
     CLERK = "clerk"                # делопроизводитель (офис-менеджер): Канцелярия — регистрация писем и документов, исполнители, сроки (D-128)
+    ENGINEER = "engineer"          # инженер сервиса (D-180, D-181): свои наряды, машины и площадки по ним; сделок, цен и себестоимости не видит
 
 
 ROLE_TITLES = {
@@ -41,6 +42,7 @@ ROLE_TITLES = {
     Role.PURCHASING: "Закупки",
     Role.LAWYER: "Юрист",
     Role.CLERK: "Делопроизводитель (офис-менеджер)",
+    Role.ENGINEER: "Инженер сервиса",
 }
 
 NONE, READ, EDIT = 0, 1, 2
@@ -116,6 +118,13 @@ FIELD_GROUPS: dict[str, tuple[str, set[str]]] = {
     "office_signers": ("Канцелярия: подписанты, факсимиле, коды юр. лиц", set()),
     # D-150: приёмка поставок запчастей на склад и фото отклонений; решения по отклонениям — по-прежнему менеджеры, закупки, КД, ЗГД
     "parts_receiving": ("Склад запчастей: приёмка поставок и фото отклонений", set()),
+    # K и I (D-180, D-181). Стартовые уровни согласованы владельцем 26.11.2026. Разделы подключаются к группам по мере выпуска:
+    # площадки — K-2, парк и владение — K-3, контакты — K-1, сервис — I-1. Инженер видит машины, площадки и контакты только по своим нарядам.
+    "client_contacts": ("Клиенты: контактные лица (персональные данные; просмотры записываются в журнал)", set()),
+    "client_sites": ("Клиенты: площадки (карьеры, базы, адреса и координаты)", set()),
+    "client_fleet": ("Клиенты: парк техники и владение машинами", set()),
+    "service_orders": ("Сервис: обращения и наряды (EDIT — назначать инженеров и вести наряды)", set()),
+    "service_refs": ("Сервис: справочники работ, нормативов, допусков и сроков реакции", set()),
 }
 
 # Стартовая матрица: роль → {группа: уровень}. Не перечисленные группы = 0.
@@ -157,6 +166,27 @@ for _r in (Role.MANAGER, Role.LOGISTICIAN, Role.PURCHASING, Role.CD, Role.GD):
 # Канцелярия (D-128): КД и ФД видят журналы
 for _r in (Role.CD, Role.FD):
     DEFAULT_MATRIX[_r].setdefault("office", READ)
+
+# K и I (D-181): стартовая матрица по таблице, согласованной владельцем 26.11.2026
+_KI = {  # роль: (контакты, площадки, парк, сервис, справочники сервиса)
+    Role.MANAGER: (EDIT, EDIT, EDIT, READ, READ),
+    Role.LOGISTICIAN: (READ, READ, READ, NONE, NONE),
+    Role.SERVICE_HEAD: (EDIT, EDIT, EDIT, EDIT, EDIT),
+    Role.CD: (EDIT, EDIT, EDIT, READ, READ),
+    Role.FD: (READ, READ, READ, READ, NONE),
+    Role.GD: (EDIT, EDIT, EDIT, EDIT, EDIT),
+    Role.ADMIN: (NONE, READ, EDIT, NONE, NONE),
+    Role.OBSERVER: (NONE, READ, NONE, NONE, NONE),
+    Role.PURCHASING: (READ, READ, READ, NONE, NONE),
+    Role.LAWYER: (READ, READ, NONE, NONE, NONE),
+    Role.CLERK: (READ, NONE, NONE, NONE, NONE),
+    Role.ENGINEER: (READ, READ, READ, READ, READ),   # только по своим нарядам; закрывает свои наряды (решение 5)
+}
+for _r, _lv in _KI.items():
+    for _g, _l in zip(("client_contacts", "client_sites", "client_fleet", "service_orders", "service_refs"), _lv):
+        if _l:
+            DEFAULT_MATRIX[_r][_g] = _l
+DEFAULT_MATRIX[Role.ENGINEER]["file_download"] = NONE   # файлы сделок инженеру не нужны: сделок он не видит
 
 PROTECTED = {Role.GD: {"access_admin", "security_admin"}, Role.ADMIN: {"access_admin"}}
 

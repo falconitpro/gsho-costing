@@ -348,7 +348,8 @@ function ClassicWorkplace({ me, onPult }: { me: Me; onPult?: () => void }) {
   const perm = (g: string) => (me.perms?.[g] ?? 0) >= 1;
   const entries: Entry[] = [];
   const mainEntries: Entry[] = [];
-  {   // «Сделки» и «Задачи» — главные входы у всех (как пункты меню); счётчики — только из видимых блоков
+  const onlyEngineer = me.roles.length > 0 && me.roles.every((x) => x.code === "engineer");   // D-181: сделок инженер не видит
+  if (!onlyEngineer) {   // «Сделки» и «Задачи» — главные входы у всех (как пункты меню); счётчики — только из видимых блоков
     const dl = on("deals") ? d.deals : [];
     const first = dl.find((r) => r.tone === "bad") || dl[0];
     const inWork = d.funnel.filter((f) => f.code !== "won" && f.code !== "lost").reduce((a, f) => a + f.count, 0);

@@ -34,6 +34,9 @@ def audit(db: Session, user_id: str | None, deal_id: str | None, entity: str, en
     from fastapi.encoders import jsonable_encoder   # даты и Decimal в JSONB (плановая дата CMR в партии и т. п.)
     db.add(AuditLog(user_id=user_id, deal_id=deal_id, entity=entity, entity_id=entity_id, action=action,
                     before=jsonable_encoder(before), after=jsonable_encoder(after), comment=comment))
+    # D-181: каждое действие журнала — событие в реестре изменений (без значений полей)
+    from .change_events import record
+    record(db, entity, entity_id, action, actor_id=user_id, deal_id=deal_id)
 
 
 def sla(db: Session) -> SlaDefaults:

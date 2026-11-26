@@ -1,4 +1,4 @@
-export type RoleCode = "manager" | "logistician" | "service_head" | "cd" | "fd" | "gd" | "admin" | "observer" | "purchasing";
+export type RoleCode = "manager" | "logistician" | "service_head" | "cd" | "fd" | "gd" | "admin" | "observer" | "purchasing" | "lawyer" | "clerk" | "engineer";
 
 export interface Me {
   id: string;

@@ -33,6 +33,7 @@ const PRIMARY: Record<string, string[]> = {
   admin: ["work", "settings", "deals"],
   observer: ["work", "deals", "board"],
   clerk: ["work", "office", "tasks"],
+  engineer: ["work", "tasks", "catalog"],   // D-181: сделок и юр. блока инженер не видит
 };
 
 /** Разделы роли: все доступные и «главные» (D-097). Один источник для верхнего меню и боковой панели «Нового вида» (D-159). */
@@ -40,8 +41,9 @@ export function navItems(me: Me): { items: NavItem[]; primary: Set<string> } {
   const codes = me.roles.map((r) => r.code);
   const has = (...r: string[]) => codes.some((c) => r.includes(c));
   const perm = (g: string) => (me.perms?.[g] ?? 0) >= 1;
+  const onlyEngineer = codes.length > 0 && codes.every((c) => c === "engineer");
   const allowed: Record<string, boolean> = {
-    work: true, deals: true, tasks: true, assignments: true, legal: true, catalog: true, settings: true,
+    work: true, deals: !onlyEngineer, tasks: true, assignments: true, legal: !onlyEngineer, catalog: true, settings: true,
     board: has("cd", "fd", "gd", "observer"),
     summary: has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager"),
     finance: perm("finance_section"),

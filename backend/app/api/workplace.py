@@ -40,6 +40,7 @@ ROLE_BLOCKS: dict[str, list[str]] = {
     "purchasing":   ["kpis", "todo", "focus", "briefing", "today", "tasks", "deals", "deadlines", "notifications", "quick"],
     "admin":        ["kpis", "todo", "briefing", "approvals", "today", "tasks", "notifications", "quick"],
     "observer":     ["kpis", "briefing", "deals", "funnel", "notifications"],
+    "engineer":     ["kpis", "todo", "today", "tasks", "notifications", "quick"],   # D-181: без сделок и денег
 }
 # D-097: по умолчанию на рабочем месте — «Что сделать», показатели и 1–3 блока роли; остальные скрыты (включаются в «Главная страница — блоки»).
 # Раскладка версии 2: прежние личные раскладки (до D-097) один раз сбрасываются на новую.
@@ -49,6 +50,7 @@ DEFAULT_SHOWN: dict[str, list[str]] = {
     "gd": ["kpis", "todo", "attention", "money", "team", "legal"], "fd": ["kpis", "todo", "money", "attention"],
     "lawyer": ["kpis", "todo", "legal"], "logistician": ["kpis", "todo", "deals"], "service_head": ["kpis", "todo", "deals"],
     "purchasing": ["kpis", "todo", "deals"], "admin": ["kpis", "todo", "approvals"], "observer": ["kpis", "deals", "funnel"],
+    "engineer": ["kpis", "todo", "tasks"],
 }
 DRAFT_STALE_DAYS = 3          # черновик без движения — напомнить менеджеру
 DRAFT_STALE_LEAD_DAYS = 7     # руководителю — сводно по черновикам старше недели
@@ -58,7 +60,7 @@ MONTHS = ["января", "февраля", "марта", "апреля", "ма�
 
 
 def _primary_role(user: CurrentUser) -> str:
-    for r in (Role.GD, Role.CD, Role.FD, Role.LAWYER, Role.MANAGER, Role.LOGISTICIAN, Role.SERVICE_HEAD, Role.PURCHASING, Role.ADMIN, Role.OBSERVER):
+    for r in (Role.GD, Role.CD, Role.FD, Role.LAWYER, Role.MANAGER, Role.LOGISTICIAN, Role.SERVICE_HEAD, Role.PURCHASING, Role.ADMIN, Role.OBSERVER, Role.ENGINEER):
         if r in user.roles:
             return r.value
     return "observer"
@@ -430,7 +432,10 @@ def build(db: Session, user: CurrentUser, executive: bool = False) -> tuple[dict
     in_work_sum = sum(_price(d) or 0 for d in open_deals) + sum(p["price_rub"] for p in open_parts)
     won_sum = sum(_price(d) or 0 for d in won_q) + sum(p["price_rub"] for p in won_q_parts)
     urgent_parts = [p for p in my_open_parts if p["urgent"]]
-    if role in ("manager", "observer", "logistician", "service_head", "purchasing"):
+    if role == "engineer":   # D-181: только свои задачи; наряды появятся в I-1
+        kpis = [{"title": "Задачи на мне", "value": str(len(tasks)), "sub": "", "tone": "", "url": "/tasks"},
+                {"title": "Просрочено задач", "value": str(len(overdue_tasks)), "sub": "", "tone": "bad" if overdue_tasks else "ok", "url": "/tasks"}]
+    elif role in ("manager", "observer", "logistician", "service_head", "purchasing"):
         kp_week = [d for d in open_deals if d.kp_due and today <= d.kp_due <= today + timedelta(days=7) and (d.manager_id == user.id or d.manager_id in user.acting_for or role != "manager")]
         my_open = [d for d in open_deals if role != "manager" or d.manager_id == user.id or d.manager_id in user.acting_for]
         kpis = [{"title": "Сделок в работе", "value": str(len(my_open) + len(my_open_parts)), "sub": ((_fmt_money(in_work_sum) + " · ") if fin else "") + f"ГШО {len(my_open)} · ЗЧ {len(my_open_parts)}" + (f" · машина стоит: {len(urgent_parts)}" if urgent_parts else ""), "tone": "bad" if urgent_parts else "", "url": "/deals?block=work"},
@@ -610,7 +615,8 @@ def _quick(user: CurrentUser) -> list[dict]:
         q.append({"title": "Финансы", "url": "/finance"})
     if user.has(Role.LAWYER, Role.GD, Role.FD):
         q.append({"title": "Доверенность", "url": "/legal?tab=poa"})
-    q.append({"title": "Договор", "url": "/legal?tab=contracts&new=1"})
+    if not all(r == Role.ENGINEER for r in user.roles):   # D-181: договоров инженер не видит
+        q.append({"title": "Договор", "url": "/legal?tab=contracts&new=1"})
     q.append({"title": "Мои задачи", "url": "/tasks"})
     return q[:5] + q[-2:] if len(q) > 7 else q
 

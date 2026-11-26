@@ -135,7 +135,12 @@ def catalog(q: str = "", group: str = "", status: str = "active", in_stock: bool
             (func.coalesce(PartStock.qty, 0) - func.coalesce(PartStock.reserved, 0)) < PartStock.min_qty)))
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     rows = db.scalars(stmt.order_by(Part.name_ru, Part.article).limit(min(max(limit, 1), 200)).offset(max(offset, 0))).all()
-    return {"total": total, "items": [_row(p) for p in rows]}
+    items = [_row(p) for p in rows]
+    if _engineer_only(user):
+        for it in items:
+            for k in _ENGINEER_HIDDEN:
+                it.pop(k, None)
+    return {"total": total, "items": items}
 
 
 def duplicates(db: Session, article: str, oem: str = "", manufacturer: str = "", exclude_id: Optional[str] = None) -> list[dict]:
@@ -210,7 +215,18 @@ def _card(db: Session, p: Part, user: CurrentUser) -> dict:
     if not user.can("factory_price_history"):          # цена поставщика — тем, кто видит цены завода
         for k in ("purchase_price", "purchase_currency", "purchase_on"):
             d.pop(k, None)
+    if _engineer_only(user):
+        for k in _ENGINEER_HIDDEN:
+            d.pop(k, None)
     return d
+
+
+# D-181: инженеру сервиса нужны номера, применимость и остатки, но не цены. Остальным ролям — без изменений.
+_ENGINEER_HIDDEN = ("sale_price", "sale_currency", "has_client_prices", "client_prices", "min_price", "min_price_currency")
+
+
+def _engineer_only(user: CurrentUser) -> bool:
+    return bool(user.roles) and all(r == Role.ENGINEER for r in user.roles)
 
 
 def _part_or_404(db: Session, pid: str) -> Part:
