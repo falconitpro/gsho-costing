@@ -871,14 +871,16 @@ def test_admin_screens_and_overdue(client, tmp_path):
     from app.services.deal_service import check_overdue_tasks
     with SessionLocal() as db:
         lg = db.query(User).filter(User.email == LOG).one()
-        t = Task(deal_id=db.query(Deal).first().id, role="logistician", assignee_id=lg.id, title="Тест просрочки", block="test", due=date.today() - timedelta(days=3))
+        t = Task(deal_id=db.query(Deal).first().id, role="logistician", assignee_id=lg.id, title="Тест просрочки", block="test",
+                 due=date.today() - timedelta(days=4))   # D-193: закрыта в полдень UTC вчера — дата одна и та же в UTC и по Москве
         db.add(t)
         db.commit()
         assert check_overdue_tasks(db) >= 1
         db.commit()
         assert db.query(NotificationLog).filter(NotificationLog.event == "task_overdue", NotificationLog.user_id == lg.id).count() >= 1
         assert check_overdue_tasks(db) == 0          # повторно не уведомляет
-        t.done_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        _dt = __import__("datetime")
+        t.done_at = _dt.datetime.combine(t.due + timedelta(days=3), _dt.time(12), tzinfo=_dt.timezone.utc)
         db.commit()
     assert "notified" in _ok(client.post("/api/tasks/check-overdue", headers=H(ADM)))
     with SessionLocal() as db:   # просрочку получил и ЗГД

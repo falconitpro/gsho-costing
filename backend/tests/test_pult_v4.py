@@ -45,7 +45,8 @@ def test_rub_reference_uses_latest_cbr_rate_not_after_today():
 
 def test_pult_v4_shape_and_assignment_filters():
     seed()
-    today = date.today()
+    from app.services.finance.cashview import moscow_today
+    today = moscow_today()   # D-193: «сегодня» поручений — по Москве (в UTC после 21:00 это ещё вчера)
     with TestClient(app) as c:
         ex = c.get("/api/workplace/executive", headers=H(GD)).json()["executive"]
         for k in ex["kpis"]:
