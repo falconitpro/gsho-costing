@@ -11,30 +11,35 @@ from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser, get_current_user
 from ..core.files import file_response
-from ..core.roles import Role
+from ..core.roles import EDIT, READ, Role
 from ..db import get_db
 from ..models import (Client, ClientMachine, Deal, EquipmentModel, Factory, MachineHours, MachineReminder, MaintenanceKit, OtherMachineModel, Part,
-                      PartApplicability, PartRequest, Position, User, ClientSite)
+                      PartApplicability, PartRequest, Position, User, ClientSite, MachineParty)
 from ..services import settings_service
 from ..services.deal_service import audit, notify
+from ..services import fleet_parties as fp
 from ..services.parts_fleet import avg_per_day, due_date, hours_now, kit_lines, next_to
 from ..services.parts_requests import match_lines, next_number, norm_article
 from .common import serialize
 from .parts_requests import _payload as request_payload, _recalc
 
 router = APIRouter(prefix="/api/parts/fleet", tags=["parts-fleet"])
-EDIT_ROLES = (Role.MANAGER, Role.SERVICE_HEAD, Role.CD, Role.GD, Role.ADMIN)
-READ_ROLES = (*EDIT_ROLES, Role.FD, Role.LOGISTICIAN, Role.PURCHASING)
+# D-186 (K-3): права парка — группа «Клиенты: парк и владение» (client_fleet); стартовые уровни совпадают с прежним списком ролей.
+# Инженер видит машины по своим нарядам — с I-1, до тех пор доступа нет.
+
+
+def _engineer_only(user: CurrentUser) -> bool:
+    return bool(user.roles) and all(r == Role.ENGINEER for r in user.roles)
 
 
 def _reader(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    if not user.has(*READ_ROLES):
+    if not user.can("client_fleet", READ) or _engineer_only(user):
         raise HTTPException(403, "Нет доступа к парку машин")
     return user
 
 
 def _editor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    if not user.has(*EDIT_ROLES):
+    if not user.can("client_fleet", EDIT) or _engineer_only(user):
         raise HTTPException(403, "Парк машин ведут менеджеры, сервис, КД и ЗГД")
     return user
 
@@ -93,6 +98,7 @@ def _payload(db: Session, m: ClientMachine, full: bool = False) -> dict:
     d["site_name"] = site_obj.name if site_obj else m.site
     d["origin_title"] = ORIGINS.get(m.origin or "unknown", "")
     if full:
+        d["parties"] = _parties_payload(db, m)
         d["readings"] = [serialize(h) for h in db.scalars(select(MachineHours).where(MachineHours.machine_id == m.id).order_by(MachineHours.on.desc())).all()]
         d["kits"] = [serialize(k) for k in _kits_for(db, m)]
         d["reminders"] = [serialize(r) for r in db.scalars(select(MachineReminder).where(MachineReminder.machine_id == m.id)
@@ -102,19 +108,35 @@ def _payload(db: Session, m: ClientMachine, full: bool = False) -> dict:
     return d
 
 
+def _parties_payload(db: Session, m: ClientMachine) -> list[dict]:
+    fp.ensure_primary(db, m)
+    rows = fp.parties(db, m.id)
+    names = dict(db.execute(select(Client.id, Client.name).where(Client.id.in_({p.client_id for p in rows}))).all()) if rows else {}
+    today = date.today()
+    return [{**serialize(p), "client_name": names.get(p.client_id, ""), "role_title": fp.ROLES.get(p.role, p.role),
+             "active": p.valid_to is None or p.valid_to >= today} for p in rows]
+
+
 # ------------------------------------------------------------------ парк
 
 @router.get("/machines")
 def machines(client_id: str = "", q: str = "", due_days: Optional[int] = None, site_id: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
     """Парк: фильтр по клиенту и строке поиска; due_days — только машины с ТО в ближайшие N дней."""
     stmt = select(ClientMachine).where(ClientMachine.active.is_(True)).order_by(ClientMachine.created_at.desc())
-    if client_id:
-        stmt = stmt.where(ClientMachine.client_id == client_id)
+    roles_of: dict[str, list[str]] = {}
+    if client_id:   # D-186: машины, где клиент — главный или любая действующая сторона (собственник, лизингодатель, эксплуатант)
+        via = db.execute(select(MachineParty.machine_id, MachineParty.role).where(MachineParty.client_id == client_id, fp.active())).all()
+        for mid_, role in via:
+            roles_of.setdefault(mid_, []).append(role)
+        stmt = stmt.where(or_(ClientMachine.client_id == client_id, ClientMachine.id.in_(list(roles_of) or [""])))
     if site_id:
         stmt = stmt.where(ClientMachine.site_id == site_id)
     out = []
     for m in db.scalars(stmt).all():
         d = _payload(db, m)
+        if client_id:
+            d["client_roles"] = [fp.ROLES.get(r, r) for r in roles_of.get(m.id, [])]
+            d["client_is_main"] = m.client_id == client_id
         if q and q.lower() not in " ".join([d["client_name"], d["manufacturer"], d["model"], m.serial, m.site, d["deal_number"]]).lower():
             continue
         nx = d["forecast"]["next"]
@@ -147,6 +169,8 @@ class MachineIn(BaseModel):
 def _apply(db: Session, m: ClientMachine, body: MachineIn) -> None:
     if db.get(Client, body.client_id) is None:
         raise HTTPException(422, "Выберите клиента")
+    if m.id and m.client_id and m.client_id != body.client_id:
+        fp.transfer_client(db, m, body.client_id)   # D-186: смена клиента = передача машины, прежняя сторона уходит в историю
     m.client_id = body.client_id
     if body.equipment_model_id:
         if db.get(EquipmentModel, body.equipment_model_id) is None:
@@ -192,6 +216,7 @@ def create_machine(body: MachineIn, db: Session = Depends(get_db), user: Current
     _apply(db, m, body)
     db.add(m)
     db.flush()
+    fp.ensure_primary(db, m)
     audit(db, user.id, None, "client_machine", m.id, "create", None, {"client": m.client_id, "serial": m.serial})
     db.commit()
     return _payload(db, m, True)
@@ -283,6 +308,7 @@ def sync_from_deals(db: Session, deal_id: Optional[str] = None, user_id: Optiona
     if deal_id:
         stmt = stmt.where(Deal.id == deal_id)
     n = 0
+    created: list[ClientMachine] = []
     for deal in db.scalars(stmt).all():
         for pos in db.scalars(select(Position).where(Position.deal_id == deal.id)).all():
             existing = {m.unit_no: m for m in db.scalars(select(ClientMachine).where(ClientMachine.deal_id == deal.id, ClientMachine.position_id == pos.id)).all()}
@@ -294,11 +320,15 @@ def sync_from_deals(db: Session, deal_id: Optional[str] = None, user_id: Optiona
             for unit in range(1, int(pos.qty or 1) + 1):
                 if unit in have:
                     continue
-                db.add(ClientMachine(client_id=deal.client_id, deal_id=deal.id, position_id=pos.id, unit_no=unit, origin="berghaus", equipment_model_id=pos.equipment_model_id,
-                                     manufacturer=(f.short_name or f.name) if f else "", model=pos.model, commissioned_on=deal.execution_closed_at,
-                                     created_by=user_id, comment="из сделки ГШО — укажите серийный номер"))
+                nm = ClientMachine(client_id=deal.client_id, deal_id=deal.id, position_id=pos.id, unit_no=unit, origin="berghaus", equipment_model_id=pos.equipment_model_id,
+                                   manufacturer=(f.short_name or f.name) if f else "", model=pos.model, commissioned_on=deal.execution_closed_at,
+                                   created_by=user_id, comment="из сделки ГШО — укажите серийный номер")
+                db.add(nm)
+                created.append(nm)
                 n += 1
     db.flush()
+    for nm in created:   # D-186: главная сторона — клиент сделки
+        fp.ensure_primary(db, nm)
     return n
 
 
@@ -613,3 +643,109 @@ def models(db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
     other = [{"id": o.id, "title": f"{o.manufacturer} {o.model}", "manufacturer": o.manufacturer, "model": o.model, "machine_type": o.machine_type}
              for o in db.scalars(select(OtherMachineModel)).all()]
     return {"gsho": sorted(gsho, key=lambda x: x["title"]), "other": sorted(other, key=lambda x: x["title"])}
+
+
+# ------------------------------------------------------------------ стороны по машине (D-186, K-3)
+
+class PartyIn(BaseModel):
+    client_id: str
+    role: str = Field(default="operator", pattern="^(owner|lessor|operator|other)$")
+    valid_from: Optional[date] = None
+    valid_to: Optional[date] = None
+    comment: str = ""
+    make_primary: bool = False
+
+
+def _party_or_404(db: Session, m: ClientMachine, pid: str) -> MachineParty:
+    p = db.get(MachineParty, pid)
+    if p is None or p.machine_id != m.id:
+        raise HTTPException(404, "Запись не найдена")
+    return p
+
+
+def _check_dates(a: Optional[date], b: Optional[date]) -> None:
+    if a and b and b < a:
+        raise HTTPException(422, "Дата окончания раньше даты начала")
+
+
+@router.get("/machines/{mid}/parties")
+def machine_parties(mid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
+    return {"roles": fp.ROLES, "items": _parties_payload(db, _m_or_404(db, mid))}
+
+
+@router.post("/machines/{mid}/parties", status_code=201)
+def add_party(mid: str, body: PartyIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    m = _m_or_404(db, mid)
+    fp.ensure_primary(db, m)
+    if db.get(Client, body.client_id) is None:
+        raise HTTPException(422, "Выберите клиента")
+    _check_dates(body.valid_from, body.valid_to)
+    if body.valid_to and body.valid_to < date.today() and body.make_primary:
+        raise HTTPException(422, "Главной может быть только действующая сторона")
+    dup = db.scalars(select(MachineParty).where(MachineParty.machine_id == m.id, MachineParty.client_id == body.client_id,
+                                                MachineParty.role == body.role, fp.active())).first()
+    if dup:
+        raise HTTPException(409, "Этот клиент уже указан у машины в этой роли")
+    p = MachineParty(machine_id=m.id, client_id=body.client_id, role=body.role, valid_from=body.valid_from, valid_to=body.valid_to,
+                     comment=body.comment, created_by=user.id)
+    db.add(p)
+    db.flush()
+    if body.make_primary:
+        fp.set_primary(db, m, p)
+    audit(db, user.id, None, "machine_party", p.id, "create", None, {"machine_id": m.id, "client_id": p.client_id, "role": p.role, "primary": p.is_primary})
+    db.commit()
+    return _payload(db, m, True)
+
+
+@router.put("/machines/{mid}/parties/{pid}")
+def update_party(mid: str, pid: str, body: PartyIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    m = _m_or_404(db, mid)
+    p = _party_or_404(db, m, pid)
+    if body.client_id != p.client_id:
+        raise HTTPException(409, "Клиента в записи не меняют — завершите её и добавьте новую (так сохранится история)")
+    _check_dates(body.valid_from, body.valid_to)
+    if p.is_primary and body.valid_to and body.valid_to < date.today():
+        raise HTTPException(409, "Это главная сторона машины — сначала сделайте главной другую")
+    before = {"role": p.role, "valid_from": p.valid_from, "valid_to": p.valid_to}
+    p.role, p.valid_from, p.valid_to, p.comment = body.role, body.valid_from, body.valid_to, body.comment
+    if body.make_primary and not p.is_primary:
+        fp.set_primary(db, m, p)
+    audit(db, user.id, None, "machine_party", p.id, "update", before, {"role": p.role, "valid_from": p.valid_from, "valid_to": p.valid_to, "primary": p.is_primary})
+    db.commit()
+    return _payload(db, m, True)
+
+
+@router.post("/machines/{mid}/parties/{pid}/primary")
+def make_primary(mid: str, pid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    """Главная сторона — на её клиента идут сервис и счета; клиент машины меняется на него."""
+    m = _m_or_404(db, mid)
+    p = _party_or_404(db, m, pid)
+    if p.valid_to and p.valid_to < date.today():
+        raise HTTPException(422, "Запись завершена — главной может быть только действующая сторона")
+    before = m.client_id
+    fp.set_primary(db, m, p)
+    audit(db, user.id, None, "machine_party", p.id, "make_primary", {"client_id": before}, {"client_id": m.client_id})
+    db.commit()
+    return _payload(db, m, True)
+
+
+class CloseIn(BaseModel):
+    on: Optional[date] = None
+    comment: str = ""
+
+
+@router.post("/machines/{mid}/parties/{pid}/close")
+def close_party(mid: str, pid: str, body: CloseIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    """Завершить: продажа, окончание лизинга или договора эксплуатации. Запись остаётся в истории."""
+    m = _m_or_404(db, mid)
+    p = _party_or_404(db, m, pid)
+    if p.is_primary:
+        raise HTTPException(409, "Это главная сторона машины — сначала сделайте главной другую")
+    on = body.on or date.today()
+    _check_dates(p.valid_from, on)
+    p.valid_to = on
+    if body.comment:
+        p.comment = (p.comment + "; " if p.comment else "") + body.comment
+    audit(db, user.id, None, "machine_party", p.id, "close", None, {"valid_to": on})
+    db.commit()
+    return _payload(db, m, True)
