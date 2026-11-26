@@ -39,11 +39,19 @@ def test_due_reminders_escalation_control_export(client):
         db.get(OfficeDoc, d["id"]).due_on = due
         db.commit()
 
-    def run(day: date, hour: int = 10) -> int:
+    # D-193: считаем только напоминания по этому документу — документы других тестов (сроки, ознакомление с приказами)
+    # в отдельные даты совпадают по рабочим дням и попадали в общий счёт office_watch.check
+    def mine() -> int:
         with SessionLocal() as db:
-            n = office_watch.check(db, datetime(day.year, day.month, day.day, hour, tzinfo=timezone(timedelta(hours=3))))
+            return db.query(Notification).filter(Notification.event == "office_due", Notification.channel == "app",
+                                                 Notification.text.contains("Запрос сроков — контроль")).count()
+
+    def run(day: date, hour: int = 10) -> int:
+        before = mine()
+        with SessionLocal() as db:
+            office_watch.check(db, datetime(day.year, day.month, day.day, hour, tzinfo=timezone(timedelta(hours=3))))
             db.commit()
-            return n
+        return mine() - before
 
     def notes(uid):
         with SessionLocal() as db:
