@@ -27,6 +27,12 @@ def ensure_guard(engine) -> None:
     if engine.dialect.name != "postgresql":
         return
     with engine.begin() as conn:
+        # init_db может выполняться одновременно в нескольких процессах: замок и проверка «уже есть», иначе
+        # параллельный CREATE OR REPLACE FUNCTION падает с «tuple concurrently updated»
+        conn.exec_driver_sql("SELECT pg_advisory_xact_lock(181181)")
+        done = conn.exec_driver_sql("SELECT count(*) FROM pg_trigger WHERE tgname IN ('change_events_no_update', 'change_events_no_truncate')").scalar()
+        if done == 2:
+            return
         conn.exec_driver_sql(GUARD_SQL)
 
 
