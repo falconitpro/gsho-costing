@@ -2804,3 +2804,129 @@ class AssignmentEvent(Base):
     to_status: Mapped[str] = mapped_column(String(16), default="")
     comment: Mapped[str] = mapped_column(Text, default="")
     data: Mapped[dict] = mapped_column(JSONType, default=dict)
+
+
+# ───────────────────────── I-0 (D-191): сервисная служба — обращения, заказ-наряды, события, справочники ─────────────────────────
+
+class ServiceWorkType(TimestampMixin, Base):
+    """Вид работ с нормативом (I-0, решение 8: черновик готовит разработчик, утверждает руководитель сервиса).
+    machine_kind пусто — для любой техники. Одна сущность для сервиса и каталога работ (J-d)."""
+    __tablename__ = "service_work_types"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    code: Mapped[str] = mapped_column(String(32), unique=True)
+    name: Mapped[str] = mapped_column(String(255))
+    category: Mapped[str] = mapped_column(String(24), default="repair")      # diagnostics | maintenance | repair | commissioning | other
+    machine_kind: Mapped[str] = mapped_column(String(64), default="")
+    norm_hours: Mapped[Optional[float]] = mapped_column(Float)                 # пусто — норматив не задан (не 0)
+    crew_size: Mapped[int] = mapped_column(Integer, default=1)
+    permit_codes: Mapped[list[str]] = mapped_column(JSONType, default=list)   # нужные допуски исполнителя
+    checklist: Mapped[list[str]] = mapped_column(JSONType, default=list)      # шаблон пунктов чек-листа
+    is_draft: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class ServicePermit(TimestampMixin, Base):
+    """Допуск исполнителя (электробезопасность, высота, ГПМ, промбезопасность и т. п.) со сроком действия."""
+    __tablename__ = "service_permits"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    code: Mapped[str] = mapped_column(String(32), unique=True)
+    name: Mapped[str] = mapped_column(String(255))
+    valid_months: Mapped[Optional[int]] = mapped_column(Integer)               # пусто — бессрочно
+    is_draft: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class ServiceSlaLevel(TimestampMixin, Base):
+    """Категория срока реакции: часы до реакции, выезда и восстановления. Пусто — срок не задан."""
+    __tablename__ = "service_sla_levels"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    code: Mapped[str] = mapped_column(String(32), unique=True)
+    name: Mapped[str] = mapped_column(String(255))
+    reaction_hours: Mapped[Optional[float]] = mapped_column(Float)
+    arrival_hours: Mapped[Optional[float]] = mapped_column(Float)
+    restore_hours: Mapped[Optional[float]] = mapped_column(Float)
+    calendar: Mapped[str] = mapped_column(String(16), default="24x7")         # 24x7 | business
+    is_draft: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class ServiceRequest(TimestampMixin, Base):
+    """Обращение клиента (I-0): машина — существующая ClientMachine (не дубль), площадка — ClientSite, контакт — ClientContact."""
+    __tablename__ = "service_requests"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(32), unique=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), index=True)
+    site_id: Mapped[Optional[str]] = mapped_column(ForeignKey("client_sites.id", ondelete="SET NULL"), index=True)
+    machine_id: Mapped[Optional[str]] = mapped_column(ForeignKey("client_machines.id", ondelete="SET NULL"), index=True)
+    contact_id: Mapped[Optional[str]] = mapped_column(ForeignKey("client_contacts.id", ondelete="SET NULL"))
+    channel: Mapped[str] = mapped_column(String(16), default="phone")          # phone | email | visit | portal | other
+    kind: Mapped[str] = mapped_column(String(24), default="repair")            # = категория вида работ
+    sla_code: Mapped[str] = mapped_column(String(32), default="")
+    status: Mapped[str] = mapped_column(String(16), default="new", index=True)  # new | accepted | rejected | done
+    description: Mapped[str] = mapped_column(Text, default="")
+    machine_down: Mapped[bool] = mapped_column(Boolean, default=False)          # машина стоит
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reject_reason: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class WorkOrder(TimestampMixin, Base):
+    """Заказ-наряд (I-0). Статус меняется только событиями WorkOrderEvent через services/work_orders.apply —
+    одинаково для веба и будущего приложения без сети; version растёт на каждое принятое событие."""
+    __tablename__ = "work_orders"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(32), unique=True)
+    request_id: Mapped[Optional[str]] = mapped_column(ForeignKey("service_requests.id", ondelete="SET NULL"), index=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("clients.id"), index=True)
+    site_id: Mapped[Optional[str]] = mapped_column(ForeignKey("client_sites.id", ondelete="SET NULL"), index=True)
+    machine_id: Mapped[Optional[str]] = mapped_column(ForeignKey("client_machines.id", ondelete="SET NULL"), index=True)
+    work_type_id: Mapped[Optional[str]] = mapped_column(ForeignKey("service_work_types.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
+    engineer_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"), index=True)
+    assigned_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    planned_start: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    planned_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    description: Mapped[str] = mapped_column(Text, default="")
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    signed_by_name: Mapped[str] = mapped_column(String(255), default="")      # подпись представителя клиента при закрытии
+    signed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class WorkOrderEvent(Base):
+    """Событие заказ-наряда — только добавление (триггер в базе). id задаёт отправитель (UUID): повторная отправка
+    того же события не применяется второй раз, а возвращает прежний результат. result: applied | merged | conflict | rejected."""
+    __tablename__ = "work_order_events"
+    __table_args__ = (Index("ix_work_order_events_order_received", "work_order_id", "received_at"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    work_order_id: Mapped[str] = mapped_column(ForeignKey("work_orders.id"), index=True)   # без каскада: история не удаляется
+    kind: Mapped[str] = mapped_column(String(24))
+    base_version: Mapped[int] = mapped_column(Integer)                          # версия наряда, которую видел отправитель
+    new_version: Mapped[Optional[int]] = mapped_column(Integer)                 # версия после применения (пусто — не применено)
+    payload: Mapped[dict] = mapped_column(JSONType, default=dict)
+    actor_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    device_id: Mapped[str] = mapped_column(String(64), default="")             # «web» или идентификатор устройства
+    offline: Mapped[bool] = mapped_column(Boolean, default=False)              # событие создано без связи
+    occurred_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))   # время на устройстве (для истории, не для порядка)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    result: Mapped[str] = mapped_column(String(16), default="applied")
+    reason: Mapped[str] = mapped_column(Text, default="")
+
+
+class WorkOrderChecklistItem(TimestampMixin, Base):
+    """Пункт чек-листа наряда. Отметки ставятся событием checklist; разные пункты от разных людей объединяются без конфликта."""
+    __tablename__ = "work_order_checklist_items"
+    __table_args__ = (UniqueConstraint("work_order_id", "position", name="uq_work_order_checklist_position"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    work_order_id: Mapped[str] = mapped_column(ForeignKey("work_orders.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    required: Mapped[bool] = mapped_column(Boolean, default=True)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    done_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    done_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str] = mapped_column(Text, default="")

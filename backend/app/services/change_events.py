@@ -36,6 +36,31 @@ def ensure_guard(engine) -> None:
         conn.exec_driver_sql(GUARD_SQL)
 
 
+# D-191: события заказ-нарядов — тоже только добавление (тот же текст, что в migrations/060)
+WORK_ORDER_GUARD_SQL = """
+CREATE OR REPLACE FUNCTION work_order_events_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'work_order_events: только добавление (изменение и удаление запрещены)';
+END $$;
+DROP TRIGGER IF EXISTS work_order_events_no_update ON work_order_events;
+CREATE TRIGGER work_order_events_no_update BEFORE UPDATE OR DELETE ON work_order_events
+    FOR EACH ROW EXECUTE FUNCTION work_order_events_append_only();
+DROP TRIGGER IF EXISTS work_order_events_no_truncate ON work_order_events;
+CREATE TRIGGER work_order_events_no_truncate BEFORE TRUNCATE ON work_order_events
+    FOR EACH STATEMENT EXECUTE FUNCTION work_order_events_append_only();
+"""
+
+
+def ensure_work_order_guard(engine) -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as conn:
+        conn.exec_driver_sql("SELECT pg_advisory_xact_lock(191191)")
+        done = conn.exec_driver_sql("SELECT count(*) FROM pg_trigger WHERE tgname IN ('work_order_events_no_update', 'work_order_events_no_truncate')").scalar()
+        if done != 2:
+            conn.exec_driver_sql(WORK_ORDER_GUARD_SQL)
+
+
 def record(db: Session, entity: str, entity_id: str, action: str, actor_id: Optional[str] = None,
            deal_id: Optional[str] = None) -> None:
     """Добавить событие в текущую транзакцию: откат транзакции откатывает и событие."""

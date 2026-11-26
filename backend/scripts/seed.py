@@ -73,6 +73,8 @@ def run() -> None:
                 db.add(HsCode(code=code, description=desc, duty_pct=duty, vat_pct=vat, util_fee=util, certification=cert, valid_from=date(2026, 1, 1)))
         payment_schemes(db)
         seed_parts_setup(db)
+        from app.services.service_refs import load_drafts
+        load_drafts(db)             # D-191: черновик справочников сервиса (dev и стенд; рабочий — scripts.service_refs_import)
         mark_supplies(db)           # раздел «Поставщики»: ГШО / запасные части — по фактическому использованию
         parts_manufacturer_paus(db)  # разово (05.11.2026): у всех запчастей каталога производитель PAUS, Германия
         parts_supplier_grp(db)       # разово (05.11.2026): запчасти из МойСклад — поставщик GRP, маршрут Германия → Киргизия → РФ
