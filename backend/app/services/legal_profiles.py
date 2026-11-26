@@ -22,7 +22,7 @@ BANK_STATUS = {"active": "действующий", "archived": "архивный
 
 # поля профиля, которые правятся из формы и попадают в историю
 PROFILE_FIELDS = ("kind", "title", "is_default", "country", "names", "opf", "reg_number", "tax_number", "kpp", "legal_address", "actual_address", "postal_address",
-                  "director", "signatory_name", "signatory_position", "signatory_basis", "contacts", "documents", "powers_of_attorney", "extra", "lawyer_comment", "is_active")
+                  "director", "signatory_name", "signatory_position", "signatory_basis", "org_phone", "org_email", "contacts", "documents", "powers_of_attorney", "extra", "lawyer_comment", "is_active")
 BANK_FIELDS = ("title", "currency", "country", "beneficiary", "bank_name", "bank_address", "account", "bik", "swift", "corr_account", "corr_bank", "purpose",
                "status", "valid_from", "valid_to")
 
@@ -73,6 +73,28 @@ def _names(ru_full: str = "", ru_short: str = "", en: str = "", zh: str = "") ->
     return {"ru": {"full": ru_full or "", "short": ru_short or ""}, "en": {"full": en or "", "short": ""}, "zh": {"full": zh or "", "short": ""}}
 
 
+def _first(lst) -> dict:
+    return next((x for x in (lst or []) if isinstance(x, dict)), {})
+
+
+def org_phone_email(p: LegalProfile) -> tuple[str, str]:
+    """Телефон и почта организации для договоров (D-189); пока не заполнены — как раньше, из первого контакта профиля."""
+    c0 = _first(p.contacts)
+    return (p.org_phone or c0.get("phone", "") or ""), (p.org_email or c0.get("email", "") or "")
+
+
+def poa_status(d: dict) -> str:
+    """Статус доверенности: действует / истекла / срок не указан. Истёкшая не удаляется и не меняет документы."""
+    from datetime import date as _d
+    v = str((d or {}).get("valid_until") or "")[:10]
+    if not v:
+        return "no_date"
+    try:
+        return "expired" if _d.fromisoformat(v) < _d.today() else "active"
+    except ValueError:
+        return "no_date"
+
+
 def profile_from_client(c: Client, req: Optional[dict] = None) -> LegalProfile:
     """Профиль российского заказчика: из набора реквизитов (#77) или из данных ЕГРЮЛ в карточке."""
     r = req or {}
@@ -84,7 +106,9 @@ def profile_from_client(c: Client, req: Optional[dict] = None) -> LegalProfile:
                      director=c.director or "", signatory_name=r.get("signatory_name") or c.director or "",
                      signatory_position=r.get("signatory_position") or ("Генеральный директор" if c.director else ""),
                      signatory_basis=r.get("signatory_basis") or ("Устава" if c.director else ""),
-                     contacts=[{"name": x.get("name", ""), "position": x.get("position", ""), "phone": x.get("phone", ""), "email": x.get("email", "")} for x in (c.contacts or []) if isinstance(x, dict)],
+                     # D-189: контакты клиента — только в едином справочнике; в профиль не копируются. Телефон и почта организации
+                     # для договоров — из первого контакта прежнего списка, как раньше попадали в договор
+                     contacts=[], org_phone=str(_first(c.contacts).get("phone", ""))[:64], org_email=str(_first(c.contacts).get("email", ""))[:255],
                      extra={"okved": c.okved or ""} if c.okved else {})
     if r.get("bank_name") or r.get("account"):
         p.banks.append(BankProfile(title="Основной RUB", currency="RUB", country="RU", bank_name=r.get("bank_name", ""), account=r.get("account", ""), bik=r.get("bik", ""),
@@ -164,7 +188,9 @@ def profile_payload(p: LegalProfile, names: dict[str, str], with_history: bool =
                                             "zh": {"full": (n.get("zh") or {}).get("full", ""), "short": (n.get("zh") or {}).get("short", "")}},
             "opf": p.opf, "reg_number": p.reg_number, "tax_number": p.tax_number, "kpp": p.kpp, "legal_address": p.legal_address, "actual_address": p.actual_address, "postal_address": p.postal_address,
             "director": p.director, "signatory_name": p.signatory_name, "signatory_position": p.signatory_position, "signatory_basis": p.signatory_basis,
-            "contacts": p.contacts or [], "documents": p.documents or [], "powers_of_attorney": p.powers_of_attorney or [], "extra": p.extra or {},
+            "org_phone": p.org_phone, "org_email": p.org_email, "contacts_readonly": p.owner_kind == "client",
+            "contacts": p.contacts or [], "documents": p.documents or [],
+            "powers_of_attorney": [{**d, "status": poa_status(d)} for d in (p.powers_of_attorney or []) if isinstance(d, dict)], "extra": p.extra or {},
             "check_status": p.check_status, "check_status_title": CHECK_STATUS.get(p.check_status, p.check_status), "checked_at": p.checked_at, "checked_by_name": names.get(p.checked_by or "", ""),
             "lawyer_comment": p.lawyer_comment, "is_active": p.is_active, "country_fields": COUNTRY_FIELDS.get(p.kind, []),
             "banks": [bank_payload(b, names) for b in p.banks], "summary": profile_summary(p),
@@ -196,7 +222,7 @@ def requisites_view(p: LegalProfile) -> dict:
             "inn": p.tax_number, "kpp": p.kpp, "ogrn": p.reg_number, "legal_address": p.legal_address, "postal_address": p.postal_address,
             "bank_name": bank.bank_name if bank else "", "bik": bank.bik if bank else "", "account": bank.account if bank else "", "corr_account": bank.corr_account if bank else "",
             "signatory_name": p.signatory_name, "signatory_position": p.signatory_position, "signatory_basis": p.signatory_basis,
-            "phone": (p.contacts[0].get("phone", "") if p.contacts else ""), "email": (p.contacts[0].get("email", "") if p.contacts else ""), "comment": p.lawyer_comment,
+            "phone": org_phone_email(p)[0], "email": org_phone_email(p)[1], "comment": p.lawyer_comment,
             "bank_profile_id": bank.id if bank else None, "profile_id": p.id}
 
 

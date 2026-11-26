@@ -1511,7 +1511,9 @@ class LegalProfile(TimestampMixin, Base):
     signatory_name: Mapped[str] = mapped_column(String(255), default="")
     signatory_position: Mapped[str] = mapped_column(String(255), default="")
     signatory_basis: Mapped[str] = mapped_column(String(255), default="")      # Устава / доверенности № … от …
-    contacts: Mapped[list[dict]] = mapped_column(JSONType, default=list)       # [{name, position, phone, email}]
+    contacts: Mapped[list[dict]] = mapped_column(JSONType, default=list)       # [{name, position, phone, email}]; у клиентов — только чтение (D-189)
+    org_phone: Mapped[str] = mapped_column(String(64), default="")            # D-189: телефон и почта организации для договоров (не контактного лица)
+    org_email: Mapped[str] = mapped_column(String(255), default="")
     documents: Mapped[list[dict]] = mapped_column(JSONType, default=list)      # регистрационные документы: [{title, number, issued_on, valid_until, attachment_id}]
     powers_of_attorney: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # [{person, number, issued_on, valid_until, scope, attachment_id}]
     extra: Mapped[dict] = mapped_column(JSONType, default=dict)                # страновые поля: business_license {...}, legal_representative, и т. п.
@@ -2330,6 +2332,18 @@ class KpDispatchRecipient(Base):
     display_name: Mapped[str] = mapped_column(String(255), default="")
     job_title: Mapped[str] = mapped_column(String(255), default="")
     email: Mapped[str] = mapped_column(String(255))
+
+
+class ContactMigrationMap(Base):
+    """Разовый перенос контактов (D-189): источник → контакт и связь справочника. Повторный перенос по ключу ничего не дублирует."""
+    __tablename__ = "contact_migration_map"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(24))                  # client_card | legal_profile
+    source_key: Mapped[str] = mapped_column(String(160), unique=True)
+    contact_id: Mapped[Optional[str]] = mapped_column(String(36))
+    link_id: Mapped[Optional[str]] = mapped_column(String(36))
+    outcome: Mapped[str] = mapped_column(String(16))                 # created | matched | ambiguous
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ClientContactView(Base):

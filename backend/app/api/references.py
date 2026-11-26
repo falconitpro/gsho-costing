@@ -212,14 +212,25 @@ def create_client(body: ClientIn, db: Session = Depends(get_db), user: CurrentUs
     if db.scalar(select(Client).where(Client.inn == body.inn)):
         raise HTTPException(409, "Клиент с таким ИНН уже есть")
     data = body.model_dump()
-    c = Client(manager_id=user.id, registry_data=data.pop("registry") or {}, **data)
+    legacy_contacts = data.pop("contacts") or []
+    c = Client(manager_id=user.id, registry_data=data.pop("registry") or {}, contacts=[], **data)
     if body.registry:
         c.registry_checked_at = datetime.now(timezone.utc)
     db.add(c)
     db.flush()
+    # D-189: контакты при создании клиента — сразу в единый справочник (прежний список не пополняется)
+    from ..models import ClientContact, ClientContactLink
+    for x in legacy_contacts:
+        if not isinstance(x, dict) or not str(x.get("name") or "").strip():
+            continue
+        cc = ClientContact(client_id=c.id, full_name=" ".join(str(x["name"]).split())[:255], position=str(x.get("position") or "")[:255],
+                           work_phone=str(x.get("phone") or "")[:64], work_email=str(x.get("email") or "").strip().lower()[:255], created_by=user.id)
+        db.add(cc)
+        db.flush()
+        db.add(ClientContactLink(contact_id=cc.id, client_id=c.id, created_by=user.id))
     from ..services.moysklad_import import relink_client_prices
     relink_client_prices(db)        # договорные цены запчастей, перенесённые раньше клиента
-    audit(db, user.id, None, "client", c.id, "create", after=body.model_dump())
+    audit(db, user.id, None, "client", c.id, "create", after=body.model_dump(exclude={"contacts"}))
     db.commit()
     return serialize(c)
 

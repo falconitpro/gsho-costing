@@ -89,12 +89,13 @@ def warranty_text(p: Position) -> str:
 def party_from_profile(p: LegalProfile, bank: Optional[BankProfile]) -> dict:
     n = p.names or {}
     ru, en, zh = n.get("ru") or {}, n.get("en") or {}, n.get("zh") or {}
-    c0 = next((c for c in (p.contacts or []) if isinstance(c, dict)), {})
+    from .legal_profiles import org_phone_email
+    org_phone, org_email = org_phone_email(p)   # D-189: телефон и почта организации, а не контактного лица
     b = bank
     return {"profile_id": p.id, "name_ru": ru.get("full") or ru.get("short") or en.get("full") or "", "short_ru": ru.get("short") or "", "name_en": en.get("full") or "", "name_zh": zh.get("full") or "",
             "country": p.country, "reg_number": p.reg_number, "tax_number": p.tax_number, "kpp": p.kpp, "legal_address": p.legal_address, "actual_address": p.actual_address,
             "postal_address": p.postal_address, "director": p.director, "signatory": p.signatory_name, "signatory_position": p.signatory_position, "signatory_basis": p.signatory_basis,
-            "phone": c0.get("phone", ""), "email": c0.get("email", ""),
+            "phone": org_phone, "email": org_email,
             "bank": {"id": b.id, "title": b.title, "beneficiary": b.beneficiary or ru.get("full") or en.get("full") or "", "bank_name": b.bank_name, "bank_address": b.bank_address, "account": b.account,
                      "bik": b.bik, "swift": b.swift, "corr_account": b.corr_account, "corr_bank": b.corr_bank, "currency": b.currency, "verified": b.verified} if b else
                     {"id": None, "title": "", "beneficiary": "", "bank_name": "", "bank_address": "", "account": "", "bik": "", "swift": "", "corr_account": "", "corr_bank": "", "currency": "", "verified": False}}

@@ -81,6 +81,8 @@ class ProfileIn(BaseModel):
     signatory_name: Optional[str] = None
     signatory_position: Optional[str] = None
     signatory_basis: Optional[str] = None
+    org_phone: Optional[str] = None
+    org_email: Optional[str] = None
     contacts: Optional[list[dict]] = None
     documents: Optional[list[dict]] = None
     powers_of_attorney: Optional[list[dict]] = None
@@ -170,6 +172,19 @@ def update_profile(pid: str, body: ProfileIn, db: Session = Depends(get_db), use
         for o in svc.ensure_profiles(db, p.owner_kind, p.owner_id):
             if o.id != p.id:
                 o.is_default = False
+    if p.owner_kind == "client" and "contacts" in data:
+        # D-189: контакты клиента ведутся только в едином справочнике — прежний список профиля только для чтения
+        if [x for x in (data["contacts"] or []) if isinstance(x, dict)] != [x for x in (p.contacts or []) if isinstance(x, dict)]:
+            raise HTTPException(422, "Контакты клиента ведутся в карточке клиента («Контактные лица»), в профиле — только просмотр")
+        data.pop("contacts")
+    if "powers_of_attorney" in data:
+        data["powers_of_attorney"] = [{k: v for k, v in (d or {}).items() if k != "status"} for d in (data["powers_of_attorney"] or [])]
+        if p.owner_kind == "client":
+            from ..models import ClientContactLink
+            for d in data["powers_of_attorney"]:
+                cid = d.get("contact_id")
+                if cid and db.scalars(select(ClientContactLink).where(ClientContactLink.contact_id == cid, ClientContactLink.client_id == p.owner_id)).first() is None:
+                    raise HTTPException(422, "Представитель по доверенности должен быть контактом этого клиента")
     if "documents" in data:
         import uuid as _uuid
         old_files = {d.get("id"): d.get("file") for d in (p.documents or []) if d.get("file")}
