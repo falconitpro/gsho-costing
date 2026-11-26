@@ -133,13 +133,13 @@ function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, canDelete, onSave
             {inp("signatory_basis", "Действует на основании", "Устава / доверенности № … от …")}
           </div>
           <div className="muted" style={{ fontSize: 11, letterSpacing: ".4px", textTransform: "uppercase", margin: "8px 0 2px" }}>Доверенности и регистрационные документы</div>
-          <table style={{ fontSize: 12 }}><thead><tr><th>Доверенность: кому</th><th>№</th><th>Выдана</th><th>Действует до</th><th>Полномочия</th>{canEdit && <th />}</tr></thead>
+          <table className="lp-scroll" style={{ fontSize: 12 }}><thead><tr><th>Доверенность: кому</th><th>№</th><th>Выдана</th><th>Действует до</th><th>Полномочия</th>{canEdit && <th />}</tr></thead>
             <tbody>{(f.powers_of_attorney || []).map((d, i) => <tr key={i}>
               {(["person", "number", "issued_on", "valid_until", "scope"] as const).map((k) => <td key={k}><input type={k.includes("_on") || k.includes("until") ? "date" : "text"} value={d[k] || ""} disabled={!canEdit} style={{ width: k === "scope" ? 220 : k === "person" ? 180 : 120 }}
                 onChange={(e) => set({ powers_of_attorney: f.powers_of_attorney.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x)) })} /></td>)}
               {canEdit && <td><button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => set({ powers_of_attorney: f.powers_of_attorney.filter((_, j) => j !== i) })}>×</button></td>}</tr>)}
               {canEdit && <tr><td colSpan={6}><button className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => set({ powers_of_attorney: [...(f.powers_of_attorney || []), { person: "", number: "", issued_on: "", valid_until: "", scope: "" }] })}>+ доверенность</button></td></tr>}</tbody></table>
-          <table style={{ fontSize: 12, marginTop: 4 }}><thead><tr><th>Документ</th><th>№</th><th>Дата</th><th>Действует до</th><th>Скан</th>{canEdit && <th />}</tr></thead>
+          <table className="lp-scroll" style={{ fontSize: 12, marginTop: 4 }}><thead><tr><th>Документ</th><th>№</th><th>Дата</th><th>Действует до</th><th>Скан</th>{canEdit && <th />}</tr></thead>
             <tbody>{(f.documents || []).map((d, i) => <tr key={d.id || i}>
               {(["title", "number", "issued_on", "valid_until"] as const).map((k) => <td key={k}><input type={k.includes("_on") || k.includes("until") ? "date" : "text"} value={d[k] || ""} disabled={!canEdit} style={{ width: k === "title" ? 240 : 120 }}
                 onChange={(e) => set({ documents: f.documents.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x)) })} /></td>)}
@@ -154,7 +154,7 @@ function ProfileCard({ p, dicts, canEdit, canCheck, canVerify, canDelete, onSave
                 <label className="btn ghost" style={{ padding: "2px 8px", fontSize: 12, cursor: "pointer" }} title="загрузить скан — строка документа создастся по имени файла">+ скан файлом<input type="file" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.docx,.zip" style={{ display: "none" }}
                   onChange={(e) => { const fl = e.target.files?.[0]; if (fl) api.upload(`/api/legal/profiles/${p.id}/documents`, fl, {}).then(onSaved).catch((er) => onMsg((er as Error).message)); e.target.value = ""; }} /></label></div></td></tr>}</tbody></table>
           <div className="muted" style={{ fontSize: 11, letterSpacing: ".4px", textTransform: "uppercase", margin: "8px 0 2px" }}>Контактные лица</div>
-          <table style={{ fontSize: 12 }}><tbody>{(f.contacts || []).map((c, i) => <tr key={i}>
+          <table className="lp-scroll" style={{ fontSize: 12 }}><tbody>{(f.contacts || []).map((c, i) => <tr key={i}>
             {(["name", "position", "phone", "email"] as const).map((k) => <td key={k}><input placeholder={{ name: "имя", position: "должность", phone: "телефон", email: "e-mail" }[k]} value={c[k] || ""} disabled={!canEdit} style={{ width: 170 }}
               onChange={(e) => set({ contacts: f.contacts.map((x, j) => (j === i ? { ...x, [k]: e.target.value } : x)) })} /></td>)}
             {canEdit && <td><button className="btn ghost" style={{ padding: "0 6px" }} onClick={() => set({ contacts: f.contacts.filter((_, j) => j !== i) })}>×</button></td>}</tr>)}

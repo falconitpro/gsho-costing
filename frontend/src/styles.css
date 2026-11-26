@@ -2155,3 +2155,11 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
   .cs-form .grid.cols-3 { grid-template-columns: minmax(0, 1fr); }
 }
 .cs-note { font-size: 12px; }
+
+/* D-183: карточка клиента в новом виде — таблицы юр. профиля с полями прокручиваются внутри карточки, а не растягивают страницу;
+   на планшете и телефоне список клиентов и карточка — друг под другом */
+.ui-new table.lp-scroll { display: block; max-width: 100%; overflow-x: auto; }
+@media (max-width: 1100px) {
+  .ui-new .cl-layout { grid-template-columns: minmax(0, 1fr) !important; }
+  .ui-new .cl-layout > :last-child { order: -1; }   /* открытая карточка — сверху, список — под ней */
+}
