@@ -4,18 +4,18 @@ import { api, ApiError, fmtDate } from "../api";
 /** D-184 (K-1): контактные лица клиента. Персональные данные (152-ФЗ): рабочие телефон, почта, мессенджер; каждый просмотр
  *  записывается в журнал; удаление по запросу — полностью, с основанием. Права — группа «Клиенты: контактные лица». Только новый вид. */
 
-type Contact = { id: string; full_name: string; position: string; department: string; roles: string[]; roles_titles: string[]; work_phone: string;
+type Contact = { id: string; full_name: string; position: string; department: string; roles: string[]; roles_titles: string[]; work_phone: string; mobile_phone: string;
   work_email: string; messenger: string; site_id: string | null; site_name: string; is_primary: boolean; is_active: boolean;
   consent_on: string | null; consent_source: string; comment: string;
   // D-188: один человек — несколько клиентов; доп. адреса; период связи
   extra_emails: { email: string; label: string }[]; other_clients: string[]; valid_from: string | null; valid_to: string | null; link_id: string };
 type Hist = { at: string; user: string; field: string; old: string; new: string };
 const FIELD: Record<string, string> = { full_name: "ФИО", position: "должность", department: "подразделение", work_phone: "телефон", work_email: "почта",
-  messenger: "мессенджер", extra_emails: "доп. адреса", consent_on: "дата согласия", consent_source: "источник согласия", comment: "комментарий" };
+  mobile_phone: "мобильный", messenger: "мессенджер", extra_emails: "доп. адреса", consent_on: "дата согласия", consent_source: "источник согласия", comment: "комментарий" };
 type Meta = { roles: Record<string, string>; consent_required: boolean; can_edit: boolean; can_see_views: boolean };
 type View = { at: string; user: string; kind: string };
 
-const EMPTY = { full_name: "", position: "", department: "", roles: [] as string[], work_phone: "", work_email: "", messenger: "", site_id: "",
+const EMPTY = { full_name: "", position: "", department: "", roles: [] as string[], work_phone: "", mobile_phone: "", work_email: "", messenger: "", site_id: "",
   is_primary: false, is_active: true, consent_on: "", consent_source: "", comment: "", extra: "", valid_from: "", valid_to: "" };
 type Form = typeof EMPTY;
 const KIND: Record<string, string> = { list: "список", card: "карточка", export: "выгрузка" };
@@ -45,7 +45,7 @@ export default function ClientContacts({ clientId }: { clientId: string }) {
 
   const edit = (c: Contact) => {
     setEditId(c.id);
-    setForm({ full_name: c.full_name, position: c.position, department: c.department, roles: c.roles, work_phone: c.work_phone, work_email: c.work_email,
+    setForm({ full_name: c.full_name, position: c.position, department: c.department, roles: c.roles, work_phone: c.work_phone, mobile_phone: c.mobile_phone || "", work_email: c.work_email,
       messenger: c.messenger, site_id: c.site_id || "", is_primary: c.is_primary, is_active: c.is_active, consent_on: c.consent_on || "", consent_source: c.consent_source, comment: c.comment,
       extra: (c.extra_emails || []).map((x) => x.email).join(", "), valid_from: c.valid_from || "", valid_to: c.valid_to || "" });
   };
@@ -104,6 +104,7 @@ export default function ClientContacts({ clientId }: { clientId: string }) {
                   (c.valid_from || c.valid_to) && [c.valid_from && `с ${fmtDate(c.valid_from)}`, c.valid_to && `по ${fmtDate(c.valid_to)}`].filter(Boolean).join(" ")].filter(Boolean).join(" · ")}</div>
                 <div className="cs-links">
                   {c.work_phone && <a href={`tel:${c.work_phone.replace(/[^\d+]/g, "")}`}>{c.work_phone}</a>}
+                  {c.mobile_phone && <a href={`tel:${c.mobile_phone.replace(/[^\d+]/g, "")}`} title="мобильный">моб. {c.mobile_phone}</a>}
                   {c.work_email && <a href={`mailto:${c.work_email}`}>{c.work_email}</a>}
                   {(c.extra_emails || []).map((x) => <a key={x.email} href={`mailto:${x.email}`}>{x.email}</a>)}
                   {c.messenger && <span>{c.messenger}</span>}
@@ -116,7 +117,7 @@ export default function ClientContacts({ clientId }: { clientId: string }) {
                 <div className="cs-act">
                   <button className="btn ghost" onClick={() => edit(c)}>изменить</button>
                   <button className="btn ghost" onClick={() => showHist(c.id)}>история</button>
-                  <button className="btn ghost" onClick={() => save({ ...EMPTY, full_name: c.full_name, position: c.position, department: c.department, roles: c.roles, work_phone: c.work_phone,
+                  <button className="btn ghost" onClick={() => save({ ...EMPTY, full_name: c.full_name, position: c.position, department: c.department, roles: c.roles, work_phone: c.work_phone, mobile_phone: c.mobile_phone || "",
                     work_email: c.work_email, messenger: c.messenger, site_id: c.site_id || "", is_primary: c.is_primary, consent_on: c.consent_on || "", consent_source: c.consent_source,
                     comment: c.comment, extra: (c.extra_emails || []).map((x) => x.email).join(", "), valid_from: c.valid_from || "", valid_to: c.valid_to || "",
                     is_active: !c.is_active }, c.id)}>{c.is_active ? "в архив" : "вернуть"}</button>
@@ -144,6 +145,7 @@ export default function ClientContacts({ clientId }: { clientId: string }) {
             <label className="f">Должность<input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} /></label>
             <label className="f">Подразделение<input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} /></label>
             <label className="f">Рабочий телефон<input inputMode="tel" value={form.work_phone} onChange={(e) => setForm({ ...form, work_phone: e.target.value })} placeholder="+7 (3842) 00-00-00 доб. 123" /></label>
+            <label className="f">Мобильный (рабочий)<input inputMode="tel" value={form.mobile_phone} onChange={(e) => setForm({ ...form, mobile_phone: e.target.value })} placeholder="+7 (9__) ___-__-__" /></label>
             <label className="f">Рабочая почта<input inputMode="email" value={form.work_email} onChange={(e) => setForm({ ...form, work_email: e.target.value })} /></label>
             <label className="f">Доп. адреса почты<input value={form.extra} onChange={(e) => setForm({ ...form, extra: e.target.value })} placeholder="через запятую" /></label>
             <label className="f">У клиента с<input type="date" value={form.valid_from} onChange={(e) => setForm({ ...form, valid_from: e.target.value })} /></label>
