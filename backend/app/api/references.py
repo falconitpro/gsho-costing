@@ -224,7 +224,8 @@ def create_client(body: ClientIn, db: Session = Depends(get_db), user: CurrentUs
         if not isinstance(x, dict) or not str(x.get("name") or "").strip():
             continue
         cc = ClientContact(client_id=c.id, full_name=" ".join(str(x["name"]).split())[:255], position=str(x.get("position") or "")[:255],
-                           work_phone=str(x.get("phone") or "")[:64], work_email=str(x.get("email") or "").strip().lower()[:255], created_by=user.id)
+                           work_phone=str(x.get("phone") or "")[:64], mobile_phone=str(x.get("mobile") or "")[:64],
+                           work_email=str(x.get("email") or "").strip().lower()[:255], created_by=user.id)
         db.add(cc)
         db.flush()
         db.add(ClientContactLink(contact_id=cc.id, client_id=c.id, created_by=user.id))

@@ -128,3 +128,20 @@ def test_no_auto_draft_on_approval(client, monkeypatch):  # noqa: F811
     monkeypatch.setattr(ConsoleMail, "create_draft", lambda self, msg: (drafts.append(msg), "d")[1])
     _approved(client)
     assert drafts == []
+
+
+def test_mobile_phone(client):  # noqa: F811
+    """D-190: мобильный (рабочий) телефон — проверка формата, дубль по любому из телефонов, стирается при обезличивании."""
+    a, _ = _two(client)
+    import random
+    n = f"{random.randint(0, 9999999):07d}"
+    p = _contact(client, a["id"], mobile_phone=f"+7 (913) {n[:3]}-{n[3:5]}-{n[5:]}")
+    assert p["mobile_phone"].endswith(n[5:])
+    assert client.post("/api/clients/contacts", headers=H(MGR), json={"client_id": a["id"], "full_name": "M", "mobile_phone": "звонить"}).status_code == 422
+    # тот же номер как рабочий у другого контакта клиента — дубль
+    assert client.post("/api/clients/contacts", headers=H(MGR), json={"client_id": a["id"], "full_name": "Дубль", "work_phone": f"8 913 {n}"}).status_code == 409
+    _ok(client.post(f"/api/clients/contacts/{p['id']}/delete", headers=H(MGR), json={"reason": "запрос субъекта"}))
+    from app.db import SessionLocal
+    from app.models import ClientContact
+    with SessionLocal() as db:
+        assert db.get(ClientContact, p["id"]).mobile_phone == ""

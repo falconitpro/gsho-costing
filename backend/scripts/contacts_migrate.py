@@ -36,7 +36,7 @@ def _rows(raw) -> list[tuple[int, dict]]:
             continue
         name = " ".join(str(x.get("name") or x.get("full_name") or x.get("fio") or "").split())
         email = str(x.get("email") or "").strip().lower()
-        out.append((i, {"full_name": name[:255], "position": str(x.get("position") or "")[:255], "work_phone": str(x.get("phone") or x.get("mobile") or "").strip()[:64],
+        out.append((i, {"full_name": name[:255], "position": str(x.get("position") or "")[:255], "work_phone": str(x.get("phone") or "").strip()[:64], "mobile_phone": str(x.get("mobile") or "").strip()[:64],
                         "work_email": email if EMAIL.match(email) else "", "bad_email": bool(email and not EMAIL.match(email)), "raw": x}))
     return out
 
@@ -70,7 +70,7 @@ def plan(db, only: set | None = None) -> dict:
             res["count"][f"{src}: уже перенесено ранее"] += 1
             continue
         if cid not in known:
-            known[cid] = [{"id": c.id, "link": l, "emails": set(emails_of(c)), "phone": _d(c.work_phone), "name": c.full_name.lower(), "new": False}
+            known[cid] = [{"id": c.id, "link": l, "emails": set(emails_of(c)), "phone": _d(c.work_phone), "mobile": _d(c.mobile_phone), "name": c.full_name.lower(), "new": False}
                           for c, l in client_contacts(db, cid, True)]
         if not r["full_name"]:
             res["count"][f"{src}: без ФИО — вручную"] += 1
@@ -78,8 +78,9 @@ def plan(db, only: set | None = None) -> dict:
             continue
         if r["bad_email"]:
             res["count"][f"{src}: почта с ошибкой (перенос без почты)"] += 1
-        em, ph, nm = r["work_email"], _d(r["work_phone"]), r["full_name"].lower()
-        hit = next((k for k in known[cid] if em and em in k["emails"]), None) or next((k for k in known[cid] if ph and k["phone"] and k["phone"] == ph), None)
+        em, nm = r["work_email"], r["full_name"].lower()
+        phones = {x for x in (_d(r["work_phone"]), _d(r["mobile_phone"])) if x}
+        hit = next((k for k in known[cid] if em and em in k["emails"]), None) or next((k for k in known[cid] if phones & {k["phone"], k.get("mobile", "")} - {""}), None)
         if hit is not None:
             res["count"][f"{src}: совпадает (почта или телефон)"] += 1
             res["items"].append({"key": key, "src": src, "client_id": cid, "outcome": "matched", "row": r, "hit": hit})
@@ -88,7 +89,7 @@ def plan(db, only: set | None = None) -> dict:
             res["count"][f"{src}: совпадает только по ФИО — вручную"] += 1
             res["items"].append({"key": key, "src": src, "client_id": cid, "outcome": "ambiguous", "row": r})
             continue
-        entry = {"id": None, "link": None, "emails": {em} if em else set(), "phone": ph, "name": nm, "new": True}
+        entry = {"id": None, "link": None, "emails": {em} if em else set(), "phone": _d(r["work_phone"]), "mobile": _d(r["mobile_phone"]), "name": nm, "new": True}
         known[cid].append(entry)
         res["count"][f"{src}: новый контакт"] += 1
         res["items"].append({"key": key, "src": src, "client_id": cid, "outcome": "created", "row": r, "hit": entry})
@@ -117,7 +118,8 @@ def run(yes: bool = False, force: bool = False, only: set | None = None) -> int:
             role = ["contracts"] if src == "legal_profile" else []
             contact_id = link_id = None
             if it["outcome"] == "created" and it["hit"]["id"] is None:
-                c = ClientContact(client_id=cid, full_name=r["full_name"], position=r["position"], work_phone=r["work_phone"], work_email=r["work_email"], roles=role)
+                c = ClientContact(client_id=cid, full_name=r["full_name"], position=r["position"], work_phone=r["work_phone"], mobile_phone=r["mobile_phone"],
+                                  work_email=r["work_email"], roles=role)
                 db.add(c)
                 db.flush()
                 link = ClientContactLink(contact_id=c.id, client_id=cid, roles=role)

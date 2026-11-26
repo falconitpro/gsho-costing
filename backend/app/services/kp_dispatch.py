@@ -29,7 +29,7 @@ def candidates(db: Session, deal: Deal) -> list[dict]:
             if ems:
                 out.append({"contact_id": c.id, "link_id": link.id, "name": c.full_name, "position": c.position, "roles": link.roles or [],
                             "roles_titles": [CONTACT_ROLES.get(r, r) for r in (link.roles or [])], "is_primary": link.is_primary,
-                            "emails": ems, "phone": c.work_phone, "source": "справочник"})
+                            "emails": ems, "phone": c.work_phone or c.mobile_phone, "source": "справочник"})
     known = {e for x in out for e in x["emails"]}
     # переходный период: прежний список карточки клиента, если адреса нет в справочнике
     for x in ((deal.client.contacts if deal.client else None) or []):

@@ -33,7 +33,7 @@ CONTACT_ROLES = {"decision": "Принимает решения", "commercial": 
 LEGAL_ROLES = ("director", "poa", "legal_mail", "contracts", "legal")
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PHONE = re.compile(r"^[0-9+()\-.\s]{5,40}(доб\.?\s*\d+)?$")
-PERSON_FIELDS = ("full_name", "position", "department", "work_phone", "work_email", "messenger", "extra_emails", "consent_on", "consent_source", "comment")
+PERSON_FIELDS = ("full_name", "position", "department", "work_phone", "mobile_phone", "work_email", "messenger", "extra_emails", "consent_on", "consent_source", "comment")
 
 
 def _engineer_only(user: CurrentUser) -> bool:
@@ -68,6 +68,7 @@ class ContactIn(BaseModel):
     department: str = Field(default="", max_length=255)
     roles: list[str] = Field(default_factory=list)
     work_phone: str = Field(default="", max_length=64)
+    mobile_phone: str = Field(default="", max_length=64)
     work_email: str = Field(default="", max_length=255)
     extra_emails: list[dict] = Field(default_factory=list)   # [{email, label}]
     messenger: str = Field(default="", max_length=255)
@@ -85,12 +86,15 @@ class ContactIn(BaseModel):
         self.full_name = " ".join(self.full_name.split())
         self.work_email = self.work_email.strip().lower()
         self.work_phone = self.work_phone.strip()
+        self.mobile_phone = self.mobile_phone.strip()
         if not self.full_name:
             raise ValueError("Укажите ФИО")
         if self.work_email and not EMAIL.match(self.work_email):
             raise ValueError("Почта указана с ошибкой")
         if self.work_phone and not PHONE.match(self.work_phone):
             raise ValueError("Телефон: только цифры, +, скобки, дефисы и «доб.»")
+        if self.mobile_phone and not PHONE.match(self.mobile_phone):
+            raise ValueError("Мобильный: только цифры, +, скобки и дефисы")
         extra, seen = [], {self.work_email} if self.work_email else set()
         for x in self.extra_emails:
             em = str((x or {}).get("email") or "").strip().lower()
@@ -135,8 +139,10 @@ def _check(db: Session, body: ContactIn, exclude_contact: str = "") -> None:
             continue
         if mine & set(emails_of(o)):
             raise HTTPException(409, f"У клиента уже есть контакт с этой почтой: {o.full_name}")
-        if body.work_phone and len(_digits(body.work_phone)) >= 7 and _digits(o.work_phone)[-10:] == _digits(body.work_phone)[-10:]:
-            raise HTTPException(409, f"У клиента уже есть контакт с этим телефоном: {o.full_name}")
+        theirs = {_digits(x)[-10:] for x in (o.work_phone, o.mobile_phone) if len(_digits(x)) >= 7}
+        for ph in (body.work_phone, body.mobile_phone):
+            if ph and len(_digits(ph)) >= 7 and _digits(ph)[-10:] in theirs:
+                raise HTTPException(409, f"У клиента уже есть контакт с этим телефоном: {o.full_name}")
     # тот же человек у другого клиента — привязать, а не заводить второго
     if mine and not exclude_contact:
         for o in db.scalars(select(ClientContact).where(ClientContact.anonymized_at.is_(None))).all():
@@ -152,7 +158,7 @@ def _sites(db: Session, client_ids: set[str]) -> dict[str, str]:
 
 
 def payload(c: ClientContact, link: Optional[ClientContactLink], sites: dict[str, str], others: Optional[list[str]] = None) -> dict:
-    d = {k: getattr(c, k) for k in ("id", "full_name", "position", "department", "work_phone", "work_email", "extra_emails", "messenger",
+    d = {k: getattr(c, k) for k in ("id", "full_name", "position", "department", "work_phone", "mobile_phone", "work_email", "extra_emails", "messenger",
                                     "consent_on", "consent_source", "comment", "anonymized_at", "created_at", "updated_at")}
     d["emails"] = emails_of(c)
     if link is not None:
@@ -379,6 +385,7 @@ def anonymize_contact(contact_id: str, body: DeleteIn, db: Session = Depends(get
         l.valid_to = l.valid_to or today
     db.query(ClientContactHistory).filter(ClientContactHistory.contact_id == c.id).delete()
     c.full_name, c.position, c.department, c.work_phone, c.work_email, c.messenger = "Обезличено по запросу", "", "", "", "", ""
+    c.mobile_phone = ""
     c.extra_emails, c.comment, c.consent_source, c.consent_on = [], "", "", None
     c.is_active, c.is_primary = False, False
     c.anonymized_at = datetime.now(timezone.utc)

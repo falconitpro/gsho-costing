@@ -2262,6 +2262,7 @@ class ClientContact(TimestampMixin, Base):
     department: Mapped[str] = mapped_column(String(255), default="")
     roles: Mapped[list[str]] = mapped_column(JSONType, default=list)        # CONTACT_ROLES в api/client_contacts.py
     work_phone: Mapped[str] = mapped_column(String(64), default="")
+    mobile_phone: Mapped[str] = mapped_column(String(64), default="")         # D-190: мобильный (рабочий) — по просьбе владельца 27.11
     work_email: Mapped[str] = mapped_column(String(255), default="")
     messenger: Mapped[str] = mapped_column(String(255), default="")          # рабочий мессенджер (Telegram, WeCom…)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
