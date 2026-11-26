@@ -69,7 +69,8 @@ def test_acknowledgment(client):
     from app.services import office_watch
     with SessionLocal() as db:
         doc = db.get(OfficeDoc, od["id"])
-        start = datetime.fromisoformat(next(x for x in doc.acks if x["user_id"] == me_log["id"])["at"]).date()
+        # дата — по Москве, как в office_watch (в UTC после 21:00 это ещё вчера — D-193)
+        start = datetime.fromisoformat(next(x for x in doc.acks if x["user_id"] == me_log["id"])["at"]).astimezone(office_watch.MSK).date()
         day = C.add_working_days(start, 3)
         n = office_watch._ack_reminders(db, day)
         db.commit()
