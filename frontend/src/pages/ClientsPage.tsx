@@ -127,7 +127,7 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
     setLookupMsg(`${kind === "branch" ? "Подставлен филиал" : "Подставлена головная организация"}: ${f.name}${f.status && f.status !== "ACTIVE" ? ` — внимание: организация ${STATUS_RU[f.status] || f.status}` : ""}. Проверьте и нажмите «Добавить».`);
   }
   return (
-    <div className="grid" style={{ gridTemplateColumns: card ? "minmax(0, 2fr) minmax(0, 3fr)" : "1fr" }}>
+    <div className="grid cl-layout" style={{ gridTemplateColumns: card ? "minmax(0, 2fr) minmax(0, 3fr)" : "1fr" }}>
       <div>
         {!embedded && <h1>Клиенты</h1>}
         {(() => {
