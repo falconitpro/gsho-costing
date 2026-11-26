@@ -9,6 +9,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Iterable, Mapping, Optional
 
 from .parts_pricing import to_rub
+from ..core.clock import today as msk_today
 
 
 def lead_text(source: str, lead_days: Optional[int]) -> str:
@@ -114,7 +115,7 @@ def release_expired(db, today: Optional[date] = None) -> int:
     """Снимает мягкие резервы с истёкшим сроком КП и пересчитывает зарезервированное по складам."""
     from sqlalchemy import select
     from ..models import PartReservation
-    today = today or date.today()
+    today = today or msk_today()
     rows = db.scalars(select(PartReservation).where(PartReservation.released_at.is_(None), PartReservation.kind == "soft",
                                                    PartReservation.expires_at < today)).all()
     now = datetime.now(timezone.utc)

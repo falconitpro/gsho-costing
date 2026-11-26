@@ -28,6 +28,7 @@ from ..services.deal_service import apply_transition, audit, complete_tasks, cre
 from ..services.kp_generator import KpData, KpVariant, build_kp
 from ..services.offers_service import kp_brand_check, kp_model_name
 from .common import get_deal_or_404, payment_terms_set, serialize
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/deals/{deal_id}", tags=["pricing"])
 CD = require_roles(Role.CD, Role.GD)
@@ -408,7 +409,7 @@ def submit(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depe
     flags = approval_flags(res)
     st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution, execution_started=deal.execution_started)
     try:
-        tr = cd_submit_price(st, flags, date.today(), sla(db), _ladder(db))
+        tr = cd_submit_price(st, flags, msk_today(), sla(db), _ladder(db))
     except Exception as e:
         raise HTTPException(409, str(e))
     self_approval = user.is_manager_of(deal.manager_id)   # «считал — не утверждает»: пока только предупреждение
@@ -458,7 +459,7 @@ def visa(deal_id: str, body: VisaIn, db: Session = Depends(get_db), user: Curren
     flags = approval_flags(res)
     st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution, execution_started=deal.execution_started)
     try:
-        tr = visa_decision(st, by, body.approved, flags, date.today(), sla(db), _ladder(db), cd_insists=body.cd_insists)
+        tr = visa_decision(st, by, body.approved, flags, msk_today(), sla(db), _ladder(db), cd_insists=body.cd_insists)
     except Exception as e:
         raise HTTPException(409, str(e))
     db.add(Approval(deal_id=deal.id, step="financial" if by == Role.FD else "general", role=by.value, user_id=user.id,
@@ -503,7 +504,7 @@ def insist(deal_id: str, body: InsistIn, db: Session = Depends(get_db), user: Cu
         raise HTTPException(409, "Настоять можно только после отказа ФД, пока цена не менялась")
     st = DealState(status=deal.status, service_flag=deal.service_flag, in_execution=deal.in_execution, execution_started=deal.execution_started)
     try:
-        tr = cd_insists_after_fd(st, date.today(), sla(db), _ladder(db))
+        tr = cd_insists_after_fd(st, msk_today(), sla(db), _ladder(db))
     except Exception as e:
         raise HTTPException(409, str(e))
     db.add(Approval(deal_id=deal.id, step="commercial", role="cd", user_id=user.id, approved=True, comment=f"КД настаивает: {body.comment}",
@@ -541,7 +542,7 @@ def rework(deal_id: str, body: ReworkIn, db: Session = Depends(get_db), user: Cu
         except ValueError as e:
             raise HTTPException(422, str(e))
     try:
-        tr = wf_rework(DealState(status=deal.status, service_flag=deal.service_flag), body.block, reason, date.today(), sla(db))
+        tr = wf_rework(DealState(status=deal.status, service_flag=deal.service_flag), body.block, reason, msk_today(), sla(db))
     except Exception as e:
         raise HTTPException(409, str(e))
     if body.block == "logistics":
@@ -710,7 +711,7 @@ def _build_kp_file(db: Session, deal: Deal, ver: DealVersion, changes: Optional[
         if sc:
             service_block = {"regulations": list(sc["result"]["executions"]), "spare_parts": f"{len(sc.get('spare_parts', []))} позиций по листу ЗИП",
                              "visits": f"{sum(r['visits'] for r in sc['result']['rows'])} выездов", "price": "включено в цену"}
-    today = date.today()
+    today = msk_today()
     from datetime import timedelta
     forbidden = [factories[p.factory_id].name for p in deal.positions if p.factory_id in factories] + \
                 [factories[p.factory_id].name_zh for p in deal.positions if p.factory_id in factories and factories[p.factory_id].name_zh] if company else []
@@ -1292,7 +1293,7 @@ def factory_price_request(deal_id: str, body: FpRequestIn, db: Session = Depends
     what = (f"скидку {body.value:g} %" if body.mode == "discount_pct" else "новую цену") + f" — {want:,.2f} {pos.currency} за 1 шт. (сейчас {float(pos.unit_price or 0):,.2f})"
     title = f"Запросить у производителя {what.replace(',', ' ')}: {pos.machine_type or ''} {pos.designation or pos.model or ''}".strip()
     t = Task(deal_id=deal.id, role=Role.MANAGER.value, assignee_id=deal.manager_id, title=title[:500] + (f". {body.comment.strip()}" if body.comment.strip() else ""),
-             block="factory_price_request", due=date.today())
+             block="factory_price_request", due=msk_today())
     db.add(t)
     db.flush()
     db.add(FeedEntry(deal_id=deal.id, kind="system", subject="Запрос производителю: скидка / новая цена", body=title + (f"\n{body.comment.strip()}" if body.comment.strip() else "")))
@@ -1327,7 +1328,7 @@ def factory_price_apply(deal_id: str, body: FpApplyIn, db: Session = Depends(get
     pos.unit_price = round(body.unit_price, 2)
     if pos.factory_id:
         db.add(FactoryPriceHistory(factory_id=pos.factory_id, model=pos.model or pos.designation or "", unit_price=pos.unit_price, currency=pos.currency or "CNY",
-                                   on=date.today(), deal_id=deal.id, source="offer"))
+                                   on=msk_today(), deal_id=deal.id, source="offer"))
     db.add(FeedEntry(deal_id=deal.id, kind="system", subject="Цена производителя изменена в расчёте",
                      body=f"{pos.machine_type or ''} {pos.designation or ''}: {before:,.2f} → {pos.unit_price:,.2f} {pos.currency} за 1 шт. {body.comment.strip()}".replace(",", " ")))
     audit(db, user.id, deal.id, "position", pos.id, "factory_price_applied", {"unit_price": before}, {"unit_price": pos.unit_price}, body.comment.strip())

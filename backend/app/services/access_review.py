@@ -19,6 +19,7 @@ from ..models import AccessReviewCampaign, AccessReviewItem, AccessUserOverride,
 from . import access_service
 from . import mfa as mfa_svc
 from . import security_events as sev
+from ..core.clock import today as msk_today
 
 SENSITIVE = ("security_admin", "access_admin", "security_audit", "backup_status", "finance_section")   # особое внимание (13 §10)
 LONG_OVERRIDE = timedelta(days=90)
@@ -84,7 +85,7 @@ def diff(old: dict, new: dict) -> dict:
 
 
 def create(db: Session, actor: CurrentUser, title: str, period_start: date, period_end: date, due: date, roles: Optional[list[str]] = None) -> AccessReviewCampaign:
-    if due < date.today():
+    if due < msk_today():
         raise HTTPException(422, "Срок проверки не может быть в прошлом")
     if period_end < period_start:
         raise HTTPException(422, "Конец периода раньше начала")
@@ -110,7 +111,7 @@ def progress(db: Session, c: AccessReviewCampaign) -> dict:
     by = {k: sum(1 for i in items if i.decision == k) for k in ("pending", "keep", "change", "disable", "skipped")}
     long_ov = sum(1 for i in items if any(o["active"] and o["long"] for o in (i.snapshot or {}).get("overrides", [])))
     return {"total": len(items), "done": len(done), "percent": round(100 * len(done) / len(items)) if items else 100, "by_decision": by,
-            "overdue": c.status == "open" and c.due_date < date.today(), "days_left": (c.due_date - date.today()).days,
+            "overdue": c.status == "open" and c.due_date < msk_today(), "days_left": (c.due_date - msk_today()).days,
             "long_overrides": long_ov, "second_reviewer_needed": sum(1 for i in items if i.decision == "pending" and needs_second_reviewer(i.snapshot or {}))}
 
 
@@ -162,7 +163,7 @@ def complete(db: Session, actor: CurrentUser, c: AccessReviewCampaign, note: str
         raise HTTPException(409, f"Не решено сотрудников: {left}. Завершить можно, когда по каждому есть решение или документированный пропуск")
     c.status, c.completed_at, c.completed_by, c.completion_note = "completed", _now(), actor.id, (note or "")[:2000]
     sev.record(db, "access", "review_completed", actor_id=actor.id, session_id=actor.sid, entity_type="access_review", entity_id=c.id,
-               meta={"overdue": c.due_date < date.today()})
+               meta={"overdue": c.due_date < msk_today()})
     db.commit()
     return c
 
@@ -170,7 +171,7 @@ def complete(db: Session, actor: CurrentUser, c: AccessReviewCampaign, note: str
 def remind(db: Session, today: Optional[date] = None) -> list[str]:
     """Напоминания только в системе: за 14, 7 и 1 день до срока и о просрочке; без повторов (IntegrationLog system=access_review)."""
     from .offboarding import security_admin_ids
-    today = today or date.today()
+    today = today or msk_today()
     sent = []
     for c in db.scalars(select(AccessReviewCampaign).where(AccessReviewCampaign.status == "open")).all():
         left = (c.due_date - today).days

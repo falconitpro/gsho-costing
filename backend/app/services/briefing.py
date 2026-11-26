@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser
 from ..models import BriefingItemState
+from ..core.clock import today as msk_today
 
 log = logging.getLogger("gsho.briefing")
 
@@ -366,7 +367,7 @@ def pin(db: Session, user_id: str, it: Item, on: bool) -> None:
 
 def snooze(db: Session, user_id: str, it: Item, until: date) -> datetime:
     from fastapi import HTTPException
-    today = datetime.now(timezone.utc).date()
+    today = msk_today()
     if until <= today or (until - today).days > MAX_SNOOZE_DAYS:
         raise HTTPException(400, f"Отложить можно на 1–{MAX_SNOOZE_DAYS} дней")
     s = _state(db, user_id, it)

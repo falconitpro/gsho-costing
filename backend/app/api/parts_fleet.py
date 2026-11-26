@@ -22,6 +22,7 @@ from ..services.parts_fleet import avg_per_day, due_date, hours_now, kit_lines, 
 from ..services.parts_requests import match_lines, next_number, norm_article
 from .common import serialize
 from .parts_requests import _payload as request_payload, _recalc
+from ..core.clock import msk_date, today as msk_today
 
 router = APIRouter(prefix="/api/parts/fleet", tags=["parts-fleet"])
 # D-186 (K-3): права парка — группа «Клиенты: парк и владение» (client_fleet); стартовые уровни совпадают с прежним списком ролей.
@@ -67,7 +68,7 @@ def _kits_for(db: Session, m: ClientMachine) -> list[MaintenanceKit]:
 
 
 def _forecast(db: Session, m: ClientMachine, today: Optional[date] = None) -> dict:
-    today = today or date.today()
+    today = today or msk_today()
     rd = [(h.on, h.hours) for h in db.scalars(select(MachineHours).where(MachineHours.machine_id == m.id).order_by(MachineHours.on)).all()]
     per_day = avg_per_day(rd, m.commissioned_on, m.hours_per_day)
     now = hours_now(rd, per_day, today)
@@ -112,7 +113,7 @@ def _parties_payload(db: Session, m: ClientMachine) -> list[dict]:
     fp.ensure_primary(db, m)
     rows = fp.parties(db, m.id)
     names = dict(db.execute(select(Client.id, Client.name).where(Client.id.in_({p.client_id for p in rows}))).all()) if rows else {}
-    today = date.today()
+    today = msk_today()
     return [{**serialize(p), "client_name": names.get(p.client_id, ""), "role_title": fp.ROLES.get(p.role, p.role),
              "active": p.valid_to is None or p.valid_to >= today} for p in rows]
 
@@ -140,7 +141,7 @@ def machines(client_id: str = "", q: str = "", due_days: Optional[int] = None, s
         if q and q.lower() not in " ".join([d["client_name"], d["manufacturer"], d["model"], m.serial, m.site, d["deal_number"]]).lower():
             continue
         nx = d["forecast"]["next"]
-        if due_days is not None and not (nx and nx["due_on"] and (nx["due_on"] - date.today()).days <= due_days):
+        if due_days is not None and not (nx and nx["due_on"] and (nx["due_on"] - msk_today()).days <= due_days):
             continue
         out.append(d)
     return out
@@ -314,7 +315,7 @@ def sync_from_deals(db: Session, deal_id: Optional[str] = None, user_id: Optiona
             existing = {m.unit_no: m for m in db.scalars(select(ClientMachine).where(ClientMachine.deal_id == deal.id, ClientMachine.position_id == pos.id)).all()}
             for m in existing.values():      # машина из приёмки на заводе — дата ввода по закрытию сделки
                 if not m.commissioned_on and deal.execution_closed_at:
-                    m.commissioned_on = deal.execution_closed_at.date() if hasattr(deal.execution_closed_at, "date") else deal.execution_closed_at
+                    m.commissioned_on = msk_date(deal.execution_closed_at) if hasattr(deal.execution_closed_at, "date") else deal.execution_closed_at
             have = set(existing)
             f = db.get(Factory, pos.factory_id)
             for unit in range(1, int(pos.qty or 1) + 1):
@@ -349,7 +350,7 @@ class HoursIn(BaseModel):
 @router.post("/machines/{mid}/hours", status_code=201)
 def add_hours(mid: str, body: HoursIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
     m = _m_or_404(db, mid)
-    if body.on > date.today():
+    if body.on > msk_today():
         raise HTTPException(422, "Дата замера не может быть в будущем")
     prev = db.scalars(select(MachineHours).where(MachineHours.machine_id == m.id, MachineHours.on <= body.on).order_by(MachineHours.on.desc())).first()
     if prev and body.hours < prev.hours:
@@ -535,7 +536,7 @@ def machine_parts(mid: str, q: str = "", db: Session = Depends(get_db), user: Cu
 
 def check_reminders(db: Session, today: Optional[date] = None) -> int:
     """Раз в час: машинам с ТО ближе, чем за parts_to_reminder_days дней, — уведомление менеджеру (одно на машину и ТО)."""
-    today = today or date.today()
+    today = today or msk_today()
     ahead = int(settings_service.get(db, "parts_to_reminder_days") or 30)
     n = 0
     for m in db.scalars(select(ClientMachine).where(ClientMachine.active.is_(True))).all():
@@ -680,7 +681,7 @@ def add_party(mid: str, body: PartyIn, db: Session = Depends(get_db), user: Curr
     if db.get(Client, body.client_id) is None:
         raise HTTPException(422, "Выберите клиента")
     _check_dates(body.valid_from, body.valid_to)
-    if body.valid_to and body.valid_to < date.today() and body.make_primary:
+    if body.valid_to and body.valid_to < msk_today() and body.make_primary:
         raise HTTPException(422, "Главной может быть только действующая сторона")
     dup = db.scalars(select(MachineParty).where(MachineParty.machine_id == m.id, MachineParty.client_id == body.client_id,
                                                 MachineParty.role == body.role, fp.active())).first()
@@ -704,7 +705,7 @@ def update_party(mid: str, pid: str, body: PartyIn, db: Session = Depends(get_db
     if body.client_id != p.client_id:
         raise HTTPException(409, "Клиента в записи не меняют — завершите её и добавьте новую (так сохранится история)")
     _check_dates(body.valid_from, body.valid_to)
-    if p.is_primary and body.valid_to and body.valid_to < date.today():
+    if p.is_primary and body.valid_to and body.valid_to < msk_today():
         raise HTTPException(409, "Это главная сторона машины — сначала сделайте главной другую")
     before = {"role": p.role, "valid_from": p.valid_from, "valid_to": p.valid_to}
     p.role, p.valid_from, p.valid_to, p.comment = body.role, body.valid_from, body.valid_to, body.comment
@@ -720,7 +721,7 @@ def make_primary(mid: str, pid: str, db: Session = Depends(get_db), user: Curren
     """Главная сторона — на её клиента идут сервис и счета; клиент машины меняется на него."""
     m = _m_or_404(db, mid)
     p = _party_or_404(db, m, pid)
-    if p.valid_to and p.valid_to < date.today():
+    if p.valid_to and p.valid_to < msk_today():
         raise HTTPException(422, "Запись завершена — главной может быть только действующая сторона")
     before = m.client_id
     fp.set_primary(db, m, p)
@@ -741,7 +742,7 @@ def close_party(mid: str, pid: str, body: CloseIn, db: Session = Depends(get_db)
     p = _party_or_404(db, m, pid)
     if p.is_primary:
         raise HTTPException(409, "Это главная сторона машины — сначала сделайте главной другую")
-    on = body.on or date.today()
+    on = body.on or msk_today()
     _check_dates(p.valid_from, on)
     p.valid_to = on
     if body.comment:

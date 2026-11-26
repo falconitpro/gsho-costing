@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from ...models import Contract, Deal, Factory, LegalEntity
 from .money import ZERO, s
 from .obligations import ObligationFilter, query
+from ...core.clock import today as msk_today
 
 
 def group_map(db: Session) -> dict[tuple[str, str], str]:
@@ -46,7 +47,7 @@ def is_intragroup(gm: dict, o) -> bool:
 
 
 def build(db: Session, vis, as_of: Optional[date] = None, currency: Optional[str] = None) -> dict[str, Any]:
-    as_of = as_of or date.today()
+    as_of = as_of or msk_today()
     gm = group_map(db)
     names = {e.id: e.name for e in db.scalars(select(LegalEntity)).all()}
     reg = query(db, vis, ObligationFilter(as_of=as_of, currency=currency, limit=100_000))

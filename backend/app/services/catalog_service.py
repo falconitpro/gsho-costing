@@ -14,6 +14,7 @@ from ..models import (ClientPriceHistory, Deal, DealVersion, EquipmentExecution,
                       default_trademark)
 from .deal_service import audit, notify
 from .tech_params_service import fingerprint, row_dicts
+from ..core.clock import today as msk_today
 
 
 # ------------------------------------------------------------------ торговые марки: сопоставление «завод → марки»
@@ -78,7 +79,7 @@ def record_client_prices(db: Session, deal: Deal, user_id: Optional[str]) -> Non
                 model=p.model, execution_id=p.execution_id, qty=p.qty, unit_price_rub=round(share / max(p.qty, 1), 2), total_rub=round(share, 2),
                 currency=cur, fx_rate=k,
                 payment_terms=v.client_payments or deal.client_payments or [], delivery_term=term, kp_brand=deal.kp_brand or "factory",
-                kp_path=(rev.kp_path if rev else ver.kp_path if ver else ""), manager_id=deal.manager_id, on=date.today(), outcome=deal.outcome,
+                kp_path=(rev.kp_path if rev else ver.kp_path if ver else ""), manager_id=deal.manager_id, on=msk_today(), outcome=deal.outcome,
             ))
 
 
@@ -126,7 +127,7 @@ def propose_catalog_task(db: Session, deal: Deal, user_id: Optional[str]) -> Non
     if db.scalar(select(Task.id).where(Task.deal_id == deal.id, Task.block == "catalog", Task.done_at.is_(None))):
         return
     db.add(Task(deal_id=deal.id, role=Role.MANAGER.value, assignee_id=deal.manager_id, title="Занести оборудование из КП в каталог (подтвердить состав)",
-                block="catalog", due=add_business_days(date.today(), 3)))
+                block="catalog", due=add_business_days(msk_today(), 3)))
 
 
 def catalog_candidates(db: Session, deal: Deal) -> list[dict]:
@@ -210,7 +211,7 @@ def propose(db: Session, deal: Deal, position_ids: list[str], names: dict[str, s
     db.flush()
     if created:
         task = Task(deal_id=deal.id, role=Role.CD.value, assignee_id=None, title=f"Подтвердить занесение в каталог: {', '.join(e.name for e in created)}",
-                    block="catalog_approve", due=add_business_days(date.today(), 2))
+                    block="catalog_approve", due=add_business_days(msk_today(), 2))
         db.add(task)
         for u in db.scalars(select(User).where(User.is_active.is_(True))).all():
             if "cd" in (u.roles or []) or "gd" in (u.roles or []):
@@ -380,7 +381,7 @@ def add_equipment(db: Session, data: dict, user, editor: bool) -> tuple[Equipmen
             term = {"value": int(_num(data.get("production_days"))), "unit": "calendar_days"}
         db.add(FactoryPriceHistory(factory_id=factory.id, model=model_name, execution_id=ex.id, unit_price=price,
                                    currency=(data.get("currency") or "CNY")[:3].upper(), basis=data.get("basis") or "",
-                                   production_term=term, on=date.today(), source="price_list"))
+                                   production_term=term, on=msk_today(), source="price_list"))
     audit(db, user.id, None, "equipment_execution", ex.id, "catalog_add" if created else "catalog_add_existing",
           after={"factory": factory.name, "trademark": model.trademark, "model": model_name, "status": ex.status, "params": len(rows), "comment": data.get("comment") or ""})
     return ex, created

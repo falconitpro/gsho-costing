@@ -22,6 +22,7 @@ from ..models import AuditLog, FinanceAccount, FinanceAllocation, FinanceBalance
 from ..services.finance import access, accounts as acc, obligations as obl, overview as ov, planfact as pf, transactions as txs
 from ..services.finance import imports as imp_fields
 from ..services.finance.money import ccy, dec, s
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/finance", tags=["finance"])
 
@@ -70,14 +71,14 @@ def meta(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_
     access.require_read(user)
     ents = [{"id": e.id, "code": e.code, "name": e.name, "currency": e.currency} for e in db.scalars(select(LegalEntity).order_by(LegalEntity.name)).all()]
     currencies = sorted({c for (c,) in db.execute(select(FinanceObligation.currency).distinct()).all()} | {a.currency for a in db.scalars(select(FinanceAccount)).all()})
-    return {"can_edit": access.can_edit(user), "entities": ents, "currencies": currencies, "today": date.today().isoformat(),
+    return {"can_edit": access.can_edit(user), "entities": ents, "currencies": currencies, "today": msk_today().isoformat(),
             "tabs": ["overview", "calendar", "debt", "liquidity"] + (["economy"] if (user.can("finance_analytics", 1) and user.can("cost", 1)) else []) + ["exposure", "reconciliation"], "import_fields": imp_fields.FIELD_TITLES, "statuses": obl.STATUS_TITLES}
 
 
 @router.get("/overview")
 def overview(as_of: Optional[date] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     access.require_read(user)
-    return ov.build(db, access.Visibility(db, user), as_of or date.today())
+    return ov.build(db, access.Visibility(db, user), as_of or msk_today())
 
 
 @router.get("/planfact")
@@ -86,7 +87,7 @@ def planfact(as_of: Optional[date] = None, currency: Optional[str] = None, direc
              db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """D-167: план/факт по месяцам и сравнение с прошлым периодом (определения — в ответе, раздел definitions)."""
     access.require_read(user)
-    return pf.build(db, access.Visibility(db, user), as_of or date.today(), back=back, forward=forward,
+    return pf.build(db, access.Visibility(db, user), as_of or msk_today(), back=back, forward=forward,
                     currency=currency.upper() if currency else None, direction=direction)
 
 
@@ -96,7 +97,7 @@ def planfact_items(period: str = Query(..., pattern=r"^\d{4}-\d{2}$"), currency:
                    db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Расшифровка ячейки план/факт: обязательства (план) или разнесённые оплаты (факт) за месяц."""
     access.require_read(user)
-    return pf.items(db, access.Visibility(db, user), as_of or date.today(), period, currency.upper(), direction, kind)
+    return pf.items(db, access.Visibility(db, user), as_of or msk_today(), period, currency.upper(), direction, kind)
 
 
 # ------------------------------------------------------------------ обязательства
@@ -109,7 +110,7 @@ def obligations(as_of: Optional[date] = None, direction: Optional[str] = Query(N
                 limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0),
                 db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     access.require_read(user)
-    f = obl.ObligationFilter(as_of=as_of or date.today(), direction=direction, currency=currency.upper() if currency else None, legal_entity_id=legal_entity_id,
+    f = obl.ObligationFilter(as_of=as_of or msk_today(), direction=direction, currency=currency.upper() if currency else None, legal_entity_id=legal_entity_id,
                              deal_id=deal_id, contract_id=contract_id, source_type=source_type, status=status, date_from=date_from, date_to=date_to, search=search.strip(),
                              include_inactive=include_inactive, reconciliation=reconciliation, limit=limit, offset=offset)
     return obl.query(db, access.Visibility(db, user), f)
@@ -136,7 +137,7 @@ def obligation_card(oid: str, as_of: Optional[date] = None, db: Session = Depend
     """Карточка: строка реестра + разнесения с операциями + история синхронизации. Юридические условия — только чтение."""
     access.require_read(user)
     o, vis = _obligation(db, user, oid)
-    row = obl.query(db, vis, obl.ObligationFilter(as_of=as_of or date.today(), ids=[o.id], include_inactive=True, limit=1))["items"][0]
+    row = obl.query(db, vis, obl.ObligationFilter(as_of=as_of or msk_today(), ids=[o.id], include_inactive=True, limit=1))["items"][0]
     allocs = db.scalars(select(FinanceAllocation).where(FinanceAllocation.obligation_id == o.id).order_by(FinanceAllocation.created_at)).all()
     tx_by = {t.id: t for t in db.scalars(select(FinanceTransaction).where(FinanceTransaction.id.in_([a.transaction_id for a in allocs] or ["-"]))).all()}
     hist = db.scalars(select(AuditLog).where(AuditLog.entity == "finance_obligation", AuditLog.entity_id == o.id).order_by(AuditLog.at.desc()).limit(50)).all()
@@ -151,7 +152,7 @@ def obligation_card(oid: str, as_of: Optional[date] = None, db: Session = Depend
 def obligation_explanation(oid: str, as_of: Optional[date] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     access.require_read(user)
     o, vis = _obligation(db, user, oid)
-    day = as_of or date.today()
+    day = as_of or msk_today()
     allocs = db.scalars(select(FinanceAllocation).where(FinanceAllocation.obligation_id == o.id)).all()
     st = obl.status_of(o, obl.paid_map(db, [o.id])[o.id], day)
     return {
@@ -198,7 +199,7 @@ def liquidity(as_of: Optional[date] = None, horizon_days: int = Query(90, ge=7, 
     exclude_intragroup — сводный прогноз группы без платежей между компаниями группы (D-163)."""
     access.require_read(user)
     from ..services.finance import liquidity as liq
-    return liq.build(db, access.Visibility(db, user), as_of or date.today(), horizon_days, group_by, currency, legal_entity_id, account_id, _money(threshold, "Порог"),
+    return liq.build(db, access.Visibility(db, user), as_of or msk_today(), horizon_days, group_by, currency, legal_entity_id, account_id, _money(threshold, "Порог"),
                      exclude_intragroup=exclude_intragroup)
 
 
@@ -208,7 +209,7 @@ def liquidity_explanation(currency: str, on: date, as_of: Optional[date] = None,
                           db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     access.require_read(user)
     from ..services.finance import liquidity as liq
-    return liq.explain_point(db, access.Visibility(db, user), as_of or date.today(), _ccy(currency), on, group_by, horizon_days, exclude_intragroup)
+    return liq.explain_point(db, access.Visibility(db, user), as_of or msk_today(), _ccy(currency), on, group_by, horizon_days, exclude_intragroup)
 
 
 @router.get("/intragroup")
@@ -216,7 +217,7 @@ def intragroup(as_of: Optional[date] = None, currency: Optional[str] = None, db:
     """Внутригрупповые расчёты: кто из компаний группы кому должен — по парам и валютам, сальдо пар (D-162)."""
     access.require_read(user)
     from ..services.finance import intragroup as ig
-    return ig.build(db, access.Visibility(db, user), as_of or date.today(), _ccy(currency) if currency else None)
+    return ig.build(db, access.Visibility(db, user), as_of or msk_today(), _ccy(currency) if currency else None)
 
 
 # ------------------------------------------------------------------ импорт выписки
@@ -598,7 +599,7 @@ def deal_economy(deal_id: str, as_of: Optional[date] = None, db: Session = Depen
     from .common import get_deal_or_404
     from ..services.finance import economy
     deal = get_deal_or_404(db, deal_id, user)
-    return economy.build(db, access.Visibility(db, user), deal, as_of or date.today())
+    return economy.build(db, access.Visibility(db, user), deal, as_of or msk_today())
 
 
 @router.get("/deals/{deal_id}/economy/explanation")
@@ -684,7 +685,7 @@ def debt(as_of: Optional[date] = None, direction: Optional[str] = Query(None, pa
     """Дебиторка и кредиторка: остатки по валютам, ageing от юридического срока, группы, отдельно — без согласованной даты (D-143)."""
     access.require_read(user)
     from ..services.finance import debt as dbt
-    return dbt.build(db, user, access.Visibility(db, user), as_of or date.today(), direction, group_by, _ccy(currency) if currency else None, legal_entity_id)
+    return dbt.build(db, user, access.Visibility(db, user), as_of or msk_today(), direction, group_by, _ccy(currency) if currency else None, legal_entity_id)
 
 
 @router.get("/legal-exposure")
@@ -699,7 +700,7 @@ def legal_exposure(deal_id: Optional[str] = None, contract_id: Optional[str] = N
         raise HTTPException(404, "Сделка не найдена")
     if contract_id and not vis.contract(contract_id):
         raise HTTPException(404, "Договор не найден")
-    return exposure.build(db, user, vis, as_of or date.today(), deal_id, contract_id, direction, status, kind)
+    return exposure.build(db, user, vis, as_of or msk_today(), deal_id, contract_id, direction, status, kind)
 
 
 # ------------------------------------------------------------------ сверка и уточнения (этап 6)
@@ -713,7 +714,7 @@ def reconciliation(queue: Optional[str] = None, deal_id: Optional[str] = None, d
     vis = access.Visibility(db, user)
     if deal_id and not vis.deal(deal_id):
         raise HTTPException(404, "Сделка не найдена")
-    return rec.build(db, user, vis, date.today(), queue, deal_id)
+    return rec.build(db, user, vis, msk_today(), queue, deal_id)
 
 
 class QuestionIn(BaseModel):
@@ -912,7 +913,7 @@ def export_xlsx(kind: str = Query(..., pattern="^(obligations|debt|liquidity|eco
     vis = access.Visibility(db, user)
     if deal_id and not vis.deal(deal_id):
         raise HTTPException(404, "Сделка не найдена")
-    params = {"as_of": as_of or date.today(), "direction": direction, "currency": _ccy(currency) if currency else None, "legal_entity_id": legal_entity_id,
+    params = {"as_of": as_of or msk_today(), "direction": direction, "currency": _ccy(currency) if currency else None, "legal_entity_id": legal_entity_id,
               "deal_id": deal_id, "contract_id": contract_id, "status": status, "source_type": source_type, "date_from": date_from, "date_to": date_to,
               "search": search.strip(), "include_inactive": include_inactive, "reconciliation": reconciliation, "horizon_days": horizon_days, "queue": queue,
               "group_by": group_by if kind != "liquidity" or group_by in ("day", "week") else "week"}

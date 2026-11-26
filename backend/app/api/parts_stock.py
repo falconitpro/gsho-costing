@@ -27,6 +27,7 @@ from ..services.parts_stock import (DECISIONS, DEV_STATUS, DISCREPANCY, add_stoc
 from .common import serialize
 from .parts_po import _sync as sync_po
 from .parts_requests import _editable, _payload as request_payload, _req_or_404
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/parts/stock", tags=["parts-stock"])
 EDIT_ROLES = (Role.MANAGER, Role.CD, Role.GD, Role.PURCHASING)
@@ -53,7 +54,7 @@ def _receiver(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
 
 
 def _number(db: Session, model, prefix: str) -> str:
-    p = f"{prefix}-{date.today().year}-"
+    p = f"{prefix}-{msk_today().year}-"
     last = db.scalars(select(model.number).where(model.number.like(f"{p}%"))).all()
     n = max([int(x[len(p):]) for x in last if x[len(p):].isdigit()] or [0]) + 1
     return f"{p}{n:04d}"
@@ -145,7 +146,7 @@ def create_receipt(body: ReceiptIn, db: Session = Depends(get_db), user: Current
     items = [x for x in body.lines if x.qty > 0 or x.qty_bad > 0]
     if not items:
         raise HTTPException(422, "Укажите принятое количество")
-    rc = PartReceipt(number=_number(db, PartReceipt, "ПР"), po_id=po.id, warehouse_id=wh.id, received_on=body.received_on or date.today(),
+    rc = PartReceipt(number=_number(db, PartReceipt, "ПР"), po_id=po.id, warehouse_id=wh.id, received_on=body.received_on or msk_today(),
                      comment=body.comment, created_by=user.id)
     db.add(rc)
     db.flush()
@@ -393,7 +394,7 @@ def ship(rid: str, body: ShipmentIn, db: Session = Depends(get_db), user: Curren
     _editable(user, req)
     wh = _physical(db, body.warehouse_id)
     by_id = {l.id: l for l in req.lines}
-    sh = PartShipment(number=_number(db, PartShipment, "ОГ"), request_id=req.id, warehouse_id=wh.id, shipped_on=body.shipped_on or date.today(),
+    sh = PartShipment(number=_number(db, PartShipment, "ОГ"), request_id=req.id, warehouse_id=wh.id, shipped_on=body.shipped_on or msk_today(),
                       comment=body.comment, created_by=user.id)
     db.add(sh)
     db.flush()
@@ -585,4 +586,4 @@ def balances_xlsx(q: str = "", warehouse_id: str = "", only_positive: bool = Tru
     wb.save(path)
     from ..core.download_audit import note
     note(entity_type="stock_balances", row_count=len(d["rows"]))
-    return FileResponse(path, filename=f"ostatki-{date.today():%Y%m%d}.xlsx", background=BackgroundTask(os.unlink, path))
+    return FileResponse(path, filename=f"ostatki-{msk_today():%Y%m%d}.xlsx", background=BackgroundTask(os.unlink, path))

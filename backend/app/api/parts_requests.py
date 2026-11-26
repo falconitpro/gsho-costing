@@ -24,6 +24,7 @@ from ..services.parts_pricing import CURRENCIES, DELETABLE_LINE, LINE_STATUS, to
 from ..services.parts_requests import approvals_pending, supplier_currency_of, line_payload, match_lines, next_number, parse_lines_text, price_lines
 from .common import serialize
 from .parts_setup import current_policy, latest_fx
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/parts/requests", tags=["parts-requests"])
 
@@ -82,7 +83,7 @@ def _payload(db: Session, req: PartRequest, user: CurrentUser) -> dict:
     d.update(request_stage(lines, req.closed))
     d["deal"] = _deal_of_machine(db, req)
     kps = db.scalars(select(PartKp).where(PartKp.request_id == req.id).order_by(PartKp.revision_no.desc())).all()
-    d["kps"] = [{**serialize(k), "expired": k.valid_until < date.today()} for k in kps]
+    d["kps"] = [{**serialize(k), "expired": k.valid_until < msk_today()} for k in kps]
     return filter_payload(d, user)
 
 
@@ -486,7 +487,7 @@ def create_kp(rid: str, body: KpIn, db: Session = Depends(get_db), user: Current
         removed_by, fee = user.id, 0.0
     prev = db.scalars(select(PartKp).where(PartKp.request_id == req.id).order_by(PartKp.revision_no.desc())).first()
     rev = (prev.revision_no if prev else 0) + 1
-    today = date.today()
+    today = msk_today()
     kp = PartKp(request_id=req.id, revision_no=rev, number=f"КП-{req.number}/{rev}", currency=body.currency, fx_rate=None if body.currency == "RUB" else rate,
                 lines=snap, handling_fee=fee, handling_fee_removed_by=removed_by, total=round(sum(l["sum"] for l in snap) + fee, 2),
                 valid_until=today + timedelta(days=int(settings_service.get(db, "parts_kp_validity_days") or 30)),

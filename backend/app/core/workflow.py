@@ -10,6 +10,7 @@ from enum import Enum
 from typing import Any, Optional
 
 from .roles import Role
+from ..core.clock import today as msk_today
 
 
 class DealStatus(str, Enum):
@@ -393,7 +394,7 @@ def close(state: DealState, outcome: str, reason: str, today: Optional[date] = N
         raise WorkflowError("Укажите исход (won/lost/cancelled) и причину.")
     res = TransitionResult(status=status, audit=f"Исход: {OUTCOME_TITLES.get(outcome, outcome)} — {reason}")
     if status == DealStatus.CONTRACT:
-        today = today or date.today()
+        today = today or msk_today()
         sla = sla or SlaDefaults()
         res.tasks.append(TaskSpec(Role.MANAGER, "Заключение контракта: подготовка проекта контракта", add_business_days(today, 2), "contract"))
         res.notifications.append(Notification("won", [Role.FD], ["app", "outlook"], "Сделка выиграна: стадия заключения контракта, далее — факт платежей"))

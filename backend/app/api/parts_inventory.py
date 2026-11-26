@@ -16,6 +16,7 @@ from ..models import Factory, Part, PartInventory, PartInventoryLine, PartStock,
 from ..services.deal_service import audit, notify
 from ..services.parts_stock import add_stock, suggest_qty
 from .common import serialize
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/parts/stock", tags=["parts-inventory"])
 COUNT_ROLES = (Role.MANAGER, Role.CD, Role.GD, Role.PURCHASING)
@@ -37,7 +38,7 @@ def _counter(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
 
 
 def _number(db: Session) -> str:
-    p = f"ИН-{date.today().year}-"
+    p = f"ИН-{msk_today().year}-"
     last = db.scalars(select(PartInventory.number).where(PartInventory.number.like(f"{p}%"))).all()
     n = max([int(x[len(p):]) for x in last if x[len(p):].isdigit()] or [0]) + 1
     return f"{p}{n:04d}"

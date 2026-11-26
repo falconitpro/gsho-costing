@@ -17,6 +17,7 @@ from ..models import Approval, Client, Deal, ExecutionStage, Task
 from ..services import execution_service as ex
 from ..services.deal_service import apply_transition, audit, complete_tasks, create_version, sla
 from .common import deal_payload, get_deal_or_404
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/deals/{deal_id}/execution", tags=["execution"])
 
@@ -193,8 +194,8 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
     allowed = user.has(_R.GD) or any(user.has(_R(r)) for r in step["roles"] if r != "manager") or ("manager" in step["roles"] and is_owner)
     if not allowed:
         raise HTTPException(403, f"Подэтап «{step['title']}» отмечают: {', '.join(role_title(r) for r in step['roles'])}")
-    on = body.on or date.today()
-    if on > date.today():
+    on = body.on or msk_today()
+    if on > msk_today():
         raise HTTPException(422, "Дата подэтапа не может быть в будущем")
     steps = dict(deal.contract_steps or {})
     signed = {"client_signed": ex.client_signed(deal), "factory_signed": ex.factory_signed(deal)}
@@ -248,10 +249,10 @@ def contract_step(deal_id: str, body: ContractStepIn, db: Session = Depends(get_
         days = 5 if nxt["code"] in ("client_review", "factory_signed") else 2
         assignee = deal.manager_id if nxt["task_role"] == "manager" else None
         db.add(Task(deal_id=deal.id, role=nxt["task_role"], assignee_id=assignee, title=f"Заключение контракта: {nxt['title'].lower()}", block="contract",
-                    due=add_business_days(date.today(), days)))
+                    due=add_business_days(msk_today(), days)))
     elif deal.contract_number and deal.contract_signed_at:
         db.add(Task(deal_id=deal.id, role="manager", assignee_id=deal.manager_id, title="Контракт подписан — начать исполнение", block="contract",
-                    due=date.today() + timedelta(days=1)))
+                    due=msk_today() + timedelta(days=1)))
     ex.rebuild_stages(db, deal)
     db.commit()
     return {"contract_steps": ex.contract_steps(db, deal), "status_detail": ex.status_detail(deal)}
@@ -266,7 +267,7 @@ def start(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = Depen
     if deal.has_alternatives and not deal.won_variant_id:
         raise HTTPException(422, "Укажите, какое предложение выбрал клиент")
     try:
-        tr = start_execution(DealState(status=deal.status, service_flag=deal.service_flag), bool(deal.contract_number and deal.contract_signed_at), date.today())
+        tr = start_execution(DealState(status=deal.status, service_flag=deal.service_flag), bool(deal.contract_number and deal.contract_signed_at), msk_today())
     except Exception as e:
         raise HTTPException(409, str(e))
     deal.in_execution, deal.execution_started = True, True
@@ -300,7 +301,7 @@ def set_actual(deal_id: str, stage_id: str, body: ActualIn, db: Session = Depend
             raise HTTPException(409, "Окончательный расчёт с заводом — после приёмки всех машин позиции на заводе (вкладка «Исполнение» → «Приёмка на заводе»)")
     if st.code == "factory_acceptance":
         raise HTTPException(409, "Приёмка на заводе отмечается сама, когда приняты все машины позиции")
-    if body.actual_on and body.actual_on > date.today():
+    if body.actual_on and body.actual_on > msk_today():
         raise HTTPException(422, "Фактическая дата не может быть в будущем — для ожидаемой даты используйте «Уточнить дату»")
     if body.actual_on:
         prev = ex.previous_open(db, deal, st, body.actual_on)
@@ -368,7 +369,7 @@ def terms_changed(deal_id: str, body: TermsChangedIn, db: Session = Depends(get_
     if not (user.has(Role.GD, Role.CD) or (user.has(Role.MANAGER) and user.is_manager_of(deal.manager_id))):
         raise HTTPException(403)
     try:
-        tr = contract_terms_changed(DealState(status=deal.status, service_flag=deal.service_flag, in_execution=True), body.reason, date.today(), sla(db))
+        tr = contract_terms_changed(DealState(status=deal.status, service_flag=deal.service_flag, in_execution=True), body.reason, msk_today(), sla(db))
     except Exception as e:
         raise HTTPException(409, str(e))
     for a in db.scalars(select(Approval).where(Approval.deal_id == deal.id, Approval.reset_at.is_(None))).all():
@@ -403,15 +404,15 @@ def close(deal_id: str, body: CloseIn, db: Session = Depends(get_db), user: Curr
                              body.reason + (f" (не завершены: {', '.join(s.title for s in open_st)})" if open_st else ""))
     except Exception as e:
         raise HTTPException(409, str(e))
-    deal.execution_closed_at = date.today()
+    deal.execution_closed_at = msk_today()
     closing = db.scalar(select(ExecutionStage).where(ExecutionStage.deal_id == deal.id, ExecutionStage.code == "closing"))
     if closing:
-        closing.actual_on, closing.done_by = date.today(), user.id
+        closing.actual_on, closing.done_by = msk_today(), user.id
     complete_tasks(db, deal)
     apply_transition(db, deal, tr, user.id)
     if not deal.plan_fact_closed:   # D-147: поздние счета (логистика, таможня, ПНР) приходят после закрытия — ФД вносит их и закрывает план/факт
         db.add(Task(deal_id=deal.id, role="fd", title="Сделка закрыта — внести последние расходы и закрыть план/факт", block="plan_fact",
-                    due=date.today() + timedelta(days=30)))
+                    due=msk_today() + timedelta(days=30)))
     try:   # машины сделки — в парк клиента (запчасти, раздел 9)
         from .parts_fleet import sync_from_deals
         sync_from_deals(db, deal.id, user.id)

@@ -28,6 +28,7 @@ from ..services import office as svc
 from ..services.deal_service import notify
 from .common import get_deal_or_404
 from ..services.office_ai import state as office_ai_state
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/office", tags=["office"])
 
@@ -206,7 +207,7 @@ def meta(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_
         "due_days": svc.DUE_DAYS,
         "signers": [{"id": s.id, "entity_id": s.entity_id, "full_name": s.full_name, "position": s.position, "basis": s.basis,
                      "valid_from": s.valid_from.isoformat() if s.valid_from else None, "valid_to": s.valid_to.isoformat() if s.valid_to else None,
-                     "methods": s.methods or [], "is_active": s.is_active, "valid_today": svc.signer_ok(s, date.today())} for s in signers],
+                     "methods": s.methods or [], "is_active": s.is_active, "valid_today": svc.signer_ok(s, msk_today())} for s in signers],
         "users": [{"id": u.id, "name": u.display_name} for u in users],
         "ai": office_ai_state(),
         "routes": [_route_view(r) for r in db.scalars(select(OfficeRoute).order_by(OfficeRoute.name)).all()],
@@ -242,12 +243,12 @@ def list_docs(kind: Optional[str] = None, entity_id: Optional[str] = None, statu
     if deal_id:
         rows = [d for d in rows if deal_id in (d.deal_ids or [])]
     if overdue:
-        today = date.today()
+        today = msk_today()
         rows = [d for d in rows if d.due_on and d.due_on < today and d.status in svc.OPEN]
     uids = {d.executor_id for d in rows if d.executor_id}
     users = {u.id: u for u in db.scalars(select(User).where(User.id.in_(uids))).all()} if uids else {}
     items = [svc.serialize(db, d, user, users) for d in rows]
-    today = date.today()
+    today = msk_today()
     return {"items": items, "counts": {
         "in_open": sum(1 for d in rows if d.kind == "in" and d.status in svc.OPEN),
         "overdue": sum(1 for d in rows if d.due_on and d.due_on < today and d.status in svc.OPEN),
@@ -290,7 +291,7 @@ def create_doc(body: DocIn, db: Session = Depends(get_db), user: CurrentUser = D
     db.flush()
     svc.hist(doc, user.id, "created")
     if body.kind == "in":   # входящее регистрируется сразу: номер, дата поступления, срок ответа
-        svc.allocate_number(db, doc, body.received_on or date.today())
+        svc.allocate_number(db, doc, body.received_on or msk_today())
         doc.status = "registered"
         doc.due_on = (body.due_on or svc.default_due(body.letter_type, doc.reg_date)) if doc.needs_reply else None
         svc.hist(doc, user.id, "registered", doc.number)
@@ -357,7 +358,7 @@ def action(did: str, body: ActionIn, db: Session = Depends(get_db), user: Curren
     doc = _get(db, did, user)
     ed = svc.is_editor(user, doc)
     ex = user.id == doc.executor_id or user.id in (doc.co_executor_ids or [])
-    on = body.on or date.today()
+    on = body.on or msk_today()
     if body.action == "take":
         if not ex or doc.status not in ("assigned", "registered"):
             raise HTTPException(409, "Взять в работу может исполнитель назначенного документа")
@@ -427,7 +428,7 @@ def sign(did: str, body: SignIn, db: Session = Depends(get_db), user: CurrentUse
     if doc.status == "draft" and svc.approval_required(db, doc):
         raise HTTPException(409, "Для этого документа согласование обязательно — отправьте его по типовой схеме или по своему маршруту")
     s = db.get(OfficeSigner, body.signer_id)
-    on = body.signed_on or date.today()
+    on = body.signed_on or msk_today()
     if s is None or s.entity_id != doc.entity_id:
         raise HTTPException(422, "Подписант не найден у этого юр. лица")
     if not svc.signer_ok(s, on):
@@ -780,7 +781,7 @@ def resolution(did: str, body: ResolutionIn, db: Session = Depends(get_db), user
         raise HTTPException(422, "Резолюция: к исполнению, к сведению или в дело")
     if not svc.has_scan(doc):
         raise HTTPException(409, "Сначала приложите скан или исходный файл письма")
-    today = date.today()
+    today = msk_today()
     rec = {"id": uuid.uuid4().hex[:12], "by": user.id, "at": datetime.now(timezone.utc).isoformat(), "kind": body.kind, "text": body.text.strip(),
            "executor_id": None, "co": [], "due_on": None}
     if body.kind == "execute":
@@ -884,7 +885,7 @@ def export_journal(kind: Optional[str] = None, date_from: Optional[date] = None,
         stmt = stmt.where(or_(OfficeDoc.number.ilike(like), OfficeDoc.subject.ilike(like), OfficeDoc.counterparty.ilike(like)))
     rows = [d for d in db.scalars(stmt.order_by(OfficeDoc.reg_date.asc().nulls_last(), OfficeDoc.number)).all() if svc.can_see(user, d)]
     if overdue:
-        rows = [d for d in rows if d.due_on and d.due_on < date.today() and d.status in svc.OPEN]
+        rows = [d for d in rows if d.due_on and d.due_on < msk_today() and d.status in svc.OPEN]
     wb = Workbook()
     ws = wb.active
     ws.title = "Журнал"
@@ -935,7 +936,7 @@ def export_journal(kind: Optional[str] = None, date_from: Optional[date] = None,
     from ..services.deal_service import audit as _audit
     _audit(db, user.id, None, "office_export", "journal", "export", after={"rows": len(rows), "filters": filters})
     db.commit()
-    name = f"Журнал_Канцелярии_{date.today():%Y-%m-%d}.xlsx"
+    name = f"Журнал_Канцелярии_{msk_today():%Y-%m-%d}.xlsx"
     return Response(buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 

@@ -20,6 +20,7 @@ from sqlalchemy import text
 
 from .core.config import get_settings
 from .db import SessionLocal, engine
+from .core.clock import today as msk_today
 
 log = logging.getLogger("gsho.jobs")
 LOCK_KEY = 774_201_143
@@ -86,7 +87,7 @@ def _fx() -> None:
     from .adapters.fx_source import SUPPORTED as FX_CODES
     from .models import FxRate, IntegrationLog
     with SessionLocal() as db:
-        today = date.today()
+        today = msk_today()
         have_today = set(db.scalars(select(FxRate.currency).where(FxRate.on == today, FxRate.source == "cbr")).all())
         if not set(FX_CODES) <= have_today:
             try:

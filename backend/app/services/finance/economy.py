@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from ...calc.types import COST_ITEMS
 from ...models import DealVersion, FinanceAllocation, FinanceObligation, FinanceRecognitionEvent, FinanceTransaction, PlanFactEntry
 from .money import ZERO, dec, s
+from ...core.clock import msk_date, today as msk_today
 
 SCEN = ("base", "pessimistic", "optimistic")
 
@@ -101,7 +102,7 @@ def cash(db: Session, vis, deal_id: str, today: date) -> dict:
             provisional.append({"obligation_id": o.id, "title": o.title, "amount": s(a.amount_obligation), "currency": o.currency})
             continue
         confirmed_paid[o.id] += a.amount_obligation
-        on = tx.value_date or tx.booked_at.date()
+        on = tx.value_date or msk_date(tx.booked_at)
         by_ccy[tx.currency][tx.direction] += a.amount_tx
         if tx.currency == "RUB":
             rub = a.amount_tx
@@ -189,7 +190,7 @@ def _revenue_forecast(db: Session, obs: list[FinanceObligation], today: date) ->
 
 
 def build(db: Session, vis, deal, today: Optional[date] = None) -> dict:
-    today = today or date.today()
+    today = today or msk_today()
     ver = db.get(DealVersion, deal.approved_version_id) if deal.approved_version_id else None
     if ver is None:
         raise HTTPException(409, "Нет утверждённой версии расчёта — экономика сделки строится от неё")
@@ -312,7 +313,7 @@ def explain(db: Session, vis, deal, metric: str, scenario: str = "base", cost_it
     codes = {k for _, k, _ in COST_ITEMS}
     if cost_item_code and cost_item_code not in codes:
         raise HTTPException(422, "Неизвестная статья себестоимости")
-    today = today or date.today()
+    today = today or msk_today()
     e = build(db, vis, deal, today)
     title = next((t for _, k, t in COST_ITEMS if k == cost_item_code), "")
     out = {"metric": metric, "metric_title": METRICS[metric] + (f" — {title}" if title else ""), "scenario": scenario, "cost_item_code": cost_item_code, "as_of": today.isoformat(),

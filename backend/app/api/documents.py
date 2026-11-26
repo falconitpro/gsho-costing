@@ -22,6 +22,7 @@ from ..db import get_db
 from ..models import Attachment, Deal, FeedEntry, Task, User
 from ..services.deal_service import audit, complete_tasks, ensure_folders, notify
 from .common import get_deal_or_404
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/deals/{deal_id}", tags=["documents"])
 
@@ -87,7 +88,7 @@ def _save(db: Session, deal: Deal, user: CurrentUser, file: UploadFile, category
     if category in NEEDS_LAWYER and (deal.legal_review or {}).get("status") != "in_review":
         if not db.scalar(select(Task.id).where(Task.deal_id == deal.id, Task.block == "legal", Task.done_at.is_(None))):
             db.add(Task(deal_id=deal.id, role=Role.LAWYER.value, assignee_id=None, title="Проверить документы клиента: тендерная документация, форма договора",
-                        block="legal", due=add_business_days(date.today(), 2)))
+                        block="legal", due=add_business_days(msk_today(), 2)))
         deal.legal_review = {"status": "in_review", "comment": "", "by": None, "at": None}
     elif category in LEGAL_CATEGORIES and deal.manager_id and deal.manager_id != user.id:
         notify(db, deal, deal.manager_id, "legal_doc", None, f"{deal.number}: юрист загрузил «{CATEGORIES[category]}» — {name}")

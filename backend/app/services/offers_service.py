@@ -17,6 +17,7 @@ from ..models import (
 )
 from .deal_service import audit, notify
 from .tech_params_service import _norm
+from ..core.clock import today as msk_today
 
 
 def _copy_columns(src, dst, skip: set[str]) -> None:
@@ -68,7 +69,7 @@ def duplicate_deal(db: Session, deal: Deal, user_id: str, offer_id: Optional[str
             np_.factory_id, np_.model, np_.unit_price, np_.currency, np_.basis = offer.factory_id, offer.model or p.model, offer.unit_price or p.unit_price, offer.currency, offer.basis
             from .production_term import normalize
             if normalize(offer.production_term) and not (p.production_term or {}).get("fixed"):
-                np_.production_term = {**normalize(offer.production_term), "source": "offer", "set_by": user_id, "set_at": date.today().isoformat(),
+                np_.production_term = {**normalize(offer.production_term), "source": "offer", "set_by": user_id, "set_at": msk_today().isoformat(),
                                        "comment": "ответ завода при копировании", "fixed": False}
             if offer.factory_id != p.factory_id:
                 from .catalog_service import resolve_trademark
@@ -94,7 +95,7 @@ def duplicate_deal(db: Session, deal: Deal, user_id: str, offer_id: Optional[str
                 db.add(PositionImage(deal_id=new.id, position_id=np_.id, attachment_id=aid, kind="photo", source="factory", has_factory_logo=True, uploaded_by=user_id))
         if offer and offer.unit_price:
             db.add(FactoryPriceHistory(factory_id=offer.factory_id, model=np_.model, unit_price=offer.unit_price, currency=offer.currency, basis=offer.basis,
-                                       production_term=offer.production_term or {}, factory_payments=offer.factory_payments or [], on=date.today(), deal_id=new.id, source="offer"))
+                                       production_term=offer.production_term or {}, factory_payments=offer.factory_payments or [], on=msk_today(), deal_id=new.id, source="offer"))
     db.flush()
     db.refresh(new)
     from ..api.deals import ensure_default_variant
@@ -110,7 +111,7 @@ def duplicate_deal(db: Session, deal: Deal, user_id: str, offer_id: Optional[str
                                   (Role.SERVICE_HEAD, deal.service_flag, "Проверить скопированный расчёт сервиса (регламенты ТО другого завода)")):
             if flag:
                 assignee = new.logistician_id if role == Role.LOGISTICIAN else new.service_head_id
-                db.add(Task(deal_id=new.id, role=role.value, assignee_id=assignee, title=title, block="copied_calc", due=add_business_days(date.today(), 2)))
+                db.add(Task(deal_id=new.id, role=role.value, assignee_id=assignee, title=title, block="copied_calc", due=add_business_days(msk_today(), 2)))
     db.add(FeedEntry(deal_id=new.id, kind="system", subject="Заявка создана дублированием", body=f"Из {deal.number}" + (f" (ответ завода {offer.model})" if offer else "") + (f": {comment}" if comment else ""), user_id=user_id))
     db.add(FeedEntry(deal_id=deal.id, kind="system", subject="Создана связанная заявка", body=f"{new.number}" + (f" — ответ завода {offer.model}" if offer else ""), user_id=user_id))
     audit(db, user_id, new.id, "deal", new.id, "duplicate", after={"from": deal.number, "offer_id": offer_id, "copy_calcs": copy_calcs})
@@ -188,7 +189,7 @@ def compare(db: Session, deal: Deal, source_position: Optional[Position], can_ch
 def submit_compare(db: Session, deal: Deal, user_id: str) -> None:
     """Менеджер отправил сравнение на отбор → задача КД (видна и ЗГД)."""
     if not db.scalar(select(Task.id).where(Task.deal_id == deal.id, Task.block == "offers", Task.done_at.is_(None))):
-        db.add(Task(deal_id=deal.id, role=Role.CD.value, title="Отобрать заводы для КП (сравнение ответов)", block="offers", due=add_business_days(date.today(), 1)))
+        db.add(Task(deal_id=deal.id, role=Role.CD.value, title="Отобрать заводы для КП (сравнение ответов)", block="offers", due=add_business_days(msk_today(), 1)))
     db.add(FeedEntry(deal_id=deal.id, kind="system", subject="Сравнение ответов заводов отправлено на отбор", body="", user_id=user_id))
 
 
@@ -221,7 +222,7 @@ def select_offers(db: Session, deal: Deal, offer_ids: list[str], user_id: str, c
                 db.add(PositionImage(deal_id=deal.id, position_id=pos.id, attachment_id=aid, kind="photo", source="factory", has_factory_logo=True, uploaded_by=user_id))
         if first.unit_price:
             db.add(FactoryPriceHistory(factory_id=first.factory_id, model=pos.model, unit_price=first.unit_price, currency=first.currency, basis=first.basis,
-                                       production_term=first.production_term or {}, factory_payments=first.factory_payments or [], on=date.today(), deal_id=deal.id, source="offer"))
+                                       production_term=first.production_term or {}, factory_payments=first.factory_payments or [], on=msk_today(), deal_id=deal.id, source="offer"))
     first.status, first.selected_deal_id, first.selected_by = "selected", deal.id, user_id
     for o in rest:
         created.append(duplicate_deal(db, deal, user_id, offer_id=o.id, copy_calcs=copy_calcs))

@@ -19,6 +19,7 @@ from ...calc.types import COST_ITEMS
 from ...models import Contract, Deal, FinanceAccount, FinanceObligation, FinanceQuestion, FinanceRecognitionEvent, FinanceTransaction, User
 from ..deal_service import audit, notify
 from .money import ru, ru_date, s
+from ...core.clock import msk_date, today as msk_today
 
 SUBJECTS = {"obligation": "строка платёжного календаря", "transaction": "банковская операция", "recognition": "событие признания",
             "account": "финансовый счёт", "deal_metric": "показатель экономики сделки"}
@@ -61,9 +62,9 @@ def subject(db: Session, user, vis, subject_type: str, subject_id: str) -> dict:
         t = db.get(FinanceTransaction, subject_id)
         if t is None or not can_read(user):
             raise nf
-        ctx = {"Операция": "поступление" if t.direction == "in" else "списание", "Дата": ru_date(t.booked_at.date()), "Сумма": ru(t.amount, t.currency),
+        ctx = {"Операция": "поступление" if t.direction == "in" else "списание", "Дата": ru_date(msk_date(t.booked_at)), "Сумма": ru(t.amount, t.currency),
                "Контрагент": t.counterparty_name or "—", "Назначение платежа": t.purpose or "—", "Номер документа банка": t.external_ref or "—"}
-        return {"deal_id": None, "context": ctx, "url": f"/finance?tab=liquidity&tx={t.id}", "title": f"операция {t.external_ref or ru_date(t.booked_at.date())}"}
+        return {"deal_id": None, "context": ctx, "url": f"/finance?tab=liquidity&tx={t.id}", "title": f"операция {t.external_ref or ru_date(msk_date(t.booked_at))}"}
     if subject_type == "recognition":
         from .recognition import can_view_all
         e = db.get(FinanceRecognitionEvent, subject_id)
@@ -119,7 +120,7 @@ def create(db: Session, user, vis, body: dict) -> FinanceQuestion:
         raise HTTPException(422, "Ответственный не найден или отключён")
     sub = subject(db, user, vis, body.get("subject_type") or "", str(body.get("subject_id") or ""))
     due = body.get("due_on")
-    if due and due < date.today():
+    if due and due < msk_today():
         raise HTTPException(422, "Срок ответа — не раньше сегодняшнего дня")
     q = FinanceQuestion(subject_type=body["subject_type"], subject_id=str(body["subject_id"]), deal_id=sub["deal_id"], question=text[:4000],
                         context_snapshot={"title": sub["title"], "fields": {k: v for k, v in sub["context"].items() if v not in (None, "")}},
@@ -205,7 +206,7 @@ def task_items(db: Session, user) -> list[dict]:
     ids = {user.id, *user.acting_for}
     rows = db.scalars(select(FinanceQuestion).where(FinanceQuestion.assignee_id.in_(ids), FinanceQuestion.status.in_(("open", "rejected")))
                       .order_by(FinanceQuestion.due_on.nulls_last(), FinanceQuestion.created_at)).all()
-    today = date.today()
+    today = msk_today()
     out = []
     for q in rows:
         d = db.get(Deal, q.deal_id) if q.deal_id else None

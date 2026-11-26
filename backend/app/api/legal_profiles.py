@@ -25,6 +25,7 @@ from ..db import get_db
 from ..models import BankProfile, Client, Factory, LegalEntity, LegalProfile
 from ..services import legal_profiles as svc
 from ..services.deal_service import audit
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/legal", tags=["legal"])
 
@@ -247,7 +248,7 @@ def fill_by_inn(pid: str, body: FillByInnIn, db: Session = Depends(get_db), user
     changed = svc.apply_changes(p, data, svc.PROFILE_FIELDS, user.id, action="registry")
     if changed:
         p.check_status, p.checked_at, p.checked_by = "not_checked", None, None
-    p.extra = {**(p.extra or {}), "registry_status": main.get("status") or "", "registry_checked_on": datetime.now(timezone.utc).date().isoformat(), "okved": main.get("okved") or (p.extra or {}).get("okved", "")}
+    p.extra = {**(p.extra or {}), "registry_status": main.get("status") or "", "registry_checked_on": msk_today().isoformat(), "okved": main.get("okved") or (p.extra or {}).get("okved", "")}
     audit(db, user.id, None, "legal_profile", p.id, "fill_by_inn", after={"inn": inn, "kpp": main.get("kpp"), "source": main.get("source")})
     db.commit()
     branches = [{"kpp": f.get("kpp", ""), "name": f.get("name", ""), "address": f.get("address", "")} for f in found if f is not main and is_branch(f)]
@@ -351,7 +352,7 @@ def archive_bank(bid: str, db: Session = Depends(get_db), user: CurrentUser = De
     b, p = _bank(db, bid)
     if p.owner_kind == "own":
         _own_editor(user)
-    svc.apply_changes(b, {"status": "archived", "valid_to": b.valid_to or date.today()}, svc.BANK_FIELDS, user.id, action="archived")
+    svc.apply_changes(b, {"status": "archived", "valid_to": b.valid_to or msk_today()}, svc.BANK_FIELDS, user.id, action="archived")
     audit(db, user.id, None, "bank_profile", b.id, "archive")
     db.commit()
     return svc.bank_payload(b, svc.user_names(db))

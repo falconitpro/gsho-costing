@@ -11,6 +11,7 @@ from docx.shared import Mm, Pt
 
 from ..models import BankProfile, LegalProfile
 from .kp_generator import ACCENT, BLACK, DEFAULT_LOGO, _heading, _run, _table
+from ..core.clock import today as msk_today
 
 LANG_T = {"ru": "RU", "en": "EN", "zh": "中文"}
 
@@ -46,7 +47,7 @@ def build_company_card(p: LegalProfile, banks: list[BankProfile], path: str, log
     ru = (p.names or {}).get("ru") or {}
     _heading(doc, f"Карточка компании — {ru.get('short') or ru.get('full') or p.title}", 16)
     pr = doc.add_paragraph()
-    _run(pr, f"Реквизиты для договоров и счетов · по состоянию на {date.today():%d.%m.%Y}", color=BLACK, size=9)
+    _run(pr, f"Реквизиты для договоров и счетов · по состоянию на {msk_today():%d.%m.%Y}", color=BLACK, size=9)
     _table(doc, ["Реквизит", "Значение"], _rows_party(p))
     active = [b for b in banks if b.status == "active"]
     if active:

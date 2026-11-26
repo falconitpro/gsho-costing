@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from ..models import LegalEntity, LegalProfile, PowerOfAttorney, User
 from .kp_generator import ACCENT, BLACK, _heading, _run, _table
+from ..core.clock import today as msk_today
 
 KINDS = {"general": "Генеральная", "special": "Специальная", "single": "Разовая"}
 STATUSES = {"draft": "черновик", "active": "действует", "expired": "срок истёк", "revoked": "отозвана", "cancelled": "аннулирована"}
@@ -105,7 +106,7 @@ def principal_snapshot(p: LegalProfile) -> dict:
 
 def refresh_status(poa: PowerOfAttorney, today: Optional[date] = None) -> bool:
     """Действующая доверенность с истёкшим сроком → «срок истёк». Возвращает True, если статус изменён."""
-    today = today or date.today()
+    today = today or msk_today()
     if poa.status == "active" and poa.valid_to and poa.valid_to < today:
         poa.status = "expired"
         poa.history = list(poa.history or []) + [{"at": _now().isoformat(), "by": None, "action": "expired", "comment": f"срок действия истёк {poa.valid_to:%d.%m.%Y}"}]
@@ -116,7 +117,7 @@ def refresh_status(poa: PowerOfAttorney, today: Optional[date] = None) -> bool:
 def days_left(poa: PowerOfAttorney, today: Optional[date] = None) -> Optional[int]:
     if not poa.valid_to:
         return None
-    return (poa.valid_to - (today or date.today())).days
+    return (poa.valid_to - (today or msk_today())).days
 
 
 def payload(poa: PowerOfAttorney, names: dict[str, str], entity_name: str, sensitive: bool) -> dict:
@@ -293,7 +294,7 @@ def template_data(poa: PowerOfAttorney) -> dict:
 def check_expiring(db: Session, today: Optional[date] = None) -> int:
     """Раз в час: за 30 и за 7 дней до окончания и по истечении — уведомление юристам, ЗГД и представителю-сотруднику; статус «срок истёк»."""
     from .deal_service import notify
-    today = today or date.today()
+    today = today or msk_today()
     n = 0
     users = db.scalars(select(User).where(User.is_active.is_(True))).all()
     bosses = [u for u in users if {"lawyer", "gd"} & set(u.roles or [])]

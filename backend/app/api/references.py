@@ -16,6 +16,7 @@ from ..db import get_db
 from ..models import Client, Deal, DealVersion, EquipmentModel, Factory, FactoryPriceHistory, FxRate, HsCode, PaymentScheme, Position
 from ..services.deal_service import audit
 from .common import serialize
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/refs", tags=["references"])
 
@@ -917,7 +918,7 @@ def create_scheme(body: SchemeIn, db: Session = Depends(get_db), user: CurrentUs
 def fx_today(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Курсы ЦБ РФ для информационного блока в шапке: действующий курс на сегодня (или последний загруженный),
     изменение к предыдущему дню и, если ЦБ уже опубликовал, курс на следующий день. Все курсы — с датой, на которую они установлены."""
-    today = date.today()
+    today = msk_today()
     out = []
     for cur in ("USD", "EUR", "CNY"):
         rows = db.scalars(select(FxRate).where(FxRate.currency == cur, FxRate.source == "cbr").order_by(FxRate.on.desc()).limit(40)).all()

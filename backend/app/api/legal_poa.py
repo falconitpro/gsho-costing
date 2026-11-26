@@ -24,6 +24,7 @@ from ..models import LegalEntity, LegalProfile, PowerOfAttorney, Template, User
 from ..services import legal_poa as svc
 from ..services import legal_profiles as lp
 from ..services.deal_service import audit, notify
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/legal/poa", tags=["legal"])
 
@@ -273,7 +274,7 @@ def issue_poa(pid: str, body: IssueIn, db: Session = Depends(get_db), user: Curr
     if errs:
         raise HTTPException(422, {"message": "Доверенность не оформлена — заполните данные", "errors": errs})
     ent = db.get(LegalEntity, p.entity_id)
-    on = body.issued_on or date.today()
+    on = body.issued_on or msk_today()
     if p.valid_to and p.valid_to <= on:
         raise HTTPException(422, "Срок действия должен быть позже даты выдачи")
     p.number, p.seq = svc.next_number(db, ent, on)
@@ -360,7 +361,7 @@ def revoke_poa(pid: str, body: RevokeIn, db: Session = Depends(get_db), user: Cu
         raise HTTPException(409, "Отозвать можно действующую (или истёкшую) доверенность")
     if len(body.reason.strip()) < 3:
         raise HTTPException(422, "Укажите причину отзыва")
-    on = body.revoked_on or date.today()
+    on = body.revoked_on or msk_today()
     p.status = "revoked"
     p.revoked_at = datetime.now(timezone.utc)
     p.revoked_by = user.id

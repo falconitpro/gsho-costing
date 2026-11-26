@@ -20,6 +20,7 @@ from ..db import get_db
 from ..models import (Client, Factory, Part, PartKp, PartReceipt, PartReceiptLine, PartRequest, PartRequestLine, PartShipment, PartShipmentLine,
                       PartStock, PartStockMove, PoLine, PurchaseOrder, Warehouse, WarrantyClaim)
 from ..services.parts_requests import norm_article
+from ..core.clock import msk_date, today as msk_today
 
 router = APIRouter(prefix="/api/parts/reports", tags=["parts-reports"])
 READ_ROLES = (Role.MANAGER, Role.CD, Role.FD, Role.GD, Role.PURCHASING, Role.SERVICE_HEAD, Role.LOGISTICIAN, Role.ADMIN)
@@ -39,7 +40,7 @@ def _finance(user: CurrentUser = Depends(_reader)) -> CurrentUser:
 
 
 def _period(date_from: Optional[date], date_to: Optional[date]) -> tuple[date, date]:
-    to = date_to or date.today()
+    to = date_to or msk_today()
     return (date_from or to - timedelta(days=365)), to
 
 
@@ -156,7 +157,7 @@ def lead_accuracy(date_from: Optional[date] = None, date_to: Optional[date] = No
 @router.get("/stock")
 def stock(idle_days: int = 180, db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
     """Неликвиды и оборачиваемость: остаток без движения дольше idle_days; отгружено за год к текущему остатку."""
-    today = date.today()
+    today = msk_today()
     year_ago = _dt(today - timedelta(days=365))
     last = dict(db.execute(select(PartStockMove.part_id, func.max(PartStockMove.at)).group_by(PartStockMove.part_id)).all())
     shipped = dict(db.execute(select(PartStockMove.part_id, func.sum(-PartStockMove.qty)).where(PartStockMove.kind == "shipment", PartStockMove.at >= year_ago)
@@ -166,7 +167,7 @@ def stock(idle_days: int = 180, db: Session = Depends(get_db), user: CurrentUser
     idle, turn = [], []
     for st, p in db.execute(select(PartStock, Part).join(Part, Part.id == PartStock.part_id).where(PartStock.qty > 0)).all():
         moved = last.get(p.id) or st.as_of
-        days = (today - moved.date()).days if moved else None
+        days = (today - msk_date(moved)).days if moved else None
         row = {"part_id": p.id, "article": p.article, "name": p.name_ru, "group": p.part_group, "warehouse": whs.get(st.warehouse_id, ""), "qty": st.qty,
                "idle_days": days, "shipped_year": round(float(shipped.get(p.id) or 0), 3)}
         if see_cost and p.purchase_price:
@@ -222,7 +223,7 @@ def warranty(db: Session = Depends(get_db), user: CurrentUser = Depends(_finance
         got = [x for x in c.compensations or [] if x.get("received_on")]
         a["compensated_rub"] += sum(float(x.get("amount_rub") or 0) for x in got)
         if got and c.sent_at:
-            a["days"].append((max(date.fromisoformat(x["received_on"]) for x in got) - c.sent_at.date()).days)
+            a["days"].append((max(date.fromisoformat(x["received_on"]) for x in got) - msk_date(c.sent_at)).days)
     out = []
     for sid, a in agg.items():
         s = db.get(Factory, sid)

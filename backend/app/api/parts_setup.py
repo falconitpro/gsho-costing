@@ -16,6 +16,7 @@ from ..models import Factory, FxRate, LegalEntity, MarkupPolicy, RouteStep, Supp
 from ..services.deal_service import audit, notify
 from ..services.markup_chain import ChainError, simulate, validate_steps
 from .common import serialize
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/parts", tags=["parts-setup"])
 
@@ -262,7 +263,7 @@ def _approver_ids(db: Session) -> list[str]:
 
 def current_policy(db: Session, on: Optional[date] = None) -> Optional[MarkupPolicy]:
     """Действующая на дату версия: утверждённая (или уже заменённая позже), с наибольшей датой начала не позже даты."""
-    on = on or date.today()
+    on = on or msk_today()
     rows = db.scalars(select(MarkupPolicy).where(MarkupPolicy.status.in_(("approved", "superseded")))).all()
     rows = [p for p in rows if (p.valid_from or date.min) <= on]
     return max(rows, key=lambda p: ((p.valid_from or date.min), p.version_no), default=None)
@@ -344,7 +345,7 @@ def approve_policy(policy_id: str, body: DecisionIn, db: Session = Depends(get_d
     p.approvals = approvals
     if all(k in approvals for k in APPROVER_SLOTS):
         p.status, p.approved_at = "approved", now
-        p.valid_from = p.valid_from or date.today()
+        p.valid_from = p.valid_from or msk_today()
         # ранее утверждённые версии с той же или более ранней датой начала — заменены этой
         for old in db.scalars(select(MarkupPolicy).where(MarkupPolicy.status == "approved", MarkupPolicy.id != p.id)).all():
             if (old.valid_from or date.min) <= p.valid_from:

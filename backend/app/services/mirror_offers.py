@@ -30,6 +30,7 @@ from .. import adapters
 from ..models import Deal, Factory, FactoryOffer, FactoryPriceHistory, FeedEntry, LegalEntity, Position, SupplyRoute
 from .deal_service import audit, notify
 from .markup_chain import ChainError, simulate
+from ..core.clock import today as msk_today
 
 COPY_FIELDS = ("model", "basis", "production_term", "factory_payments", "params", "images")
 
@@ -284,7 +285,7 @@ def on_selected(db: Session, selected: list[FactoryOffer], deal_id: str, user_id
             lo.status, lo.selected_deal_id, lo.selected_by = "selected", up.selected_deal_id or deal_id, user_id
             if lo.unit_price:
                 db.add(FactoryPriceHistory(factory_id=lo.factory_id, model=lo.model or "", unit_price=lo.unit_price, currency=lo.currency, basis=lo.basis,
-                                           production_term=lo.production_term or {}, factory_payments=lo.factory_payments or [], on=date.today(),
+                                           production_term=lo.production_term or {}, factory_payments=lo.factory_payments or [], on=msk_today(),
                                            deal_id=up.selected_deal_id or deal_id, source="via_group"))
     for lo in db.scalars(select(FactoryOffer).where(FactoryOffer.deal_id == deal_id, FactoryOffer.mirror_of_id.is_not(None))).all():
         up = db.get(FactoryOffer, lo.mirror_of_id)

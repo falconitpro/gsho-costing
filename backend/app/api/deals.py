@@ -24,6 +24,7 @@ from ..services import settings_service
 from ..services.deal_service import apply_transition, audit, complete_tasks, ensure_folders, next_number, sla
 from ..services.rfq_import import parse_rfq, price_reference
 from .common import deal_payload, get_deal_or_404, is_deal_owner, payment_terms_set, serialize
+from ..core.clock import msk_date, today as msk_today
 
 router = APIRouter(prefix="/api/deals", tags=["deals"])
 
@@ -150,7 +151,7 @@ def list_deals(status: Optional[str] = None, archived: bool = False, db: Session
     if post_win:
         for st in db.scalars(select(ExecutionStage).where(ExecutionStage.deal_id.in_(post_win))).all():
             stages.setdefault(st.deal_id, []).append(st)
-    today = _date.today()
+    today = msk_today()
     fin = user.can("finance_analytics")   # суммы в списке сделок — только ФД, КД, ЗГД
     # что сделать мне по сделке и к какому сроку (D-073): открытые задачи на меня или на мою роль без исполнителя
     from ..models import Task as _Task
@@ -274,7 +275,7 @@ def _now_block(db: Session, deal: Deal, user: CurrentUser) -> dict:
     from ..core.workflow import role_title
     from ..models import ExecutionStage, Task, User
     from ..services.execution_service import won_variant
-    today = _date.today()
+    today = msk_today()
     names = {}
     def name(uid):
         if uid and uid not in names:
@@ -309,7 +310,7 @@ def _now_block(db: Session, deal: Deal, user: CurrentUser) -> dict:
         res = ((ver.calc_result or {}).get("variants", {}).get(v.id, {}) if (ver and v) else {}).get("base", {})
         won_log = db.scalar(select(AuditLog).where(AuditLog.deal_id == deal.id, AuditLog.entity == "deal", AuditLog.action == "status",
                                                    AuditLog.after["status"].as_string() == "won").order_by(AuditLog.at.desc()).limit(1))
-        out["sale"] = {"won_on": won_log.at.date().isoformat() if won_log and won_log.at else None,
+        out["sale"] = {"won_on": msk_date(won_log.at).isoformat() if won_log and won_log.at else None,
                        **_actual_sale(deal, v, db),
                        "margin_pct": res.get("margin_pct"), "approved_by": name(ver.created_by) if ver else "", "kp_version": ver.version_no if ver else None}
         if not user.can("price"):
@@ -495,7 +496,7 @@ def _price_ref(db: Session, pos: Position, comment: str) -> dict:
 def _record_price(db: Session, pos: Position, deal: Deal, source: str = "rfq") -> None:
     db.add(FactoryPriceHistory(factory_id=pos.factory_id, model=pos.model, execution_id=pos.execution_id, unit_price=pos.unit_price,
                                currency=pos.currency, basis=pos.basis, production_term=_pterm_norm(pos.production_term) or {"value": pos.production_days, "unit": "calendar_days"},
-                               factory_payments=pos.factory_payments_offer or pos.factory_payments or [], on=date.today(), deal_id=deal.id, source=source))
+                               factory_payments=pos.factory_payments_offer or pos.factory_payments or [], on=msk_today(), deal_id=deal.id, source=source))
 
 
 @router.patch("/{deal_id}/positions/{pos_id}")
@@ -731,7 +732,7 @@ async def rfq_import(deal_id: str, file: UploadFile = File(...), price_comment: 
                                   "price_reference": pos.price_reference, "preview": parsed.to_dict()})
     if pos_data.get("production_days"):   # срока в запросе клиента может не быть
         pos.production_term = {"value": pos.production_days, "unit": "calendar_days", "start_event": "factory_contract", "source": "rfq",
-                               "set_by": user.id, "set_at": date.today().isoformat(), "comment": "", "fixed": False}
+                               "set_by": user.id, "set_at": msk_today().isoformat(), "comment": "", "fixed": False}
     db.add(pos)
     db.flush()
     if factory and pos.unit_price:
@@ -823,7 +824,7 @@ def send_to_calc_ep(deal_id: str, body: Optional[SendToCalcIn] = None, db: Sessi
               + (f". {body.comment}" if body.comment else ""))
     st = DealState(status=deal.status, service_flag=deal.service_flag)
     try:
-        tr = send_to_calc(st, date.today(), sla(db))
+        tr = send_to_calc(st, msk_today(), sla(db))
     except Exception as e:
         raise HTTPException(409, str(e))
     deal.logistics_done = deal.service_done = False
@@ -882,7 +883,7 @@ def schedule_status_check(db: Session, deal: Deal, user_id: Optional[str], expec
     from ..services.deal_service import notify
     complete_tasks(db, deal, block="waiting")
     days = int(settings_service.get(db, "waiting_check_days") or 5)
-    due = expected_on or add_business_days(date.today(), days)
+    due = expected_on or add_business_days(msk_today(), days)
     deal.decision_expected_on = due
     title = f"Уточнить у клиента решение по КП (ждём до {due.strftime('%d.%m')})"
     db.add(Task(deal_id=deal.id, role=Role.MANAGER.value, assignee_id=deal.manager_id, title=title, block="waiting", due=due))
@@ -904,9 +905,9 @@ def status_check(deal_id: str, body: StatusCheckIn, db: Session = Depends(get_db
         raise HTTPException(409, "Ожидание результата — только после отправки КП")
     if not (user.has(Role.CD, Role.GD) or user.is_manager_of(deal.manager_id)):
         raise HTTPException(403, "Статус уточняет менеджер сделки, КД или ЗГД")
-    if body.expected_on and body.expected_on < date.today():
+    if body.expected_on and body.expected_on < msk_today():
         raise HTTPException(422, "Дата ожидаемого решения уже прошла")
-    deal.status_checked_on = date.today()
+    deal.status_checked_on = msk_today()
     deal.status_check_note = body.note.strip()
     due = schedule_status_check(db, deal, user.id, body.expected_on)
     db.add(FeedEntry(deal_id=deal.id, kind="note", direction="in", counterparty=deal.client.name if deal.client else "",
@@ -934,7 +935,7 @@ def outcome_ep(deal_id: str, body: OutcomeIn, db: Session = Depends(get_db), use
     if body.outcome == "won" and deal.has_alternatives and not body.won_variant_id:
         raise HTTPException(422, "Укажите, какое предложение выбрал клиент")
     try:
-        tr = wf_close(DealState(status=deal.status, service_flag=deal.service_flag), body.outcome, body.reason, date.today(), sla(db))
+        tr = wf_close(DealState(status=deal.status, service_flag=deal.service_flag), body.outcome, body.reason, msk_today(), sla(db))
     except Exception as e:
         raise HTTPException(409, str(e))
     complete_tasks(db, deal, block="waiting")   # ожидание результата закончено

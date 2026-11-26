@@ -72,9 +72,6 @@ def test_summary_money_uses_moscow_date_like_workplace(monkeypatch):
     from datetime import datetime as real_dt, timezone as tz
     from app.services.finance import cashview
 
-    class Frozen(real_dt):
-        @classmethod
-        def now(cls, tzinfo=None):
-            return real_dt(2026, 11, 10, 22, 30, tzinfo=tz.utc)   # 01:30 МСК 11.11
-    monkeypatch.setattr(cashview, "datetime", Frozen)
+    from app.core import clock   # D-194: единый источник «сегодня по Москве»
+    monkeypatch.setattr(clock, "now", lambda: real_dt(2026, 11, 10, 22, 30, tzinfo=tz.utc).astimezone(clock.MSK))   # 01:30 МСК 11.11
     assert cashview.moscow_today().isoformat() == "2026-11-11"

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from ...models import BankProfile, FinanceAccount, FinanceBalanceSnapshot, FinanceTransaction, LegalEntity, LegalProfile
 from ..deal_service import audit
 from .money import ZERO, dec, s
+from ...core.clock import today as msk_today
 
 MOVING = ("posted", "reversed")   # движение денег состоялось; сторно — отдельная проведённая операция обратного направления
 
@@ -64,7 +65,7 @@ def create(db: Session, user, legal_entity_id: str, bank_profile_id: str, title:
     if db.scalar(select(FinanceAccount).where(FinanceAccount.bank_profile_id == b.id, FinanceAccount.status == "active")):
         raise HTTPException(409, "Для этого банковского профиля уже есть действующий финансовый счёт")
     a = FinanceAccount(legal_entity_id=legal_entity_id, bank_profile_id=b.id, title=(title or b.title or b.bank_name or bank_ccy)[:255], currency=bank_ccy,
-                       status="active", opened_on=date.today(), note=note or "", created_by=user.id)
+                       status="active", opened_on=msk_today(), note=note or "", created_by=user.id)
     db.add(a)
     db.flush()
     audit(db, user.id, None, "finance_account", a.id, "create", after={"legal_entity_id": legal_entity_id, "bank_profile_id": b.id, "currency": bank_ccy, "title": a.title})
@@ -74,7 +75,7 @@ def create(db: Session, user, legal_entity_id: str, bank_profile_id: str, title:
 def archive(db: Session, user, a: FinanceAccount, reason: str) -> FinanceAccount:
     if a.status == "archived":
         return a
-    a.status, a.archived_on = "archived", date.today()
+    a.status, a.archived_on = "archived", msk_today()
     audit(db, user.id, None, "finance_account", a.id, "archive", before={"status": "active"}, after={"status": "archived", "reason": reason})
     return a
 

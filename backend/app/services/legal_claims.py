@@ -20,6 +20,7 @@ from ..models import Contract, ContractClaim, LegalEntity, LegalProfile, User
 from . import legal_contracts as cs
 from .kp_generator import ACCENT, BLACK, _run, _table
 from .legal_poa import _setup, date_words
+from ..core.clock import today as msk_today
 
 STATUSES_OUT = {"draft": "черновик", "signing": "на подписи у КД / ЗГД", "signed": "подписана", "sent": "отправлена — ждём ответа", "answered": "получен ответ",
                 "court": "передана в суд", "closed": "закрыта", "cancelled": "отменена"}
@@ -79,7 +80,7 @@ def lines_for(db: Session, c: Contract, keys: Optional[list[str]] = None, side: 
 
 def create(db: Session, c: Contract, user_id: Optional[str], direction: str = "outgoing", keys: Optional[list[str]] = None, source: str = "manual",
            lines: Optional[list[dict]] = None, number: str = "", issued_on: Optional[date] = None) -> ContractClaim:
-    today = date.today()
+    today = msk_today()
     cl = ContractClaim(contract_id=c.id, deal_id=c.deal_id, direction=direction, currency=c.currency or "RUB", source=source, created_by=user_id,
                        answer_days=int((c.law or {}).get("claim_days") or 30), status="draft" if direction == "outgoing" else "received")
     if direction == "outgoing":
@@ -103,7 +104,7 @@ def mark_penalties(c: Contract, cl: ContractClaim, status: str, user_id: Optiona
     """Неустойки из претензии → статус в договоре (предъявлена / признана) с суммой и сроком ответа."""
     for x in cl.lines or []:
         if x.get("kind") == "penalty" and x.get("penalty_key"):
-            cs.set_fact(c, "pen", x["penalty_key"], {"status": status, "amount": round(float(x.get("amount") or 0) * share, 2), "on": (cl.sent_on or date.today()).isoformat(),
+            cs.set_fact(c, "pen", x["penalty_key"], {"status": status, "amount": round(float(x.get("amount") or 0) * share, 2), "on": (cl.sent_on or msk_today()).isoformat(),
                                                     "due_on": cl.answer_due.isoformat() if cl.answer_due else None, "comment": f"претензия {cl.number}", "by": user_id})
 
 
@@ -112,7 +113,7 @@ def payload(db: Session, cl: ContractClaim, names: Optional[dict] = None, full: 
     c = db.get(Contract, cl.contract_id)
     st = statuses(cl)
     t = totals(cl)
-    today = date.today()
+    today = msk_today()
     out = {"id": cl.id, "contract_id": cl.contract_id, "contract_number": c.number if c else "", "cp_name": cs.cp_display(db, c) if c else "", "deal_id": cl.deal_id,
            "direction": cl.direction, "direction_title": "исходящая (наше требование)" if cl.direction == "outgoing" else "входящая (требование к нам)",
            "number": cl.number, "status": cl.status, "status_title": st.get(cl.status, cl.status), "currency": cl.currency, **t,
@@ -184,7 +185,7 @@ def template_data(db: Session, cl: ContractClaim) -> dict:
             facts.append(f"{x['title']} — срок {date.fromisoformat(x['due_on']).strftime('%d.%m.%Y') if x.get('due_on') else '—'}, обязательство не исполнено, просрочка {x.get('days', 0)} дн.")
     lines = [{"n": i + 1, "title": x["title"], "due_on": date.fromisoformat(x["due_on"]).strftime("%d.%m.%Y") if x.get("due_on") else "", "days": x.get("days") or "",
               "amount": _money(x.get("amount")) if x.get("amount") is not None else "", "kind": LINE_KINDS.get(x.get("kind"), ""), "rate": x.get("rate_text", "")} for i, x in enumerate(cl.lines or [])]
-    on = cl.issued_on or date.today()
+    on = cl.issued_on or msk_today()
     return {"claim": {"number": cl.number, "date": on.strftime("%d.%m.%Y"), "date_words": date_words(on), "subject": subject(cl), "contract_number": cnum, "contract_date": cdate,
                       "contract_text": f"договор № {cnum}" + (f" от {cdate}" if cdate else ""), "debt": _money(t["debt"]), "penalty": _money(t["penalty"]), "total": _money(t["total"]),
                       "currency": cur, "answer_days": str(cl.answer_days), "demand_text": "; ".join(f"{i + 1}) {d}" for i, d in enumerate(demands)),
@@ -246,7 +247,7 @@ def build_docx(db: Session, cl: ContractClaim, path: str, draft: bool) -> str:
 
 # ------------------------------------------------------------------ лестница сроков (ежедневно)
 def ladder(db: Session, today: Optional[date] = None) -> int:
-    today = today or date.today()
+    today = today or msk_today()
     n = 0
     users = cs.role_users(db, "lawyer", "fd", "cd", "gd")
     lawyers = [u.id for u in users if "lawyer" in (u.roles or [])]

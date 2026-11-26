@@ -16,6 +16,7 @@ from ..core.auth import CurrentUser
 from ..core.roles import Role
 from ..core.workflow import add_business_days
 from ..models import Deal, FeedEntry, LegalEntity, OfficeCounter, OfficeDoc, OfficeRoute, OfficeSigner, User
+from ..core.clock import today as msk_today
 
 KINDS = {"in": "Входящее письмо", "out": "Исходящее письмо", "order": "Приказ", "directive": "Распоряжение",
          "memo": "Служебная записка", "internal": "Внутренний документ"}
@@ -61,7 +62,7 @@ def prefix_of(e: LegalEntity) -> str:
 
 def default_due(letter_type: str, start: Optional[date] = None) -> Optional[date]:
     n = DUE_DAYS.get(letter_type)
-    return add_business_days(start or date.today(), n) if n else None
+    return add_business_days(start or msk_today(), n) if n else None
 
 
 def allocate_number(db: Session, doc: OfficeDoc, on: Optional[date] = None) -> None:
@@ -69,7 +70,7 @@ def allocate_number(db: Session, doc: OfficeDoc, on: Optional[date] = None) -> N
     if doc.number:
         return
     ent = db.get(LegalEntity, doc.entity_id)
-    on = on or date.today()
+    on = on or msk_today()
     journal = journal_of(doc.kind, doc.category)
     stmt = select(OfficeCounter).where(OfficeCounter.entity_id == doc.entity_id, OfficeCounter.journal == journal, OfficeCounter.year == on.year)
     if db.bind is not None and db.bind.dialect.name == "postgresql":
@@ -132,7 +133,7 @@ def post_to_deals(db: Session, doc: OfficeDoc, user_id: Optional[str]) -> None:
     """Письмо по сделке — в ленту каждой связанной сделки (раздел из карточки письма)."""
     if not doc.deal_ids or doc.kind not in ("in", "out"):
         return
-    when = doc.reg_date or date.today()
+    when = doc.reg_date or msk_today()
     title = f"{'Вх.' if doc.kind == 'in' else 'Исх.'} № {doc.number} от {when:%d.%m.%Y}" + (f" — {doc.subject}" if doc.subject else "")
     for did in doc.deal_ids:
         if db.get(Deal, did) is None:
@@ -162,7 +163,7 @@ def serialize(db: Session, doc: OfficeDoc, user: CurrentUser, users: Optional[di
     sg = db.get(OfficeSigner, doc.signer_id) if doc.signer_id else None
     rv = db.get(User, doc.reviewer_id) if doc.reviewer_id else None
     ent = db.get(LegalEntity, doc.entity_id)
-    today = date.today()
+    today = msk_today()
     out = {
         "id": doc.id, "entity_id": doc.entity_id, "entity": ent.name if ent else "", "entity_prefix": prefix_of(ent) if ent else "",
         "kind": doc.kind, "kind_title": KINDS.get(doc.kind, doc.kind), "category": doc.category, "number": doc.number,
