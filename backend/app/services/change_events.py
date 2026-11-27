@@ -61,6 +61,31 @@ def ensure_work_order_guard(engine) -> None:
             conn.exec_driver_sql(WORK_ORDER_GUARD_SQL)
 
 
+HR_EVENTS_GUARD_SQL = """
+CREATE OR REPLACE FUNCTION hr_employee_events_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'hr_employee_events: только добавление (ошибочное событие отменяется событием cancel)';
+END $$;
+DROP TRIGGER IF EXISTS hr_employee_events_no_update ON hr_employee_events;
+CREATE TRIGGER hr_employee_events_no_update BEFORE UPDATE OR DELETE ON hr_employee_events
+    FOR EACH ROW EXECUTE FUNCTION hr_employee_events_append_only();
+DROP TRIGGER IF EXISTS hr_employee_events_no_truncate ON hr_employee_events;
+CREATE TRIGGER hr_employee_events_no_truncate BEFORE TRUNCATE ON hr_employee_events
+    FOR EACH STATEMENT EXECUTE FUNCTION hr_employee_events_append_only();
+"""
+
+
+def ensure_hr_events_guard(engine) -> None:
+    """D-205: кадровые события — только добавление."""
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as conn:
+        conn.exec_driver_sql("SELECT pg_advisory_xact_lock(205205)")
+        done = conn.exec_driver_sql("SELECT count(*) FROM pg_trigger WHERE tgname IN ('hr_employee_events_no_update', 'hr_employee_events_no_truncate')").scalar()
+        if done != 2:
+            conn.exec_driver_sql(HR_EVENTS_GUARD_SQL)
+
+
 def record(db: Session, entity: str, entity_id: str, action: str, actor_id: Optional[str] = None,
            deal_id: Optional[str] = None) -> None:
     """Добавить событие в текущую транзакцию: откат транзакции откатывает и событие."""

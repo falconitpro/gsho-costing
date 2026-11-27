@@ -125,6 +125,9 @@ FIELD_GROUPS: dict[str, tuple[str, set[str]]] = {
     "client_fleet": ("Клиенты: парк техники и владение машинами", set()),
     "service_orders": ("Сервис: обращения и наряды (EDIT — назначать инженеров и вести наряды)", set()),
     "service_refs": ("Сервис: справочники работ, нормативов, допусков и сроков реакции", set()),
+    # L1 (D-205): блок «Персонал». Видны только работодатели из области пользователя (hr_access_scopes); ЗГД — все.
+    # Паспортных, адресных и зарплатных данных в группе нет — для них будут отдельные группы.
+    "hr_core": ("Персонал: сотрудники, оргструктура, должности, штатное расписание (EDIT — кадровые события)", set()),
 }
 
 # Стартовая матрица: роль → {группа: уровень}. Не перечисленные группы = 0.
@@ -160,6 +163,7 @@ for _r in Role:
     DEFAULT_MATRIX.setdefault(_r, {}).setdefault("assistant_use", READ)
     DEFAULT_MATRIX[_r].setdefault("file_download", READ)   # по умолчанию скачивание открыто всем; закрывается в «Уровнях доступа»
 DEFAULT_MATRIX[Role.GD]["assistant_admin"] = EDIT
+DEFAULT_MATRIX[Role.GD]["hr_core"] = EDIT   # D-205: стартово — только ЗГД; остальным выдаёт ЗГД вместе с областью по юрлицам
 # Приёмка на склад (D-150, решение владельца 22.11.2026): менеджер и логист; закупки, КД и ЗГД — как раньше
 for _r in (Role.MANAGER, Role.LOGISTICIAN, Role.PURCHASING, Role.CD, Role.GD):
     DEFAULT_MATRIX[_r]["parts_receiving"] = EDIT

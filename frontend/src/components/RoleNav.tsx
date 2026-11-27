@@ -19,6 +19,7 @@ const ITEMS: Item[] = [
   { key: "legal", to: "/legal", label: "Юридический блок" },
   { key: "office", to: "/office", label: "Канцелярия" },
   { key: "service", to: "/service", label: "Сервис" },
+  { key: "hr", to: "/hr", label: "Персонал" },
   { key: "catalog", to: "/catalog", label: "Каталог" },
   { key: "supply", to: "/supply", label: "Снабжение и склад" },
   { key: "settings", to: "/settings", label: "Настройки" },
@@ -51,6 +52,7 @@ export function navItems(me: Me): { items: NavItem[]; primary: Set<string> } {
     finance: perm("finance_section"),
     supply: has("cd", "fd", "gd", "admin", "logistician", "manager", "purchasing", "service_head"),
     office: perm("office") || perm("office_hr"),
+    hr: perm("hr_core") && isNewUi(),   // D-205: «Персонал» — только в новом виде
     service: perm("service_orders") && isNewUi(),   // D-192: раздел «Сервис» — только в новом виде   // D-128: исполнитель без права видит свои документы через «Что сделать»
   };
   const primary = new Set(codes.flatMap((c) => PRIMARY[c] || []));

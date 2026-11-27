@@ -1485,6 +1485,10 @@ class LegalEntity(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str] = mapped_column(Text, default="")
     doc_prefix: Mapped[str] = mapped_column(String(8), default="", server_default="")   # код в номерах Канцелярии: РФ / КГ / КН (D-128)
+    # L1 (D-205): работодатель в блоке «Персонал»
+    is_employer: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    hr_timezone: Mapped[str] = mapped_column(String(64), default="Europe/Moscow", server_default="Europe/Moscow")
+    hr_external_id: Mapped[str] = mapped_column(String(64), default="", server_default="")   # ID организации в ЗУП
 
 
 class LegalProfile(TimestampMixin, Base):
@@ -3121,3 +3125,103 @@ class PartDocument(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     uploaded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ───────────────────────── L1 (D-205): блок «Персонал» — ядро ─────────────────────────
+# Работодатель = компания группы (legal_entities, is_employer). Каждая кадровая запись несёт employer_id — область доступа
+# проверяется на сервере (hr_access_scopes). Паспортных, адресных и зарплатных данных в L1 нет: только кадровое ядро.
+
+class HrDepartment(TimestampMixin, Base):
+    """Подразделение работодателя: дерево (parent_id), действует с valid_from по valid_to (пусто — бессрочно)."""
+    __tablename__ = "hr_departments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    employer_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    parent_id: Mapped[Optional[str]] = mapped_column(ForeignKey("hr_departments.id"))
+    code: Mapped[str] = mapped_column(String(32), default="")
+    name: Mapped[str] = mapped_column(String(255))
+    head_employee_id: Mapped[Optional[str]] = mapped_column(String(36))     # руководитель (сотрудник); без FK — сотрудник создаётся позже
+    valid_from: Mapped[date] = mapped_column(Date)
+    valid_to: Mapped[Optional[date]] = mapped_column(Date)
+
+
+class HrPosition(TimestampMixin, Base):
+    """Должность работодателя (справочник)."""
+    __tablename__ = "hr_positions"
+    __table_args__ = (UniqueConstraint("employer_id", "name", name="uq_hr_position_name"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    employer_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    code: Mapped[str] = mapped_column(String(32), default="")
+    name: Mapped[str] = mapped_column(String(255))
+    category: Mapped[str] = mapped_column(String(24), default="worker")     # manager | specialist | worker | other
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class HrStaffSlot(TimestampMixin, Base):
+    """Штатная единица: должность в подразделении, количество ставок, место работы, срок действия.
+    Изменение штатного расписания — новая версия (supersedes_id), прежняя закрывается датой (valid_to)."""
+    __tablename__ = "hr_staff_slots"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    employer_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    department_id: Mapped[str] = mapped_column(ForeignKey("hr_departments.id"), index=True)
+    position_id: Mapped[str] = mapped_column(ForeignKey("hr_positions.id"))
+    fte: Mapped[float] = mapped_column(_Numeric(6, 2, asdecimal=False), default=1)
+    work_location: Mapped[str] = mapped_column(String(255), default="")
+    valid_from: Mapped[date] = mapped_column(Date)
+    valid_to: Mapped[Optional[date]] = mapped_column(Date)
+    supersedes_id: Mapped[Optional[str]] = mapped_column(ForeignKey("hr_staff_slots.id"))
+    comment: Mapped[str] = mapped_column(Text, default="")
+
+
+class HrEmployee(TimestampMixin, Base):
+    """Сотрудник — человек. Трудовые отношения — в hr_employments (несколько, в т. ч. повторный приём).
+    Связь с учётной записью CRM — необязательная (0..1)."""
+    __tablename__ = "hr_employees"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    personnel_no: Mapped[str] = mapped_column(String(32), unique=True)      # внутренний номер в CRM (не табельный ЗУП)
+    last_name: Mapped[str] = mapped_column(String(128))
+    first_name: Mapped[str] = mapped_column(String(128))
+    middle_name: Mapped[str] = mapped_column(String(128), default="")
+    user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"), unique=True)
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class HrEmployment(TimestampMixin, Base):
+    """Трудовые отношения с работодателем. Повторный приём — новая запись. Назначение (подразделение, должность, ставка)
+    на любую дату собирается из кадровых событий; поля ниже — только даты и внешние ссылки."""
+    __tablename__ = "hr_employments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    employee_id: Mapped[str] = mapped_column(ForeignKey("hr_employees.id"), index=True)
+    employer_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="main")           # main | internal_part | external_part
+    start_date: Mapped[date] = mapped_column(Date)
+    end_date: Mapped[Optional[date]] = mapped_column(Date)                  # дата увольнения (последний день работы)
+    external_id: Mapped[str] = mapped_column(String(64), default="")        # ID в ЗУП — заполняется при обмене (L5)
+
+
+class HrEmployeeEvent(Base):
+    """Кадровое событие — только добавление (триггер). effective_from / effective_to — когда действует,
+    recorded_at — когда внесено. Ошибочное событие не правится: его отменяет событие cancel (cancels_id)."""
+    __tablename__ = "hr_employee_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    employment_id: Mapped[str] = mapped_column(ForeignKey("hr_employments.id"), index=True)
+    employee_id: Mapped[str] = mapped_column(ForeignKey("hr_employees.id"), index=True)
+    employer_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))                           # hire | transfer | rate | terminate | cancel
+    effective_from: Mapped[date] = mapped_column(Date)
+    effective_to: Mapped[Optional[date]] = mapped_column(Date)              # временный перевод — до этой даты включительно
+    data: Mapped[dict] = mapped_column(JSONType, default=dict)              # department_id, position_id, staff_slot_id, rate, reason
+    cancels_id: Mapped[Optional[str]] = mapped_column(ForeignKey("hr_employee_events.id"))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    recorded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class HrAccessScope(Base):
+    """Область кадровых данных пользователя: к каким работодателям у него доступ. ЗГД видит всех без записи."""
+    __tablename__ = "hr_access_scopes"
+    __table_args__ = (UniqueConstraint("user_id", "employer_id", name="uq_hr_access_scope"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    employer_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id", ondelete="CASCADE"))
+    granted_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

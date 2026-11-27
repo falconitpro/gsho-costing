@@ -2332,3 +2332,22 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
 /* D-203 (J-f): документы детали */
 .pc-docs ul { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 6px; } .pc-docs li.arch { opacity: .6; }
 .pc-docs-add { align-items: end; margin-top: 6px; }
+
+/* D-205 (L1): «Персонал» */
+.hr-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 8px; }
+.hr-filters .add { margin-left: auto; }
+.hr-form { margin: 8px 0 12px; }
+.hr-row { cursor: pointer; }
+.hr-row:hover td { background: var(--hover, #f6f6f6); }
+.hr-emp { margin: 10px 0; }
+.hr-emp-head { gap: 10px; align-items: center; flex-wrap: wrap; }
+.hr-asg { margin: 6px 0 8px; font-weight: 600; }
+.hr-cancelled, .hr-cancelled td { color: var(--muted); text-decoration: line-through; }
+.hr-cancelled .badge { text-decoration: none; }
+.hr-org { align-items: start; }
+.hr-tree { list-style: none; margin: 8px 0 0; padding: 0; }
+.hr-tree li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.hr-tree li .btn { margin-left: auto; }
+.hr-lvl-1 { padding-left: 18px !important; } .hr-lvl-2 { padding-left: 36px !important; } .hr-lvl-3 { padding-left: 54px !important; } .hr-lvl-4 { padding-left: 72px !important; }
+.hr-name { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--ink); cursor: pointer; text-align: left; }
+.hr-name:hover { text-decoration: underline; }
