@@ -21,7 +21,7 @@ type Gap = { code: string; name: string; problem: string; valid_until: string | 
 type Order = { id: string; number: string; status: string; status_title: string; client_name: string; site_name: string; machine_title: string;
   work_type_name: string; norm_hours: number | null; engineer_id: string | null; engineer_name: string; planned_start: string | null;
   planned_end: string | null; description: string; version: number; conflicts: number; signed_by_name: string; closed_at: string | null;
-  actions?: string[]; checklist?: Item[]; works?: Work[]; photos?: Photo[]; diagnosis?: string; hours?: { norm: number | null; actual: number | null };
+  billing?: string; actions?: string[]; checklist?: Item[]; works?: Work[]; photos?: Photo[]; diagnosis?: string; hours?: { norm: number | null; actual: number | null };
   permits?: { required: string[]; on: string; gaps: Gap[] }; events?: Ev[]; open_conflicts?: Ev[]; assigned_by_name?: string;
   site?: { name: string; address: string; access_mode_title: string; hse_notes: string; map_url: string } | null;
   machine?: { manufacturer: string; model: string; serial: string; warranty_until: string | null } | null;
@@ -136,11 +136,11 @@ function OrdersTab({ me, engOnly }: { me: Me; engOnly: boolean }) {
       </div>
       {oid && <aside className="pc-panel" aria-label="Карточка наряда">
         <button type="button" className="btn ghost pc-close" onClick={() => setOid(null)} aria-label="Закрыть карточку">✕</button>
-        <OrderCard id={oid} engs={engs} onChanged={load} /></aside>}
+        <OrderCard id={oid} engs={engs} onChanged={load} engOnly={engOnly} /></aside>}
     </div>);
 }
 
-function OrderCard({ id, engs: engsAll, onChanged }: { id: string; engs: Eng[]; onChanged: () => void }) {
+function OrderCard({ id, engs: engsAll, onChanged, engOnly }: { id: string; engs: Eng[]; onChanged: () => void; engOnly: boolean }) {
   const [engs, setEngs] = useState<Eng[]>(engsAll);
   const [override, setOverride] = useState<{ eng: string; reason: string } | null>(null);
   const [workTypes, setWorkTypes] = useState<{ id: string; name: string; norm_hours: number | null }[]>([]);
@@ -298,6 +298,15 @@ function OrderCard({ id, engs: engsAll, onChanged }: { id: string; engs: Eng[]; 
               <span>{i.text}{i.required && !i.done && <span className="sv-req" aria-label="обязательный"> *</span>}</span></label>
             {i.done && i.done_by_name && <div className="pc-sub">{i.done_by_name} · {dt(i.done_at)}</div>}
           </li>))}</ul>)}
+
+      {!engOnly && <>
+        <h3>Оплата</h3>
+        {act.has("billing") ? <label className="f sv-billing">Вид оплаты<select value={o.billing || "client"} disabled={busy} onChange={(e) => send("billing", { billing: e.target.value })}>
+          {Object.entries(BILLING).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+          : <p>{BILLING[o.billing || "client"]}</p>}
+        <EstimateBlock orderId={o.id} works={o.works || []} />
+      </>}
+      <DocumentsBlock orderId={o.id} status={o.status} />
 
       <h3>Фото{(o.photos || []).length > 0 && <span className="muted"> · {o.photos!.length}</span>}</h3>
       {(o.photos || []).length > 0 && <ul className="sv-photos">{o.photos!.map((p) => (
@@ -725,5 +734,136 @@ function OrderParts({ orderId }: { orderId: string }) {
               <span className={`badge ${APPL_TONE_S[p.status] || ""}`}>{p.status_title}</span></li>))}</ul>)}
         <p className="muted sv-photo-note">«Не подтверждено» — связь заведена без проверки: сверьте номер перед заказом.</p>
       </>}
+    </>);
+}
+
+
+/* ─────────────── I-3 (D-198): смета и документы ─────────────── */
+
+const BILLING: Record<string, string> = { client: "За счёт клиента", warranty: "Гарантия", goodwill: "За счёт компании" };
+type ELine = { kind: string; part_id: string | null; work_id: string | null; title: string; article: string; qty: number; unit: string; price: number | null;
+  discount_pct: number; note: string; net?: number | null; catalog_price?: number | null; catalog_currency?: string };
+type Est = { id: string; version: number; status: string; status_title: string; currency: string; vat_pct: number; hour_rate: number | null; note: string;
+  reason: string; lines: ELine[]; totals: { net: number; vat: number; total: number; missing_prices: number }; sent_at: string | null; sent_channel: string;
+  client_name: string; decision_basis: string; decided_at: string | null; decided_by_name: string; created_at: string };
+const money = (v: number | null | undefined, c = "") => (v == null ? "—" : `${v.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${c ? ` ${c}` : ""}`);
+const EST_TONE: Record<string, string> = { draft: "", sent: "info", approved: "ok", rejected: "bad", superseded: "" };
+
+function EstimateBlock({ orderId, works }: { orderId: string; works: Work[] }) {
+  const [d, setD] = useState<{ items: Est[]; channels: Record<string, string>; kinds: Record<string, string>; can_edit: boolean } | null>(null);
+  const [ed, setEd] = useState<Est | null>(null);
+  const [msg, setMsg] = useState<{ tone: string; text: string } | null>(null);
+  const [parts, setParts] = useState<{ id: string; article: string; name_ru: string }[]>([]);
+  const [pq, setPq] = useState("");
+  const load = () => api.get<typeof d & object>(`/api/service/orders/${orderId}/estimates`).then((r) => { setD(r); setEd(r.items[0]?.status === "draft" ? structuredClone(r.items[0]) : null); }).catch(() => setD(null));
+  useEffect(() => { load(); }, [orderId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (pq.trim().length < 2) { setParts([]); return; }
+    const t = setTimeout(() => api.get<{ parts: { id: string; article: string; name_ru: string }[] }>(`/api/catalog/search?q=${encodeURIComponent(pq.trim())}`).then((r) => setParts(r.parts)).catch(() => setParts([])), 300);
+    return () => clearTimeout(t);
+  }, [pq]);
+  if (!d) return null;
+  const run = async (fn: () => Promise<unknown>, ok: string) => { try { await fn(); setMsg({ tone: "ok", text: ok }); load(); } catch (e) { setMsg({ tone: "error", text: (e as Error).message }); } };
+  const cur = d.items[0];
+  const save = () => ed && run(() => api.put(`/api/service/estimates/${ed.id}`, { currency: ed.currency, vat_pct: ed.vat_pct, hour_rate: ed.hour_rate, note: ed.note,
+    lines: ed.lines.map(({ net, catalog_price, catalog_currency, ...l }) => { void net; void catalog_price; void catalog_currency; return l; }) }), "Смета сохранена");
+  const setLine = (i: number, p: Partial<ELine>) => ed && setEd({ ...ed, lines: ed.lines.map((l, j) => (j === i ? { ...l, ...p } : l)) });
+  const net = (l: ELine) => (l.price == null ? null : Math.round(l.qty * l.price * (1 - (l.discount_pct || 0) / 100) * 100) / 100);
+  const draftNet = ed ? ed.lines.reduce((a, l) => a + (net(l) || 0), 0) : 0;
+  return (
+    <div className="sv-est">
+      <h3>Смета{cur && <span className="muted"> · версия {cur.version}</span>}</h3>
+      {msg && <div className={`alert ${msg.tone === "ok" ? "info" : "error"}`} role="status">{msg.text}</div>}
+      {!cur && (d.can_edit ? <button className="btn" onClick={() => run(() => api.post(`/api/service/orders/${orderId}/estimates`, {}), "Черновик сметы создан")}>
+        Составить смету{works.length ? " (работы — из наряда)" : ""}</button> : <p className="muted">Сметы нет.</p>)}
+      {cur && cur.status !== "draft" && <div className="sv-est-sum">
+        <span className={`badge ${EST_TONE[cur.status] || ""}`}>{cur.status_title}</span> <b>{money(cur.totals.total, cur.currency)}</b> <span className="muted">с НДС {cur.vat_pct}%</span>
+        {cur.client_name && <div className="pc-sub">{cur.status === "approved" ? "Согласовал" : "Отказал"}: {cur.client_name} · {cur.decision_basis} · {fmtDate(cur.decided_at)}</div>}
+        <ul className="sv-est-lines">{cur.lines.map((l, i) => <li key={i}><span>{l.title}{l.article ? ` · ${l.article}` : ""}</span><span>{l.qty} {l.unit}</span><span>{money(l.net)}</span></li>)}</ul>
+        {d.can_edit && cur.status === "sent" && <EstDecide onDecide={(b) => run(() => api.post(`/api/service/estimates/${cur.id}/decide`, b), b.decision === "approved" ? "Смета согласована" : "Отказ записан")} />}
+        {d.can_edit && <button className="btn ghost" onClick={async () => {
+          const reason = cur.status === "approved" ? await askPrompt("Смета согласована. Почему нужна новая версия?", "", { title: "Новая версия сметы" }) : "";
+          if (cur.status === "approved" && !reason?.trim()) return;
+          run(() => api.post(`/api/service/orders/${orderId}/estimates`, { reason: reason || "" }), "Создана новая версия");
+        }}>Новая версия</button>}
+      </div>}
+      {ed && d.can_edit && <div className="sv-est-edit">
+        <div className="grid cols-3">
+          <label className="f">Валюта<select value={ed.currency} onChange={(e) => setEd({ ...ed, currency: e.target.value })}>{["RUB", "EUR", "USD", "CNY"].map((c) => <option key={c}>{c}</option>)}</select></label>
+          <label className="f">НДС, %<input inputMode="decimal" value={ed.vat_pct} onChange={(e) => setEd({ ...ed, vat_pct: Number(e.target.value.replace(",", ".")) || 0 })} /></label>
+          <label className="f">Нормо-час без НДС<input inputMode="decimal" value={ed.hour_rate ?? ""} placeholder="не задан" onChange={(e) => setEd({ ...ed, hour_rate: e.target.value.trim() === "" ? null : Number(e.target.value.replace(",", ".")) })} /></label>
+        </div>
+        <p className="pc-sub">В строке: количество · цена без НДС · скидка, % · сумма без НДС</p>
+        <table className="sv-est-table">
+          <thead><tr><th>Наименование</th><th>Кол-во</th><th>Цена без НДС</th><th>Скидка, %</th><th>Сумма</th><th /></tr></thead>
+          <tbody>{ed.lines.map((l, i) => (
+            <tr key={i}>
+              <td><input value={l.title} aria-label="Наименование" onChange={(e) => setLine(i, { title: e.target.value })} />
+                <div className="pc-sub">{d.kinds[l.kind]}{l.article ? ` · ${l.article}` : ""}{l.catalog_price != null ? ` · в каталоге ${money(l.catalog_price, l.catalog_currency)}` : ""}</div></td>
+              <td><input inputMode="decimal" value={l.qty} aria-label="Количество" title="Количество" onChange={(e) => setLine(i, { qty: Number(e.target.value.replace(",", ".")) || 0 })} /> <span className="pc-sub">{l.unit}</span></td>
+              <td><input inputMode="decimal" value={l.price ?? ""} placeholder="не задана" aria-label="Цена" aria-invalid={l.price == null}
+                onChange={(e) => setLine(i, { price: e.target.value.trim() === "" ? null : Number(e.target.value.replace(",", ".")) })} />
+                {l.kind === "work" && l.price == null && ed.hour_rate != null && <button className="btn ghost sv-mini" onClick={() => setLine(i, { price: ed.hour_rate })}>ставка</button>}
+                {l.kind === "part" && l.price == null && l.catalog_price != null && l.catalog_currency === ed.currency && <button className="btn ghost sv-mini" onClick={() => setLine(i, { price: l.catalog_price! })}>из каталога</button>}</td>
+              <td><input inputMode="decimal" value={l.discount_pct} aria-label="Скидка, %" title="Скидка, %" onChange={(e) => setLine(i, { discount_pct: Number(e.target.value.replace(",", ".")) || 0 })} /></td>
+              <td className="num">{money(net(l))}</td>
+              <td><button className="btn ghost" aria-label="Удалить строку" onClick={() => setEd({ ...ed, lines: ed.lines.filter((_, j) => j !== i) })}>✕</button></td>
+            </tr>))}</tbody>
+        </table>
+        <div className="row sv-est-add">
+          <input type="search" value={pq} onChange={(e) => setPq(e.target.value)} placeholder="Добавить запчасть: артикул или название" aria-label="Поиск запчасти" />
+          <button className="btn ghost" onClick={() => setEd({ ...ed, lines: [...ed.lines, { kind: "other", part_id: null, work_id: null, title: "", article: "", qty: 1, unit: "шт", price: null, discount_pct: 0, note: "" }] })}>+ прочее</button>
+          <button className="btn ghost" onClick={() => run(async () => { await save(); await api.post(`/api/service/estimates/${ed.id}/fill-works`, {}); }, "Работы наряда добавлены")}>+ работы из наряда</button>
+        </div>
+        {parts.length > 0 && <ul className="sv-est-found">{parts.slice(0, 8).map((p) => <li key={p.id}><button className="btn ghost" onClick={() => {
+          setEd({ ...ed, lines: [...ed.lines, { kind: "part", part_id: p.id, work_id: null, title: p.name_ru, article: p.article, qty: 1, unit: "шт", price: null, discount_pct: 0, note: "" }] }); setPq("");
+        }}>{p.article} · {p.name_ru}</button></li>)}</ul>}
+        <div className="sv-est-sum">Без НДС: <b>{money(draftNet, ed.currency)}</b> · НДС {ed.vat_pct}%: {money(Math.round(draftNet * ed.vat_pct) / 100)} · С НДС: <b>{money(Math.round(draftNet * (100 + ed.vat_pct)) / 100, ed.currency)}</b>
+          {ed.lines.some((l) => l.price == null) && <span className="sv-req"> · не у всех строк есть цена</span>}</div>
+        <div className="row">
+          <button className="btn" onClick={save}>Сохранить черновик</button>
+          <select className="sv-send" defaultValue="" aria-label="Отправить клиенту" disabled={ed.lines.some((l) => l.price == null) || !ed.lines.length}
+            onChange={(e) => { const ch = e.target.value; e.target.value = ""; if (ch) run(async () => { await save(); await api.post(`/api/service/estimates/${ed.id}/send`, { channel: ch }); }, "Смета отправлена, документ сформирован"); }}>
+            <option value="">Отправить клиенту…</option>{Object.entries(d.channels).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+        </div>
+        {cur.version > 1 && cur.reason && <p className="muted">Причина новой версии: {cur.reason}</p>}
+      </div>}
+      {d.items.length > 1 && <details className="sv-est-hist"><summary>Прежние версии · {d.items.length - 1}</summary>
+        <ul>{d.items.slice(1).map((e) => <li key={e.id}>Версия {e.version} · <span className={`badge ${EST_TONE[e.status] || ""}`}>{e.status_title}</span> · {money(e.totals.total, e.currency)}{e.client_name ? ` · ${e.client_name}` : ""}</li>)}</ul></details>}
+    </div>);
+}
+
+function EstDecide({ onDecide }: { onDecide: (b: { decision: string; client_name: string; basis: string }) => void }) {
+  const [f, setF] = useState({ client_name: "", basis: "" });
+  return (
+    <div className="grid cols-3 sv-decide">
+      <label className="f">Кто у клиента<input value={f.client_name} onChange={(e) => setF({ ...f, client_name: e.target.value })} placeholder="ФИО, должность" /></label>
+      <label className="f">Основание<input value={f.basis} onChange={(e) => setF({ ...f, basis: e.target.value })} placeholder="письмо от …, подпись на смете" /></label>
+      <div className="row">
+        <button className="btn primary" disabled={!f.client_name.trim() || !f.basis.trim()} onClick={() => onDecide({ decision: "approved", ...f })}>Согласовал</button>
+        <button className="btn ghost" disabled={!f.client_name.trim() || !f.basis.trim()} onClick={() => onDecide({ decision: "rejected", ...f })}>Отказал</button></div>
+    </div>);
+}
+
+type SDoc = { id: string; kind: string; kind_title: string; number: string; filename: string; created_at: string; created_by_name: string; legal_checked: boolean; url: string };
+
+function DocumentsBlock({ orderId, status }: { orderId: string; status: string }) {
+  const [d, setD] = useState<{ items: SDoc[]; can_make: boolean } | null>(null);
+  const [msg, setMsg] = useState("");
+  const load = () => api.get<{ items: SDoc[]; can_make: boolean }>(`/api/service/orders/${orderId}/documents`).then(setD).catch(() => setD(null));
+  useEffect(() => { load(); }, [orderId, status]);   // eslint-disable-line react-hooks/exhaustive-deps
+  if (!d) return null;
+  const make = async (kind: string) => { try { await api.post(`/api/service/orders/${orderId}/documents`, { kind }); setMsg(""); load(); } catch (e) { setMsg((e as Error).message); } };
+  return (
+    <>
+      <h3>Документы</h3>
+      {msg && <div className="alert error">{msg}</div>}
+      {d.items.length === 0 ? <p className="muted">Документов пока нет.</p> : <ul className="sv-docs">{d.items.map((x) => (
+        <li key={x.id}><button className="btn ghost" onClick={() => api.download(x.url, x.filename).catch((e) => setMsg((e as Error).message))}>{x.kind_title} № {x.number}</button>
+          <span className="pc-sub"> {fmtDate(x.created_at)} · {x.created_by_name}{!x.legal_checked && " · черновик, не проверен юристом"}</span></li>))}</ul>}
+      {d.can_make && <div className="row">
+        <button className="btn ghost" onClick={() => make("defect_list")}>Сформировать дефектную ведомость</button>
+        {["ready_to_close", "closed"].includes(status) && <button className="btn ghost" onClick={() => make("act")}>Сформировать акт</button>}
+      </div>}
     </>);
 }

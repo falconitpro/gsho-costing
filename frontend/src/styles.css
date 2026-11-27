@@ -2292,3 +2292,23 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
 .sv-parts li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; border-bottom: 1px solid var(--line); padding: 6px 0; }
 .sv-parts li > .pc-sub { grid-column: 1; } .sv-parts li > .badge { grid-row: 1 / span 2; grid-column: 2; }
 .cat-match { font-size: 11px; color: var(--muted); margin: 0 0 4px; } /* D-197: причина совпадения в поиске Каталога */
+/* D-198 (I-3): смета и документы наряда */
+.sv-billing { max-width: 280px; }
+.sv-est-sum { margin: 6px 0 10px; }
+.sv-est-lines { list-style: none; margin: 8px 0; padding: 0; font-size: 13px; }
+.sv-est-lines li { display: grid; grid-template-columns: minmax(0, 1fr) auto 110px; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.sv-est-lines li span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.sv-est-edit { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin: 6px 0 12px; }
+.sv-est-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0; display: block; }
+.sv-est-table thead { display: none; } .sv-est-table tbody { display: grid; gap: 6px; }
+.sv-est-table tr { display: grid; grid-template-columns: 76px minmax(0, 1fr) 64px auto 34px; gap: 6px; align-items: start; border-top: 1px solid var(--line); padding-top: 6px; }
+.sv-est-table td { padding: 0; min-width: 0; } .sv-est-table td:first-child { grid-column: 1 / -1; }
+.sv-est-table input { width: 100%; } .sv-est-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; padding-top: 8px; }
+.sv-est-table td:last-child .btn { padding: 4px 8px; }
+.sv-mini { padding: 2px 8px; font-size: 12px; margin-top: 4px; }
+.sv-est-add { gap: 6px; flex-wrap: wrap; } .sv-est-add input { flex: 1 1 220px; }
+.sv-est-found { list-style: none; margin: 4px 0; padding: 0; display: grid; gap: 2px; } .sv-est-found .btn { text-align: left; width: 100%; }
+.sv-send { max-width: 240px; }
+.sv-decide { align-items: end; margin: 8px 0; }
+.sv-est-hist summary { cursor: pointer; color: var(--muted); font-size: 13px; } .sv-est-hist ul { margin: 6px 0; padding-left: 18px; font-size: 13px; }
+.sv-docs { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; }
