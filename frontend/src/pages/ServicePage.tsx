@@ -288,6 +288,7 @@ function OrderCard({ id, engs: engsAll, onChanged, engOnly }: { id: string; engs
       {act.has("work_add") && <label className="f sv-addwork">Добавить работу<select value="" disabled={busy} onChange={(e) => e.target.value && send("work_add", { work_type_id: e.target.value })}>
         <option value="">— вид работ —</option>{workTypes.map((w) => <option key={w.id} value={w.id}>{w.name} · {hrs(w.norm_hours)}</option>)}</select></label>}
 
+      {o.machine && act.has("work_add") && <OrderKits orderId={o.id} works={o.works || []} busy={busy} onAddWork={(id) => send("work_add", { work_type_id: id })} />}
       {o.machine && <OrderParts orderId={o.id} />}
 
       <h3>Чек-лист{items.length > 0 && <span className="muted"> · {items.filter((i) => i.done).length} из {items.length}</span>}</h3>
@@ -755,6 +756,8 @@ function EstimateBlock({ orderId, works }: { orderId: string; works: Work[] }) {
   const [msg, setMsg] = useState<{ tone: string; text: string } | null>(null);
   const [parts, setParts] = useState<{ id: string; article: string; name_ru: string }[]>([]);
   const [pq, setPq] = useState("");
+  const [kits, setKits] = useState<OKit[]>([]);
+  useEffect(() => { api.get<{ items: OKit[] }>(`/api/service/orders/${orderId}/kits`).then((r) => setKits(r.items)).catch(() => setKits([])); }, [orderId]);
   const load = () => api.get<typeof d & object>(`/api/service/orders/${orderId}/estimates`).then((r) => { setD(r); setEd(r.items[0]?.status === "draft" ? structuredClone(r.items[0]) : null); }).catch(() => setD(null));
   useEffect(() => { load(); }, [orderId]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -814,6 +817,8 @@ function EstimateBlock({ orderId, works }: { orderId: string; works: Work[] }) {
           <input type="search" value={pq} onChange={(e) => setPq(e.target.value)} placeholder="Добавить запчасть: артикул или название" aria-label="Поиск запчасти" />
           <button className="btn ghost" onClick={() => setEd({ ...ed, lines: [...ed.lines, { kind: "other", part_id: null, work_id: null, title: "", article: "", qty: 1, unit: "шт", price: null, discount_pct: 0, note: "" }] })}>+ прочее</button>
           <button className="btn ghost" onClick={() => run(async () => { await save(); await api.post(`/api/service/estimates/${ed.id}/fill-works`, {}); }, "Работы наряда добавлены")}>+ работы из наряда</button>
+          {kits.length > 0 && <select className="sv-send" value="" aria-label="Запчасти комплекта ТО в смету" onChange={(e) => { const id = e.target.value; if (id) run(async () => { await save(); await api.post(`/api/service/estimates/${ed.id}/add-kit`, { kit_id: id }); }, "Запчасти комплекта добавлены"); }}>
+            <option value="">+ запчасти комплекта ТО…</option>{kits.map((k) => <option key={k.id} value={k.id}>{k.name} · {k.lines.length} поз.</option>)}</select>}
         </div>
         {parts.length > 0 && <ul className="sv-est-found">{parts.slice(0, 8).map((p) => <li key={p.id}><button className="btn ghost" onClick={() => {
           setEd({ ...ed, lines: [...ed.lines, { kind: "part", part_id: p.id, work_id: null, title: p.name_ru, article: p.article, qty: 1, unit: "шт", price: null, discount_pct: 0, note: "" }] }); setPq("");
@@ -866,4 +871,29 @@ function DocumentsBlock({ orderId, status }: { orderId: string; status: string }
         {["ready_to_close", "closed"].includes(status) && <button className="btn ghost" onClick={() => make("act")}>Сформировать акт</button>}
       </div>}
     </>);
+}
+
+
+/* D-201 (J-e): комплекты ТО для машины наряда — работы одной кнопкой (событиями work_add), запчасти — в смету */
+type OKit = { id: string; name: string; interval_hours: number; serial_range: string; works: { work_type_id: string; title: string; norm_hours: number | null }[];
+  lines: { article: string; name: string; qty: number; assembly?: string }[] };
+
+function OrderKits({ orderId, works, busy, onAddWork }: { orderId: string; works: Work[]; busy: boolean; onAddWork: (workTypeId: string) => Promise<void> }) {
+  const [kits, setKits] = useState<OKit[] | null>(null);
+  useEffect(() => { api.get<{ items: OKit[] }>(`/api/service/orders/${orderId}/kits`).then((r) => setKits(r.items)).catch(() => setKits([])); }, [orderId]);
+  if (!kits || kits.length === 0) return null;
+  const haveTitles = new Set(works.map((w) => w.title));
+  return (
+    <div className="sv-kits">
+      <h3>Комплекты ТО для машины</h3>
+      <ul>{kits.map((k) => {
+        const missing = k.works.filter((w) => !haveTitles.has(w.title));
+        return (
+          <li key={k.id}><b>{k.name}</b> <span className="pc-sub">каждые {k.interval_hours} м·ч{k.serial_range ? ` · зав. № ${k.serial_range}` : ""}</span>
+            <div className="pc-sub">Работы: {k.works.map((w) => w.title).join(", ") || "не заданы"} · запчастей: {k.lines.length}</div>
+            {missing.length > 0 && <button className="btn ghost sv-mini" disabled={busy} onClick={async () => { for (const w of missing) await onAddWork(w.work_type_id); }}>
+              Добавить работы комплекта ({missing.length})</button>}
+          </li>);
+      })}</ul>
+    </div>);
 }

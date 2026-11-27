@@ -72,7 +72,7 @@ def _forecast(db: Session, m: ClientMachine, today: Optional[date] = None) -> di
     rd = [(h.on, h.hours) for h in db.scalars(select(MachineHours).where(MachineHours.machine_id == m.id).order_by(MachineHours.on)).all()]
     per_day = avg_per_day(rd, m.commissioned_on, m.hours_per_day)
     now = hours_now(rd, per_day, today)
-    kits = _kits_for(db, m)
+    kits = kits_for_machine(db, m)
     out = {"per_day": per_day, "hours_now": now, "last_reading": {"on": rd[-1][0], "hours": rd[-1][1]} if rd else None, "next": None}
     if now is not None and kits:
         nt = next_to(now, [{"id": k.id, "interval_hours": k.interval_hours, "name": k.name} for k in kits])
@@ -101,7 +101,7 @@ def _payload(db: Session, m: ClientMachine, full: bool = False) -> dict:
     if full:
         d["parties"] = _parties_payload(db, m)
         d["readings"] = [serialize(h) for h in db.scalars(select(MachineHours).where(MachineHours.machine_id == m.id).order_by(MachineHours.on.desc())).all()]
-        d["kits"] = [serialize(k) for k in _kits_for(db, m)]
+        d["kits"] = [serialize(k) for k in kits_for_machine(db, m)]
         d["reminders"] = [serialize(r) for r in db.scalars(select(MachineReminder).where(MachineReminder.machine_id == m.id)
                                                             .order_by(MachineReminder.to_hours.desc())).all()]
         d["requests"] = [{"id": r.id, "number": r.number, "created_at": r.created_at} for r in
@@ -365,6 +365,11 @@ def add_hours(mid: str, body: HoursIn, db: Session = Depends(get_db), user: Curr
 class KitLineIn(BaseModel):
     article: str
     qty: float = Field(default=1, gt=0)
+    assembly_id: Optional[str] = None          # J-e: узел строки (справочник J-c)
+
+
+class KitWorkIn(BaseModel):
+    work_type_id: str
 
 
 class KitIn(BaseModel):
@@ -374,6 +379,10 @@ class KitIn(BaseModel):
     interval_hours: float = Field(gt=0)
     lines: list[KitLineIn] = Field(default_factory=list)
     active: bool = True
+    # J-e: не переданы (прежний вид) — у существующего комплекта не меняются
+    works: Optional[list[KitWorkIn]] = None
+    serial_from: Optional[str] = Field(default=None, max_length=64)
+    serial_to: Optional[str] = Field(default=None, max_length=64)
 
 
 def _kit_lines(db: Session, lines: list[KitLineIn]) -> list[dict]:
@@ -384,8 +393,43 @@ def _kit_lines(db: Session, lines: list[KitLineIn]) -> list[dict]:
         if p is None:
             na = norm_article(art)
             p = next((x for x in db.scalars(select(Part).where(Part.article.ilike(f"%{art[-4:]}%"))).all() if norm_article(x.article) == na), None) if na else None
-        out.append({"part_id": p.id if p else None, "article": p.article if p else art, "name": p.name_ru if p else "", "qty": l.qty})
+        row = {"part_id": p.id if p else None, "article": p.article if p else art, "name": p.name_ru if p else "", "qty": l.qty}
+        if l.assembly_id:
+            from ..models import EquipmentAssembly
+            a = db.get(EquipmentAssembly, l.assembly_id)
+            if a is None:
+                raise HTTPException(422, "Нет такого узла")
+            row["assembly_id"], row["assembly"] = a.id, a.name_ru
+        out.append(row)
     return out
+
+
+def _kit_works(db: Session, works: list[KitWorkIn]) -> list[dict]:
+    """Работы комплекта — снимок вида работ (код, название, норматив) на момент сохранения."""
+    from ..models import ServiceWorkType
+    out = []
+    for w in works:
+        wt = db.get(ServiceWorkType, w.work_type_id)
+        if wt is None:
+            raise HTTPException(422, "Нет такого вида работ в справочнике сервиса")
+        out.append({"work_type_id": wt.id, "code": wt.code, "title": wt.name, "norm_hours": wt.norm_hours})
+    return out
+
+
+def _kit_extra(db: Session, k: MaintenanceKit, body: "KitIn") -> None:
+    if body.works is not None:
+        k.works = _kit_works(db, body.works)
+    if body.serial_from is not None:
+        k.serial_from = body.serial_from.strip()
+    if body.serial_to is not None:
+        k.serial_to = body.serial_to.strip()
+
+
+def kits_for_machine(db: Session, m: ClientMachine) -> list[MaintenanceKit]:
+    """D-201: комплекты модели машины, подходящие по заводскому номеру (номер вне диапазона — комплект не подходит;
+    номер не известен — подходит, проверка на совести человека)."""
+    from ..services.applicability import serial_in_range
+    return [k for k in _kits_for(db, m) if serial_in_range(m.serial, k.serial_from, k.serial_to) is not False]
 
 
 def _kit_model_title(db: Session, k: MaintenanceKit) -> str:
@@ -465,6 +509,7 @@ def create_kit(body: KitIn, db: Session = Depends(get_db), user: CurrentUser = D
         raise HTTPException(422, "Комплект — к модели каталога ГШО или к модели другого производителя")
     k = MaintenanceKit(equipment_model_id=body.equipment_model_id, other_model_id=body.other_model_id, name=body.name.strip(),
                        interval_hours=body.interval_hours, lines=_kit_lines(db, body.lines), active=body.active)
+    _kit_extra(db, k, body)
     db.add(k)
     db.commit()
     return serialize(k)
@@ -476,6 +521,7 @@ def update_kit(kid: str, body: KitIn, db: Session = Depends(get_db), user: Curre
     if k is None:
         raise HTTPException(404, "Комплект не найден")
     k.name, k.interval_hours, k.lines, k.active, k.source = body.name.strip(), body.interval_hours, _kit_lines(db, body.lines), body.active, "manual"
+    _kit_extra(db, k, body)
     db.commit()
     return serialize(k)
 

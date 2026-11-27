@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import type { Me } from "../types";
+import { can, type Me } from "../types";
+import { useNewUiFlag } from "../uiMode";
 import { Loading } from "./States";
 
 // Каталог: комплекты ТО, техника других производителей, склады (перенесены из раздела запчастей / новые экраны).
@@ -9,7 +10,9 @@ import { Loading } from "./States";
 const has = (me: Me, ...r: string[]) => me.roles.some((x) => r.includes(x.code));
 
 type KitLine = { part_id: string | null; article: string; name: string; qty: number };
-type Kit = { id: string; name: string; interval_hours: number; source: string; active: boolean; lines: KitLine[]; equipment_model_id: string | null; other_model_id: string | null; model_title: string };
+type KitWork = { work_type_id: string; code: string; title: string; norm_hours: number | null };
+type Kit = { id: string; name: string; interval_hours: number; source: string; active: boolean; lines: KitLine[]; equipment_model_id: string | null; other_model_id: string | null; model_title: string;
+  works?: KitWork[]; serial_from?: string; serial_to?: string };
 type ModelRef = { id: string; title: string; kind: "equipment" | "other" };
 
 /** Комплекты ТО: запчасти на одно ТО модели с периодичностью в моточасах. */
@@ -17,7 +20,10 @@ export function KitsBlock({ me }: { me: Me }) {
   const [rows, setRows] = useState<Kit[]>([]);
   const [models, setModels] = useState<ModelRef[]>([]);
   const [q, setQ] = useState("");
-  const [form, setForm] = useState<{ id?: string; model: string; name: string; interval_hours: string; text: string; active: boolean } | null>(null);
+  const [form, setForm] = useState<{ id?: string; model: string; name: string; interval_hours: string; text: string; active: boolean; works: string[]; serial_from: string; serial_to: string } | null>(null);
+  const nv = useNewUiFlag();
+  const [wtypes, setWtypes] = useState<{ id: string; code: string; name: string; norm_hours: number | null }[]>([]);
+  useEffect(() => { if (nv && can(me, "service_refs")) api.get<{ work_types: { id: string; code: string; name: string; norm_hours: number | null; is_active: boolean }[] }>("/api/service/refs").then((r) => setWtypes(r.work_types.filter((w) => w.is_active))).catch(() => setWtypes([])); }, [nv, me]);
   const [msg, setMsg] = useState("");
   const edit = has(me, "manager", "service_head", "cd", "gd", "admin");
   const load = () => api.get<Kit[]>("/api/parts/fleet/kits").then(setRows).catch((e) => setMsg((e as Error).message));
@@ -37,7 +43,8 @@ export function KitsBlock({ me }: { me: Me }) {
     const m = models.find((x) => x.id === form.model);
     const lines = form.text.split("\n").map((s) => s.split(/\t|;/)).filter((x) => x[0]?.trim()).map((x) => ({ article: x[0].trim(), qty: Number((x[1] || "1").replace(",", ".")) || 1 }));
     const body = { name: form.name, interval_hours: Number(form.interval_hours), lines, active: form.active,
-      equipment_model_id: m?.kind === "equipment" ? m.id : null, other_model_id: m?.kind === "other" ? m.id : null };
+      equipment_model_id: m?.kind === "equipment" ? m.id : null, other_model_id: m?.kind === "other" ? m.id : null,
+      ...(nv ? { works: form.works.map((id) => ({ work_type_id: id })), serial_from: form.serial_from, serial_to: form.serial_to } : {}) };
     (form.id ? api.put(`/api/parts/fleet/kits/${form.id}`, body) : api.post("/api/parts/fleet/kits", body))
       .then(() => { setForm(null); setMsg("Комплект сохранён"); load(); }).catch((e) => setMsg((e as Error).message));
   };
@@ -46,7 +53,7 @@ export function KitsBlock({ me }: { me: Me }) {
       <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div><b>Комплекты ТО</b><div className="muted" style={{ fontSize: 12 }}>По ним считается следующее ТО машин клиентов и формируется заявка на комплект. Строки без карточки запчасти помечены — заведите её в «Запасных частях».</div></div>
         <div className="row" style={{ gap: 6 }}><input placeholder="модель, комплект, артикул…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 220 }} />
-          {edit && <button className="btn add" onClick={() => setForm({ model: "", name: "", interval_hours: "", text: "", active: true })}>Комплект</button>}</div>
+          {edit && <button className="btn add" onClick={() => setForm({ model: "", name: "", interval_hours: "", text: "", active: true, works: [], serial_from: "", serial_to: "" })}>Комплект</button>}</div>
       </div>
       {msg && <div className="alert info" style={{ marginTop: 8 }}>{msg}</div>}
       {form && (
@@ -58,6 +65,13 @@ export function KitsBlock({ me }: { me: Me }) {
             <label className="f"><span>Название</span><input value={form.name} placeholder="ТО-500" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
             <label className="f"><span>Каждые, м·ч</span><input inputMode="decimal" value={form.interval_hours} onChange={(e) => setForm({ ...form, interval_hours: e.target.value })} /></label>
             <label className="f" style={{ gridColumn: "span 2" }}><span>Состав: артикул ⇥ количество — по строке</span><textarea rows={6} value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} /></label>
+            {nv && <>
+              <label className="f"><span>Зав. № машин с</span><input value={form.serial_from} placeholder="пусто — без ограничения" onChange={(e) => setForm({ ...form, serial_from: e.target.value })} /></label>
+              <label className="f"><span>по</span><input value={form.serial_to} placeholder="пусто — без ограничения" onChange={(e) => setForm({ ...form, serial_to: e.target.value })} /></label>
+              {wtypes.length > 0 && <fieldset className="f kit-works"><legend>Работы из справочника сервиса</legend>
+                {wtypes.map((w) => <label key={w.id} className="row"><input type="checkbox" checked={form.works.includes(w.id)}
+                  onChange={(e) => setForm({ ...form, works: e.target.checked ? [...form.works, w.id] : form.works.filter((x) => x !== w.id) })} /> {w.code} · {w.name}{w.norm_hours != null ? ` · ${w.norm_hours} ч` : ""}</label>)}</fieldset>}
+            </>}
             <label className="row" style={{ gap: 6, fontSize: 13 }}><input type="checkbox" style={{ width: "auto", minHeight: 0 }} checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />действует</label>
           </div>
           <div className="row" style={{ gap: 8, marginTop: 8 }}><button className="btn" disabled={!form.model || !form.name || !Number(form.interval_hours)} onClick={save}>Сохранить</button><button className="btn ghost" onClick={() => setForm(null)}>Отмена</button></div>
@@ -68,9 +82,11 @@ export function KitsBlock({ me }: { me: Me }) {
           {shown.length === 0 && <tr><td colSpan={5} className="muted">Комплектов нет. Их можно завести здесь или взять из ЗИП на ТО сделки (Парк машин → карточка машины).</td></tr>}
           {shown.map((k) => (
             <tr key={k.id} style={{ opacity: k.active ? 1 : 0.5 }}>
-              <td>{k.model_title || "—"}</td><td><b>{k.name}</b>{k.source === "deal_zip" && <div className="muted" style={{ fontSize: 11 }}>из ЗИП сделки</div>}</td><td className="num">{k.interval_hours}</td>
+              <td>{k.model_title || "—"}{nv && (k.serial_from || k.serial_to) && <div className="kit-sub">зав. № {k.serial_from || "…"} — {k.serial_to || "…"}</div>}</td><td><b>{k.name}</b>{k.source === "deal_zip" && <div className="muted" style={{ fontSize: 11 }}>из ЗИП сделки</div>}
+                {nv && (k.works || []).map((w) => <div key={w.work_type_id} className="kit-sub">работа: {w.title}{w.norm_hours != null ? ` · ${w.norm_hours} ч` : ""}</div>)}</td><td className="num">{k.interval_hours}</td>
               <td style={{ fontSize: 12 }}>{k.lines.map((l, i) => <div key={i} style={{ color: l.part_id ? undefined : "var(--bad)" }}>{l.article} × {l.qty}{l.name ? ` — ${l.name}` : l.part_id ? "" : " (нет карточки)"}</div>)}</td>
-              <td>{edit && <button className="btn ghost" style={{ padding: "0 8px" }} onClick={() => setForm({ id: k.id, model: k.equipment_model_id || k.other_model_id || "", name: k.name, interval_hours: String(k.interval_hours), active: k.active, text: k.lines.map((l) => `${l.article}\t${l.qty}`).join("\n") })}>изменить</button>}</td>
+              <td>{edit && <button className="btn ghost" style={{ padding: "0 8px" }} onClick={() => setForm({ id: k.id, model: k.equipment_model_id || k.other_model_id || "", name: k.name, interval_hours: String(k.interval_hours), active: k.active, text: k.lines.map((l) => `${l.article}\t${l.qty}`).join("\n"),
+                works: (k.works || []).map((w) => w.work_type_id), serial_from: k.serial_from || "", serial_to: k.serial_to || "" })}>изменить</button>}</td>
             </tr>))}
         </tbody>
       </table>
