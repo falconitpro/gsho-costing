@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, fmtDate } from "../api";
+import { api, fmtDate, getDevUser } from "../api";
 import { Crumbs, useQueryParam } from "../components/Levels";
 import { askConfirm, askPrompt } from "../components/Dialogs";
 import { Empty, ErrorState, Loading } from "../components/States";
@@ -14,10 +14,15 @@ import { setNewUi, useNewUiFlag } from "../uiMode";
 type Ev = { id: string; kind: string; kind_title: string; result: string; reason: string; actor_name: string; offline: boolean;
   received_at: string | null; payload: Record<string, unknown>; new_version: number | null };
 type Item = { id: string; position: number; text: string; required: boolean; done: boolean; done_by_name: string; done_at: string | null };
+type Work = { id: string; title: string; norm_hours: number | null; actual_hours: number | null; performer_id: string | null; performer_name: string; done: boolean; note: string };
+type Photo = { id: string; url: string; filename: string; caption: string; taken_at: string | null; uploaded_at: string; uploaded_by_name: string;
+  latitude: number | null; longitude: number | null; accuracy_m: number | null; geo_source: string; map_url: string; checklist_item_id: string | null; work_id: string | null };
+type Gap = { code: string; name: string; problem: string; valid_until: string | null };
 type Order = { id: string; number: string; status: string; status_title: string; client_name: string; site_name: string; machine_title: string;
   work_type_name: string; norm_hours: number | null; engineer_id: string | null; engineer_name: string; planned_start: string | null;
   planned_end: string | null; description: string; version: number; conflicts: number; signed_by_name: string; closed_at: string | null;
-  actions?: string[]; checklist?: Item[]; events?: Ev[]; open_conflicts?: Ev[]; assigned_by_name?: string;
+  actions?: string[]; checklist?: Item[]; works?: Work[]; photos?: Photo[]; diagnosis?: string; hours?: { norm: number | null; actual: number | null };
+  permits?: { required: string[]; on: string; gaps: Gap[] }; events?: Ev[]; open_conflicts?: Ev[]; assigned_by_name?: string;
   site?: { name: string; address: string; access_mode_title: string; hse_notes: string; map_url: string } | null;
   machine?: { manufacturer: string; model: string; serial: string; warranty_until: string | null } | null;
   request?: { number: string; machine_down: boolean; sla_code: string; received_at: string | null } | null };
@@ -29,7 +34,7 @@ type Ref = { id: string; code: string; name: string; is_draft: boolean; is_activ
   reaction_hours?: number | null; arrival_hours?: number | null; restore_hours?: number | null; calendar?: string };
 type Refs = { work_types: Ref[]; permits: Ref[]; sla: Ref[]; categories: Record<string, string>; channels: Record<string, string>;
   statuses: Record<string, string>; request_statuses: Record<string, string>; drafts: number };
-type Eng = { id: string; name: string; is_engineer: boolean; open_orders: number };
+type Eng = { id: string; name: string; is_engineer: boolean; open_orders: number; gaps?: Gap[] };
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 const dt = (s: string | null | undefined) => (s ? new Date(s).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
@@ -51,7 +56,7 @@ export default function ServicePage({ me }: { me: Me }) {
       <Empty title="Раздел «Сервис» — в новом виде интерфейса" hint="Наряды, обращения и справочники сервиса открываются только в новом виде."
         action={<button className="btn" onClick={() => setNewUi(true)}>Включить новый вид</button>} /></div>);
   if (!can(me, "service_orders")) return <div><h1>Сервис</h1><Empty title="Нет доступа к сервису" hint="Доступ выдаёт ЗГД в «Уровнях доступа»: группа «Сервис: обращения и наряды»." /></div>;
-  const cur = tab === "requests" && showReq ? "requests" : tab === "refs" && showRefs ? "refs" : "orders";
+  const cur = tab === "requests" && showReq ? "requests" : tab === "refs" && showRefs ? "refs" : tab === "plan" && showReq ? "plan" : tab === "permits" ? "permits" : "orders";
   return (
     <div className="sv-page">
       <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Сервис" }]} />
@@ -59,9 +64,12 @@ export default function ServicePage({ me }: { me: Me }) {
       {(showReq || showRefs) && <div className="tabs" role="tablist">
         <button role="tab" aria-selected={cur === "orders"} className={cur === "orders" ? "active" : ""} onClick={() => setTab(null, { drop: ["o"] })}>Наряды</button>
         {showReq && <button role="tab" aria-selected={cur === "requests"} className={cur === "requests" ? "active" : ""} onClick={() => setTab("requests", { drop: ["o"] })}>Обращения</button>}
+        {showReq && <button role="tab" aria-selected={cur === "plan"} className={cur === "plan" ? "active" : ""} onClick={() => setTab("plan", { drop: ["o"] })}>План</button>}
+        <button role="tab" aria-selected={cur === "permits"} className={cur === "permits" ? "active" : ""} onClick={() => setTab("permits", { drop: ["o"] })}>{engOnly ? "Мои допуски" : "Допуски"}</button>
         {showRefs && <button role="tab" aria-selected={cur === "refs"} className={cur === "refs" ? "active" : ""} onClick={() => setTab("refs", { drop: ["o"] })}>Справочники</button>}
       </div>}
-      {cur === "orders" ? <OrdersTab me={me} engOnly={engOnly} /> : cur === "requests" ? <RequestsTab me={me} /> : <RefsTab me={me} />}
+      {cur === "orders" ? <OrdersTab me={me} engOnly={engOnly} /> : cur === "requests" ? <RequestsTab me={me} /> : cur === "plan" ? <PlanTab />
+        : cur === "permits" ? <PermitsTab me={me} engOnly={engOnly} /> : <RefsTab me={me} />}
     </div>);
 }
 
@@ -132,7 +140,11 @@ function OrdersTab({ me, engOnly }: { me: Me; engOnly: boolean }) {
     </div>);
 }
 
-function OrderCard({ id, engs, onChanged }: { id: string; engs: Eng[]; onChanged: () => void }) {
+function OrderCard({ id, engs: engsAll, onChanged }: { id: string; engs: Eng[]; onChanged: () => void }) {
+  const [engs, setEngs] = useState<Eng[]>(engsAll);
+  const [override, setOverride] = useState<{ eng: string; reason: string } | null>(null);
+  const [workTypes, setWorkTypes] = useState<{ id: string; name: string; norm_hours: number | null }[]>([]);
+  const [diag, setDiag] = useState<string | null>(null);
   const [o, setO] = useState<Order | null>(null);
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState<{ tone: string; text: string } | null>(null);
@@ -140,7 +152,11 @@ function OrderCard({ id, engs, onChanged }: { id: string; engs: Eng[]; onChanged
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState({ start: "", end: "" });
   useEffect(() => {
-    setO(null); setMsg(null); setNote("");
+    if (engsAll.length) api.get<Eng[]>(`/api/service/engineers?order_id=${id}`).then(setEngs).catch(() => setEngs(engsAll));
+  }, [id, engsAll]);
+  useEffect(() => { api.get<Refs>("/api/service/refs").then((r) => setWorkTypes(r.work_types.filter((w) => w.is_active).map((w) => ({ id: w.id, name: w.name, norm_hours: w.norm_hours ?? null })))).catch(() => setWorkTypes([])); }, []);
+  useEffect(() => {
+    setO(null); setMsg(null); setNote(""); setDiag(null); setOverride(null);
     api.get<Order>(`/api/service/orders/${id}`).then((r) => { setO(r); setPlan({ start: local(r.planned_start), end: local(r.planned_end) }); })
       .catch((e) => setErr((e as Error).message));
   }, [id]);
@@ -148,12 +164,34 @@ function OrderCard({ id, engs, onChanged }: { id: string; engs: Eng[]; onChanged
   if (!o) return <div className="card"><Loading /></div>;
   const act = new Set(o.actions || []);
 
+  function done(r: { event: Ev; order: Order }) {
+    setO(r.order); setPlan({ start: local(r.order.planned_start), end: local(r.order.planned_end) });
+    const e = r.event;
+    setMsg({ tone: e.result === "applied" || e.result === "merged" ? "ok" : e.result === "conflict" ? "warn" : "error",
+      text: `${e.kind_title}: ${RESULT[e.result] || e.result}${e.reason ? ` — ${e.reason}` : ""}` });
+    onChanged();
+  }
+  async function upload(file: File, extra: Record<string, string>) {
+    if (!o) return;
+    if (file.size > 10 * 1024 * 1024) { setMsg({ tone: "error", text: "Фото больше 10 МБ — уменьшите размер или снимите заново" }); return; }
+    setBusy(true);
+    const geo = await new Promise<GeolocationPosition | null>((res) => {
+      if (!navigator.geolocation) { res(null); return; }
+      navigator.geolocation.getCurrentPosition(res, () => res(null), { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
+    });
+    const f: Record<string, string> = { base_version: String(o.version), event_id: uid(), device_id: "web", ...extra };
+    if (geo) { f.latitude = String(geo.coords.latitude); f.longitude = String(geo.coords.longitude); f.accuracy_m = String(Math.round(geo.coords.accuracy)); }
+    try { done(await api.upload<{ event: Ev; order: Order }>(`/api/service/orders/${o.id}/photos`, file, f)); }
+    catch (e) { setMsg({ tone: "error", text: (e as Error).message }); } finally { setBusy(false); }
+  }
   async function send(kind: string, payload: Record<string, unknown> = {}) {
     if (!o) return;
     setBusy(true);
     try {
       const r = await api.post<{ event: Ev; order: Order }>(`/api/service/orders/${o.id}/events`,
         { id: uid(), kind, base_version: o.version, payload, device_id: "web" });
+      if (r.event.result === "rejected" && kind === "assign" && r.event.reason.startsWith("Нет допусков")) setOverride({ eng: String(payload.engineer_id), reason: "" });
+      if (r.event.result !== "rejected" && kind === "assign") setOverride(null);
       setO(r.order); setPlan({ start: local(r.order.planned_start), end: local(r.order.planned_end) });
       const e = r.event;
       setMsg({ tone: e.result === "applied" || e.result === "merged" ? "ok" : e.result === "conflict" ? "warn" : "error",
@@ -218,12 +256,37 @@ function OrderCard({ id, engs, onChanged }: { id: string; engs: Eng[]; onChanged
       {act.has("assign") && <div className="grid cols-3 sv-assign">
         <label className="f">Назначить инженера<select value={o.engineer_id || ""} disabled={busy} onChange={(e) => e.target.value && send("assign", { engineer_id: e.target.value })}>
           <option value="">— выберите —</option>
-          {engs.map((e) => <option key={e.id} value={e.id}>{e.name}{e.is_engineer ? "" : " (руководитель)"} · открытых {e.open_orders}</option>)}</select></label>
+          {engs.map((e) => <option key={e.id} value={e.id}>{e.name}{e.is_engineer ? "" : " (руководитель)"} · открытых {e.open_orders}{e.gaps?.length ? ` · нет допусков: ${e.gaps.length}` : ""}</option>)}</select></label>
         <label className="f">Начало<input type="datetime-local" value={plan.start} onChange={(e) => setPlan({ ...plan, start: e.target.value })} /></label>
         <label className="f">Окончание<input type="datetime-local" value={plan.end} onChange={(e) => setPlan({ ...plan, end: e.target.value })} /></label>
         <div className="row"><button className="btn ghost" disabled={busy || (plan.start === local(o.planned_start) && plan.end === local(o.planned_end))}
           onClick={() => send("plan", { planned_start: iso(plan.start), planned_end: iso(plan.end) })}>Сохранить сроки</button></div>
       </div>}
+      {override && <div className="alert warn sv-override">
+        <div>У сотрудника нет нужных допусков{(() => { const e = engs.find((x) => x.id === override.eng); return e?.gaps?.length ? `: ${e.gaps.map((g) => `${g.code} — ${g.problem === "missing" ? "нет" : "истёк " + fmtDate(g.valid_until)}`).join("; ")}` : ""; })()}. Назначить можно только с причиной — она попадёт в историю наряда.</div>
+        <label className="f">Причина<input value={override.reason} onChange={(e) => setOverride({ ...override, reason: e.target.value })} placeholder="Например: допуск оформляется, работает под надзором" /></label>
+        <div className="row"><button className="btn" disabled={busy || !override.reason.trim()} onClick={() => send("assign", { engineer_id: override.eng, override_reason: override.reason.trim() })}>Назначить с причиной</button>
+          <button className="btn ghost" onClick={() => setOverride(null)}>отмена</button></div>
+      </div>}
+      {(o.permits?.required.length || 0) > 0 && <div className={"sv-permit-line" + (o.permits!.gaps.length ? " bad" : "")}>
+        Нужные допуски на {fmtDate(o.permits!.on)}: {o.permits!.required.join(", ")}
+        {o.engineer_id && (o.permits!.gaps.length ? <b> · у исполнителя нет: {o.permits!.gaps.map((g) => g.problem === "missing" ? g.code : `${g.code} (истёк)`).join(", ")}</b> : " · у исполнителя все есть")}
+      </div>}
+
+      <h3>Диагностика</h3>
+      {diag === null ? <>
+        {o.diagnosis ? <p className="sv-pre">{o.diagnosis}</p> : <p className="muted">Заключения пока нет.</p>}
+        {act.has("diagnosis") && <button className="btn ghost" onClick={() => setDiag(o.diagnosis || "")}>{o.diagnosis ? "Изменить заключение" : "Записать заключение"}</button>}
+      </> : <>
+        <textarea rows={3} value={diag} onChange={(e) => setDiag(e.target.value)} aria-label="Заключение диагностики" placeholder="Причина неисправности, что нужно сделать, какие детали" />
+        <div className="row"><button className="btn" disabled={busy || !diag.trim()} onClick={async () => { await send("diagnosis", { text: diag.trim() }); setDiag(null); }}>Сохранить</button>
+          <button className="btn ghost" onClick={() => setDiag(null)}>отмена</button></div></>}
+
+      <h3>Работы{o.hours && (o.hours.norm != null || o.hours.actual != null) && <span className="muted"> · норматив {hrs(o.hours.norm)}, факт {hrs(o.hours.actual)}</span>}</h3>
+      {(o.works || []).length === 0 ? <p className="muted">Работ нет. Добавьте вид работ — норматив подставится из справочника.</p> : (
+        <ul className="sv-works">{o.works!.map((w) => <WorkRow key={w.id} w={w} can={act.has("work_update")} busy={busy} onSave={(p) => send("work_update", { work_id: w.id, ...p })} />)}</ul>)}
+      {act.has("work_add") && <label className="f sv-addwork">Добавить работу<select value="" disabled={busy} onChange={(e) => e.target.value && send("work_add", { work_type_id: e.target.value })}>
+        <option value="">— вид работ —</option>{workTypes.map((w) => <option key={w.id} value={w.id}>{w.name} · {hrs(w.norm_hours)}</option>)}</select></label>}
 
       <h3>Чек-лист{items.length > 0 && <span className="muted"> · {items.filter((i) => i.done).length} из {items.length}</span>}</h3>
       {items.length === 0 ? <p className="muted">Пунктов нет — у вида работ не задан шаблон.</p> : (
@@ -233,6 +296,15 @@ function OrderCard({ id, engs, onChanged }: { id: string; engs: Eng[]; onChanged
               <span>{i.text}{i.required && !i.done && <span className="sv-req" aria-label="обязательный"> *</span>}</span></label>
             {i.done && i.done_by_name && <div className="pc-sub">{i.done_by_name} · {dt(i.done_at)}</div>}
           </li>))}</ul>)}
+
+      <h3>Фото{(o.photos || []).length > 0 && <span className="muted"> · {o.photos!.length}</span>}</h3>
+      {(o.photos || []).length > 0 && <ul className="sv-photos">{o.photos!.map((p) => (
+        <li key={p.id}><AuthImg url={p.url} alt={p.caption || p.filename} />
+          <div className="pc-sub">{p.caption && <b>{p.caption} · </b>}{dt(p.taken_at || p.uploaded_at)} · {p.uploaded_by_name}</div>
+          <div className="pc-sub">{p.map_url ? <a href={p.map_url} target="_blank" rel="noreferrer">на карте{p.accuracy_m ? ` (±${Math.round(p.accuracy_m)} м)` : ""}{p.geo_source === "exif" ? " · из снимка" : ""}</a> : "без координат"}</div>
+        </li>))}</ul>}
+      {act.has("photo") && <PhotoAdd busy={busy} items={items} works={o.works || []} onUpload={upload} />}
+      <p className="muted sv-photo-note">До 10 МБ, хранится 10 лет. Координаты берутся с устройства (если разрешён доступ к геопозиции) или из снимка.</p>
 
       {act.has("note") && <>
         <h3>Заметка</h3>
@@ -467,5 +539,160 @@ function RefEdit({ kind, r, refs, onSave, onCancel }: { kind: string; r: Ref; re
       </div>
       <div className="row"><button className="btn primary" disabled={!f.name.trim()} onClick={() => onSave(out())}>Сохранить</button>
         <button className="btn ghost" onClick={onCancel}>отмена</button></div>
+    </div>);
+}
+
+
+function WorkRow({ w, can: canEdit, busy, onSave }: { w: Work; can: boolean; busy: boolean; onSave: (p: Record<string, unknown>) => void }) {
+  const [h, setH] = useState(w.actual_hours?.toString() ?? "");
+  useEffect(() => setH(w.actual_hours?.toString() ?? ""), [w.actual_hours]);
+  const val = h.trim() === "" ? null : Number(h.replace(",", "."));
+  const bad = val !== null && (!Number.isFinite(val) || val < 0);
+  const over = val != null && w.norm_hours != null && val > w.norm_hours;
+  return (
+    <li className={w.done ? "done" : ""}>
+      <label className="sv-work-main"><input type="checkbox" checked={w.done} disabled={busy || !canEdit} onChange={(e) => onSave({ done: e.target.checked })} />
+        <span><b>{w.title}</b><div className="pc-sub">норматив {hrs(w.norm_hours)}{w.performer_name ? ` · ${w.performer_name}` : ""}{w.note ? ` · ${w.note}` : ""}</div></span></label>
+      <label className="f sv-hours">Факт, ч<input inputMode="decimal" value={h} disabled={!canEdit} onChange={(e) => setH(e.target.value)}
+        onBlur={() => { if (!bad && val !== w.actual_hours) onSave({ actual_hours: val }); }} aria-invalid={bad} /></label>
+      {over && <span className="badge warn">выше норматива</span>}
+    </li>);
+}
+
+function PhotoAdd({ busy, items, works, onUpload }: { busy: boolean; items: Item[]; works: Work[]; onUpload: (f: File, extra: Record<string, string>) => void }) {
+  const [caption, setCaption] = useState("");
+  const [link, setLink] = useState("");
+  return (
+    <div className="grid cols-3 sv-photo-add">
+      <label className="f">Подпись<input value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Что на фото" /></label>
+      <label className="f">К чему относится<select value={link} onChange={(e) => setLink(e.target.value)}>
+        <option value="">к наряду</option>
+        {items.map((i) => <option key={i.id} value={`c:${i.id}`}>чек-лист: {i.text.slice(0, 60)}</option>)}
+        {works.map((w) => <option key={w.id} value={`w:${w.id}`}>работа: {w.title.slice(0, 60)}</option>)}</select></label>
+      <label className={"btn sv-photo-btn" + (busy ? " disabled" : "")}>Сфотографировать или выбрать
+        <input type="file" accept="image/jpeg,image/png,image/webp,image/heic" capture="environment" disabled={busy} onChange={(e) => {
+          const f = e.target.files?.[0]; e.target.value = "";
+          if (f) { onUpload(f, { caption, ...(link.startsWith("c:") ? { checklist_item_id: link.slice(2) } : link.startsWith("w:") ? { work_id: link.slice(2) } : {}) }); setCaption(""); }
+        }} /></label>
+    </div>);
+}
+
+/** Фото по защищённой ссылке API: те же заголовки входа, что у запросов (картинка без них не откроется). */
+function AuthImg({ url, alt }: { url: string; alt: string }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => {
+    let href = ""; let alive = true;
+    const headers: Record<string, string> = {};
+    const dev = getDevUser(); if (dev) headers["X-Dev-User"] = dev;
+    fetch(url, { headers, credentials: "include" }).then((r) => (r.ok ? r.blob() : null)).then((b) => {
+      if (b && alive) { href = URL.createObjectURL(b); setSrc(href); }
+    }).catch(() => undefined);
+    return () => { alive = false; if (href) URL.revokeObjectURL(href); };
+  }, [url]);
+  return src ? <a href={src} target="_blank" rel="noreferrer"><img src={src} alt={alt} className="sv-photo" /></a> : <div className="sv-photo st-loading" role="img" aria-label={alt} />;
+}
+
+/* ─────────────── план ─────────────── */
+
+type PlanO = { id: string; number: string; status: string; status_title: string; client_name: string; engineer_id: string | null; start: string | null; end: string | null };
+type Plan = { start: string; days: string[]; engineers: { id: string; name: string; orders: PlanO[] }[]; unassigned: PlanO[]; unplanned: PlanO[] };
+
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const parseYmd = (s: string) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+
+function PlanTab() {
+  const [start, setStart] = useState(() => ymd(new Date()));
+  const [p, setP] = useState<Plan | null>(null);
+  const [err, setErr] = useState("");
+  useEffect(() => { api.get<Plan>(`/api/service/plan?start=${start}&days=14`).then(setP).catch((e) => setErr((e as Error).message)); }, [start]);
+  if (err) return <ErrorState hint={err} />;
+  if (!p) return <Loading />;
+  const shift = (d: number) => { const x = parseYmd(start); x.setDate(x.getDate() + d); setStart(ymd(x)); };
+  const wd = (d: string) => parseYmd(d).toLocaleDateString("ru-RU", { weekday: "short", day: "2-digit", month: "2-digit" });
+  const weekend = (d: string) => [0, 6].includes(parseYmd(d).getDay());
+  const cell = (orders: PlanO[], day: string) => orders.filter((o) => o.start && o.end && o.start <= day && day <= o.end);
+  return (
+    <div>
+      <div className="row sv-plan-nav">
+        <button className="btn ghost" onClick={() => shift(-7)}>← неделя</button>
+        <label className="f">С даты<input type="date" value={start} onChange={(e) => e.target.value && setStart(e.target.value)} /></label>
+        <button className="btn ghost" onClick={() => shift(7)}>неделя →</button>
+      </div>
+      <div className="sv-plan-wrap">
+        <table className="sv-plan">
+          <thead><tr><th>Исполнитель</th>{p.days.map((d) => <th key={d} className={weekend(d) ? "we" : ""}>{wd(d)}</th>)}</tr></thead>
+          <tbody>{[...p.engineers, ...(p.unassigned.length ? [{ id: "", name: "Не назначены", orders: p.unassigned }] : [])].map((e) => (
+            <tr key={e.id || "none"}><th scope="row">{e.name}</th>{p.days.map((d) => {
+              const os = cell(e.orders, d);
+              return <td key={d} className={(weekend(d) ? "we " : "") + (os.length > 1 ? "busy" : "")}>{os.map((o) => <Link key={o.id} to={`/service?o=${o.id}`} className={`sv-chip ${o.status}`}>{o.number}</Link>)}</td>;
+            })}</tr>))}</tbody>
+        </table>
+      </div>
+      {p.unplanned.length > 0 && <><h3>Без сроков · {p.unplanned.length}</h3>
+        <ul className="sv-unplanned">{p.unplanned.map((o) => <li key={o.id}><Link to={`/service?o=${o.id}`}>{o.number}</Link> · {o.client_name} · <span className="badge">{o.status_title}</span></li>)}</ul></>}
+    </div>);
+}
+
+/* ─────────────── допуски сотрудников ─────────────── */
+
+type Permit = { id: string; user_id: string; user_name: string; permit_code: string; permit_name: string; number: string; issued_on: string | null; valid_until: string | null; state: string; comment: string };
+
+function PermitsTab({ me, engOnly }: { me: Me; engOnly: boolean }) {
+  const [data, setData] = useState<{ items: Permit[]; can_edit: boolean } | null>(null);
+  const [engs, setEngs] = useState<Eng[]>([]);
+  const [refs, setRefs] = useState<Ref[]>([]);
+  const [f, setF] = useState<{ user_id: string; permit_code: string; number: string; issued_on: string; valid_until: string; comment: string } | null>(null);
+  const [msg, setMsg] = useState("");
+  const load = () => api.get<{ items: Permit[]; can_edit: boolean }>("/api/service/permits").then(setData).catch((e) => setMsg((e as Error).message));
+  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (can(me, "service_refs")) api.get<Refs>("/api/service/refs").then((r) => setRefs(r.permits)).catch(() => setRefs([]));
+    if (!engOnly && can(me, "service_orders", 2)) api.get<Eng[]>("/api/service/engineers").then(setEngs).catch(() => setEngs([]));
+  }, [me, engOnly]);
+  if (!data) return msg ? <ErrorState hint={msg} /> : <Loading />;
+  const save = async () => {
+    if (!f) return;
+    try { await api.put("/api/service/permits", { ...f, issued_on: f.issued_on || null, valid_until: f.valid_until || null }); setF(null); setMsg("Допуск сохранён"); load(); }
+    catch (e) { setMsg((e as Error).message); }
+  };
+  const del = async (p: Permit) => {
+    if (!(await askConfirm(`Удалить допуск ${p.permit_code} у ${p.user_name}?`, { danger: true }))) return;
+    try { await api.del(`/api/service/permits/${p.id}`); load(); } catch (e) { setMsg((e as Error).message); }
+  };
+  const bad = data.items.filter((p) => p.state !== "ok");
+  return (
+    <div>
+      {bad.length > 0 && <div className="alert warn">Истекли или истекают в ближайшие 30 дней: {bad.length}. Без действующего допуска назначить на работы, где он нужен, можно только с причиной.</div>}
+      {msg && <div className="alert info" role="status">{msg}</div>}
+      {data.can_edit && !f && <div className="row"><button className="btn add primary" onClick={() => setF({ user_id: "", permit_code: "", number: "", issued_on: "", valid_until: "", comment: "" })}>Допуск</button></div>}
+      {f && <div className="card sv-form">
+        <h3>Допуск сотрудника</h3>
+        <div className="grid cols-3">
+          <label className="f">Сотрудник *<select value={f.user_id} onChange={(e) => setF({ ...f, user_id: e.target.value })}>
+            <option value="">— выберите —</option>{engs.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</select></label>
+          <label className="f">Допуск *<select value={f.permit_code} onChange={(e) => setF({ ...f, permit_code: e.target.value })}>
+            <option value="">— выберите —</option>{refs.filter((r) => r.is_active).map((r) => <option key={r.code} value={r.code}>{r.code} · {r.name}{r.valid_months ? ` · ${r.valid_months} мес.` : ""}</option>)}</select></label>
+          <label className="f">Номер удостоверения<input value={f.number} onChange={(e) => setF({ ...f, number: e.target.value })} /></label>
+          <label className="f">Выдан<input type="date" value={f.issued_on} onChange={(e) => setF({ ...f, issued_on: e.target.value })} /></label>
+          <label className="f">Действует до<input type="date" value={f.valid_until} onChange={(e) => setF({ ...f, valid_until: e.target.value })} /></label>
+          <label className="f">Комментарий<input value={f.comment} onChange={(e) => setF({ ...f, comment: e.target.value })} /></label>
+        </div>
+        <p className="muted">Срок не указан — считается от даты выдачи по справочнику; если и там не задан — бессрочно.</p>
+        <div className="row"><button className="btn primary" disabled={!f.user_id || !f.permit_code} onClick={save}>Сохранить</button><button className="btn ghost" onClick={() => setF(null)}>отмена</button></div>
+      </div>}
+      {data.items.length === 0 ? <Empty title="Допусков нет" hint={data.can_edit ? "Заведите допуски инженеров — система проверит их при назначении на работы." : "Допуски заводит руководитель сервиса."} /> : (
+        <table className="pc-table nv-cards sv-table">
+          <thead><tr><th>Сотрудник</th><th>Допуск</th><th>Удостоверение</th><th>Действует до</th><th /></tr></thead>
+          <tbody>{data.items.map((p) => (
+            <tr key={p.id}>
+              <td className="pc-name">{p.user_name}</td>
+              <td data-label="Допуск"><b>{p.permit_code}</b><div className="pc-sub">{p.permit_name}</div></td>
+              <td data-label="Удостоверение">{p.number || <span className="muted">—</span>}{p.issued_on && <div className="pc-sub">выдан {fmtDate(p.issued_on)}</div>}</td>
+              <td data-label="Действует до">{p.valid_until ? fmtDate(p.valid_until) : "бессрочно"} {p.state === "expired" ? <span className="badge bad">истёк</span> : p.state === "expiring" ? <span className="badge warn">истекает</span> : null}</td>
+              <td>{data.can_edit && <div className="row sv-rowact">
+                <button className="btn ghost" onClick={() => setF({ user_id: p.user_id, permit_code: p.permit_code, number: p.number, issued_on: p.issued_on || "", valid_until: p.valid_until || "", comment: p.comment })}>продлить</button>
+                <button className="btn ghost" onClick={() => del(p)}>удалить</button></div>}</td>
+            </tr>))}</tbody>
+        </table>)}
     </div>);
 }

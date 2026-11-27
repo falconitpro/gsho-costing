@@ -53,10 +53,11 @@ TRANSITIONS: dict[str, tuple[set[str], str]] = {
 }
 STATUS_KINDS = set(TRANSITIONS) | {"assign"}
 HEAD_ONLY = {"assign", "plan", "cancel", "resolve"}
-KINDS = STATUS_KINDS | {"plan", "note", "checklist", "resolve"}
+KINDS = STATUS_KINDS | {"plan", "note", "checklist", "resolve", "work_add", "work_update", "diagnosis", "photo"}
 KIND_TITLES = {"create": "Создан", "assign": "Назначен инженер", "plan": "Сроки", "start": "Начат", "hold": "Приостановлен",
                "resume": "Возобновлён", "ready": "Готов к закрытию", "reopen": "Возвращён в работу", "close": "Закрыт",
-               "cancel": "Отменён", "note": "Заметка", "checklist": "Чек-лист", "resolve": "Решение по конфликту"}
+               "cancel": "Отменён", "note": "Заметка", "checklist": "Чек-лист", "resolve": "Решение по конфликту",
+               "work_add": "Добавлена работа", "work_update": "Работа", "diagnosis": "Диагностика", "photo": "Фото"}
 
 
 class Forbidden(Exception):
@@ -125,7 +126,18 @@ def _later(db: Session, wo: WorkOrder, base: int) -> list[WorkOrderEvent]:
 def _stale_conflict(db: Session, wo: WorkOrder, kind: str, payload: dict, base: int) -> str:
     """Причина конфликта для события по устаревшей версии или пустая строка, если его можно объединить."""
     later = _later(db, wo, base)
-    if kind == "note":
+    if kind in ("note", "photo", "work_add"):
+        return ""
+    if kind == "work_update":
+        work, keys = str(payload.get("work_id") or ""), {k for k in ("actual_hours", "done", "performer_id", "note") if k in payload}
+        for e in later:
+            if e.kind == "work_update" and str(e.payload.get("work_id")) == work:
+                if any(k in e.payload and e.payload[k] != payload[k] for k in keys):
+                    return "Эту работу уже изменили иначе"
+        return ""
+    if kind == "diagnosis":
+        if any(e.kind == "diagnosis" for e in later):
+            return "Заключение диагностики уже изменили"
         return ""
     if kind == "checklist":
         item = str(payload.get("item_id") or "")
@@ -167,8 +179,12 @@ def _apply(db: Session, wo: WorkOrder, actor: Actor, kind: str, payload: dict, o
         item.done_by, item.done_at = (actor.id, _now()) if item.done else (None, None)
         item.note = str(payload.get("note") or item.note or "")[:2000]
         return "applied", ""
+    if kind == "photo":
+        return "applied", ""          # фото с поля принимается всегда, в том числе после закрытия (доказательство работ)
     if wo.status in FINAL:
         return "rejected", f"Наряд уже {STATUSES[wo.status].lower()}"
+    if kind in ("work_add", "work_update", "diagnosis"):
+        return _apply_work(db, wo, actor, kind, payload)
     if kind == "assign":
         eng = str(payload.get("engineer_id") or "")
         if not eng:
@@ -176,7 +192,17 @@ def _apply(db: Session, wo: WorkOrder, actor: Actor, kind: str, payload: dict, o
         u = db.get(User, eng)
         if u is None or not u.is_active or not {"engineer", "service_head"} & set(u.roles or []):
             return "rejected", "Назначить можно только действующего инженера или руководителя сервиса"
+        # I-2: допуски исполнителя на дату работ; без нужных — только с причиной руководителя
+        from . import engineer_permits as ep
+        gaps = ep.check(db, eng, ep.required(db, wo), ep.work_date(wo))
+        why = str(payload.get("override_reason") or "").strip()
+        if gaps and not why:
+            return "rejected", f"Нет допусков: {ep.describe(gaps)}. Назначить можно, указав причину"
         wo.engineer_id, wo.assigned_by = eng, actor.id
+        if gaps:
+            reason_note = f"Назначен без допусков ({ep.describe(gaps)}). Причина: {why[:500]}"
+            wo.status = "assigned" if wo.status == "draft" else wo.status
+            return "applied", reason_note
         if wo.status == "draft":
             wo.status = "assigned"
         return "applied", ""
@@ -213,6 +239,43 @@ def _apply(db: Session, wo: WorkOrder, actor: Actor, kind: str, payload: dict, o
     if kind == "cancel" and not str(payload.get("reason") or "").strip():
         return "rejected", "Укажите причину отмены"
     wo.status = dst
+    return "applied", ""
+
+
+def _apply_work(db: Session, wo: WorkOrder, actor: Actor, kind: str, payload: dict) -> tuple[str, str]:
+    from ..models import WorkOrderWork
+    if kind == "diagnosis":
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            return "rejected", "Пустое заключение"
+        wo.diagnosis = text[:20000]
+        return "applied", ""
+    if kind == "work_add":
+        wt = db.get(ServiceWorkType, str(payload.get("work_type_id") or "")) if payload.get("work_type_id") else None
+        title = str(payload.get("title") or (wt.name if wt else "")).strip()
+        if not title:
+            return "rejected", "Выберите вид работ или укажите название"
+        if payload.get("work_type_id") and wt is None:
+            return "rejected", "Нет такого вида работ"
+        pos = len(db.scalars(select(WorkOrderWork.id).where(WorkOrderWork.work_order_id == wo.id)).all()) + 1
+        db.add(WorkOrderWork(id=str(payload.get("work_id") or uuid.uuid4()), work_order_id=wo.id, position=pos, work_type_id=wt.id if wt else None,
+                             title=title[:255], norm_hours=wt.norm_hours if wt else None, performer_id=payload.get("performer_id") or wo.engineer_id,
+                             created_by=actor.id))
+        return "applied", ""
+    w = db.get(WorkOrderWork, str(payload.get("work_id") or ""))
+    if w is None or w.work_order_id != wo.id:
+        return "rejected", "Нет такой работы в наряде"
+    if "actual_hours" in payload:
+        v = payload.get("actual_hours")
+        if v is not None and (not isinstance(v, (int, float)) or v < 0 or v > 10000):
+            return "rejected", "Часы — число от 0"
+        w.actual_hours = float(v) if v is not None else None
+    if "done" in payload:
+        w.done = bool(payload.get("done"))
+    if "performer_id" in payload:
+        w.performer_id = payload.get("performer_id") or None
+    if "note" in payload:
+        w.note = str(payload.get("note") or "")[:2000]
     return "applied", ""
 
 
@@ -287,9 +350,11 @@ def actions(wo: WorkOrder, actor: Actor) -> list[str]:
         if wo.status in src and (actor.is_head if kind in HEAD_ONLY else own) and not (kind == "start" and not wo.engineer_id):
             out.append(kind)
     if own:
-        out.append("note")
+        out += ["note", "photo"]
         if wo.status in ("assigned", "in_progress", "on_hold"):
             out.append("checklist")
+        if wo.status not in FINAL:
+            out += ["work_add", "work_update", "diagnosis"]
     if actor.is_head:
         out.append("resolve")
     return out

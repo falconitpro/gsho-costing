@@ -9,7 +9,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import hashlib
+import os
+import tempfile
+import uuid
+from datetime import date, timedelta, timezone
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -17,9 +24,13 @@ from sqlalchemy.orm import Session
 from ..core.auth import CurrentUser, get_current_user
 from ..core.roles import EDIT, READ
 from ..db import get_db
-from ..models import (Client, ClientContact, ClientMachine, ClientSite, ServicePermit, ServiceRequest, ServiceSlaLevel,
+from ..models import (EngineerPermit, WorkOrderPhoto, WorkOrderWork, Client, ClientContact, ClientMachine, ClientSite, ServicePermit, ServiceRequest, ServiceSlaLevel,
                       ServiceWorkType, User, WorkOrder, WorkOrderChecklistItem, WorkOrderEvent)
+from .. import adapters
+from ..core.clock import msk_date, today as msk_today
+from ..core.files import MB, file_response, read_limited, safe_filename
 from ..services import change_events
+from ..services import engineer_permits as ep
 from ..services import work_orders as wos
 from ..services.deal_service import audit
 from .common import serialize
@@ -291,6 +302,16 @@ def _order_payload(db: Session, wo: WorkOrder, full: bool = False, user: Optiona
         d["request"] = ({"id": r.id, "number": r.number, "machine_down": r.machine_down, "sla_code": r.sla_code,
                          "received_at": r.received_at.isoformat() if r.received_at else None} if r else None)
         d["assigned_by_name"] = names.get(wo.assigned_by or "", "")
+        works = db.scalars(select(WorkOrderWork).where(WorkOrderWork.work_order_id == wo.id).order_by(WorkOrderWork.position)).all()
+        photos = db.scalars(select(WorkOrderPhoto).where(WorkOrderPhoto.work_order_id == wo.id).order_by(WorkOrderPhoto.uploaded_at)).all()
+        pn = _names(db, [w.performer_id for w in works] + [p.uploaded_by for p in photos])
+        d["works"] = [{**serialize(w), "performer_name": pn.get(w.performer_id or "", "")} for w in works]
+        d["hours"] = {"norm": sum(w.norm_hours or 0 for w in works) if any(w.norm_hours is not None for w in works) else None,
+                      "actual": sum(w.actual_hours or 0 for w in works) if any(w.actual_hours is not None for w in works) else None}
+        d["photos"] = [_photo_payload(p, pn) for p in photos]
+        req_codes = ep.required(db, wo)
+        d["permits"] = {"required": req_codes, "on": ep.work_date(wo).isoformat(),
+                        "gaps": ep.check(db, wo.engineer_id, req_codes, ep.work_date(wo)) if wo.engineer_id else []}
         items = db.scalars(select(WorkOrderChecklistItem).where(WorkOrderChecklistItem.work_order_id == wo.id)
                            .order_by(WorkOrderChecklistItem.position)).all()
         evs = db.scalars(select(WorkOrderEvent).where(WorkOrderEvent.work_order_id == wo.id).order_by(WorkOrderEvent.received_at)).all()
@@ -362,13 +383,17 @@ def order_get(order_id: str, user: CurrentUser = Depends(_orders_reader), db: Se
 
 
 @router.get("/engineers")
-def engineers(user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
-    """Кого можно назначить: действующие инженеры и руководители сервиса, с числом открытых нарядов."""
+def engineers(order_id: str = "", user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
+    """Кого можно назначить: действующие инженеры и руководители сервиса, с числом открытых нарядов.
+    order_id — для каждого ещё и недостающие допуски на дату работ этого наряда."""
     users = [u for u in db.scalars(select(User).where(User.is_active.is_(True)).order_by(User.display_name)).all()
              if {"engineer", "service_head"} & set(u.roles or [])]
     open_ = dict(db.execute(select(WorkOrder.engineer_id, func.count()).where(WorkOrder.status.not_in(wos.FINAL))
                             .group_by(WorkOrder.engineer_id)).all())
-    return [{"id": u.id, "name": u.display_name, "is_engineer": "engineer" in (u.roles or []), "open_orders": open_.get(u.id, 0)} for u in users]
+    wo = db.get(WorkOrder, order_id) if order_id else None
+    codes, on = (ep.required(db, wo), ep.work_date(wo)) if wo else ([], msk_today())
+    return [{"id": u.id, "name": u.display_name, "is_engineer": "engineer" in (u.roles or []), "open_orders": open_.get(u.id, 0),
+             "gaps": ep.check(db, u.id, codes, on) if wo else []} for u in users]
 
 
 class EventIn(BaseModel):
@@ -436,3 +461,212 @@ def sync_pull(cursor: int = Query(0, ge=0), limit: int = Query(500, ge=1, le=200
     ids = list(dict.fromkeys(e.entity_id for e in events))
     vis = {o.id: o for o in db.scalars(_visible(user).where(WorkOrder.id.in_(ids))).all()} if ids else {}
     return {"cursor": nxt, "orders": [_order_payload(db, vis[i], full=True, user=user) for i in ids if i in vis]}
+
+
+# ─────────────── I-2 (D-195): фото, допуски сотрудников, план ───────────────
+
+PHOTO_LIMIT = 10 * MB                          # решение владельца 27.11.2026
+PHOTO_YEARS = 10
+PHOTO_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".heic": "image/heic"}
+
+
+def _photo_payload(p: WorkOrderPhoto, names: dict[str, str]) -> dict:
+    d = {k: v for k, v in serialize(p).items() if k not in ("storage_path", "sha256")}
+    d["uploaded_by_name"] = names.get(p.uploaded_by or "", "")
+    d["url"] = f"/api/service/photos/{p.id}"
+    d["map_url"] = (f"https://yandex.ru/maps/?pt={p.longitude},{p.latitude}&z=16&l=map"
+                    if p.latitude is not None and p.longitude is not None else "")
+    return d
+
+
+def _exif_geo(path: str) -> tuple[Optional[float], Optional[float], Optional[datetime]]:
+    """Координаты и время съёмки из EXIF (если телефон их записал). Ошибки чтения — просто «нет данных»."""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            ex = im.getexif()
+            gps = ex.get_ifd(0x8825) if ex else {}
+            taken = None
+            raw = (ex.get_ifd(0x8769) or {}).get(0x9003) or ex.get(0x0132)
+            if raw:
+                taken = datetime.strptime(str(raw), "%Y:%m:%d %H:%M:%S").replace(tzinfo=timezone(timedelta(hours=3)))
+
+            def deg(v, ref):
+                d, m, sec = (float(x) for x in v)
+                out = d + m / 60 + sec / 3600
+                return -out if ref in ("S", "W") else out
+            if gps and 2 in gps and 4 in gps:
+                return deg(gps[2], gps.get(1, "N")), deg(gps[4], gps.get(3, "E")), taken
+            return None, None, taken
+    except Exception:
+        return None, None, None
+
+
+@router.post("/orders/{order_id}/photos")
+def photo_upload(order_id: str, file: UploadFile = File(...), base_version: int = Form(...), event_id: str = Form(""),
+                 caption: str = Form(""), latitude: Optional[float] = Form(None), longitude: Optional[float] = Form(None),
+                 accuracy_m: Optional[float] = Form(None), taken_at: Optional[datetime] = Form(None),
+                 checklist_item_id: str = Form(""), work_id: str = Form(""), device_id: str = Form("web"), offline: bool = Form(False),
+                 user: CurrentUser = Depends(_orders_reader), db: Session = Depends(get_db)):
+    """Фото к наряду: до 10 МБ, хранится 10 лет, с координатами устройства или из EXIF. Событие photo — как у прочих действий."""
+    wo = _get_order(db, user, order_id)
+    eid = event_id or str(uuid.uuid4())
+    prev = db.get(WorkOrderEvent, eid)
+    if prev is not None:                       # повтор из очереди: файл второй раз не сохраняем
+        return {"event": wos.event_payload(prev), "order": _order_payload(db, wo, full=True, user=user)}
+    act = wos.actor_of(user)
+    if not (act.is_head or (wo.engineer_id and wo.engineer_id == user.id)):
+        raise HTTPException(403, "Наряд назначен другому инженеру")
+    name = safe_filename(file.filename, "photo.jpg")
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in PHOTO_TYPES:
+        raise HTTPException(415, "Фото — JPG, PNG, WEBP или HEIC")
+    data = read_limited(file, PHOTO_LIMIT)
+    if (latitude is None) != (longitude is None) or (latitude is not None and not (-90 <= latitude <= 90 and -180 <= longitude <= 180)):
+        raise HTTPException(422, "Координаты — парой, в допустимых пределах")
+    items = {i.id for i in db.scalars(select(WorkOrderChecklistItem).where(WorkOrderChecklistItem.work_order_id == wo.id)).all()}
+    works = {w.id for w in db.scalars(select(WorkOrderWork).where(WorkOrderWork.work_order_id == wo.id)).all()}
+    if (checklist_item_id and checklist_item_id not in items) or (work_id and work_id not in works):
+        raise HTTPException(422, "Пункт чек-листа или работа — из этого наряда")
+    fd, path = tempfile.mkstemp(suffix=ext)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        geo = "device" if latitude is not None else ""
+        if latitude is None or taken_at is None:
+            elat, elon, etaken = _exif_geo(path)
+            if latitude is None and elat is not None:
+                latitude, longitude, geo = elat, elon, "exif"
+            taken_at = taken_at or etaken
+        pid = str(uuid.uuid4())
+        stored = adapters.storage().upload(path, f"Сервис/Наряды/{wo.number}", "07_fact", f"{pid[:8]} {name}")
+    finally:
+        if os.path.exists(path):
+            os.unlink(path)
+    today = msk_today()
+    try:
+        keep = today.replace(year=today.year + PHOTO_YEARS)
+    except ValueError:                          # 29 февраля
+        keep = today.replace(year=today.year + PHOTO_YEARS, day=28)
+    ph = WorkOrderPhoto(id=pid, work_order_id=wo.id, event_id=eid, storage_path=stored.path, filename=name, content_type=PHOTO_TYPES[ext],
+                        size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest(), caption=caption[:2000],
+                        checklist_item_id=checklist_item_id or None, work_id=work_id or None, taken_at=taken_at,
+                        latitude=latitude, longitude=longitude, accuracy_m=accuracy_m, geo_source=geo, uploaded_by=user.id, retain_until=keep)
+    db.add(ph)
+    db.flush()
+    ev = _submit(db, user, wo, EventIn(id=eid, kind="photo", base_version=base_version, device_id=device_id, offline=offline,
+                                       payload={"photo_id": pid, "filename": name, "geo": bool(geo)}))
+    db.commit()
+    return {"event": wos.event_payload(ev), "order": _order_payload(db, wo, full=True, user=user)}
+
+
+@router.get("/photos/{photo_id}")
+def photo_get(photo_id: str, user: CurrentUser = Depends(_orders_reader), db: Session = Depends(get_db)):
+    p = db.get(WorkOrderPhoto, photo_id)
+    if p is None:
+        raise HTTPException(404, "Фото не найдено")
+    _get_order(db, user, p.work_order_id)       # те же права, что на наряд (инженер — только свои)
+    fd, path = tempfile.mkstemp(suffix=os.path.splitext(p.filename)[1])
+    os.close(fd)
+    adapters.storage().download(p.storage_path, path)
+    return file_response(path, p.filename, background=BackgroundTask(os.unlink, path))
+
+
+# допуски сотрудников
+
+def _permit_payload(p: EngineerPermit, names: dict[str, str], today: date) -> dict:
+    d = serialize(p)
+    d["permit_name"] = names.get(p.permit_code, p.permit_code)
+    d["state"] = ("expired" if p.valid_until and p.valid_until < today else
+                  "expiring" if p.valid_until and p.valid_until <= today + timedelta(days=30) else "ok")
+    return d
+
+
+@router.get("/permits")
+def permits_list(user_id: str = "", user: CurrentUser = Depends(_orders_reader), db: Session = Depends(get_db)):
+    """Допуски сотрудников сервиса. Инженер видит только свои; руководитель сервиса и ЗГД — всех."""
+    act = wos.actor_of(user)
+    if not act.is_head:
+        user_id = user.id
+    st = select(EngineerPermit)
+    if user_id:
+        st = st.where(EngineerPermit.user_id == user_id)
+    rows = db.scalars(st).all()
+    names = {p.code: p.name for p in db.scalars(select(ServicePermit)).all()}
+    un = _names(db, [r.user_id for r in rows])
+    today = msk_today()
+    return {"items": sorted([{**_permit_payload(r, names, today), "user_name": un.get(r.user_id, "")} for r in rows],
+                            key=lambda x: (x["user_name"], x["permit_code"])), "can_edit": act.is_head}
+
+
+class PermitIn(BaseModel):
+    user_id: str
+    permit_code: str = Field(min_length=1, max_length=32)
+    number: str = Field(default="", max_length=64)
+    issued_on: Optional[date] = None
+    valid_until: Optional[date] = None
+    comment: str = ""
+
+
+@router.put("/permits")
+def permit_save(body: PermitIn, user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
+    """Завести или продлить допуск. Срок не указан — считается от даты выдачи по сроку из справочника (пусто — бессрочно)."""
+    ref = db.scalar(select(ServicePermit).where(ServicePermit.code == body.permit_code))
+    u = db.get(User, body.user_id)
+    if ref is None:
+        raise HTTPException(422, "Нет такого допуска в справочнике")
+    if u is None or not u.is_active:
+        raise HTTPException(422, "Нет такого сотрудника")
+    valid = body.valid_until
+    if valid is None and body.issued_on and ref.valid_months:
+        m = body.issued_on.month - 1 + ref.valid_months
+        y, m = body.issued_on.year + m // 12, m % 12 + 1
+        import calendar
+        valid = date(y, m, min(body.issued_on.day, calendar.monthrange(y, m)[1]))
+    if body.issued_on and valid and valid < body.issued_on:
+        raise HTTPException(422, "Срок действия раньше даты выдачи")
+    p = db.scalar(select(EngineerPermit).where(EngineerPermit.user_id == body.user_id, EngineerPermit.permit_code == body.permit_code))
+    before = serialize(p) if p else None
+    if p is None:
+        p = EngineerPermit(user_id=body.user_id, permit_code=body.permit_code, created_by=user.id)
+        db.add(p)
+    p.number, p.issued_on, p.valid_until, p.comment = body.number.strip(), body.issued_on, valid, body.comment
+    db.flush()
+    audit(db, user.id, None, "engineer_permit", p.id, "update" if before else "create", before=before, after=serialize(p))
+    db.commit()
+    return _permit_payload(p, {ref.code: ref.name}, msk_today())
+
+
+@router.delete("/permits/{permit_id}")
+def permit_delete(permit_id: str, user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
+    p = db.get(EngineerPermit, permit_id)
+    if p is None:
+        raise HTTPException(404, "Допуск не найден")
+    audit(db, user.id, None, "engineer_permit", p.id, "delete", before=serialize(p))
+    db.delete(p)
+    db.commit()
+    return {"ok": True}
+
+
+# план работ
+
+@router.get("/plan")
+def plan(start: Optional[date] = None, days: int = Query(14, ge=1, le=62), user: CurrentUser = Depends(_desk), db: Session = Depends(get_db)):
+    """План по инженерам: открытые наряды со сроками в окне [start, start+days) и без сроков — отдельно."""
+    start = start or msk_today()
+    end = start + timedelta(days=days)
+    rows = db.scalars(select(WorkOrder).where(WorkOrder.status.not_in(wos.FINAL))).all()
+    engs = [u for u in db.scalars(select(User).where(User.is_active.is_(True)).order_by(User.display_name)).all()
+            if {"engineer", "service_head"} & set(u.roles or [])]
+    clients = {c.id: c.name for c in db.scalars(select(Client).where(Client.id.in_({r.client_id for r in rows}))).all()} if rows else {}
+
+    def brief(o: WorkOrder) -> dict:
+        return {"id": o.id, "number": o.number, "status": o.status, "status_title": wos.STATUSES.get(o.status, o.status),
+                "client_name": clients.get(o.client_id, ""), "engineer_id": o.engineer_id,
+                "start": msk_date(o.planned_start).isoformat() if o.planned_start else None,
+                "end": msk_date(o.planned_end or o.planned_start).isoformat() if o.planned_start else None}
+    planned = [brief(o) for o in rows if o.planned_start and msk_date(o.planned_start) < end and msk_date(o.planned_end or o.planned_start) >= start]
+    return {"start": start.isoformat(), "days": [(start + timedelta(days=i)).isoformat() for i in range(days)],
+            "engineers": [{"id": u.id, "name": u.display_name, "orders": [o for o in planned if o["engineer_id"] == u.id]} for u in engs],
+            "unassigned": [o for o in planned if not o["engineer_id"]],
+            "unplanned": [brief(o) for o in rows if not o.planned_start]}
