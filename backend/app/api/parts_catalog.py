@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -16,8 +16,9 @@ from ..core.files import file_response
 from ..core.roles import Role
 from ..db import get_db
 from ..models import (
-    Client, EquipmentModel, Factory, LegalEntity, Part, PartApplicability, PartClientPrice, PartCrossRef, PartStock, SupplyRoute, Warehouse,
+    Client, EquipmentExecution, EquipmentModel, Factory, User, LegalEntity, Part, PartApplicability, PartClientPrice, PartCrossRef, PartStock, SupplyRoute, Warehouse,
 )
+from ..services import applicability as app_svc
 from ..services.deal_service import audit
 from ..services.suppliers import mark as _mark_supplier
 from ..services.moysklad_import import apply_products, apply_stock, parse_products, parse_stock, read_rows
@@ -197,6 +198,9 @@ def _card(db: Session, p: Part, user: CurrentUser) -> dict:
     d["applicability"] = []
     for a in p.applicability:
         row = serialize(a)
+        row["status_title"] = app_svc.STATUSES.get(a.status, a.status)
+        row["verified_by_name"] = (db.get(User, a.verified_by).display_name if a.verified_by and db.get(User, a.verified_by) else "")
+        row["execution_name"] = (db.get(EquipmentExecution, a.execution_id).name if a.execution_id and db.get(EquipmentExecution, a.execution_id) else "")
         if a.equipment_model_id:
             m = db.get(EquipmentModel, a.equipment_model_id)
             f = db.get(Factory, m.factory_id) if m else None
@@ -251,10 +255,18 @@ class CrossIn(BaseModel):
 
 
 class ApplicabilityIn(BaseModel):
+    id: Optional[str] = None                  # D-196: существующая связь — по id (иначе — по модели и узлу)
     equipment_model_id: Optional[str] = None
     other_manufacturer: str = ""
     other_model: str = ""
     assembly: str = ""
+    # J-b: не переданы (прежний вид, импорт) — у существующей связи не меняются, у новой — «не подтверждено»
+    execution_id: Optional[str] = None
+    status: str = "unverified"
+    serial_from: str = Field(default="", max_length=64)
+    serial_to: str = Field(default="", max_length=64)
+    basis_kind: str = ""
+    basis: str = ""
 
 
 class ClientPriceIn(BaseModel):
@@ -309,7 +321,7 @@ class PartIn(BaseModel):
     min_stock: list[StockIn] = Field(default_factory=list)
 
 
-def _validate(body: PartIn) -> None:
+def _validate(body: PartIn, db: Optional[Session] = None) -> None:
     if body.status not in PART_STATUS:
         raise HTTPException(422, "Статус карточки: активна или архив")
     if not body.unit.strip():
@@ -320,9 +332,53 @@ def _validate(body: PartIn) -> None:
     for a in body.applicability:
         if not a.equipment_model_id and not a.other_model.strip():
             raise HTTPException(422, "В применимости выберите модель из каталога или укажите модель другого производителя")
+        if db is not None:
+            _check_app(db, a)
     for v in (body.moq, body.multiple, body.weight_kg, body.lead_days):
         if v is not None and v < 0:
             raise HTTPException(422, "Количество, вес и срок не могут быть отрицательными")
+
+
+_APP_KEY = ("equipment_model_id", "other_manufacturer", "other_model", "assembly")
+_APP_CHECK = ("execution_id", "status", "serial_from", "serial_to", "basis_kind", "basis")
+
+
+def _check_app(db: Session, a: ApplicabilityIn) -> None:
+    """Проверки J-b: статус и основание из списка, «подтверждено» и «не подходит» — только с основанием, исполнение — той же модели."""
+    if a.status not in app_svc.STATUSES:
+        raise HTTPException(422, "Статус применимости — из списка")
+    if a.basis_kind and a.basis_kind not in app_svc.BASIS_KINDS:
+        raise HTTPException(422, "Основание — из списка")
+    if "status" in a.model_fields_set and a.status in app_svc.NEED_BASIS and not (a.basis.strip() or a.basis_kind):
+        raise HTTPException(422, f"Для статуса «{app_svc.STATUSES[a.status]}» укажите основание")
+    if a.execution_id:
+        ex = db.get(EquipmentExecution, a.execution_id)
+        if ex is None or ex.model_id != a.equipment_model_id:
+            raise HTTPException(422, "Исполнение — той же модели, что в применимости")
+
+
+def _merge_applicability(db: Session, p: Part, rows: list[ApplicabilityIn], user: CurrentUser) -> None:
+    """Сохранить применимость, не теряя проверку: связь ищется по id, иначе по модели и узлу. Поля проверки, которых
+    нет в запросе (прежний вид, импорт), остаются как были; изменение статуса или основания записывает, кто и когда."""
+    old = {a.id: a for a in p.applicability}
+    by_key = {tuple(getattr(a, k) or "" for k in _APP_KEY): a for a in p.applicability}
+    out = []
+    for r in rows:
+        cur = old.get(r.id or "") or by_key.get(tuple(getattr(r, k) or "" for k in _APP_KEY))
+        if cur is None or cur in out:
+            cur = PartApplicability(status="unverified")
+        for k in _APP_KEY:
+            setattr(cur, k, getattr(r, k))
+        before = {k: getattr(cur, k) for k in ("status", "basis_kind", "basis")}
+        for k in _APP_CHECK:
+            if k in r.model_fields_set:
+                setattr(cur, k, getattr(r, k).strip() if isinstance(getattr(r, k), str) else getattr(r, k))
+        if cur.status is None:
+            cur.status = "unverified"
+        if any(getattr(cur, k) != v for k, v in before.items()) and cur.status != "unverified":
+            cur.verified_by, cur.verified_at = user.id, datetime.now(timezone.utc)
+        out.append(cur)
+    p.applicability = out
 
 
 def _apply(db: Session, p: Part, body: PartIn, user: CurrentUser) -> None:
@@ -335,7 +391,7 @@ def _apply(db: Session, p: Part, body: PartIn, user: CurrentUser) -> None:
     for k, v in data.items():
         setattr(p, k, v.strip() if isinstance(v, str) and k in ("article", "name_ru", "oem_number", "manufacturer") else v)
     p.cross_refs = [PartCrossRef(**c.model_dump()) for c in body.cross_refs]
-    p.applicability = [PartApplicability(**a.model_dump()) for a in body.applicability]
+    _merge_applicability(db, p, body.applicability, user)
     names = {c.id: c.name for c in db.scalars(select(Client)).all()}
     p.prices = [PartClientPrice(**{**c.model_dump(), "client_name": names.get(c.client_id, c.client_name)}) for c in body.client_prices]
     keep = {s.warehouse_id: s for s in p.stock}
@@ -349,7 +405,7 @@ def _apply(db: Session, p: Part, body: PartIn, user: CurrentUser) -> None:
 
 @router.post("/catalog", status_code=201)
 def create_part(body: PartIn, force: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
-    _validate(body)
+    _validate(body, db)
     dups = duplicates(db, body.article, body.oem_number, body.manufacturer)
     if dups and not force:
         raise HTTPException(409, {"message": "Похожие карточки уже есть. Проверьте их или сохраните новую карточку принудительно.", "duplicates": dups})
@@ -365,7 +421,7 @@ def create_part(body: PartIn, force: bool = False, db: Session = Depends(get_db)
 
 @router.put("/catalog/{pid}")
 def update_part(pid: str, body: PartIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
-    _validate(body)
+    _validate(body, db)
     p = _part_or_404(db, pid)
     before = {"article": p.article, "name_ru": p.name_ru, "status": p.status}
     _apply(db, p, body, user)
@@ -486,3 +542,70 @@ def delete_part_photo(pid: str, i: int, db: Session = Depends(get_db), user: Cur
     audit(db, user.id, None, "part", p.id, "photo_remove", removed, None)
     db.commit()
     return {"photo_files": files}
+
+
+# ------------------------------------------------------------------ J-b (D-196): проверка применимости
+
+def _app_row(db: Session, a: PartApplicability, p: Part, names: dict[str, str]) -> dict:
+    m = db.get(EquipmentModel, a.equipment_model_id) if a.equipment_model_id else None
+    f = db.get(Factory, m.factory_id) if m else None
+    ex = db.get(EquipmentExecution, a.execution_id) if a.execution_id else None
+    return {**serialize(a), "status_title": app_svc.STATUSES.get(a.status, a.status), "part_article": p.article, "part_name": p.name_ru,
+            "model_title": (f"{(f.short_name or f.name) if f else ''} {m.model}".strip() if m else f"{a.other_manufacturer} {a.other_model}".strip()),
+            "execution_name": ex.name if ex else "", "verified_by_name": names.get(a.verified_by or "", "")}
+
+
+@router.get("/applicability")
+def applicability_queue(status: str = "unverified", model_id: str = "", q: str = "", limit: int = 100, offset: int = 0,
+                        db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Очередь проверки применимости: связи деталь — модель с отбором по статусу, модели и тексту; счётчики по статусам."""
+    limit = max(1, min(limit, 500))
+    base = select(PartApplicability, Part).join(Part, Part.id == PartApplicability.part_id).where(Part.status == "active")
+    if model_id:
+        base = base.where(PartApplicability.equipment_model_id == model_id)
+    if q.strip():
+        like = f"%{q.strip()}%"
+        base = base.where(or_(Part.article.ilike(like), Part.name_ru.ilike(like), PartApplicability.other_model.ilike(like),
+                              PartApplicability.assembly.ilike(like)))
+    counts = {k: 0 for k in app_svc.STATUSES}
+    sq = base.subquery()
+    for st, n in db.execute(select(sq.c.status, func.count()).group_by(sq.c.status)).all():
+        counts[st] = n
+    if status:
+        base = base.where(PartApplicability.status == status)
+    rows = db.execute(base.order_by(Part.article, PartApplicability.assembly).offset(offset).limit(limit)).all()
+    ids = {a.verified_by for a, _ in rows if a.verified_by}
+    names = {u.id: u.display_name for u in db.scalars(select(User).where(User.id.in_(ids))).all()} if ids else {}
+    return {"items": [_app_row(db, a, p, names) for a, p in rows], "counts": counts, "statuses": app_svc.STATUSES,
+            "basis_kinds": app_svc.BASIS_KINDS, "need_basis": sorted(app_svc.NEED_BASIS), "can_edit": user.has(*EDIT_ROLES)}
+
+
+class VerifyIn(BaseModel):
+    status: str
+    basis_kind: str = ""
+    basis: str = Field(default="", max_length=5000)
+    serial_from: Optional[str] = Field(default=None, max_length=64)
+    serial_to: Optional[str] = Field(default=None, max_length=64)
+    execution_id: Optional[str] = None
+
+
+@router.post("/applicability/{aid}/verify")
+def applicability_verify(aid: str, body: VerifyIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    """Отметить проверку связи: статус и основание (для «подтверждено», «не подходит», «заменена» — обязательно)."""
+    a = db.get(PartApplicability, aid)
+    if a is None:
+        raise HTTPException(404, "Связь не найдена")
+    chk = ApplicabilityIn(equipment_model_id=a.equipment_model_id, other_model=a.other_model or "x", status=body.status,
+                          basis_kind=body.basis_kind, basis=body.basis, execution_id=body.execution_id if body.execution_id is not None else a.execution_id)
+    _check_app(db, chk)
+    before = {k: getattr(a, k) for k in _APP_CHECK}
+    a.status, a.basis_kind, a.basis = body.status, body.basis_kind, body.basis.strip()
+    for k in ("serial_from", "serial_to", "execution_id"):
+        v = getattr(body, k)
+        if v is not None:
+            setattr(a, k, (v.strip() if isinstance(v, str) else v) or ("" if k != "execution_id" else None))
+    a.verified_by, a.verified_at = user.id, datetime.now(timezone.utc)
+    audit(db, user.id, None, "part_applicability", a.id, "verify", before=before, after={k: getattr(a, k) for k in _APP_CHECK})
+    db.commit()
+    p = db.get(Part, a.part_id)
+    return _app_row(db, a, p, {user.id: user.display_name})

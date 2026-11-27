@@ -514,24 +514,12 @@ def kits_from_deal(deal_id: str, db: Session = Depends(get_db), user: CurrentUse
 
 @router.get("/machines/{mid}/parts")
 def machine_parts(mid: str, q: str = "", db: Session = Depends(get_db), user: CurrentUser = Depends(_reader)):
-    """Запчасти, применимые к машине (по модели каталога ГШО или модели другого производителя)."""
+    """Запчасти, применимые к машине (по модели каталога ГШО или модели другого производителя). D-196: со статусом
+    проверки; «не подходит» и номера вне диапазона серийных номеров не показываются."""
     m = _m_or_404(db, mid)
-    man, model = _model_title(db, m)
-    conds = []
-    if m.equipment_model_id:
-        conds.append(PartApplicability.equipment_model_id == m.equipment_model_id)
-    if model:
-        conds.append(PartApplicability.other_model.ilike(model))
-    if not conds:
-        return []
-    rows = db.execute(select(Part, PartApplicability.assembly).join(PartApplicability, PartApplicability.part_id == Part.id).where(or_(*conds))).all()
-    out, seen = [], set()
-    for p, assembly in rows:
-        if p.id in seen or (q and q.lower() not in f"{p.article} {p.name_ru} {assembly}".lower()):
-            continue
-        seen.add(p.id)
-        out.append({"id": p.id, "article": p.article, "name_ru": p.name_ru, "assembly": assembly, "stock_total": sum((s.qty or 0) - (s.reserved or 0) for s in p.stock)})
-    return sorted(out, key=lambda x: (x["assembly"], x["article"]))[:300]
+    _man, model = _model_title(db, m)
+    from ..services.applicability import parts_for_machine
+    return parts_for_machine(db, m, model, q)
 
 
 def check_reminders(db: Session, today: Optional[date] = None) -> int:

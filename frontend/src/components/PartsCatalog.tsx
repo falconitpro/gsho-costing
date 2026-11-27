@@ -9,7 +9,32 @@ import { askConfirm } from "./Dialogs";
 // Каталог запасных частей: поиск, карточка (утверждена 05.11.2026), проверка дублей, перенос из МойСклад.
 
 type Cross = { kind: string; number: string; supplier_id: string | null; manufacturer: string; comment: string };
-type Appl = { equipment_model_id: string | null; other_manufacturer: string; other_model: string; assembly: string; model_title?: string };
+type Appl = { id?: string; equipment_model_id: string | null; other_manufacturer: string; other_model: string; assembly: string; model_title?: string;
+  status?: string; status_title?: string; serial_from?: string; serial_to?: string; basis_kind?: string; basis?: string; verified_by?: string | null;
+  verified_by_name?: string; verified_at?: string | null; execution_id?: string | null; execution_name?: string };
+const APPL_STATUS: Record<string, string> = { confirmed: "Подтверждено", probable: "Вероятно", unverified: "Не подтверждено", not_applicable: "Не подходит", replaced: "Заменена" };
+const APPL_BASIS: Record<string, string> = { manual: "Каталог / руководство завода", supplier: "Поставщик", service: "Опыт сервиса", analog: "По аналогии", comment: "Комментарий" };
+
+/** D-196 (J-b): статус проверки связи в карточке детали — только новый вид. */
+function ApplStatus({ a, edit, onChange }: { a: Appl; edit: boolean; onChange: (p: Partial<Appl>) => void }) {
+  const st = a.status || "unverified";
+  const tone = { confirmed: "ok", probable: "info", unverified: "warn", not_applicable: "bad", replaced: "" }[st] || "";
+  if (!edit) return (
+    <div className="pc-appl-st"><span className={`badge ${tone}`}>{APPL_STATUS[st]}</span>
+      {(a.serial_from || a.serial_to) && <span className="pc-sub"> · номера {a.serial_from || "…"} — {a.serial_to || "…"}</span>}
+      {(a.basis || a.basis_kind) && <span className="pc-sub"> · {[APPL_BASIS[a.basis_kind || ""], a.basis].filter(Boolean).join(": ")}</span>}
+      {a.verified_by_name && <span className="pc-sub"> · {a.verified_by_name}</span>}</div>);
+  return (
+    <div className="pc-appl-st edit">
+      <select value={st} aria-label="Статус применимости" onChange={(e) => onChange({ status: e.target.value })}>
+        {Object.entries(APPL_STATUS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+      <select value={a.basis_kind || ""} aria-label="Основание" onChange={(e) => onChange({ basis_kind: e.target.value })}>
+        <option value="">основание…</option>{Object.entries(APPL_BASIS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+      <input value={a.basis || ""} placeholder="документ, страница, комментарий" aria-label="Основание — текст" onChange={(e) => onChange({ basis: e.target.value })} />
+      <input value={a.serial_from || ""} placeholder="зав. № с" aria-label="Серийные номера с" onChange={(e) => onChange({ serial_from: e.target.value })} />
+      <input value={a.serial_to || ""} placeholder="по" aria-label="Серийные номера по" onChange={(e) => onChange({ serial_to: e.target.value })} />
+    </div>);
+}
 type ClientPrice = { client_id: string | null; client_name: string; price: number; currency: string; valid_from: string | null; valid_to: string | null };
 type Stock = { warehouse_id: string; warehouse?: string; warehouse_kind?: string; qty?: number; reserved?: number; in_transit?: number; available?: number; min_qty: number | null };
 type Part = {
@@ -117,7 +142,8 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
     if (!cur) return;
     const { id, stock, stock_total, source, ...rest } = cur;
     void stock_total; void source;
-    const body = { ...rest, applicability: rest.applicability.map(({ model_title, ...a }) => { void model_title; return a; }),
+    const body = { ...rest, applicability: rest.applicability.map(({ model_title, status_title, verified_by_name, execution_name, verified_by, verified_at, ...a }) => {
+      void model_title; void status_title; void verified_by_name; void execution_name; void verified_by; void verified_at; return a; }),
       min_stock: (stock || []).map((s) => ({ warehouse_id: s.warehouse_id, min_qty: s.min_qty })) };
     try {
       const r = id ? await api.put<Part>(`/api/parts/catalog/${id}`, body) : await api.post<Part>(`/api/parts/catalog${force ? "?force=true" : ""}`, body);
@@ -200,7 +226,8 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
 
           <h3 id="pc-appl">Применимость</h3>
           {cur.applicability.map((a, i) => (
-            <div key={i} className="row" style={{ marginBottom: 4 }}>
+            <div key={a.id || i} className={nv ? "pc-appl" : "row"} style={nv ? undefined : { marginBottom: 4 }}>
+              {nv && <ApplStatus a={a} edit={edit} onChange={(patch) => set({ applicability: cur.applicability.map((x, j) => (j === i ? { ...x, ...patch } : x)) })} />}
               {a.model_title ? <span className="badge">{a.model_title}</span> : a.equipment_model_id ? <span className="badge">{models.find((m) => m.id === a.equipment_model_id)?.title || "модель каталога"}</span> : <>
                 <input placeholder="производитель машины" value={a.other_manufacturer} disabled={!edit} onChange={(e) => set({ applicability: cur.applicability.map((x, j) => (j === i ? { ...x, other_manufacturer: e.target.value } : x)) })} />
                 <input placeholder="модель" value={a.other_model} disabled={!edit} onChange={(e) => set({ applicability: cur.applicability.map((x, j) => (j === i ? { ...x, other_model: e.target.value } : x)) })} /></>}

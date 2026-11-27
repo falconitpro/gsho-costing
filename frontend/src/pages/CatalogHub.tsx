@@ -1,3 +1,4 @@
+import ApplicabilityQueue from "../components/ApplicabilityQueue";
 import { Crumbs, EntryGrid } from "../components/Levels";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -13,11 +14,12 @@ import { GroupSetupBlock } from "./PartsSetupPage";
 // Единый «Каталог» (решение владельца 08.11.2026): все справочники в одном разделе — оборудование ГШО, запчасти, комплекты ТО,
 // техника других производителей, склады, ТН ВЭД, компании группы и маршруты поставки. Выбранная вкладка — в адресе (?s=…).
 
-type Sec = "equipment" | "parts" | "kits" | "other" | "warehouses" | "hs" | "entities" | "routes";
+type Sec = "equipment" | "parts" | "applicability" | "kits" | "other" | "warehouses" | "hs" | "entities" | "routes";
 type Found = { models: { id: string; title: string; machine_type: string }[]; parts: { id: string; article: string; name_ru: string; manufacturer: string }[]; other: { id: string; title: string; machine_type: string }[] };
 
 export default function CatalogHub({ me }: { me: Me }) {
   const loc = useLocation();
+  const nv = useNewUiFlag();
   const nav = useNavigate();
   const qs = new URLSearchParams(loc.search);
   const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
@@ -27,6 +29,7 @@ export default function CatalogHub({ me }: { me: Me }) {
   const SECS: [Sec, string, boolean][] = [
     ["equipment", "Оборудование ГШО", true],
     ["parts", "Запасные части", partsReader],
+    ["applicability", "Проверка применимости", partsReader && nv],   // D-196: только новый вид
     ["kits", "Комплекты ТО", fleetReader],
     ["other", "Техника других производителей", true],
     ["warehouses", "Склады", partsReader],
@@ -39,12 +42,11 @@ export default function CatalogHub({ me }: { me: Me }) {
   // «Новый вид»: /catalog без ?s= — обзор: поиск и входы в разделы; ссылка на объект (?model=, ?part=) открывает раздел сразу
   const overview = !asked && !qs.get("model") && !qs.get("part");
   const sec: Sec | "" = overview ? "" : visible.some(([k]) => k === asked) ? asked : "equipment";
-  const HINTS: Record<Sec, string> = { equipment: "модели и исполнения ГШО, характеристики, цены, документы", parts: "артикулы, OEM и кросс-номера, остатки, цены", kits: "комплекты технического обслуживания по моделям",
+  const HINTS: Record<Sec, string> = { equipment: "модели и исполнения ГШО, характеристики, цены, документы", parts: "артикулы, OEM и кросс-номера, остатки, цены", applicability: "подтверждение связей «деталь — модель» с основанием", kits: "комплекты технического обслуживания по моделям",
     other: "техника других производителей для заявок на запчасти", warehouses: "склады компании", hs: "коды ТН ВЭД, ставки пошлин и НДС", entities: "компании группы для цепочек поставки", routes: "маршруты поставки и их параметры" };
   const go = (s: Sec, extra = "") => nav(`/catalog?s=${s}${extra}`);   // смена раздела — новая запись истории («Назад» возвращает прежний)
   const [q, setQ] = useState("");
   const [found, setFound] = useState<Found | null>(null);
-  const nv = useNewUiFlag();
   // новый вид: на обзоре — сколько моделей и запчастей (из тех же запросов, что и разделы)
   const [stats, setStats] = useState<{ models?: number; execs?: number; pending?: number; parts?: number; inStock?: number }>({});
   useEffect(() => {
@@ -87,7 +89,7 @@ export default function CatalogHub({ me }: { me: Me }) {
         </div>
       </div>
       {nv ? (() => {
-        const MAIN: Sec[] = ["equipment", "parts", "kits", "other"];
+        const MAIN: Sec[] = ["equipment", "parts", "applicability", "kits", "other"];
         const refs = visible.filter(([k]) => !MAIN.includes(k));
         return (
           <nav className="cat-nav" aria-label="Разделы каталога">
@@ -111,6 +113,7 @@ export default function CatalogHub({ me }: { me: Me }) {
           : k === "parts" && stats.parts != null ? [{ value: stats.parts, label: "карточек" }, { value: stats.inStock ?? "…", label: "в наличии", tone: "ok" as const }] : undefined }))} />}
       {sec === "equipment" && <CatalogPage me={me} embedded openModelId={qs.get("model") || undefined} />}
       {sec === "parts" && <PartsCatalog me={me} openId={qs.get("part") || undefined} />}
+      {sec === "applicability" && nv && <ApplicabilityQueue />}
       {sec === "kits" && <KitsBlock me={me} />}
       {sec === "other" && <OtherModelsBlock me={me} />}
       {sec === "warehouses" && <WarehousesBlock me={me} />}

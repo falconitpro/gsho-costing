@@ -288,6 +288,8 @@ function OrderCard({ id, engs: engsAll, onChanged }: { id: string; engs: Eng[]; 
       {act.has("work_add") && <label className="f sv-addwork">Добавить работу<select value="" disabled={busy} onChange={(e) => e.target.value && send("work_add", { work_type_id: e.target.value })}>
         <option value="">— вид работ —</option>{workTypes.map((w) => <option key={w.id} value={w.id}>{w.name} · {hrs(w.norm_hours)}</option>)}</select></label>}
 
+      {o.machine && <OrderParts orderId={o.id} />}
+
       <h3>Чек-лист{items.length > 0 && <span className="muted"> · {items.filter((i) => i.done).length} из {items.length}</span>}</h3>
       {items.length === 0 ? <p className="muted">Пунктов нет — у вида работ не задан шаблон.</p> : (
         <ul className="sv-check">{items.map((i) => (
@@ -695,4 +697,33 @@ function PermitsTab({ me, engOnly }: { me: Me; engOnly: boolean }) {
             </tr>))}</tbody>
         </table>)}
     </div>);
+}
+
+
+/* D-196 (J-b): запчасти для машины наряда — по применимости, со статусом проверки, без цен */
+type OPart = { id: string; article: string; name_ru: string; assembly: string; status: string; status_title: string; serial_check: boolean; serial_range: string; stock_total: number };
+const APPL_TONE_S: Record<string, string> = { confirmed: "ok", probable: "info", unverified: "warn", replaced: "" };
+
+function OrderParts({ orderId }: { orderId: string }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<OPart[] | null>(null);
+  const load = () => api.get<{ items: OPart[] }>(`/api/service/orders/${orderId}/parts${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""}`).then((r) => setRows(r.items)).catch(() => setRows([]));
+  useEffect(() => { if (open) load(); }, [open, orderId]);   // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <>
+      <h3>Запчасти для машины</h3>
+      {!open ? <button className="btn ghost" onClick={() => setOpen(true)}>Показать применимые запчасти</button> : <>
+        <form className="row sv-search" onSubmit={(e) => { e.preventDefault(); load(); }}>
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Артикул, название, узел" aria-label="Поиск запчасти" />
+          <button className="btn ghost">Найти</button></form>
+        {!rows ? <Loading /> : rows.length === 0 ? <p className="muted">По применимости ничего не найдено. Проверьте модель машины или добавьте применимость в каталоге.</p> : (
+          <ul className="sv-parts">{rows.map((p) => (
+            <li key={p.id}><div><b className="pc-mono">{p.article}</b> {p.name_ru}</div>
+              <div className="pc-sub">{p.assembly || "узел не указан"} · доступно {p.stock_total}
+                {p.serial_check && <> · <span className="sv-req">проверьте зав. № ({p.serial_range})</span></>}</div>
+              <span className={`badge ${APPL_TONE_S[p.status] || ""}`}>{p.status_title}</span></li>))}</ul>)}
+        <p className="muted sv-photo-note">«Не подтверждено» — связь заведена без проверки: сверьте номер перед заказом.</p>
+      </>}
+    </>);
 }
