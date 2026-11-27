@@ -618,6 +618,12 @@ def employee_update(employee_id: str, body: EmployeePatch, user: CurrentUser = D
     if "user_id" in data:
         _check_user_link(db, data["user_id"], e.id)
         e.user_id = data["user_id"] or None
+        if e.user_id:   # D-206: допуски, заведённые в сервисе на эту учётную запись, — к карточке сотрудника
+            from ..models import EngineerPermit
+            mine = set(db.scalars(select(EngineerPermit.permit_code).where(EngineerPermit.employee_id == e.id)).all())
+            for p in db.scalars(select(EngineerPermit).where(EngineerPermit.user_id == e.user_id, EngineerPermit.employee_id.is_(None))):
+                if p.permit_code not in mine:
+                    p.employee_id = e.id
     for k in ("last_name", "first_name", "middle_name"):
         if data.get(k) is not None:
             setattr(e, k, data[k].strip())

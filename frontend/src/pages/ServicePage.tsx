@@ -263,14 +263,14 @@ function OrderCard({ id, engs: engsAll, onChanged, engOnly }: { id: string; engs
           onClick={() => send("plan", { planned_start: iso(plan.start), planned_end: iso(plan.end) })}>Сохранить сроки</button></div>
       </div>}
       {override && <div className="alert warn sv-override">
-        <div>У сотрудника нет нужных допусков{(() => { const e = engs.find((x) => x.id === override.eng); return e?.gaps?.length ? `: ${e.gaps.map((g) => `${g.code} — ${g.problem === "missing" ? "нет" : "истёк " + fmtDate(g.valid_until)}`).join("; ")}` : ""; })()}. Назначить можно только с причиной — она попадёт в историю наряда.</div>
+        <div>У сотрудника нет нужных допусков{(() => { const e = engs.find((x) => x.id === override.eng); return e?.gaps?.length ? `: ${e.gaps.map((g) => `${g.code} — ${g.problem === "missing" ? "нет" : g.problem === "unfit" ? "не годен по медосмотру" : "истёк " + fmtDate(g.valid_until)}`).join("; ")}` : ""; })()}. Назначить можно только с причиной — она попадёт в историю наряда.</div>
         <label className="f">Причина<input value={override.reason} onChange={(e) => setOverride({ ...override, reason: e.target.value })} placeholder="Например: допуск оформляется, работает под надзором" /></label>
         <div className="row"><button className="btn" disabled={busy || !override.reason.trim()} onClick={() => send("assign", { engineer_id: override.eng, override_reason: override.reason.trim() })}>Назначить с причиной</button>
           <button className="btn ghost" onClick={() => setOverride(null)}>отмена</button></div>
       </div>}
       {(o.permits?.required.length || 0) > 0 && <div className={"sv-permit-line" + (o.permits!.gaps.length ? " bad" : "")}>
         Нужные допуски на {fmtDate(o.permits!.on)}: {o.permits!.required.join(", ")}
-        {o.engineer_id && (o.permits!.gaps.length ? <b> · у исполнителя нет: {o.permits!.gaps.map((g) => g.problem === "missing" ? g.code : `${g.code} (истёк)`).join(", ")}</b> : " · у исполнителя все есть")}
+        {o.engineer_id && (o.permits!.gaps.length ? <b> · у исполнителя нет: {o.permits!.gaps.map((g) => g.problem === "missing" ? g.code : g.problem === "unfit" ? `${g.code} (не годен)` : `${g.code} (истёк)`).join(", ")}</b> : " · у исполнителя все есть")}
       </div>}
 
       <h3>Диагностика</h3>

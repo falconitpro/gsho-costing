@@ -103,8 +103,14 @@ def test_request_order_flow_close_with_signature(client):  # noqa: F811
     assert _ok(client.get("/api/service/requests", headers=H(SVC), params={"q": req["number"]}))["items"][0]["status"] == "done"
     assert _ev(client, wo, "reopen").json()["event"]["result"] == "rejected"           # закрытый наряд не меняется
     # история — в реестре изменений
-    ch = _ok(client.get("/api/changes", headers=H(GD), params={"entity": "work_order", "limit": 2000}))
-    assert any(e["entity_id"] == wo["id"] and e["action"] == "close" for e in ch["events"])
+    seen, after = [], 0
+    while True:   # реестр за весь прогон тестов длиннее одной страницы — читаем по курсору до конца
+        ch = _ok(client.get("/api/changes", headers=H(GD), params={"entity": "work_order", "limit": 2000, "after": after}))
+        seen += ch["events"]
+        if ch["cursor"] == after:
+            break
+        after = ch["cursor"]
+    assert any(e["entity_id"] == wo["id"] and e["action"] == "close" for e in seen)
 
 
 def test_offline_close_becomes_ready_and_idempotent(client):  # noqa: F811

@@ -2860,6 +2860,7 @@ class ServicePermit(TimestampMixin, Base):
     code: Mapped[str] = mapped_column(String(32), unique=True)
     name: Mapped[str] = mapped_column(String(255))
     valid_months: Mapped[Optional[int]] = mapped_column(Integer)               # пусто — бессрочно
+    category: Mapped[str] = mapped_column(String(16), default="permit", server_default="permit")   # D-206: permit | training | briefing | medical
     is_draft: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     comment: Mapped[str] = mapped_column(Text, default="")
@@ -2968,10 +2969,15 @@ class EngineerPermit(TimestampMixin, Base):
     """Допуск сотрудника по справочнику service_permits: номер удостоверения и срок. Одна запись на допуск — продление
     меняет её (прежние значения — в журнале действий). Пустой срок — бессрочно."""
     __tablename__ = "engineer_permits"
-    __table_args__ = (UniqueConstraint("user_id", "permit_code", name="uq_engineer_permit"),)
+    __table_args__ = (UniqueConstraint("user_id", "permit_code", name="uq_engineer_permit"),
+                      Index("uq_engineer_permit_employee", "employee_id", "permit_code", unique=True, postgresql_where=sa_text("employee_id IS NOT NULL")),
+                      CheckConstraint("user_id IS NOT NULL OR employee_id IS NOT NULL", name="ck_engineer_permit_owner"))
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    # D-206 (L4): допуск принадлежит сотруднику «Персонала» (employee_id) и/или учётной записи CRM (user_id) — у рабочих без входа в CRM только employee_id
+    user_id: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"), index=True)
+    employee_id: Mapped[Optional[str]] = mapped_column(ForeignKey("hr_employees.id"), index=True)
     permit_code: Mapped[str] = mapped_column(String(32))
+    result: Mapped[str] = mapped_column(String(16), default="", server_default="")   # медосмотр: fit | limited | unfit — только итог, без диагноза
     number: Mapped[str] = mapped_column(String(64), default="")
     issued_on: Mapped[Optional[date]] = mapped_column(Date)
     valid_until: Mapped[Optional[date]] = mapped_column(Date)

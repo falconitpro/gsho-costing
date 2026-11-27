@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, fmtDate, getDevUser } from "../api";
 import { Crumbs, useQueryParam } from "../components/Levels";
 import { askPrompt } from "../components/Dialogs";
@@ -45,7 +46,7 @@ export default function HrPage({ me }: { me: Me }) {
         action={<button className="btn" onClick={() => setNewUi(true)}>Включить новый вид</button>} /></div>);
   if (!can(me, "hr_core")) return <div><h1>Персонал</h1><Empty title="Нет доступа к разделу «Персонал»" hint="Доступ выдаёт ЗГД: группа «Персонал» в «Уровнях доступа» и юрлица во вкладке «Доступ»." /></div>;
   if (!employers) return err ? <ErrorState hint={err} /> : <Loading />;
-  const tabs: [string, string][] = [["people", "Сотрудники"], ["org", "Оргструктура"], ["slots", "Штатное расписание"], ...(isAdmin ? [["access", "Доступ"] as [string, string]] : [])];
+  const tabs: [string, string][] = [["people", "Сотрудники"], ["org", "Оргструктура"], ["slots", "Штатное расписание"], ["adm", "Допуски"], ...(isAdmin ? [["access", "Доступ"] as [string, string]] : [])];
   const cur = tabs.some(([k]) => k === tab) ? tab! : "people";
   return (
     <div className="hr-page">
@@ -56,7 +57,7 @@ export default function HrPage({ me }: { me: Me }) {
       {employers.length === 0 && cur !== "access"
         ? <Empty title="Нет работодателей в вашей области" hint={isAdmin ? "Отметьте компании группы работодателями во вкладке «Доступ»." : "Попросите ЗГД добавить юрлица в вашу область доступа."} />
         : cur === "people" ? <People me={me} employers={employers} /> : cur === "org" ? <Org me={me} employers={employers} />
-          : cur === "slots" ? <Slots me={me} employers={employers} /> : <Access onChange={loadEmployers} />}
+          : cur === "slots" ? <Slots me={me} employers={employers} /> : cur === "adm" ? <AdmOverview me={me} /> : <Access onChange={loadEmployers} />}
     </div>);
 }
 
@@ -204,7 +205,7 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
   };
   const [st, tone] = STATUS[e.status] || [e.status, ""];
   const secs: [string, string][] = [["jobs", "Кадры"], ...(can(me, "hr_personal") ? [["personal", "Личные данные"] as [string, string]] : []),
-    ...(can(me, "hr_payroll") ? [["pay", "Оплата труда"] as [string, string]] : []), ["docs", "Документы и сканы"]];
+    ...(can(me, "hr_payroll") ? [["pay", "Оплата труда"] as [string, string]] : []), ["adm", "Допуски и обучение"], ["docs", "Документы и сканы"]];
   const curSec = secs.some(([k]) => k === sec) ? sec! : "jobs";
   const head = (
     <>
@@ -216,6 +217,7 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
   if (curSec === "personal") return <div className="hr-card">{head}<PersonalTab e={e} me={me} /></div>;
   if (curSec === "pay") return <div className="hr-card">{head}<PayTab e={e} me={me} /></div>;
   if (curSec === "docs") return <div className="hr-card">{head}<DocsTab e={e} /></div>;
+  if (curSec === "adm") return <div className="hr-card">{head}<AdmTab e={e} me={me} /></div>;
   return (
     <div className="hr-card">
       {head}
@@ -748,5 +750,127 @@ function DocsTab({ e }: { e: Employee }) {
               </tr>))}</tbody>
           </table>
         </section>))}
+    </div>);
+}
+
+/* ───────── допуски, обучение, инструктажи, медосмотры (D-206) — общий справочник и общая таблица с сервисом */
+
+type AdmKind = { code: string; name: string; category: string; valid_months: number | null; is_draft: boolean };
+type AdmKinds = { categories: Record<string, string>; results: Record<string, string>; items: AdmKind[] };
+type Adm = { id: string; permit_code: string; name: string; category: string; number: string; issued_on: string | null; valid_until: string | null;
+  result: string; result_title: string; comment: string; state: string; employee_id?: string; employee?: string; personnel_no?: string };
+const ADM_STATE: Record<string, [string, string]> = { ok: ["действует", "ok"], expiring: ["истекает", "warn"], expired: ["истёк", "bad"], unfit: ["не годен", "bad"] };
+
+function useAdmKinds() {
+  const [k, setK] = useState<AdmKinds | null>(null);
+  const load = () => api.get<AdmKinds>("/api/hr/admission-kinds").then(setK).catch(() => setK(null));
+  useEffect(() => { load(); }, []);
+  return { kinds: k, reload: load };
+}
+
+function AdmTab({ e, me }: { e: Employee; me: Me }) {
+  const { kinds } = useAdmKinds();
+  const [d, setD] = useState<{ items: Adm[]; has_login: boolean } | null>(null);
+  const [f, setF] = useState<{ permit_code: string; number: string; issued_on: string; valid_until: string; result: string; comment: string } | null>(null);
+  const [msg, setMsg] = useState("");
+  const edit = can(me, "hr_core", 2);
+  const load = () => api.get<NonNullable<typeof d>>(`/api/hr/employees/${e.id}/admissions`).then(setD).catch((x) => setMsg((x as Error).message));
+  useEffect(() => { load(); }, [e.id]);
+  if (!d || !kinds) return msg ? <ErrorState hint={msg} /> : <Loading />;
+  const kind = kinds.items.find((k) => k.code === f?.permit_code);
+  const save = async () => {
+    if (!f) return;
+    try { await api.put(`/api/hr/employees/${e.id}/admissions`, { ...f, issued_on: f.issued_on || null, valid_until: f.valid_until || null }); setF(null); load(); }
+    catch (x) { setMsg((x as Error).message); }
+  };
+  const del = async (a: Adm) => {
+    const ok = await askPrompt(`Удалить «${a.name}»? Запись останется в журнале действий. Напишите «да»:`, "", { title: "Удаление записи", required: true });
+    if (ok?.trim().toLowerCase() !== "да") return;
+    try { await api.del(`/api/hr/admissions/${a.id}`); load(); } catch (x) { setMsg((x as Error).message); }
+  };
+  const groups = Object.entries(kinds.categories).map(([c, t]) => [c, t, d.items.filter((x) => x.category === c)] as const).filter(([, , xs]) => xs.length);
+  return (
+    <div>
+      <p className="muted">Общие с сервисом: {d.has_login ? "назначая сотрудника на наряд, сервис проверяет эти допуски." : "у сотрудника нет входа в CRM — сервис его на наряды не назначает, но сроки видны здесь и в сводке."} Медосмотр — только итог и срок, без диагноза. Сканы удостоверений — во вкладке «Документы и сканы».</p>
+      {msg && <div className="alert warn" role="alert">{msg}</div>}
+      {edit && !f && <div className="row"><button className="btn add primary" onClick={() => setF({ permit_code: "", number: "", issued_on: today(), valid_until: "", result: "", comment: "" })}>Допуск, обучение или медосмотр</button></div>}
+      {f && <div className="card hr-form"><h3>Запись</h3>
+        <div className="grid cols-3">
+          <label className="f">Вид *<select value={f.permit_code} onChange={(x) => setF({ ...f, permit_code: x.target.value, result: "" })}><option value="">— выберите —</option>
+            {Object.entries(kinds.categories).map(([c, t]) => <optgroup key={c} label={t}>{kinds.items.filter((k) => k.category === c).map((k) => <option key={k.code} value={k.code}>{k.name}{k.valid_months ? ` · ${k.valid_months} мес.` : ""}</option>)}</optgroup>)}</select></label>
+          <label className="f">Номер удостоверения / протокола<input value={f.number} onChange={(x) => setF({ ...f, number: x.target.value })} /></label>
+          <label className="f">Дата выдачи / прохождения<input type="date" value={f.issued_on} onChange={(x) => setF({ ...f, issued_on: x.target.value })} /></label>
+          <label className="f">Действует до<input type="date" value={f.valid_until} placeholder="по справочнику" onChange={(x) => setF({ ...f, valid_until: x.target.value })} /></label>
+          {kind?.category === "medical" && <label className="f">Итог<select value={f.result} onChange={(x) => setF({ ...f, result: x.target.value })}><option value="">—</option>
+            {Object.entries(kinds.results).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>}
+          <label className="f">Комментарий<input value={f.comment} onChange={(x) => setF({ ...f, comment: x.target.value })} /></label>
+        </div>
+        <p className="muted">Срок не указан — считается от даты выдачи по справочнику{kind?.valid_months ? ` (${kind.valid_months} мес.)` : ""}; нет срока в справочнике — бессрочно. Тот же вид у сотрудника уже есть — запись продлевается.</p>
+        <div className="row"><button className="btn primary" disabled={!f.permit_code} onClick={save}>Сохранить</button><button className="btn ghost" onClick={() => setF(null)}>отмена</button></div>
+      </div>}
+      {groups.length === 0 ? <Empty title="Допусков пока нет" /> : groups.map(([c, t, xs]) => (
+        <section key={c} className="card hr-emp"><h3>{t}</h3>
+          <table className="pc-table nv-cards hr-events">
+            <thead><tr><th>Вид</th><th>Номер</th><th>Выдан</th><th>Действует до</th><th>Состояние</th><th /></tr></thead>
+            <tbody>{xs.map((a) => { const [st, tone] = ADM_STATE[a.state] || [a.state, ""]; return (
+              <tr key={a.id}>
+                <td className="pc-name">{a.name}<div className="pc-sub">{a.permit_code}{a.result_title ? ` · ${a.result_title}` : ""}</div>{a.comment && <div className="pc-sub">{a.comment}</div>}</td>
+                <td data-label="Номер">{a.number || "—"}</td>
+                <td data-label="Выдан">{a.issued_on ? fmtDate(a.issued_on) : "—"}</td>
+                <td data-label="Действует до">{a.valid_until ? fmtDate(a.valid_until) : "бессрочно"}</td>
+                <td data-label="Состояние"><span className={`badge ${tone}`}>{st}</span></td>
+                <td>{edit && <><button className="btn ghost" onClick={() => setF({ permit_code: a.permit_code, number: a.number, issued_on: today(), valid_until: "", result: a.result, comment: "" })}>продлить</button>
+                  <button className="btn ghost" onClick={() => del(a)}>удалить</button></>}</td>
+              </tr>); })}</tbody>
+          </table>
+        </section>))}
+    </div>);
+}
+
+function AdmOverview({ me }: { me: Me }) {
+  const { kinds, reload } = useAdmKinds();
+  const [days, setDays] = useState("30");
+  const [d, setD] = useState<{ items: Adm[] } | null>(null);
+  const [nk, setNk] = useState<{ code: string; name: string; category: string; valid_months: string } | null>(null);
+  const [msg, setMsg] = useState("");
+  const nav = useNavigate();
+  const edit = can(me, "hr_core", 2);
+  useEffect(() => { api.get<{ items: Adm[] }>(`/api/hr/admissions/overview?days=${days || 30}`).then(setD).catch((x) => setMsg((x as Error).message)); }, [days]);
+  const addKind = async () => {
+    if (!nk) return;
+    try { await api.post("/api/hr/admission-kinds", { ...nk, valid_months: nk.valid_months ? Number(nk.valid_months) : null }); setNk(null); reload(); setMsg("Добавлено в справочник"); }
+    catch (x) { setMsg((x as Error).message); }
+  };
+  return (
+    <div>
+      {msg && <div className="alert info" role="status">{msg}</div>}
+      <section className="card">
+        <div className="row hr-filters"><h3>Требуют внимания</h3>
+          <label className="f">Истекают в ближайшие, дней<input type="number" min="1" max="365" value={days} onChange={(x) => setDays(x.target.value)} /></label></div>
+        {!d ? <Loading /> : d.items.length === 0 ? <Empty title="Всё действует" hint="Нет истёкших, истекающих допусков и отметок «не годен»." /> : (
+          <table className="pc-table nv-cards hr-table">
+            <thead><tr><th>Сотрудник</th><th>Допуск, обучение, медосмотр</th><th>Действует до</th><th>Состояние</th></tr></thead>
+            <tbody>{d.items.map((a) => { const [st, tone] = ADM_STATE[a.state] || [a.state, ""]; return (
+              <tr key={a.id} className="hr-row" onClick={() => nav(`/hr?e=${a.employee_id}&s=adm`)}>
+                <td className="pc-name">{a.employee}<div className="pc-sub">{a.personnel_no}</div></td>
+                <td data-label="Что">{a.name}<div className="pc-sub">{a.permit_code}{a.result_title ? ` · ${a.result_title}` : ""}</div></td>
+                <td data-label="Действует до">{a.valid_until ? fmtDate(a.valid_until) : "—"}</td>
+                <td data-label="Состояние"><span className={`badge ${tone}`}>{st}</span></td>
+              </tr>); })}</tbody>
+          </table>)}
+      </section>
+      {kinds && <section className="card">
+        <div className="row"><h3>Справочник</h3>{edit && !nk && <button className="btn add" onClick={() => setNk({ code: "", name: "", category: "training", valid_months: "" })}>Вид</button>}</div>
+        <p className="muted">Общий с сервисом: виды работ в сервисе ссылаются на эти коды. Новые виды отсюда сразу видны и в сервисе.</p>
+        {nk && <div className="hr-form"><div className="grid cols-3">
+          <label className="f">Код *<input value={nk.code} placeholder="MED-PER" onChange={(x) => setNk({ ...nk, code: x.target.value })} /></label>
+          <label className="f">Название *<input value={nk.name} onChange={(x) => setNk({ ...nk, name: x.target.value })} /></label>
+          <label className="f">Категория<select value={nk.category} onChange={(x) => setNk({ ...nk, category: x.target.value })}>{Object.entries(kinds.categories).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+          <label className="f">Срок действия, мес.<input type="number" min="1" value={nk.valid_months} placeholder="бессрочно" onChange={(x) => setNk({ ...nk, valid_months: x.target.value })} /></label>
+        </div><div className="row"><button className="btn primary" disabled={!nk.code.trim() || !nk.name.trim()} onClick={addKind}>Добавить</button><button className="btn ghost" onClick={() => setNk(null)}>отмена</button></div></div>}
+        <ul className="hr-tree">{kinds.items.map((k) => (
+          <li key={k.code}><span>{k.name}</span><span className="muted"> · {k.code} · {kinds.categories[k.category] || k.category} · {k.valid_months ? `${k.valid_months} мес.` : "бессрочно"}</span>
+            {k.is_draft && <span className="badge">черновик</span>}</li>))}</ul>
+      </section>}
     </div>);
 }
