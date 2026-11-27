@@ -58,7 +58,7 @@ def make_deal() -> str:
 
 fails: list[str] = []
 visited = 0
-NEW_ONLY = {"/service"}   # D-192: разделы, которые есть только в новом виде (решение владельца «всё — только в новом виде»)
+NEW_ONLY = {"/service", "/hr"}   # D-192: разделы, которые есть только в новом виде (решение владельца «всё — только в новом виде»)
 
 
 VIEWS = [v for v in os.environ.get("UI_VIEWS", "classic,new").split(",") if v]
