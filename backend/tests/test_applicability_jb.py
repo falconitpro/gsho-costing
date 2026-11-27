@@ -234,3 +234,26 @@ def test_cross_refs_machine_oem_d202(client):
     found = _ok(client.get("/api/catalog/search", headers=H(MGR), params={"q": f"777{t}"}))["parts"]
     assert found and found[0]["article"] == f"777-{t}"
     assert other["id"]
+
+
+def test_part_documents_jf(client):
+    """D-203 (J-f): документы детали — ревизии по виду и языку, прежняя сохраняется, права, история."""
+    t = uuid.uuid4().hex[:5].upper()
+    p = _ok(client.post("/api/parts/catalog", headers=H(CD), json={"article": f"DC-{t}", "name_ru": "Деталь", "purchase_price": 1, "purchase_currency": "RUB"}), 201)
+    up = lambda rev, lang="zh", who=CD, kind="drawing": client.post(f"/api/parts/catalog/{p['id']}/documents", headers=H(who),  # noqa: E731
+                                                                   files={"file": (f"d{rev}.pdf", b"%PDF-1.4 test " + rev.encode())},
+                                                                   data={"kind": kind, "language": lang, "revision": rev})
+    assert up("A", who=LOG).status_code == 403
+    a = _ok(up("A"), 201)
+    b = _ok(up("B"), 201)
+    _ok(up("A", lang="ru"), 201)
+    assert b["supersedes_id"] == a["id"] and b["language_title"] == "китайский"
+    cur = _ok(client.get(f"/api/parts/catalog/{p['id']}/documents", headers=H(ENG)))["items"]
+    assert sorted((d["language"], d["revision"]) for d in cur) == [("ru", "A"), ("zh", "B")]
+    allv = _ok(client.get(f"/api/parts/catalog/{p['id']}/documents", headers=H(MGR), params={"all": "true"}))["items"]
+    assert len(allv) == 3 and any(d["id"] == a["id"] and not d["active"] for d in allv)
+    assert client.get(b["url"], headers=H(ENG)).content.endswith(b"B")
+    assert client.post(f"/api/parts/documents/{b['id']}/archive", headers=H(ENG)).status_code == 403
+    _ok(client.post(f"/api/parts/documents/{b['id']}/archive", headers=H(CD)))
+    h = _ok(client.get(f"/api/parts/catalog/{p['id']}/history", headers=H(CD)))["items"]
+    assert [x["title"] for x in h][:2] == ["Документ снят с актуальных", "Загружен документ"]

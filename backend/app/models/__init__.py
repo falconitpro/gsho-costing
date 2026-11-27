@@ -3097,3 +3097,27 @@ class EquipmentAssembly(TimestampMixin, Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+# ───────────────────────── J-f (D-203): документы детали ─────────────────────────
+
+class PartDocument(Base):
+    """Документ детали: чертёж, сертификат, инструкция, лист каталога и т. п. — с ревизией и языком.
+    Новая ревизия того же вида и языка делает прежнюю неактуальной (active = false); прежние сохраняются."""
+    __tablename__ = "part_documents"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    part_id: Mapped[str] = mapped_column(ForeignKey("parts.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(24))                  # drawing | certificate | instruction | catalog_page | spec | photo | other
+    title: Mapped[str] = mapped_column(String(255), default="")
+    language: Mapped[str] = mapped_column(String(8), default="ru")
+    revision: Mapped[str] = mapped_column(String(64), default="")
+    file_name: Mapped[str] = mapped_column(String(255))
+    storage_path: Mapped[str] = mapped_column(Text)
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    sha256: Mapped[str] = mapped_column(String(64), default="")
+    supersedes_id: Mapped[Optional[str]] = mapped_column(ForeignKey("part_documents.id", ondelete="SET NULL"))
+    valid_until: Mapped[Optional[date]] = mapped_column(Date)      # сертификат / декларация — срок действия
+    comment: Mapped[str] = mapped_column(Text, default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    uploaded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
