@@ -869,3 +869,44 @@ def document_file(doc_id: str, user: CurrentUser = Depends(_orders_reader), db: 
     os.close(fd)
     adapters.storage().download(d.storage_path, path)
     return file_response(path, d.filename, inline=False, background=BackgroundTask(os.unlink, path))
+
+
+# ─────────────── J-e (D-201): комплекты ТО в наряде ───────────────
+
+@router.get("/orders/{order_id}/kits")
+def order_kits(order_id: str, user: CurrentUser = Depends(_orders_reader), db: Session = Depends(get_db)):
+    """Комплекты ТО для машины наряда (модель и диапазон заводских номеров): работы и запчасти, без цен."""
+    wo = _get_order(db, user, order_id)
+    m = db.get(ClientMachine, wo.machine_id) if wo.machine_id else None
+    if m is None:
+        return {"items": []}
+    from .parts_fleet import kits_for_machine
+    return {"items": [{"id": k.id, "name": k.name, "interval_hours": k.interval_hours, "works": k.works or [],
+                       "lines": [{kk: ln.get(kk) for kk in ("part_id", "article", "name", "qty", "assembly")} for ln in (k.lines or [])],
+                       "serial_range": " — ".join(x for x in (k.serial_from, k.serial_to) if x)} for k in kits_for_machine(db, m)]}
+
+
+class AddKitIn(BaseModel):
+    kit_id: str
+
+
+@router.post("/estimates/{eid}/add-kit")
+def estimate_add_kit(eid: str, body: AddKitIn, user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
+    """Запчасти комплекта ТО — в черновик сметы (цена из каталога, только если валюта совпадает; иначе «не задана»)."""
+    from ..models import MaintenanceKit
+    est = _est_or_404(db, user, eid)
+    if est.status != "draft":
+        raise HTTPException(422, "Править можно только черновик сметы")
+    k = db.get(MaintenanceKit, body.kit_id)
+    if k is None:
+        raise HTTPException(404, "Комплект не найден")
+    cur = se.lines_of(db, est)
+    rows = [{kk: getattr(x, kk) for kk in ("kind", "part_id", "work_id", "title", "article", "qty", "unit", "price", "discount_pct", "note")} for x in cur]
+    for ln in k.lines or []:
+        p = db.get(_Part, ln["part_id"]) if ln.get("part_id") else None
+        price = p.sale_price if p is not None and p.sale_price is not None and (p.sale_currency or "") == est.currency else None
+        rows.append({"kind": "part" if p else "other", "part_id": p.id if p else None, "title": p.name_ru if p else (ln.get("name") or ln.get("article") or "запчасть"),
+                     "article": ln.get("article") or "", "qty": ln.get("qty") or 1, "price": price, "note": f"комплект {k.name}" + ("" if p else " · нет карточки в каталоге")})
+    _est_err(lambda: se.set_lines(db, est, rows))
+    db.commit()
+    return _est_payload(db, est)

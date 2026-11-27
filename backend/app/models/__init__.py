@@ -2432,6 +2432,10 @@ class MaintenanceKit(TimestampMixin, Base):
     lines: Mapped[list[dict]] = mapped_column(JSONType, default=list)                # [{part_id, article, name, qty}]
     source: Mapped[str] = mapped_column(String(16), default="manual")                # manual | deal_zip (ЗИП на ТО из RFQ сделки)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # J-e (D-201): работы из справочника сервиса и диапазон заводских номеров машин, к которым подходит комплект
+    works: Mapped[list[dict]] = mapped_column(JSONType, default=list)                # [{work_type_id, code, title, norm_hours}]
+    serial_from: Mapped[str] = mapped_column(String(64), default="")
+    serial_to: Mapped[str] = mapped_column(String(64), default="")
 
 
 class MachineReminder(Base):
