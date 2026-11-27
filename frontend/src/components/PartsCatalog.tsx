@@ -11,7 +11,31 @@ import { askConfirm } from "./Dialogs";
 type Cross = { kind: string; number: string; supplier_id: string | null; manufacturer: string; comment: string };
 type Appl = { id?: string; equipment_model_id: string | null; other_manufacturer: string; other_model: string; assembly: string; model_title?: string;
   status?: string; status_title?: string; serial_from?: string; serial_to?: string; basis_kind?: string; basis?: string; verified_by?: string | null;
-  verified_by_name?: string; verified_at?: string | null; execution_id?: string | null; execution_name?: string };
+  verified_by_name?: string; verified_at?: string | null; execution_id?: string | null; execution_name?: string; assembly_id?: string | null };
+
+type Asm = { id: string; name_ru: string; name_en: string; name_cn: string; scope: string };
+const asmCache: Record<string, Promise<Asm[]>> = {};
+const loadAsm = (modelId: string | null) => (asmCache[modelId || ""] ??= api.get<{ items: Asm[] }>(`/api/parts/assemblies${modelId ? `?model_id=${modelId}` : ""}`).then((r) => r.items).catch(() => []));
+
+/** D-200 (J-c): узел из справочника (общий и узлы модели) или свой текст — только новый вид. */
+function AsmPick({ a, edit, onChange }: { a: Appl; edit: boolean; onChange: (p: Partial<Appl>) => void }) {
+  const [list, setList] = useState<Asm[]>([]);
+  const [own, setOwn] = useState(!a.assembly_id && !!a.assembly);
+  useEffect(() => { loadAsm(a.equipment_model_id).then(setList); }, [a.equipment_model_id]);
+  if (own) return (
+    <span className="pc-asm"><input placeholder="узел / агрегат (свой текст)" value={a.assembly} disabled={!edit} onChange={(e) => onChange({ assembly: e.target.value, assembly_id: null })} />
+      {edit && <button type="button" className="btn ghost sv-mini" onClick={() => setOwn(false)}>из справочника</button>}</span>);
+  return (
+    <select className="pc-asm" value={a.assembly_id || ""} disabled={!edit} aria-label="Узел / агрегат" onChange={(e) => {
+      if (e.target.value === "__own") { setOwn(true); return; }
+      const x = list.find((l) => l.id === e.target.value); onChange({ assembly_id: x?.id || null, assembly: x?.name_ru || "" });
+    }}>
+      <option value="">узел не указан</option>
+      {list.filter((x) => x.scope === "model").length > 0 && <optgroup label="Узлы модели">{list.filter((x) => x.scope === "model").map((x) => <option key={x.id} value={x.id}>{x.name_ru}</option>)}</optgroup>}
+      <optgroup label="Общий справочник">{list.filter((x) => x.scope === "general").map((x) => <option key={x.id} value={x.id}>{x.name_ru}{x.name_cn ? ` · ${x.name_cn}` : ""}</option>)}</optgroup>
+      <option value="__own">свой текст…</option>
+    </select>);
+}
 const APPL_STATUS: Record<string, string> = { confirmed: "Подтверждено", probable: "Вероятно", unverified: "Не подтверждено", not_applicable: "Не подходит", replaced: "Заменена" };
 const APPL_BASIS: Record<string, string> = { manual: "Каталог / руководство завода", supplier: "Поставщик", service: "Опыт сервиса", analog: "По аналогии", comment: "Комментарий" };
 
@@ -251,7 +275,8 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
               {a.model_title ? <span className="badge">{a.model_title}</span> : a.equipment_model_id ? <span className="badge">{models.find((m) => m.id === a.equipment_model_id)?.title || "модель каталога"}</span> : <>
                 <input placeholder="производитель машины" value={a.other_manufacturer} disabled={!edit} onChange={(e) => set({ applicability: cur.applicability.map((x, j) => (j === i ? { ...x, other_manufacturer: e.target.value } : x)) })} />
                 <input placeholder="модель" value={a.other_model} disabled={!edit} onChange={(e) => set({ applicability: cur.applicability.map((x, j) => (j === i ? { ...x, other_model: e.target.value } : x)) })} /></>}
-              <input placeholder="узел / агрегат" value={a.assembly} disabled={!edit} onChange={(e) => set({ applicability: cur.applicability.map((x, j) => (j === i ? { ...x, assembly: e.target.value } : x)) })} />
+              {nv ? <AsmPick a={a} edit={edit} onChange={(patch) => set({ applicability: cur.applicability.map((x, j) => (j === i ? { ...x, ...patch } : x)) })} />
+                : <input placeholder="узел / агрегат" value={a.assembly} disabled={!edit} onChange={(e) => set({ applicability: cur.applicability.map((x, j) => (j === i ? { ...x, assembly: e.target.value } : x)) })} />}
               {edit && <button className="btn ghost" onClick={() => set({ applicability: cur.applicability.filter((_, j) => j !== i) })}>удалить</button>}
             </div>))}
           {edit && nv && models.length > 0 && <select className="pc-addmodel" value="" aria-label="Добавить модель из каталога ГШО" onChange={(e) => { if (e.target.value) set({ applicability: [...cur.applicability, { equipment_model_id: e.target.value, other_manufacturer: "", other_model: "", assembly: "" }] }); }}>

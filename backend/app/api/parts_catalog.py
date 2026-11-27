@@ -16,7 +16,7 @@ from ..core.files import file_response
 from ..core.roles import Role
 from ..db import get_db
 from ..models import (
-    Client, EquipmentExecution, EquipmentModel, Factory, User, LegalEntity, Part, PartApplicability, PartClientPrice, PartCrossRef, PartStock, SupplyRoute, Warehouse,
+    Client, EquipmentAssembly, EquipmentExecution, EquipmentModel, Factory, User, LegalEntity, Part, PartApplicability, PartClientPrice, PartCrossRef, PartStock, SupplyRoute, Warehouse,
 )
 from ..services import applicability as app_svc
 from ..services.deal_service import audit
@@ -262,6 +262,7 @@ class ApplicabilityIn(BaseModel):
     assembly: str = ""
     # J-b: не переданы (прежний вид, импорт) — у существующей связи не меняются, у новой — «не подтверждено»
     execution_id: Optional[str] = None
+    assembly_id: Optional[str] = None         # J-c: узел из справочника (текст assembly подставляется из него)
     status: str = "unverified"
     serial_from: str = Field(default="", max_length=64)
     serial_to: str = Field(default="", max_length=64)
@@ -351,6 +352,10 @@ def _check_app(db: Session, a: ApplicabilityIn) -> None:
         raise HTTPException(422, "Основание — из списка")
     if "status" in a.model_fields_set and a.status in app_svc.NEED_BASIS and not (a.basis.strip() or a.basis_kind):
         raise HTTPException(422, f"Для статуса «{app_svc.STATUSES[a.status]}» укажите основание")
+    if a.assembly_id:
+        asm = db.get(EquipmentAssembly, a.assembly_id)
+        if asm is None or (asm.model_id and asm.model_id != a.equipment_model_id):
+            raise HTTPException(422, "Узел — из общего справочника или узлов этой модели")
     if a.execution_id:
         ex = db.get(EquipmentExecution, a.execution_id)
         if ex is None or ex.model_id != a.equipment_model_id:
@@ -367,6 +372,12 @@ def _merge_applicability(db: Session, p: Part, rows: list[ApplicabilityIn], user
         cur = old.get(r.id or "") or by_key.get(tuple(getattr(r, k) or "" for k in _APP_KEY))
         if cur is None or cur in out:
             cur = PartApplicability(status="unverified")
+        if "assembly_id" in r.model_fields_set:
+            asm = db.get(EquipmentAssembly, r.assembly_id) if r.assembly_id else None
+            r.assembly = asm.name_ru if asm else r.assembly
+            cur.assembly_id = asm.id if asm else None
+        elif cur.assembly_id and (r.assembly or "") != (cur.assembly or ""):
+            cur.assembly_id = None                      # текст узла изменили вручную — ссылка на справочник снимается
         for k in _APP_KEY:
             setattr(cur, k, getattr(r, k))
         before = {k: getattr(cur, k) for k in ("status", "basis_kind", "basis")}
@@ -713,3 +724,77 @@ def part_history(pid: str, limit: int = 100, db: Session = Depends(get_db), user
         out.append({"id": r.id, "at": r.at.isoformat() if r.at else None, "user_name": who.get(r.user_id or "", ""), "action": r.action,
                     "title": title, "changes": changes})
     return {"items": out}
+
+
+
+# ------------------------------------------------------------------ J-c (D-200): узлы и агрегаты
+
+def _asm_payload(a: EquipmentAssembly, used: dict[str, int]) -> dict:
+    return {**serialize(a), "scope": "model" if a.model_id else "general", "used": used.get(a.id, 0)}
+
+
+@router.get("/assemblies")
+def assemblies(model_id: str = "", all: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Узлы для выбора: общий справочник и узлы модели (model_id). all=1 — включая неиспользуемые (is_active=false)."""
+    from ..services import assemblies as asm_svc
+    rows = asm_svc.for_model(db, model_id or None) if not all else db.scalars(
+        select(EquipmentAssembly).where(or_(EquipmentAssembly.model_id.is_(None), EquipmentAssembly.model_id == (model_id or None)))
+        .order_by(EquipmentAssembly.model_id.is_(None), EquipmentAssembly.position, EquipmentAssembly.name_ru)).all()
+    used = dict(db.execute(select(PartApplicability.assembly_id, func.count()).where(PartApplicability.assembly_id.is_not(None))
+                           .group_by(PartApplicability.assembly_id)).all())
+    return {"items": [_asm_payload(a, used) for a in rows], "can_edit": user.has(*EDIT_ROLES)}
+
+
+class AssemblyIn(BaseModel):
+    model_id: Optional[str] = None
+    parent_id: Optional[str] = None
+    code: str = Field(default="", max_length=32)
+    name_ru: str = Field(min_length=1, max_length=255)
+    name_en: str = Field(default="", max_length=255)
+    name_cn: str = Field(default="", max_length=255)
+    position: int = 0
+    is_active: bool = True
+
+
+def _asm_check(db: Session, body: AssemblyIn, self_id: Optional[str] = None) -> None:
+    from ..services.assemblies import norm
+    if body.model_id and db.get(EquipmentModel, body.model_id) is None:
+        raise HTTPException(422, "Нет такой модели")
+    if body.parent_id:
+        par = db.get(EquipmentAssembly, body.parent_id)
+        if par is None or par.id == self_id or (par.model_id and par.model_id != body.model_id):
+            raise HTTPException(422, "Родительский узел — из общего справочника или этой модели")
+    same = db.scalars(select(EquipmentAssembly).where(EquipmentAssembly.model_id.is_(None) if not body.model_id else EquipmentAssembly.model_id == body.model_id)).all()
+    if any(norm(x.name_ru) == norm(body.name_ru) and x.id != self_id for x in same):
+        raise HTTPException(409, "Такой узел уже есть")
+
+
+@router.post("/assemblies", status_code=201)
+def assembly_create(body: AssemblyIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    _asm_check(db, body)
+    a = EquipmentAssembly(**{**body.model_dump(), "name_ru": body.name_ru.strip()}, created_by=user.id)
+    db.add(a)
+    db.flush()
+    audit(db, user.id, None, "equipment_assembly", a.id, "create", None, body.model_dump())
+    db.commit()
+    return _asm_payload(a, {})
+
+
+@router.put("/assemblies/{aid}")
+def assembly_update(aid: str, body: AssemblyIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    a = db.get(EquipmentAssembly, aid)
+    if a is None:
+        raise HTTPException(404, "Узел не найден")
+    if body.model_id != a.model_id:
+        raise HTTPException(422, "Узел нельзя перенести между моделью и общим справочником")
+    _asm_check(db, body, a.id)
+    before = serialize(a)
+    old_name = a.name_ru
+    for k, v in body.model_dump().items():
+        setattr(a, k, v.strip() if isinstance(v, str) else v)
+    if old_name != a.name_ru:                           # переименование — текст узла в связях меняется вместе с ним
+        for ap in db.scalars(select(PartApplicability).where(PartApplicability.assembly_id == a.id)).all():
+            ap.assembly = a.name_ru
+    audit(db, user.id, None, "equipment_assembly", a.id, "update", before, serialize(a))
+    db.commit()
+    return _asm_payload(a, {})
