@@ -577,7 +577,7 @@ def applicability_queue(status: str = "unverified", model_id: str = "", q: str =
     ids = {a.verified_by for a, _ in rows if a.verified_by}
     names = {u.id: u.display_name for u in db.scalars(select(User).where(User.id.in_(ids))).all()} if ids else {}
     return {"items": [_app_row(db, a, p, names) for a, p in rows], "counts": counts, "statuses": app_svc.STATUSES,
-            "basis_kinds": app_svc.BASIS_KINDS, "need_basis": sorted(app_svc.NEED_BASIS), "can_edit": user.has(*EDIT_ROLES)}
+            "basis_kinds": app_svc.BASIS_KINDS, "need_basis": sorted(app_svc.NEED_BASIS), "can_edit": user.has(*VERIFY_ROLES)}
 
 
 class VerifyIn(BaseModel):
@@ -589,8 +589,17 @@ class VerifyIn(BaseModel):
     execution_id: Optional[str] = None
 
 
+VERIFY_ROLES = (*EDIT_ROLES, Role.SERVICE_HEAD)   # D-197: руководитель сервиса утверждает применимость (решение владельца 27.11)
+
+
+def _verifier(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    if not user.has(*VERIFY_ROLES):
+        raise HTTPException(403, "Применимость проверяют менеджеры, закупки, КД, ЗГД, руководитель сервиса и администратор")
+    return user
+
+
 @router.post("/applicability/{aid}/verify")
-def applicability_verify(aid: str, body: VerifyIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+def applicability_verify(aid: str, body: VerifyIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_verifier)):
     """Отметить проверку связи: статус и основание (для «подтверждено», «не подходит», «заменена» — обязательно)."""
     a = db.get(PartApplicability, aid)
     if a is None:

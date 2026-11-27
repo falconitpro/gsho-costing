@@ -45,7 +45,8 @@ def test_catalog_hub():
         assert _ok(c.get(f"/api/catalog/search?q={model['model'][:4]}", headers=H(MGR)))["models"]
         assert _ok(c.get(f"/api/catalog/search?q={art}", headers=H(MGR)))["parts"][0]["id"] == p["id"]
         assert _ok(c.get(f"/api/catalog/search?q=X-{t}", headers=H(MGR)))["parts"][0]["id"] == p["id"]
-        assert _ok(c.get("/api/catalog/search?q=a", headers=H(MGR))) == {"models": [], "parts": [], "other": []}
+        short = _ok(c.get("/api/catalog/search?q=a", headers=H(MGR)))   # D-197: короче 2 символов — пусто во всех группах
+        assert all(short[k] == [] for k in ("models", "executions", "parts", "other", "machines"))
         # карточка модели: применимые запчасти и комплекты ТО
         bm = _ok(c.get(f"/api/parts/catalog/by-model/{model['id']}", headers=H(LOG)))
         assert any(x["id"] == p["id"] and x["assembly"] == "Двигатель" for x in bm["parts"])

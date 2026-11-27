@@ -15,7 +15,8 @@ import { GroupSetupBlock } from "./PartsSetupPage";
 // техника других производителей, склады, ТН ВЭД, компании группы и маршруты поставки. Выбранная вкладка — в адресе (?s=…).
 
 type Sec = "equipment" | "parts" | "applicability" | "kits" | "other" | "warehouses" | "hs" | "entities" | "routes";
-type Found = { models: { id: string; title: string; machine_type: string }[]; parts: { id: string; article: string; name_ru: string; manufacturer: string }[]; other: { id: string; title: string; machine_type: string }[] };
+type Found = { models: { id: string; title: string; machine_type: string; match?: string }[]; parts: { id: string; article: string; name_ru: string; manufacturer: string; match?: string; exact?: boolean }[];
+  other: { id: string; title: string; machine_type: string }[]; machines?: { id: string; title: string; serial: string; client_name: string; client_id: string; exact?: boolean }[] };
 
 export default function CatalogHub({ me }: { me: Me }) {
   const loc = useLocation();
@@ -67,7 +68,7 @@ export default function CatalogHub({ me }: { me: Me }) {
     return () => clearTimeout(t);
   }, [q]);
   const pick = (s: Sec, extra: string) => { setQ(""); setFound(null); go(s, extra); };
-  const nothing = found && !found.models.length && !found.parts.length && !found.other.length;
+  const nothing = found && !found.models.length && !found.parts.length && !found.other.length && !(nv && found.machines?.length);
 
   return (
     <>
@@ -75,14 +76,19 @@ export default function CatalogHub({ me }: { me: Me }) {
       <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 12, marginBottom: 6 }}>
         <h1 style={{ margin: 0 }}>Каталог</h1>
         <div style={{ position: "relative", maxWidth: "100%" }}>
-          <input placeholder="Поиск: модель, исполнение, артикул, OEM, кросс-номер…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 340, maxWidth: "100%" }} />
+          <input placeholder={nv ? "Поиск: модель, исполнение, артикул, OEM, кросс, зав. №" : "Поиск: модель, исполнение, артикул, OEM, кросс-номер…"} value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 340, maxWidth: "100%" }} />
           {found && (
             <div className="card" style={{ position: "absolute", right: 0, top: "100%", zIndex: 20, width: 420, maxWidth: "calc(100vw - 20px)", maxHeight: 420, overflow: "auto", marginTop: 4, padding: 10, fontSize: 13 }}>
               {nothing && <div className="muted">Ничего не найдено</div>}
               {found.models.length > 0 && <><div className="muted" style={{ fontSize: 11, margin: "2px 0" }}>Оборудование ГШО</div>
-                {found.models.map((m) => <div key={m.id}><a href="#" onClick={(e) => { e.preventDefault(); pick("equipment", `&model=${m.id}`); }}><b>{m.title}</b></a> <span className="muted">{m.machine_type}</span></div>)}</>}
+                {found.models.map((m) => <div key={m.id}><a href="#" onClick={(e) => { e.preventDefault(); pick("equipment", `&model=${m.id}`); }}><b>{m.title}</b></a> <span className="muted">{m.machine_type}</span>
+                  {nv && m.match && m.match !== "модель" && <div className="cat-match">{m.match}</div>}</div>)}</>}
               {found.parts.length > 0 && partsReader && <><div className="muted" style={{ fontSize: 11, margin: "8px 0 2px" }}>Запасные части</div>
-                {found.parts.map((p) => <div key={p.id}><a href="#" onClick={(e) => { e.preventDefault(); pick("parts", `&part=${p.id}`); }}><b>{p.article}</b></a> {p.name_ru}{p.manufacturer && <span className="muted"> · {p.manufacturer}</span>}</div>)}</>}
+                {found.parts.map((p) => <div key={p.id}><a href="#" onClick={(e) => { e.preventDefault(); pick("parts", `&part=${p.id}`); }}><b>{p.article}</b></a> {p.name_ru}{p.manufacturer && <span className="muted"> · {p.manufacturer}</span>}
+                  {nv && p.match && <div className="cat-match">{p.exact ? "точное совпадение · " : ""}{p.match}</div>}</div>)}</>}
+              {nv && (found.machines?.length || 0) > 0 && <><div className="muted" style={{ fontSize: 11, margin: "8px 0 2px" }}>Машины клиентов</div>
+                {found.machines!.map((m) => <div key={m.id}><a href="#" onClick={(e) => { e.preventDefault(); setQ(""); setFound(null); nav(`/clients?client=${m.client_id}`); }}><b>{m.serial}</b></a> {m.title}
+                  <div className="cat-match">{m.client_name}{m.exact ? " · точное совпадение" : ""}</div></div>)}</>}
               {found.other.length > 0 && <><div className="muted" style={{ fontSize: 11, margin: "8px 0 2px" }}>Техника других производителей</div>
                 {found.other.map((o) => <div key={o.id}><a href="#" onClick={(e) => { e.preventDefault(); pick("other", ""); }}>{o.title}</a> <span className="muted">{o.machine_type}</span></div>)}</>}
             </div>)}
