@@ -2291,3 +2291,4 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
 .sv-parts { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; }
 .sv-parts li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; border-bottom: 1px solid var(--line); padding: 6px 0; }
 .sv-parts li > .pc-sub { grid-column: 1; } .sv-parts li > .badge { grid-row: 1 / span 2; grid-column: 2; }
+.cat-match { font-size: 11px; color: var(--muted); margin: 0 0 4px; } /* D-197: причина совпадения в поиске Каталога */
