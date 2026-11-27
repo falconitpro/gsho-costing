@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from ...core.roles import READ
 from ...models import Contract, ContractClaim, Deal, ExecutionStage, FinanceObligation
 from .. import legal_contracts as legal
+from ...core.clock import today as msk_today
 
 SECURITY_KINDS = {"bank_guarantee": "банковская гарантия", "lc": "аккредитив", "retention": "гарантийное удержание", "advance_guarantee": "гарантия возврата аванса"}
 PEN_GROUP = {"accruing": "accruing", "accrued": "accrued", "claimed": "claimed", "recognized": "recognized", "paid": "paid", "waived": "waived"}
@@ -52,7 +53,7 @@ def _factory_hidden(user, c: Contract) -> bool:
 
 def build(db: Session, user, vis, today: Optional[date] = None, deal_id: Optional[str] = None, contract_id: Optional[str] = None,
           direction: Optional[str] = None, status: Optional[str] = None, kind: Optional[str] = None) -> dict:
-    today = today or date.today()
+    today = today or msk_today()
     q = select(Contract).where(Contract.status.in_(CONTRACT_STATUSES))
     if contract_id:
         q = q.where(Contract.id == contract_id)

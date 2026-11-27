@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..core.roles import Role
 from ..core.workflow import STATUS_TITLES as STATUS_NAMES, DealStatus
+from ..core.clock import msk_date
 
 LOGISTICS = ("readiness", "shipment", "border", "declaration", "delivery")
 PAYMENTS = ("client_advance", "client_final", "factory_advance", "factory_final", "lc_opened")
@@ -152,7 +153,7 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
         bank_last = max([x for x in (b1, b2) if x], default=None)
         if bank_last is None:
             rec_q, rec_note = "unverified", "банковские операции в «Финансах» не загружались — оплата могла прийти"
-        elif CAL.working_days_between(bank_last.date(), today) > STALE_BANK_DAYS:
+        elif CAL.working_days_between(msk_date(bank_last), today) > STALE_BANK_DAYS:
             rec_q, rec_note = "stale", f"последняя банковская операция загружена {bank_last:%d.%m} — выписки устарели"
     kpis = [
         _kpi("active", "Активные сделки", len(open_deals) + len(open_parts), (_money(in_work) + " в работе · " if fin else "") + f"ГШО {len(open_deals)} · ЗЧ {len(open_parts)}",
@@ -331,7 +332,7 @@ def build(db: Session, user, *, today: date, names: dict, fin: bool, open_deals:
         return "bad" if bad else "warn" if warn else "ok"
 
     kp_late = [d for d in open_deals if d.kp_due and d.kp_due < today and d.status not in (DealStatus.KP_SENT,)]
-    stale = [d for d in open_deals if d.status == DealStatus.DRAFT and d.updated_at and (today - d.updated_at.date()).days >= 7]
+    stale = [d for d in open_deals if d.status == DealStatus.DRAFT and d.updated_at and (today - msk_date(d.updated_at)).days >= 7]
     lg, py, fc, sv = late_by(LOGISTICS), late_by(PAYMENTS), late_by(FACTORY), late_by(SERVICE)
     try:
         wc_open = db.scalar(select(func.count(WarrantyClaim.id)).where(WarrantyClaim.status.not_in(("closed",)))) or 0

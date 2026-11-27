@@ -23,6 +23,7 @@ from ..models import Attachment, Deal, DealVersion, PlanFactEntry, Task
 from ..services import settings_service
 from ..services.deal_service import audit
 from .common import can_see_deal, get_deal_or_404, serialize
+from ..core.clock import msk_date, today as msk_today
 
 router = APIRouter(prefix="/api", tags=["tasks-files-planfact"])
 
@@ -32,7 +33,7 @@ router = APIRouter(prefix="/api", tags=["tasks-files-planfact"])
 @router.get("/tasks/my")
 def my_tasks(db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     rows = db.scalars(select(Task).where(Task.done_at.is_(None)).order_by(Task.due)).all()
-    today = date.today()
+    today = msk_today()
     out = []
     for t in rows:
         if t.assignee_id == user.id or t.assignee_id in user.acting_for or (t.assignee_id is None and Role(t.role) in user.roles):
@@ -82,7 +83,7 @@ def task_done(task_id: str, body: TaskDoneIn, db: Session = Depends(get_db), use
 @router.get("/board")
 def board(db: Session = Depends(get_db), user: CurrentUser = Depends(require_roles(Role.CD, Role.FD, Role.GD, Role.OBSERVER))):
     """Доска сделок для руководства: по статусам, с просрочками."""
-    today = date.today()
+    today = msk_today()
     deals = [d for d in db.scalars(select(Deal).where(Deal.archived_at.is_(None)).order_by(Deal.updated_at.desc())).all() if can_see_deal(user, d)]
     tasks = db.scalars(select(Task).where(Task.done_at.is_(None))).all()
     by_deal: dict[str, list] = {}
@@ -136,7 +137,7 @@ def overdue_report(date_from: Optional[date] = None, date_to: Optional[date] = N
     from ..models import User
     if not user.has(Role.GD):
         raise HTTPException(403, "История просрочек доступна только ЗГД")
-    today = date.today()
+    today = msk_today()
     users = {u.id: u for u in db.scalars(select(User)).all()}
     q = select(Task)
     if date_from:
@@ -157,7 +158,7 @@ def overdue_report(date_from: Optional[date] = None, date_to: Optional[date] = N
                                      "roles": [role_title(r) for r in (u.roles if u else [t.role])], "tasks": 0, "overdue": 0,
                                      "open_overdue": 0, "days_total": 0, "days_max": 0})
         s["tasks"] += 1
-        done_on = t.done_at.date() if isinstance(t.done_at, _dt) else t.done_at
+        done_on = msk_date(t.done_at) if isinstance(t.done_at, _dt) else t.done_at
         late = (done_on - t.due).days if done_on else (today - t.due).days
         if late <= 0:
             continue
@@ -522,7 +523,7 @@ def plan_fact(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = D
                      "deviation_pct": None if dev_pct is None else round(dev_pct, 2), "flag": dev_pct is not None and abs(dev_pct) > thr})
     cost_fact = sum(fact_by_item.values()) if fact_by_item else None
     revenue_fact = float(rec["revenue_rub"]) if rec["revenue_rub"] is not None else None
-    cash = fin_economy.cash(db, fin_access.Visibility(db, user), deal.id, date.today())
+    cash = fin_economy.cash(db, fin_access.Visibility(db, user), deal.id, msk_today())
     cf = cash["fact"]
     legacy_in = sum(f.amount * ((f.fx_rate or 1.0) if f.currency != "RUB" else 1.0) for f in facts if f.kind == "payment_in")
     legacy_out = sum(f.amount * ((f.fx_rate or 1.0) if f.currency != "RUB" else 1.0) for f in facts if f.kind == "payment_out")

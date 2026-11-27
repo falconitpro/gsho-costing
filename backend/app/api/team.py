@@ -14,6 +14,7 @@ from ..core.roles import ROLE_TITLES, Role
 from ..db import get_db
 from ..models import NotificationLog, User
 from ..services.deal_service import CHANNELS, _channels_of, audit, notify
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/team", tags=["team"])
 CONTACT_FIELDS = ("position", "department", "mobile", "work_phone", "wechat", "telegram", "whatsapp", "max", "extra_email", "note")
@@ -37,7 +38,7 @@ def _card(u: User, viewer: CurrentUser) -> dict:
 def _deputy_active(u: User) -> bool:
     if not u.deputy_id:
         return False
-    today = date.today()
+    today = msk_today()
     return (u.deputy_from is None or u.deputy_from <= today) and (u.deputy_to is None or u.deputy_to >= today)
 
 
@@ -153,7 +154,7 @@ def set_contacts(user_id: str, body: ContactsIn, db: Session = Depends(get_db), 
     if pending:
         cur = dict(u.pending_changes or {})
         fields = {**(cur.get("fields") or {}), **pending}
-        u.pending_changes = {"fields": fields, "requested_at": date.today().isoformat(), "requested_by": user.id}
+        u.pending_changes = {"fields": fields, "requested_at": msk_today().isoformat(), "requested_by": user.id}
         for admin_id in db.scalars(select(User.id).where(User.is_active.is_(True))).all():
             adm = db.get(User, admin_id)
             if adm and ({"admin", "gd"} & set(adm.roles or [])) and adm.id != user.id:

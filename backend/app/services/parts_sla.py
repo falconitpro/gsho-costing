@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from ..core.clock import msk_date, today as msk_today
 
 
 def norm_days(days: float, urgent: bool) -> int:
@@ -26,7 +27,7 @@ def check(db, today: Optional[date] = None) -> int:
     from ..models import PartKp, PartRequest, PartRequestLine, PoLine, PurchaseOrder, SupplierRfq, User, WarrantyClaim
     from . import settings_service
     from .deal_service import notify
-    today = today or date.today()
+    today = today or msk_today()
     kp_days = float(settings_service.get(db, "parts_sla_kp_days") or 2)
     conf_days = float(settings_service.get(db, "parts_sla_po_confirm_days") or 5)
     cds = [u.id for u in db.scalars(select(User).where(User.is_active.is_(True))).all() if "cd" in (u.roles or [])]
@@ -43,7 +44,7 @@ def check(db, today: Optional[date] = None) -> int:
             continue
         if db.scalars(select(PartKp.id).where(PartKp.request_id == req.id)).first():
             continue
-        if overdue(req.created_at.date(), kp_days, req.urgent, today):
+        if overdue(msk_date(req.created_at), kp_days, req.urgent, today):
             send([req.manager_id, *(cds if req.urgent else [])], f"{req.number}: КП клиенту не отправлено в норматив ({norm_days(kp_days, req.urgent)} дн.)"
                                                               + (" — машина стоит" if req.urgent else ""))
             req.sla_notified = [*(req.sla_notified or []), "kp"]
@@ -67,7 +68,7 @@ def check(db, today: Optional[date] = None) -> int:
     for po in db.scalars(select(PurchaseOrder).where(PurchaseOrder.kind == "external", PurchaseOrder.status.not_in(("closed", "cancelled", "draft")))).all():
         urg = urgent_po(po)
         if po.status == "sent" and not po.confirmed_at and "confirm" not in (po.sla_notified or []) and po.sent_at \
-                and overdue(po.sent_at.date(), conf_days, urg, today):
+                and overdue(msk_date(po.sent_at), conf_days, urg, today):
             send([po.created_by, *(cds if urg else [])], f"{po.number}: поставщик не подтвердил заказ за {norm_days(conf_days, urg)} дн. — запросите подтверждение и дату отгрузки")
             po.sla_notified = [*(po.sla_notified or []), "confirm"]
         for l in po.lines:

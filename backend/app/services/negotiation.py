@@ -17,6 +17,7 @@ from ..calc.types import PaymentLine
 from ..models import CompetitorOffer, Competitor, Deal, DealVersion, KpRevision, NegotiationStep, User
 from . import settings_service
 from .deal_calc import build_calc_input
+from ..core.clock import msk_date, today as msk_today
 
 MODES = ("pct", "amount", "target")          # снижение в %, снижение на сумму, новая цена
 BASES = ("net", "gross")                     # от цены без НДС / с НДС
@@ -224,8 +225,8 @@ def analytics(deal: Deal, ver: DealVersion, st: dict, rows: list[NegotiationStep
     cost = sum(((res.get(vid) or {}).get("base") or {}).get("cost_total_rub") or 0 for vid in st)
     m0 = round((first - cost) / first * 100, 2) if first and cost else None
     m1 = rows[-1].margin_pct if rows else m0
-    start = ver.created_at.date() if ver.created_at else None
-    end = rows[-1].created_at.date() if rows and rows[-1].created_at else None
+    start = msk_date(ver.created_at) if ver.created_at else None
+    end = msk_date(rows[-1].created_at) if rows and rows[-1].created_at else None
     best = min((c["rub_net"] for c in comps), default=None)
     steps_price = [r for r in rows if r.price_rub is not None and r.price_before_rub is not None and r.price_rub < r.price_before_rub - 0.005]
     return {"first_rub": round(first, 2), "current_rub": round(now, 2), "discount_rub": round(first - now, 2),
@@ -275,4 +276,4 @@ def now() -> datetime:
 
 
 def today() -> date:
-    return date.today()
+    return msk_today()

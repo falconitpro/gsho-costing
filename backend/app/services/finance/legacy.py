@@ -24,6 +24,7 @@ from ...models import Contract, FinanceAllocation, FinanceObligation, FinanceTra
 from ..deal_service import audit
 from .money import ZERO, dec, s
 from .obligations import paid_map
+from ...core.clock import today as msk_today
 
 MSK = ZoneInfo("Europe/Moscow")
 ORIGINS = {"execution_legacy": "этап исполнения", "contract_legacy": "отметка в договоре", "planfact_legacy": "план/факт",
@@ -118,7 +119,7 @@ def record(db: Session, user_id: Optional[str], *, origin_type: str, origin_id: 
     o = _unique_obligation(db, deal_id=deal_id, source=source, direction=direction, currency=currency, amount=amt)
     if o is not None:
         n = db.query(FinanceAllocation).filter(FinanceAllocation.transaction_id == tx.id).count()
-        al = FinanceAllocation(transaction_id=tx.id, obligation_id=o.id, amount_tx=amt, amount_obligation=amt, status="provisional", allocated_on=date.today(),
+        al = FinanceAllocation(transaction_id=tx.id, obligation_id=o.id, amount_tx=amt, amount_obligation=amt, status="provisional", allocated_on=msk_today(),
                                idempotency_key=f"{tx.idempotency_key}:{n}", note="авто: однозначное соответствие старой отметке", created_by=user_id)
         db.add(al)
         db.flush()

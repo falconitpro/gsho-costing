@@ -27,6 +27,7 @@ from ...models import Deal, FinanceAccount, FinanceAllocation, FinanceObligation
 from . import accounts as acc
 from .money import ZERO, ru, s
 from .transactions import allocated
+from ...core.clock import msk_date, today as msk_today
 
 QUEUES = {"unallocated": "Операции без разнесения", "manual_marks": "Отметки без банка", "provisional": "Временные разнесения",
           "source_conflict": "Источник изменился", "duplicates": "Возможные дубли", "no_date": "Без даты", "stale_balance": "Устаревшие остатки",
@@ -37,7 +38,7 @@ ORIGIN = {"contract_legacy": "в договоре", "execution_legacy": "в эт
 
 
 def _tx_ref(t: FinanceTransaction) -> dict:
-    return {"type": "transaction", "id": t.id, "url": f"/finance?tab=liquidity&tx={t.id}", "title": f"{'поступление' if t.direction == 'in' else 'списание'} {t.booked_at.date():%d.%m.%Y}"
+    return {"type": "transaction", "id": t.id, "url": f"/finance?tab=liquidity&tx={t.id}", "title": f"{'поступление' if t.direction == 'in' else 'списание'} {msk_date(t.booked_at):%d.%m.%Y}"
             + (f" · {t.external_ref}" if t.external_ref else "")}
 
 
@@ -46,7 +47,7 @@ def _ob_ref(o: FinanceObligation) -> dict:
 
 
 def build(db: Session, user, vis, today: Optional[date] = None, queue: Optional[str] = None, deal_id: Optional[str] = None) -> dict:
-    today = today or date.today()
+    today = today or msk_today()
     items: list[dict] = []
     want = (lambda q: True)   # очереди считаются все — счётчики вкладок полные; фильтр по очереди — в конце
     deal_nums: dict[str, str] = {}
@@ -93,18 +94,18 @@ def build(db: Session, user, vis, today: Optional[date] = None, queue: Optional[
             part = used[t.id] > 0
             items.append({"queue": "unallocated", "severity": "medium", "object": _tx_ref(t), "deal": deal_ref(tx_deal(t)),
                           "problem": ("частично разнесена: " if part else "не разнесена: ") + f"остаток {ru(left, t.currency)} не привязан к обязательству",
-                          "amount": s(left), "currency": t.currency, "on": t.booked_at.date().isoformat(), "counterparty": t.counterparty_name,
+                          "amount": s(left), "currency": t.currency, "on": msk_date(t.booked_at).isoformat(), "counterparty": t.counterparty_name,
                           "action": {"title": "Разнести", "url": f"/finance?tab=liquidity&tx={t.id}"}})
         if t.status == "needs_reconciliation":
             if want("manual_marks"):
                 items.append({"queue": "manual_marks", "severity": "high", "object": _tx_ref(t), "deal": deal_ref(tx_deal(t)),
                               "problem": f"отметка «оплачено» ({ORIGIN.get(t.origin_type, t.origin_type)}) без банковского подтверждения — в остатки и оплату не входит",
-                              "amount": s(t.amount), "currency": t.currency, "on": t.booked_at.date().isoformat(), "counterparty": t.counterparty_name,
+                              "amount": s(t.amount), "currency": t.currency, "on": msk_date(t.booked_at).isoformat(), "counterparty": t.counterparty_name,
                               "action": {"title": "Подтвердить по банку", "url": f"/finance?tab=liquidity&tx={t.id}"}})
             if want("duplicates") and t.external_ref and (t.account_id, t.external_ref) in posted_refs:
                 items.append({"queue": "duplicates", "severity": "high", "object": _tx_ref(t), "deal": deal_ref(tx_deal(t)),
                               "problem": f"номер документа {t.external_ref} уже есть у проведённой операции этого счёта — вероятно, это та же оплата",
-                              "amount": s(t.amount), "currency": t.currency, "on": t.booked_at.date().isoformat(), "counterparty": t.counterparty_name,
+                              "amount": s(t.amount), "currency": t.currency, "on": msk_date(t.booked_at).isoformat(), "counterparty": t.counterparty_name,
                               "action": {"title": "Отозвать отметку или связать", "url": f"/finance?tab=liquidity&tx={t.id}"}})
 
     # --- обязательства

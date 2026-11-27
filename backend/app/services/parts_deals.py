@@ -12,6 +12,7 @@ from ..core.auth import CurrentUser
 from ..core.roles import Role
 from ..models import Client, PartRequest, User
 from .parts_pricing import STAGE_TITLES, request_stage
+from ..core.clock import today as msk_today
 
 CLOSE_KINDS = {"lost": "проиграна", "cancelled": "отменена клиентом", "done": "выполнена"}
 
@@ -49,7 +50,7 @@ def rows(db: Session, user: CurrentUser, include_closed: bool = True) -> list[di
 
 def as_of(r: dict) -> date:
     v = r.get("updated_at") or r.get("created_at")
-    return v.date() if isinstance(v, datetime) else (v or date.today())
+    return v.date() if isinstance(v, datetime) else (v or msk_today())
 
 
 __all__ = ["rows", "can_see", "as_of", "STAGE_TITLES", "CLOSE_KINDS"]

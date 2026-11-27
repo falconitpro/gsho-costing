@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..calc.calendar import WorkCalendar
 from ..calc.types import DEFAULT_CLIENT_PAYMENTS, DEFAULT_FACTORY_PAYMENTS, EVENT_TITLES
 from ..models import Client, Contract, Deal, ExecutionStage, Factory, LegalEntity, LegalPackage, User
+from ..core.clock import today as msk_today
 
 # ------------------------------------------------------------------ справочники
 KINDS: dict[str, dict[str, str]] = {
@@ -155,7 +156,7 @@ def line_amount(c: Contract, line: dict) -> Optional[float]:
 
 def schedule(db: Session, c: Contract, today: Optional[date] = None) -> list[dict]:
     """График платежей договора: сумма, дата события (факт/план), срок оплаты; просрочка — только от факта события."""
-    today = today or date.today()
+    today = today or msk_today()
     cal = work_calendar(db)
     ev = event_dates(db, c)
     rows = []
@@ -254,7 +255,7 @@ def payload(db: Session, c: Contract, names: Optional[dict] = None, ents: Option
     names = names if names is not None else _names(db)
     ents = ents if ents is not None else {e.id: e.name for e in db.scalars(select(LegalEntity)).all()}
     deal = db.get(Deal, c.deal_id) if c.deal_id else None
-    today = date.today()
+    today = msk_today()
     out = {"id": c.id, "parent_id": c.parent_id, "doc_type": c.doc_type, "doc_type_title": DOC_TYPES.get(c.doc_type, c.doc_type), "kind": c.kind, "kind_title": KINDS.get(c.kind, {}).get("title", c.kind),
            "direction": c.direction, "direction_title": DIRECTIONS.get(c.direction, ""), "number": c.number, "cp_number": c.cp_number, "title": c.title, "subject": c.subject,
            "status": c.status, "status_title": STATUSES.get(c.status, c.status), "locked": c.status in LOCKED,
@@ -384,7 +385,7 @@ def upsert_from_package(db: Session, pkg: LegalPackage, deal: Deal, user_id: Opt
     if fresh:
         ent = db.get(LegalEntity, pkg.own_entity_id) if pkg.own_entity_id else None
         direction = "income" if income else "expense"
-        num, seq = next_number(db, ent, direction, date.today())
+        num, seq = next_number(db, ent, direction, msk_today())
         pens, cap = default_penalties(db, direction)
         c = Contract(doc_type="contract", kind="client_supply" if income else "supplier", direction=direction, number=num, seq=seq, own_entity_id=pkg.own_entity_id,
                      cp_kind=pkg.counterparty_kind, cp_id=pkg.counterparty_id, deal_id=deal.id, deal_ids=[deal.id], subject=(snap.get("contract") or {}).get("subject") or "поставка горно-шахтного оборудования",
@@ -695,7 +696,7 @@ def notify_pending(db: Session, c: Contract) -> None:
 
 def check_expiring(db: Session, today: Optional[date] = None) -> int:
     """Действующие договоры: напоминания куратору и юристам за 30 и 7 дней до окончания; автопролонгация на год; уведомление об истечении."""
-    today = today or date.today()
+    today = today or msk_today()
     n = 0
     lawyers = [u.id for u in role_users(db, "lawyer")]
     for c in db.scalars(select(Contract).where(Contract.status == "active", Contract.valid_to.is_not(None))).all():
@@ -727,7 +728,7 @@ def check_expiring(db: Session, today: Optional[date] = None) -> int:
 
 def inbox(db: Session, user) -> dict:
     """Договоры к действию для пользователя: мои визы, мои проекты/возвраты, на подпись, без скана, истекающие."""
-    today = date.today()
+    today = msk_today()
     roles = {str(getattr(r, "value", r)) for r in user.roles}
     sees_all = bool(roles & {"lawyer", "gd", "fd", "cd", "admin"})
     rows = db.scalars(select(Contract).where(Contract.status.not_in(("cancelled", "closed", "terminated")))).all()
@@ -793,7 +794,7 @@ def obligations(db: Session, c: Contract, today: Optional[date] = None) -> dict:
     """Обязательства договора с фактом исполнения и неустойками.
     Оплата: должник — контрагент (доходный) или мы (расходный); исполнение (поставка, работы) — наоборот.
     Неустойка = база × ставка × (дни просрочки − льгота), не больше предела по строке и общего предела ответственности (% цены)."""
-    today = today or date.today()
+    today = today or msk_today()
     cal = work_calendar(db)
     ev = event_dates(db, c)
     facts = dict(c.facts or {})

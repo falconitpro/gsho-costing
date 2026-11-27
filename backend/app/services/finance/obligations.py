@@ -21,6 +21,7 @@ from ...models import Contract, Deal, FinanceAllocation, FinanceObligation
 from ..deal_service import audit
 from .. import legal_contracts as legal
 from .money import ZERO, dec, s
+from ...core.clock import today as msk_today
 
 PROJECTED_STATUSES = ("active", "closed", "terminated")   # подписанные договоры (legal.LOCKED)
 DIRECTION = {"income": "in", "expense": "out"}
@@ -162,7 +163,7 @@ def sync_contract(db: Session, c: Contract, user_id: Optional[str] = None, today
     """Пересобрать проекцию строк графика одного договора. Вызывается в той же транзакции, что и изменение договора."""
     if not eligible(c):
         return SyncStats()
-    today = today or date.today()
+    today = today or msk_today()
     terms = list(c.payment_terms or [])
     rows = legal.schedule(db, c, today)
     keys = _line_keys(terms)

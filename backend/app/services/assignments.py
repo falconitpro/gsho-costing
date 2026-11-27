@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from ..core.roles import Role
 from ..models import Assignment, AssignmentEvent, AssignmentFile, OrgDirection, User
+from ..core.clock import msk_date
 
 OPEN = ("new", "accepted", "in_progress", "blocked", "review", "rework")
 STATUS_TITLES = {"new": "новое", "accepted": "принято", "in_progress": "в работе", "blocked": "заблокировано", "review": "на проверке",
@@ -427,8 +428,8 @@ def check(db: Session, today: Optional[date] = None) -> int:
                 once(f"over:{due}", workers + [a.author_id, a.head_id], f"просрочено — срок был {due:%d.%m.%Y}")
                 if (today - due).days >= 7:
                     once(f"over7:{due}", [a.author_id], f"просрочено на {(today - due).days} дн.")
-        elif a.submitted_at and (today - a.submitted_at.date()).days >= 2:
-            once(f"review:{a.submitted_at.date()}", [a.author_id], "результат ждёт вашей проверки больше 2 дней")
+        elif a.submitted_at and (today - msk_date(a.submitted_at)).days >= 2:
+            once(f"review:{msk_date(a.submitted_at)}", [a.author_id], "результат ждёт вашей проверки больше 2 дней")
         if al != (a.alerts or {}):
             a.alerts = al
     return sent

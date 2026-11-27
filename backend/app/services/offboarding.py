@@ -17,6 +17,7 @@ from ..core.auth import CurrentUser, require_step_up
 from ..models import AccessUserOverride, NotificationLog, SupportTicket, Task, User
 from . import auth_session as sess
 from . import security_events as sev
+from ..core.clock import today as msk_today
 
 
 def _now() -> datetime:
@@ -38,7 +39,7 @@ def security_admin_ids(db: Session, exclude: Optional[str] = None) -> list[str]:
 
 def preview(db: Session, user: User) -> dict:
     from ..models.finance import FinanceQuestion
-    today = date.today()
+    today = msk_today()
     t = _now()
     return {
         "active_sessions": len(sess.active(db, user.id)),
@@ -66,7 +67,7 @@ def _revoke_sessions(db: Session, user: User, by: str) -> int:
 
 
 def _end_delegations(db: Session, user: User) -> int:
-    yesterday = date.today() - timedelta(days=1)
+    yesterday = msk_today() - timedelta(days=1)
     n = 0
     for other in db.scalars(select(User).where(User.deputy_id == user.id)).all():   # он замещал других
         if other.deputy_to is None or other.deputy_to > yesterday:

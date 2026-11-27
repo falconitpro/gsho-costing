@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Deal, QuoteLink
+from ..core.clock import today as msk_today
 
 VALID_AFTER_ANSWER_DAYS = 14
 MAX_ANSWERS = 10
@@ -38,7 +39,7 @@ def create(db: Session, deal: Deal, req: dict, emails: list[str], user_id: str) 
     try:
         answer_by = date.fromisoformat(req.get("answer_by") or "")
     except ValueError:
-        answer_by = date.today() + timedelta(days=3)
+        answer_by = msk_today() + timedelta(days=3)
     expires = datetime.combine(answer_by + timedelta(days=VALID_AFTER_ANSWER_DAYS), datetime.max.time(), tzinfo=timezone.utc)
     out = []
     for e in emails:

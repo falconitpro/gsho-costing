@@ -14,6 +14,7 @@ from typing import Optional
 
 from .money import ZERO, dec, s
 from .obligations import ObligationFilter, query
+from ...core.clock import today as msk_today
 
 BUCKETS = [("current", "не просрочено", 0, 0), ("d1_7", "1–7 дн.", 1, 7), ("d8_30", "8–30 дн.", 8, 30), ("d31_60", "31–60 дн.", 31, 60),
            ("d61_90", "61–90 дн.", 61, 90), ("d90_plus", "более 90 дн.", 91, 10 ** 6)]
@@ -28,7 +29,7 @@ def bucket_of(days_overdue: int) -> str:
 
 def build(db, user, vis, as_of: Optional[date] = None, direction: Optional[str] = None, group_by: str = "counterparty", currency: Optional[str] = None,
           legal_entity_id: Optional[str] = None) -> dict:
-    as_of = as_of or date.today()
+    as_of = as_of or msk_today()
     reg = query(db, vis, ObligationFilter(as_of=as_of, direction=direction, currency=currency, legal_entity_id=legal_entity_id, status="open", limit=10_000))
     from .liquidity import fx_rate
     rates: dict[str, Optional[dict]] = {}

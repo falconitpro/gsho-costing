@@ -19,6 +19,7 @@ from ..db import get_db
 from ..models import (AcceptanceUnit, Client, ClientMachine, Deal, ExecutionStage, Factory, LocalOption, MachineReminder, PartRequest, PoLine,
                       Position, PurchaseOrder, User, WarrantyClaim)
 from .common import can_see_deal
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/summary", tags=["summary"])
 ACTIVE = (DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION)
@@ -47,7 +48,7 @@ def shipments(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cur
     """Все партии в пути и к отгрузке: этапы отгрузка → граница → ДТ → доставка, просрочки, готовность завода по позициям."""
     if not user.has(Role.LOGISTICIAN, Role.CD, Role.GD, Role.FD, Role.MANAGER, Role.PURCHASING):
         raise HTTPException(403)
-    today = date.today()
+    today = msk_today()
     names = _names(db)
     out = []
     for d in _deals(db, user):
@@ -80,7 +81,7 @@ def money(days: int = 90, db: Session = Depends(get_db), user: CurrentUser = Dep
     Адаптер общего сервиса «Финансов» (cashview): кривая — от подтверждённого остатка, все источники и валюты (D-130)."""
     if not user.can("finance_analytics"):
         raise HTTPException(403, "Финансовая аналитика доступна ФД, КД и ЗГД")
-    today = date.today()
+    today = msk_today()
     # гарантии и аккредитивы — из общего сервиса «Обеспечение и неустойки» (D-139): сделки, договоры сделок, аккредитив клиента
     from ..services.finance import access as fin_access, exposure
     active = {d.id: d for d in _deals(db, user)}
@@ -105,7 +106,7 @@ def service(db: Session = Depends(get_db), user: CurrentUser = Depends(get_curre
     """Приёмки (онлайн и на заводе) по плану, ПНР, напоминания ТО, открытые претензии, парк машин."""
     if not user.has(Role.SERVICE_HEAD, Role.CD, Role.GD, Role.MANAGER, Role.FD):
         raise HTTPException(403)
-    today = date.today()
+    today = msk_today()
     names = _names(db)
     acceptances, pnr = [], []
     for d in _deals(db, user):
@@ -146,7 +147,7 @@ def purchasing(db: Session = Depends(get_db), user: CurrentUser = Depends(get_cu
     """Что закупить к какой дате: опции РФ по сделкам (срок поставки против готовности завода), заявки на запчасти без заказа, заказы поставщикам с ETA."""
     if not user.has(Role.PURCHASING, Role.CD, Role.GD, Role.SERVICE_HEAD, Role.FD):
         raise HTTPException(403)
-    today = date.today()
+    today = msk_today()
     names = _names(db)
     options = []
     for d in _deals(db, user):
@@ -190,5 +191,5 @@ def overview(kind: str = "quarter", anchor: Optional[date] = None, direction: st
         raise HTTPException(403, "Показатели сводки доступны КД, ЗГД, ФД и менеджерам (по своим сделкам)")
     from ..services import summary_overview
     from .workplace import _price
-    today = date.today()
+    today = msk_today()
     return summary_overview.build(db, user, kind=kind, anchor=anchor or today, direction=direction, today=today, can_see=can_see_deal, price=_price)

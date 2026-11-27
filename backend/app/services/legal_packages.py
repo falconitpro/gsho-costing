@@ -24,6 +24,7 @@ from ..models import (BankProfile, Deal, DealVersion, Factory, LegalEntity, Lega
                       RfqImport, Template, User)
 from . import legal_profiles as lp
 from .legal_templates import LEGAL_KINDS
+from ..core.clock import today as msk_today
 
 PURCHASE_DOCS = ("purchase_contract", "spec_equipment", "spec_zip")
 DOC_TITLES = {"purchase_contract": "Договор поставки", "spec_equipment": "Приложение № 1 — Спецификация оборудования", "spec_zip": "Приложение № 2 — Спецификация ЗИП"}
@@ -306,7 +307,7 @@ def build_context(db: Session, deal: Deal, ch: Choice) -> dict:
     return {"factory": {"id": factory.id, "name": factory.name, "short_name": factory.short_name or factory.name, "country": country}, "own_entity": {"id": own_entity.id, "name": own_entity.name, "code": own_entity.code} if own_entity else None,
             "buyer": buyer, "seller": seller, "contract": contract, "items": items, "params": params_rows, "zip": zrows, "zip_set": {"id": zs.id if zs else None, "confirmed": bool(zs and zs.confirmed_at), "pricing_mode": zs.pricing_mode if zs else "included", "lines_total": len(zs.lines) if zs else 0},
             "options": [], "totals": totals, "deal_version": {"id": ver.id if ver else None, "no": ver.version_no if ver else None}, "language": language, "sources": src,
-            "package": {"created_on": _fmt_date(date.today()), "author": "", "version": "", "status": STATUS_TITLES["draft"]}, "mirror": mirror, "framework": framework}
+            "package": {"created_on": _fmt_date(msk_today()), "author": "", "version": "", "status": STATUS_TITLES["draft"]}, "mirror": mirror, "framework": framework}
 
 
 def vat_fields(db: Session, gross: Optional[float], currency: str, taxable: bool) -> dict:
@@ -402,7 +403,7 @@ def check_purchase(ctx: dict, templates: dict[str, Optional[Template]]) -> dict:
 
 def _flatten_for_template(ctx: dict, author: str, version_no: int) -> dict:
     data = {k: ctx[k] for k in ("buyer", "seller", "contract", "totals", "items", "params", "zip", "options")}
-    data["package"] = {"created_on": _fmt_date(date.today()), "author": author, "version": str(version_no), "status": STATUS_TITLES["draft"]}
+    data["package"] = {"created_on": _fmt_date(msk_today()), "author": author, "version": str(version_no), "status": STATUS_TITLES["draft"]}
     return data
 
 

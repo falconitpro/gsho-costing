@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from ...models import Batch, Deal, Factory, FinanceObligation, PurchaseOrder, WarrantyClaim
 from .money import dec, s
 from .obligations import LineSpec, SyncStats, project_lines
+from ...core.clock import today as msk_today
 
 PO_STATUSES = ("confirmed", "in_progress", "closed", "cancelled")
 
@@ -103,7 +104,7 @@ def sync_contract_claim(db: Session, cl, user_id: Optional[str] = None) -> SyncS
         from ..legal_contracts import cp_display
         cp = cp_display(db, c) or ""
         direction = "in" if cl.direction == "outgoing" else "out"
-        due = cl.answer_due if not recognized else ((cl.answer_on or date.today()) + timedelta(days=10))
+        due = cl.answer_due if not recognized else ((cl.answer_on or msk_today()) + timedelta(days=10))
         for i, x in enumerate(manual):
             amount = dec(round(float(x["amount"]) * share, 2))
             fields = {"deal_id": cl.deal_id or c.deal_id, "contract_id": c.id, "legal_entity_id": c.own_entity_id, "counterparty_kind": c.cp_kind or "other",

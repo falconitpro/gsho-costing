@@ -21,6 +21,7 @@ from ..models import AuditLog, FxRate, HsCode, IntegrationLog, Template, User
 from ..services import settings_service
 from ..services.deal_service import audit
 from .common import serialize
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -272,7 +273,7 @@ def delete_user(user_id: str, request: Request, db: Session = Depends(get_db), u
 async def hs_upload(file: UploadFile = File(...), valid_from: Optional[date] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN)):
     """CSV: code;description;duty_pct;vat_pct;util_fee;licence;certification. Старые записи закрываются датой."""
     import re as _re
-    valid_from = valid_from or date.today()
+    valid_from = valid_from or msk_today()
     raw = (await file.read()).decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(raw), delimiter=";")
     if not reader.fieldnames or "code" not in reader.fieldnames or "description" not in reader.fieldnames:
@@ -327,7 +328,7 @@ def hs_upsert(body: HsIn, db: Session = Depends(get_db), user: CurrentUser = Dep
     code = _re.sub(r"\D", "", body.code)
     if len(code) not in (4, 6, 8, 10):
         raise HTTPException(422, "Код ТН ВЭД — 4, 6, 8 или 10 цифр")
-    vf = body.valid_from or date.today()
+    vf = body.valid_from or msk_today()
     before = None
     for old in db.scalars(select(HsCode).where(HsCode.code == code, HsCode.valid_to.is_(None))).all():
         before = serialize(old)
@@ -362,7 +363,7 @@ def hs_export(db: Session = Depends(get_db), user: CurrentUser = Depends(ADMIN))
 @router.post("/fx/load")
 def fx_load(on: Optional[date] = None, db: Session = Depends(get_db), user: CurrentUser = Depends(FD_ADMIN)):
     """Ручной запуск загрузки курсов ЦБ на дату (ежедневно запускается планировщиком)."""
-    on = on or date.today()
+    on = on or msk_today()
     try:
         rates = adapters.fx_source().daily(on)
         for cur, rate in rates.items():
@@ -381,7 +382,7 @@ def fx_load(on: Optional[date] = None, db: Session = Depends(get_db), user: Curr
 
 @router.post("/fx/history")
 def fx_history_load(currency: str = "CNY", start: date = date(2014, 1, 1), db: Session = Depends(get_db), user: CurrentUser = Depends(FD_ADMIN)):
-    pts = adapters.fx_source().history(currency, start, date.today())
+    pts = adapters.fx_source().history(currency, start, msk_today())
     existing = {r.on for r in db.scalars(select(FxRate).where(FxRate.currency == currency, FxRate.source == "cbr")).all()}
     n = 0
     for d, r in pts:

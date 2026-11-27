@@ -18,6 +18,7 @@ from ..services import settings_service
 from ..services.deal_service import apply_transition, audit, complete_tasks, sla
 from ..services.history_check import history_check, hs_check
 from .common import get_deal_or_404, serialize
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/deals/{deal_id}/logistics", tags=["logistics"])
 LOGIST = require_roles(Role.LOGISTICIAN, Role.GD)
@@ -257,7 +258,7 @@ def update_position_logistics(deal_id: str, pos_id: str, body: PositionLogistics
         if len(code) == 10:
             db.add(HsCode(code=code, description=body.hs_description.strip(), duty_pct=body.duty_pct or 0.0,
                           vat_pct=body.vat_pct if body.vat_pct is not None else 22.0, util_fee=bool(body.util_applies), certification=[],
-                          valid_from=date.today()))
+                          valid_from=msk_today()))
             data["hs_code"] = code
             audit(db, user.id, deal.id, "hs_code", code, "manual_add", after={"description": body.hs_description.strip()})
     # код ТН ВЭД — в карточку оборудования каталога (модель позиции): в следующих сделках подставляется логисту
@@ -269,7 +270,7 @@ def update_position_logistics(deal_id: str, pos_id: str, body: PositionLogistics
         if m is not None and len(code_) == 10:
             m.default_hs_code = code_
             m.hs_info = {"code": code_, "description": body.hs_description.strip() or (ref_row.description if ref else ""),
-                         "duty_pct": body.duty_pct, "vat_pct": body.vat_pct, "util_applies": body.util_applies, "on": date.today().isoformat(), "deal": deal.number}
+                         "duty_pct": body.duty_pct, "vat_pct": body.vat_pct, "util_applies": body.util_applies, "on": msk_today().isoformat(), "deal": deal.number}
     chk = hs_check(body.duty_pct, body.vat_pct, ref)
     if chk.get("mismatch") and not body.hs_manual_comment:
         raise HTTPException(422, {"message": "Ставка отличается от справочника ТН ВЭД — укажите комментарий", "hs_check": chk})
@@ -356,7 +357,7 @@ def complete(deal_id: str, body: Optional[CompleteIn] = None, db: Session = Depe
         db.rollback()
         raise HTTPException(422, {"message": "; ".join(x["message"] for x in probs), "problems": probs, "confirm": "no_delivery_cost"})
     st = DealState(status=deal.status, service_flag=deal.service_flag, logistics_done=deal.logistics_done, service_done=deal.service_done)
-    tr = block_completed(st, "logistics", date.today(), sla(db))
+    tr = block_completed(st, "logistics", msk_today(), sla(db))
     deal.logistics_done = True
     # история логистики пополняется из каждого расчёта: суммы на 1 машину (D-111), по сделке — последний расчёт
     from ..services.logistics_history import record_deal

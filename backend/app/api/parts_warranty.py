@@ -29,6 +29,7 @@ from ..services.parts_warranty import (BATCH_LINE_STATUS, BATCH_STATUS, CLAIM_ST
 from .common import serialize
 from .parts_po import PoCreateIn, StockLineIn, _set_eta, _sync, create as create_po
 from .parts_setup import latest_fx
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/parts", tags=["parts-warranty"])
 EDIT_ROLES = (Role.MANAGER, Role.SERVICE_HEAD, Role.CD, Role.GD, Role.PURCHASING)
@@ -49,7 +50,7 @@ def _editor(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
 
 
 def _number(db: Session, model, prefix: str) -> str:
-    p = f"{prefix}-{date.today().year}-"
+    p = f"{prefix}-{msk_today().year}-"
     last = db.scalars(select(model.number).where(model.number.like(f"{p}%"))).all()
     n = max([int(x[len(p):]) for x in last if x[len(p):].isdigit()] or [0]) + 1
     return f"{p}{n:04d}"
@@ -69,7 +70,7 @@ def _claim_payload(db: Session, c) -> dict:
              request_number=req.number if req else "", status_title=CLAIM_STATUS.get(c.status, c.status),
              cost_rub=round(sum(float(l.get("cost_rub") or 0) * float(l.get("qty") or 1) for l in c.lines or []), 2),
              compensated_rub=round(sum(float(x.get("amount_rub") or 0) for x in c.compensations or [] if x.get("received_on")), 2),
-             overdue=bool(c.status == "sent" and c.answer_due and c.answer_due < date.today()))
+             overdue=bool(c.status == "sent" and c.answer_due and c.answer_due < msk_today()))
     d["photos"] = [{"i": i, "name": p.get("name", "")} for i, p in enumerate(c.photos or [])]
     return d
 
@@ -221,7 +222,7 @@ def claim_sent(cid: str, body: SentIn, db: Session = Depends(get_db), user: Curr
     c = _claim_or_404(db, cid)
     if c.status != "draft":
         raise HTTPException(409, "Претензия уже отправлена")
-    c.status, c.sent_at, c.answer_due = "sent", datetime.now(timezone.utc), date.today() + timedelta(days=body.answer_days)
+    c.status, c.sent_at, c.answer_due = "sent", datetime.now(timezone.utc), msk_today() + timedelta(days=body.answer_days)
     db.commit()
     return _claim_payload(db, c)
 
@@ -295,7 +296,7 @@ def comp_received(cid: str, comp_id: str, body: ReceivedIn, db: Session = Depend
     x = next((x for x in comps if x["id"] == comp_id), None)
     if x is None:
         raise HTTPException(404, "Компенсация не найдена")
-    x["received_on"] = (body.received_on or date.today()).isoformat()
+    x["received_on"] = (body.received_on or msk_today()).isoformat()
     c.compensations = comps
     c.status = status_after_compensation(c.status, comps)
     _fin_sync(db, c, user.id)
@@ -519,7 +520,7 @@ def update_batch(bid: str, body: BatchUpdateIn, db: Session = Depends(get_db), u
             raise HTTPException(409, "Статус партии назад не переводится")
         b.status = body.status
         if body.status == "transit" and not b.shipped_on:
-            b.shipped_on = body.shipped_on or date.today()
+            b.shipped_on = body.shipped_on or msk_today()
     for k in ("eta", "shipped_on", "forwarder", "tracking"):
         v = getattr(body, k)
         if v is not None:

@@ -24,6 +24,7 @@ from .execution_service import won_variant
 from .kp_generator import ACCENT, BLACK, STOP_WORDS, _heading, _run, _table
 from .legal_packages import party_from_profile, production_term_text, suggest_bank, warranty_text, _fmt_date
 from .legal_rules import GROUPS, RULES_VERSION, SEVERITY, Finding, protocol_rows
+from ..core.clock import today as msk_today
 
 SALE_DOCS = ("client_contract_copy", "disagreements_protocol", "tech_spec_client")
 SALE_TITLES = {"client_contract_copy": "Рабочая копия договора заказчика", "disagreements_protocol": "Протокол разногласий", "tech_spec_client": "Техническая спецификация"}
@@ -125,7 +126,7 @@ def build_sale_context(db: Session, deal: Deal, ch: SaleChoice) -> dict:
     return {"own_entity": {"id": ent.id, "name": ent.name}, "client": {"id": client.id, "name": client.name}, "seller": seller, "buyer": buyer, "contract": contract, "items": items, "params": params,
             "options": options_rows, "zip": [], "totals": totals, "brand_company": brand_company, "forbidden_names": sorted(set(forbidden_names)), "rule_ctx": rule_ctx,
             "deal_version": {"id": ver.id if ver else None, "no": ver.version_no if ver else None}, "variant": {"id": v.id if v else None, "name": v.name if v else ""}, "sources": src, "language": "ru",
-            "package": {"created_on": _fmt_date(date.today()), "author": "", "version": "", "status": "черновик — проверить юристу"}}
+            "package": {"created_on": _fmt_date(msk_today()), "author": "", "version": "", "status": "черновик — проверить юристу"}}
 
 
 def check_sale(ctx: dict, has_source: bool, templates: dict[str, Optional[Template]]) -> dict:
@@ -263,7 +264,7 @@ def render_sale_documents(db: Session, ctx: dict, findings: list[Finding], templ
     # 2. протокол разногласий
     data = {k: ctx[k] for k in ("buyer", "seller", "contract", "totals", "items", "params", "options", "zip")}
     data["clauses"] = protocol_rows(findings)
-    data["package"] = {"created_on": _fmt_date(date.today()), "author": author, "version": str(version_no), "status": "черновик — проверить юристу"}
+    data["package"] = {"created_on": _fmt_date(msk_today()), "author": author, "version": str(version_no), "status": "черновик — проверить юристу"}
     pr = os.path.join(out_dir, f"Протокол разногласий к договору {num}.docx".replace("/", "-"))
     t = templates.get("disagreements_protocol")
     if t is not None and os.path.isfile(t.file_path):

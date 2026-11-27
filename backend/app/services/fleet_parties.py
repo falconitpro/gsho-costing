@@ -10,12 +10,13 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..models import ClientMachine, ClientSite, MachineParty
+from ..core.clock import today as msk_today
 
 ROLES = {"owner": "Собственник", "lessor": "Лизингодатель", "operator": "Эксплуатант", "other": "Другое"}
 
 
 def active(today: Optional[date] = None):
-    t = today or date.today()
+    t = today or msk_today()
     return or_(MachineParty.valid_to.is_(None), MachineParty.valid_to >= t)
 
 
@@ -53,7 +54,7 @@ def set_primary(db: Session, m: ClientMachine, p: MachineParty) -> None:
 def transfer_client(db: Session, m: ClientMachine, new_client_id: str, on: Optional[date] = None) -> None:
     """Смена клиента машины прежней формой («Клиент» в карточке машины) = передача: прежняя главная сторона закрывается
     вчерашним днём, новая открывается с сегодняшнего с той же ролью."""
-    on = on or date.today()
+    on = on or msk_today()
     cur = ensure_primary(db, m)
     if cur.client_id == new_client_id:
         return

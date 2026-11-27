@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..core.workflow import STATUS_TITLES, DealStatus
 from ..models import AuditLog, Deal, Task, User
+from ..core.clock import msk_date
 
 WHO = {"draft": "менеджер", "logistics_calc": "логист", "service_calc": "сервис", "calc_ready": "КД", "cd_approval": "КД",
        "fd_visa": "ФД", "gd_visa": "ЗГД", "rework": "на доработке", "approved": "менеджер — отправить КП", "kp_sent": "клиент — решение по КП",
@@ -117,7 +118,7 @@ def report(db: Session, days: int = 90, now: Optional[datetime] = None) -> dict:
         if t.done_at:
             p["done"] += 1
             p["hours"].append((_utc(t.done_at) - _utc(t.created_at)).total_seconds() / 3600)
-            if _utc(t.done_at).date() <= t.due:
+            if msk_date(_utc(t.done_at)) <= t.due:
                 p["on_time"] += 1
         else:
             p["open"] += 1

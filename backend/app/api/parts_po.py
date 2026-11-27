@@ -28,6 +28,7 @@ from ..services.parts_supplier import CARD_KEY, supplier_language
 from .common import serialize
 from .parts_rfq import send_supplier_file
 from .parts_setup import current_policy, latest_fx
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/parts/po", tags=["parts-po"])
 EDIT_ROLES = (Role.MANAGER, Role.CD, Role.GD, Role.PURCHASING)
@@ -51,7 +52,7 @@ def _can_edit_lines(user: CurrentUser) -> bool:
 
 
 def _next_number(db: Session) -> str:
-    prefix = f"ЗК-{date.today().year}-"
+    prefix = f"ЗК-{msk_today().year}-"
     last = db.scalars(select(PurchaseOrder.number).where(PurchaseOrder.number.like(f"{prefix}%"), PurchaseOrder.kind == "external")).all()
     n = max([int(x[len(prefix):]) for x in last if x[len(prefix):].isdigit()] or [0]) + 1
     return f"{prefix}{n:04d}"
@@ -186,7 +187,7 @@ def create(body: PoCreateIn, db: Session = Depends(get_db), user: CurrentUser = 
     mark_supplier(db, sup.id, "parts")
     done = _ordered_line_ids(db)
     lang = supplier_language(sup.country, sup.language)
-    today = date.today()
+    today = msk_today()
     items: list[dict] = []
     for lid in dict.fromkeys(body.request_line_ids):
         l = db.get(PartRequestLine, lid)
@@ -307,7 +308,7 @@ def list_pos(open_only: bool = True, supplier_id: str = "", request_id: str = ""
         d = _payload(db, po, user, names)
         etas = [l.eta for l in po.lines if l.eta and l.status not in ("received", "cancelled")]
         d["eta"] = min(etas).isoformat() if etas else None
-        d["overdue"] = any(l.eta and l.eta < date.today() and l.status not in ("received", "cancelled") for l in po.lines)
+        d["overdue"] = any(l.eta and l.eta < msk_today() and l.status not in ("received", "cancelled") for l in po.lines)
         d["lines_count"] = len(po.lines)
         out.append(d)
     return out

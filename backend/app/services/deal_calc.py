@@ -16,6 +16,7 @@ from ..calc.types import (FreightTerms,
 from ..models import Deal, ExecutionStage, FxRate, LocalOption
 from . import offer_prices as _offer_prices  # noqa: F401  (D-109: запись цен предложения при сохранении)
 from . import settings_service
+from ..core.clock import today as msk_today
 
 
 _FX_HISTORY_CACHE: dict[tuple, dict[str, list[tuple[date, float]]]] = {}
@@ -173,7 +174,7 @@ def build_calc_input(db: Session, deal: Deal, calc_date: date | None = None) -> 
     s = settings_service.get_all(db)
     from . import logistics_vat as lv
     vat_in_pct = float(s.get("sales_vat_pct") or 22.0)   # D-122: входящий НДС российских услуг — по общей ставке
-    calc_date = calc_date or deal.report_date or date.today()   # дата отчёта — задают КД / ЗГД
+    calc_date = calc_date or deal.report_date or msk_today()   # дата отчёта — задают КД / ЗГД
     fx, history = load_fx(db, calc_date)
     ov = deal.scenario_override or {}
     dk, dt = dict(s["scenario_dk"]), dict(s["scenario_dt"])

@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Client, Deal, Factory, User
+from ..core.clock import today as msk_today
 
 DEFAULT_FIELDS = [{"code": c, "name": n} for c, n in (
     ("1.3", "Страна производства"), ("1.5", "Длина (транспортное положение)"), ("1.6", "Ширина"), ("1.7", "Высота"),
@@ -212,11 +213,11 @@ def request_data(db: Session, deal: Deal, answer_days: int = 3) -> dict:
     for p in deal.positions:
         from .production_term import calendar_days
         if p.production_term:
-            d = date.today() + timedelta(days=calendar_days(p.production_term))
+            d = msk_today() + timedelta(days=calendar_days(p.production_term))
             readiness = d if readiness is None or d > readiness else readiness
     info = deal.logistics_info or {}
     no = f"{deal.number}-Л{len(info.get('requests') or []) + 1}"
-    return {"no": no, "date": date.today().isoformat(), "answer_by": (date.today() + timedelta(days=answer_days)).isoformat(),
+    return {"no": no, "date": msk_today().isoformat(), "answer_by": (msk_today() + timedelta(days=answer_days)).isoformat(),
             "deal": deal.number, "client_region": adr["delivery_address"], "pickup": adr["pickup"], "delivery": adr["delivery_address"],
             "readiness": readiness.isoformat() if readiness else "", "positions": pos, "services": [SERVICE_TITLES[k] for k in services(deal)], "service_codes": services(deal),
             "basis": sorted({p.basis for p in deal.positions if p.basis}) or ["FCA"]}
@@ -336,7 +337,7 @@ def remove_quote(deal: Deal, qid: str) -> bool:
 def compare(db: Session, deal: Deal, quotes: list[dict], carriers_list: list[dict]) -> dict:
     """Сравнение предложений логистических компаний по выбранным услугам: итог в рублях по курсу ЦБ, срок, полнота, лучшее."""
     from .deal_calc import load_fx
-    rates = load_fx(db, date.today())[0].rates
+    rates = load_fx(db, msk_today())[0].rates
     sel = services(deal)
     need = [k for k in sel if k != "door_to_door"]
     by_mail = {(c.get("email") or "").lower(): c.get("name") for c in carriers_list}

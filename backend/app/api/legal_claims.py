@@ -25,6 +25,7 @@ from ..services import legal_claims as svc
 from ..services import legal_contracts as cs
 from ..services.deal_service import audit
 from .legal_contracts import _can_see, _get as _get_contract
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/legal", tags=["legal"])
 WORK_ROLES = (Role.LAWYER, Role.GD, Role.CD, Role.FD)
@@ -193,7 +194,7 @@ def refresh_claim(clid: str, db: Session = Depends(get_db), user: CurrentUser = 
     keys = list(dict.fromkeys(x.get("key") for x in cl.lines or [] if x.get("key")))
     manual = [x for x in cl.lines or [] if not x.get("key")]
     cl.lines = svc.lines_for(db, c, keys or None, "cp") + manual
-    svc.hist(cl, user.id, "refreshed", f"расчёт на {date.today():%d.%m.%Y}")
+    svc.hist(cl, user.id, "refreshed", f"расчёт на {msk_today():%d.%m.%Y}")
     db.commit()
     return _out(db, user, cl, c)
 
@@ -234,7 +235,7 @@ def sign(clid: str, body: StepIn, db: Session = Depends(get_db), user: CurrentUs
     if cl.status not in ("signing", "draft") or cl.direction != "outgoing":
         raise HTTPException(409, "Подписывается претензия на подписи")
     cl.signer_id, cl.signer_role = user.id, ("gd" if user.has(Role.GD) else "cd")
-    cl.signed_at, cl.issued_on, cl.status = datetime.now(timezone.utc), date.today(), "signed"
+    cl.signed_at, cl.issued_on, cl.status = datetime.now(timezone.utc), msk_today(), "signed"
     d = tempfile.mkdtemp()
     try:
         path = _render(db, cl, d, draft=False)
@@ -273,7 +274,7 @@ def send(clid: str, body: StepIn, db: Session = Depends(get_db), user: CurrentUs
         raise HTTPException(403)
     if body.sent_via and body.sent_via not in svc.SENT_VIA:
         raise HTTPException(422, "Способ: " + ", ".join(svc.SENT_VIA))
-    cl.sent_on = body.sent_on or date.today()
+    cl.sent_on = body.sent_on or msk_today()
     cl.sent_via, cl.track = body.sent_via or "post", body.track.strip()
     cl.answer_due = cl.sent_on + timedelta(days=cl.answer_days)
     cl.status = "sent"
@@ -299,7 +300,7 @@ def answer(clid: str, body: StepIn, db: Session = Depends(get_db), user: Current
     if body.result == "partial" and (body.amount is None or body.amount <= 0):
         raise HTTPException(422, "Укажите признанную сумму")
     cl.result, cl.result_amount = body.result, (body.amount if body.result == "partial" else t["total"] if body.result == "satisfied" else 0.0)
-    cl.answer_on, cl.answer_text, cl.status = body.answer_on or date.today(), body.comment.strip(), "answered"
+    cl.answer_on, cl.answer_text, cl.status = body.answer_on or msk_today(), body.comment.strip(), "answered"
     if body.result in ("satisfied", "partial"):
         share = 1.0 if body.result == "satisfied" or not t["total"] else min(1.0, float(body.amount or 0) / t["total"])
         svc.mark_penalties(c, cl, "recognized", user.id, share)

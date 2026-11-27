@@ -73,7 +73,8 @@ def curve(db: Session, user, today: date, days: int) -> dict:
 def moscow_today() -> date:
     """«Сегодня» по Москве — как на рабочем месте (api/workplace.py). По UTC сервера с 00:00 до 03:00 МСК была бы вчерашняя дата,
     и «Сводка → Деньги» расходилась бы с рабочим местом в просроченной дебиторке (docs/operations/15, D-031)."""
-    return (datetime.now(timezone.utc) + timedelta(hours=3)).date()
+    from ...core.clock import today
+    return today()   # D-194: единое «сегодня по Москве» — app/core/clock.py
 
 
 def summary_money(db: Session, user, days: int = 90) -> dict:

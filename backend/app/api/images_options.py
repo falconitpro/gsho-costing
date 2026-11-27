@@ -21,6 +21,7 @@ from ..db import get_db
 from ..models import Attachment, LocalOption, Position, PositionImage, Task
 from ..services.deal_service import audit, ensure_folders, notify
 from .common import get_deal_or_404, serialize
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/deals/{deal_id}", tags=["images-local-options"])
 IMAGE_KINDS = {"photo", "render", "drawing", "scheme"}
@@ -216,7 +217,7 @@ class LocalOptionIn(BaseModel):
 def _option_tasks(db: Session, deal, pos: Position, o: LocalOption, user_id: str, quoted: bool = False) -> None:
     """Задачи на этапе расчёта: менеджеру — КП поставщиков, сервису — оценка установки, КД — утвердить стоимость."""
     existing = {t.block for t in db.scalars(select(Task).where(Task.deal_id == deal.id, Task.done_at.is_(None))).all()}
-    today = date.today()
+    today = msk_today()
     specs = []
     if not quoted:   # D-149: стоимость и срок поставщика внесены при создании опции — запрашивать КП не нужно
         specs.append((Role.MANAGER, deal.manager_id, f"Запросить КП поставщиков опции «{o.name}» ({pos.designation})", f"local_option_quote:{o.id}", 2))

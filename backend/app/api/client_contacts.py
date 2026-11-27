@@ -22,6 +22,7 @@ from ..db import get_db
 from ..models import Client, ClientContact, ClientContactHistory, ClientContactLink, ClientContactView, ClientSite, User
 from ..services import settings_service
 from ..services.deal_service import audit
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/clients/contacts", tags=["client-contacts"])
 
@@ -57,7 +58,7 @@ def _digits(s: str) -> str:
 
 
 def active_link():
-    t = date.today()
+    t = msk_today()
     return (ClientContactLink.is_active.is_(True)) & (or_(ClientContactLink.valid_to.is_(None), ClientContactLink.valid_to >= t))
 
 
@@ -163,7 +164,7 @@ def payload(c: ClientContact, link: Optional[ClientContactLink], sites: dict[str
     d["emails"] = emails_of(c)
     if link is not None:
         d.update({"link_id": link.id, "client_id": link.client_id, "roles": link.roles or [], "site_id": link.site_id, "is_primary": link.is_primary,
-                  "is_active": link.is_active and (link.valid_to is None or link.valid_to >= date.today()), "valid_from": link.valid_from,
+                  "is_active": link.is_active and (link.valid_to is None or link.valid_to >= msk_today()), "valid_from": link.valid_from,
                   "valid_to": link.valid_to, "link_comment": link.comment})
         d["roles_titles"] = [CONTACT_ROLES.get(r, r) for r in (link.roles or [])]
         d["site_name"] = sites.get(link.site_id or "", "")
@@ -379,7 +380,7 @@ def anonymize_contact(contact_id: str, body: DeleteIn, db: Session = Depends(get
                 nm = " ".join(str(x.get("name") or x.get("full_name") or "").split()).lower()
                 return bool(em and em in emails) or (not em and nm == name)
             cl.contacts = [x for x in cl.contacts if not same(x)]
-    today = date.today()
+    today = msk_today()
     for l in links:
         l.is_active, l.is_primary = False, False
         l.valid_to = l.valid_to or today

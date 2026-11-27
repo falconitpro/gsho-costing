@@ -17,6 +17,7 @@ from ..models import EquipmentModel, Position
 from ..services import settings_service
 from ..services.deal_service import apply_transition, audit, complete_tasks, sla
 from .common import get_deal_or_404
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/deals/{deal_id}/service", tags=["service"])
 SERVICE = require_roles(Role.SERVICE_HEAD, Role.GD)
@@ -114,7 +115,7 @@ def complete(deal_id: str, db: Session = Depends(get_db), user: CurrentUser = De
     if missing:
         raise HTTPException(422, {"message": "Сервис не рассчитан для позиций", "positions": missing})
     st = DealState(status=deal.status, service_flag=deal.service_flag, logistics_done=deal.logistics_done, service_done=deal.service_done)
-    tr = block_completed(st, "service", date.today(), sla(db))
+    tr = block_completed(st, "service", msk_today(), sla(db))
     deal.service_done = True
     complete_tasks(db, deal, block="service")
     apply_transition(db, deal, tr, user.id)

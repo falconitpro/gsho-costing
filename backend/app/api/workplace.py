@@ -19,6 +19,7 @@ from ..models import Contract, Deal, ExecutionStage, LegalPackage, NotificationL
 from ..services import draft_watch, settings_service
 from ..services.deal_service import audit
 from .common import can_see_deal
+from ..core.clock import msk_date
 
 router = APIRouter(prefix="/api/workplace", tags=["workplace"])
 
@@ -147,7 +148,7 @@ def _todo(user: CurrentUser, today: date, tasks: list[dict], approvals: list[dic
         if d.status != DealStatus.DRAFT or not d.updated_at or not (d.manager_id == user.id or d.manager_id in user.acting_for):
             continue
         # движение — по сделке, позициям, предложениям, файлам и ленте (то же правило, что у напоминаний и автоархива)
-        age = (idle or {}).get(d.id, (today - d.updated_at.date()).days)
+        age = (idle or {}).get(d.id, (today - msk_date(d.updated_at)).days)
         if age >= DRAFT_STALE_DAYS:
             left = draft_watch.WARN_DAYS + 1 - age
             hint = "отправьте на расчёт или в архив" if left > 7 else f"через {left} дн. уйдёт в архив" if left > 1 else "завтра уйдёт в архив" if left == 1 else "уходит в архив"
@@ -375,7 +376,7 @@ def build(db: Session, user: CurrentUser, executive: bool = False) -> tuple[dict
                 per[t.assignee_id] = per.get(t.assignee_id, 0) + 1
         if per:
             attention.append({"title": f"{len(all_over)} задач просрочено у {len(per)} сотрудников", "sub": ", ".join(f"{names.get(k, '?')} — {v}" for k, v in sorted(per.items(), key=lambda x: -x[1])[:4]), "url": "/tasks", "tone": "warn"})
-        stale = [d for d in open_deals if d.status == DealStatus.DRAFT and d.updated_at and idle.get(d.id, (today - d.updated_at.date()).days) >= DRAFT_STALE_LEAD_DAYS]
+        stale = [d for d in open_deals if d.status == DealStatus.DRAFT and d.updated_at and idle.get(d.id, (today - msk_date(d.updated_at)).days) >= DRAFT_STALE_LEAD_DAYS]
         if stale:
             per_m: dict[str, int] = {}
             for d in stale:
@@ -400,7 +401,7 @@ def build(db: Session, user: CurrentUser, executive: bool = False) -> tuple[dict
     # ---------------- воронка и команда (ГШО + заявки на запчасти — единый раздел «Сделки»)
     mine = [d for d in deals if user.has(Role.CD, Role.GD, Role.FD, Role.OBSERVER) or d.manager_id == user.id or d.manager_id in user.acting_for]
     q_start = date(today.year, 3 * ((today.month - 1) // 3) + 1, 1)
-    won_q = [d for d in mine if d.status in (DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED) and (d.contract_signed_at or (d.updated_at.date() if d.updated_at else today)) >= q_start]
+    won_q = [d for d in mine if d.status in (DealStatus.WON, DealStatus.CONTRACT, DealStatus.EXECUTION, DealStatus.CLOSED) and (d.contract_signed_at or (msk_date(d.updated_at) if d.updated_at else today)) >= q_start]
     won_q_parts = [p for p in mine_parts if p["block"] == "won" and parts_deals.as_of(p) >= q_start]
     pst = lambda *st: sum(1 for p in mine_parts if p["block"] == "work" and p["stage"] in st)   # noqa: E731
     funnel = [{"code": "request", "title": "запросы", "count": sum(1 for d in mine if d.status in (DealStatus.DRAFT, DealStatus.LOGISTICS_CALC, DealStatus.SERVICE_CALC)), "parts": pst("request")},

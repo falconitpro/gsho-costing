@@ -27,6 +27,7 @@ from ..core.auth import CurrentUser
 from ..core.workflow import OPEN_STATUSES, POST_WIN_STATUSES, STATUS_TITLES, DealStatus
 from ..models import AuditLog, Deal, ExecutionStage, User
 from . import parts_deals
+from ..core.clock import msk_date
 
 MONTHS = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
 MONTHS_SHORT = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
@@ -123,7 +124,7 @@ def build(db: Session, user: CurrentUser, *, kind: str, anchor: date, direction:
         if d.status not in (DealStatus.LOST, DealStatus.CANCELLED):
             return None
         x = sd.get(d.id, {})
-        return x.get("lost") or x.get("cancelled") or (d.updated_at.date() if d.updated_at else None)
+        return x.get("lost") or x.get("cancelled") or (msk_date(d.updated_at) if d.updated_at else None)
 
     parts = parts_deals.rows(db, user) if pt else []
 
@@ -131,7 +132,7 @@ def build(db: Session, user: CurrentUser, *, kind: str, anchor: date, direction:
         return v is not None and s <= v <= e
 
     def metrics(s: date, e: date) -> dict:
-        created = [d for d in deals if d.created_at and in_(d.created_at.date(), s, e)]
+        created = [d for d in deals if d.created_at and in_(msk_date(d.created_at), s, e)]
         won = [d for d in deals if in_(won_on(d), s, e)]
         lost = [d for d in deals if in_(lost_on(d), s, e)]
         p_created = [p for p in parts if p["created_at"] and in_(p["created_at"].date(), s, e)]

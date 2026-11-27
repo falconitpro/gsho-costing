@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from ..core.auth import CurrentUser
 from ..core.roles import Role
 from ..models import Attachment, Deal, FeedEntry, User
+from ..core.clock import today as msk_today
 
 SECTIONS = {
     "": "Общее",
@@ -81,7 +82,7 @@ def serialize_entry(db: Session, e: FeedEntry, user: CurrentUser, users: dict[st
         "author_id": e.user_id, "author": author.display_name if author else "",
         "parent_id": e.parent_id, "tags": e.tags or [], "mentions": [{"id": m, "name": users[m].display_name} for m in (e.mentions or []) if m in users],
         "awaiting": bool(e.awaiting) and not deleted, "due_on": e.due_on.isoformat() if e.due_on else None,
-        "overdue": bool(e.awaiting and not e.resolved_at and e.due_on and e.due_on < date.today()),
+        "overdue": bool(e.awaiting and not e.resolved_at and e.due_on and e.due_on < msk_today()),
         "resolved_at": e.resolved_at.isoformat() if e.resolved_at else None, "pinned": bool(e.pinned) and not deleted,
         "edited": e.edited_at is not None, "deleted": deleted,
         "files": [] if deleted else [{"id": a.id, "name": a.file_name, "size": a.size, "url": f"/api/files/{a.storage_path}"}

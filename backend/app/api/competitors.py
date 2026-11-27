@@ -23,6 +23,7 @@ from ..models import AuditLog, Client, Competitor, CompetitorOffer, Contract, De
 from ..services import settings_service
 from ..services.deal_service import audit
 from .common import get_deal_or_404
+from ..core.clock import today as msk_today
 
 router = APIRouter(tags=["competitors"])
 CD_GD = require_roles(Role.CD, Role.GD)
@@ -152,7 +153,7 @@ def _our(db: Session, deal: Deal, contract_ccy: str) -> list[dict]:
         if v.price_rub is None:
             continue
         price = now.get(v.id, {}).get("price_rub", v.price_rub)
-        crate, _ = rate_on(db, contract_ccy, date.today())
+        crate, _ = rate_on(db, contract_ccy, msk_today())
         out.append({"variant_id": v.id, "name": v.name, "rub_net": round(price, 2), "rub_gross": round(price * (1 + vat / 100), 2),
                     "currency": v.price_currency or "RUB", "net": v.price_amount, "vat_included": v.price_vat_included,
                     "contract_net": round(price / crate, 2), "contract_gross": round(price * (1 + vat / 100) / crate, 2)})

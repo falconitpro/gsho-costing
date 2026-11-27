@@ -22,6 +22,7 @@ from ..models import Batch, Deal, ExecutionStage, LocalOption, PlanFactEntry, Po
 from . import settings_service
 from .deal_calc import build_calc_input
 from .deal_service import audit, notify
+from ..core.clock import today as msk_today
 
 # code → (название, уровень: deal|position|batch|option, событие расчёта, ответственные роли, вид: date|payment_in|payment_out, порядок)
 STAGE_DEFS: dict[str, dict[str, Any]] = {
@@ -325,7 +326,7 @@ def stage_rows(db: Session, deal: Deal) -> list[dict]:
                     "responsible_roles": s.responsible_roles, "kind": STAGE_DEFS[s.code]["kind"],
                     "position_id": s.position_id, "position": pos[s.position_id].designation if s.position_id in pos else None,
                     "batch_id": s.batch_id, "batch": bat[s.batch_id].name if s.batch_id in bat else None, "local_option_id": s.local_option_id,
-                    "note": s.note, "done": s.actual_on is not None, "overdue": s.actual_on is None and s.planned_on is not None and s.planned_on < date.today(),
+                    "note": s.note, "done": s.actual_on is not None, "overdue": s.actual_on is None and s.planned_on is not None and s.planned_on < msk_today(),
                     # контроль сроков: базовый план, уточнённая дата, прогноз, факт, отклонение от базового плана (дни, + — позже)
                     "baseline_on": s.baseline_on, "refined_on": s.refined_on, "refined_note": s.refined_note,
                     "factory_date": s.code in FACTORY_DATE_CODES,

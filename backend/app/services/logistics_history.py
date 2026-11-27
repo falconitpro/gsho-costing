@@ -17,6 +17,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..models import Deal, LogisticsHistory, RateSetting
+from ..core.clock import today as msk_today
 
 MARK = "_migration_logistics_history_v2"
 
@@ -62,7 +63,7 @@ def record_deal(db: Session, deal: Deal, on: Optional[date] = None) -> int:
     """Записи сделки в истории — по текущему расчёту логистики (прежние записи сделки заменяются)."""
     db.execute(delete(LogisticsHistory).where(LogisticsHistory.deal_id == deal.id, LogisticsHistory.source == "plan"))
     from . import settings_service
-    rows = _rows(deal, on or date.today(), float(settings_service.get(db, "sales_vat_pct") or 22.0))
+    rows = _rows(deal, on or msk_today(), float(settings_service.get(db, "sales_vat_pct") or 22.0))
     db.add_all(rows)
     return len(rows)
 

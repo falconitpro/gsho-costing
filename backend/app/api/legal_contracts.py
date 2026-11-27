@@ -22,6 +22,7 @@ from ..models import Client, Contract, Deal, Factory, LegalEntity
 from ..services import legal_contracts as svc
 from ..services.deal_service import audit
 from .common import can_see_deal
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api", tags=["legal"])
 
@@ -265,7 +266,7 @@ def create_contract(body: ContractIn, db: Session = Depends(get_db), user: Curre
             raise HTTPException(404, "Сделка не найдена")
         data.setdefault("deal_ids", [d.id])
     ent = db.get(LegalEntity, data["own_entity_id"]) if data.get("own_entity_id") else None
-    num, seq = svc.next_number(db, ent, direction, date.today())
+    num, seq = svc.next_number(db, ent, direction, msk_today())
     if parent:
         k = db.scalars(select(Contract).where(Contract.parent_id == parent.id)).all()
         num, seq = f"{parent.number}/{'ДС' if data['doc_type'] == 'amendment' else 'СП'}-{len(k) + 1}", None
@@ -574,7 +575,7 @@ def contract_fact(cid: str, body: FactIn, db: Session = Depends(get_db), user: C
             raise HTTPException(422, "Укажите, почему неустойку не взыскиваем")
         if body.amount is not None and body.amount < 0:
             raise HTTPException(422, "Сумма не может быть отрицательной")
-        data = {"status": body.status, "amount": body.amount, "on": (body.on or date.today()).isoformat(), "due_on": body.due_on.isoformat() if body.due_on else None,
+        data = {"status": body.status, "amount": body.amount, "on": (body.on or msk_today()).isoformat(), "due_on": body.due_on.isoformat() if body.due_on else None,
                 "comment": body.comment.strip(), "by": user.id, "clear": body.clear}
         txt = "неустойка: " + (svc.PEN_STATUS.get(body.status or "", "") if not body.clear else "решение снято")
     else:

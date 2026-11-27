@@ -29,6 +29,7 @@ from ..services import acceptance_service as acs
 from ..services.deal_service import audit, notify
 from .common import get_deal_or_404, serialize
 from .model_docs import model_docs, position_model
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/deals/{deal_id}/acceptance", tags=["acceptance"])
 EDIT_ROLES = (Role.MANAGER, Role.SERVICE_HEAD, Role.CD, Role.GD)
@@ -243,7 +244,7 @@ def _to_park(db: Session, u: AcceptanceUnit, pos: Position, user: CurrentUser) -
                           manufacturer=pos.trademark or ((f.short_name or f.name) if f else ""), model=pos.model, created_by=user.id, origin="berghaus")
         db.add(m)
     m.serial = u.serial
-    m.comment = f"принята на заводе {date.today():%d.%m.%Y}" + ("" if not m.comment or m.comment.startswith("из сделки") else f"; {m.comment}")
+    m.comment = f"принята на заводе {msk_today():%d.%m.%Y}" + ("" if not m.comment or m.comment.startswith("из сделки") else f"; {m.comment}")
     db.flush()
     u.machine_id = m.id
     from ..services.fleet_parties import ensure_primary
@@ -268,7 +269,7 @@ def _mark_stage(db: Session, deal: Deal, pos: Position, user: CurrentUser) -> bo
                                                  ExecutionStage.position_id == pos.id)).first()
     if st is not None:
         from ..services import execution_service as ex
-        acc_on = max((x.inspected_on for x in units if x.inspected_on), default=None) or date.today()
+        acc_on = max((x.inspected_on for x in units if x.inspected_on), default=None) or msk_today()
         was = st.actual_on
         st.actual_on = acc_on if done else None
         st.done_by = user.id if done else None

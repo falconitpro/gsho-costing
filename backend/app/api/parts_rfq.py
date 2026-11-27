@@ -25,6 +25,7 @@ from ..services.suppliers import mark as mark_supplier
 from ..services.parts_supplier import AVAILABILITY, CARD_KEY, LANG_TITLE, build_rfq_xlsx, parse_rfq_answer, rfq_status, supplier_language
 from .common import serialize
 from .parts_requests import _editable, _payload, _recalc, _req_or_404
+from ..core.clock import today as msk_today
 
 router = APIRouter(prefix="/api/parts", tags=["parts-rfq"])
 EDIT_ROLES = (Role.MANAGER, Role.CD, Role.GD, Role.PURCHASING)
@@ -55,7 +56,7 @@ def _check_access(user: CurrentUser, rfq: SupplierRfq, edit: bool = False) -> No
 
 
 def _next_number(db: Session) -> str:
-    prefix = f"ЗП-{date.today().year}-"
+    prefix = f"ЗП-{msk_today().year}-"
     last = db.scalars(select(SupplierRfq.number).where(SupplierRfq.number.like(f"{prefix}%"))).all()
     n = max([int(x.rsplit("-", 1)[1]) for x in last if x.rsplit("-", 1)[1].isdigit()] or [0]) + 1
     return f"{prefix}{n:04d}"
@@ -116,7 +117,7 @@ class RfqCreateIn(BaseModel):
 
 def _make_rfq(db: Session, sup: Factory, lines: list[PartRequestLine], user: CurrentUser, due_days: int, comment: str, **extra) -> SupplierRfq:
     lang = supplier_language(sup.country, sup.language)
-    rfq = SupplierRfq(number=_next_number(db), supplier_id=sup.id, language=lang, due_date=date.today() + timedelta(days=max(due_days, 0)),
+    rfq = SupplierRfq(number=_next_number(db), supplier_id=sup.id, language=lang, due_date=msk_today() + timedelta(days=max(due_days, 0)),
                       comment=comment, created_by=user.id, **extra)
     db.add(rfq)
     db.flush()
@@ -173,7 +174,7 @@ def create_rfqs(rid: str, body: RfqCreateIn, db: Session = Depends(get_db), user
         for end, route in pairs:                     # U — предложение компании группы, L — её запрос поставщику X
             mark_supplier(db, end.id, "parts")
             up = SupplierRfq(number=_next_number(db), supplier_id=sup.id, language="ru", end_supplier_id=end.id, route_id=route.id,
-                             due_date=date.today() + timedelta(days=max(body.due_days, 0)), comment=body.comment, created_by=user.id,
+                             due_date=msk_today() + timedelta(days=max(body.due_days, 0)), comment=body.comment, created_by=user.id,
                              mirror_state="waiting")
             db.add(up)
             db.flush()

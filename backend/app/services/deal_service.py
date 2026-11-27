@@ -63,6 +63,7 @@ def _assignee(db: Session, deal: Deal, spec: TaskSpec) -> str | None:
 
 
 from . import notification_kinds as _nk  # noqa: E402,F401 — регистрирует закрытие уведомлений при выполнении задачи (D-101)
+from ..core.clock import today as msk_today
 
 
 def apply_transition(db: Session, deal: Deal, tr: TransitionResult, user_id: str | None) -> None:
@@ -112,7 +113,7 @@ def notify(db: Session, deal: Deal | None, user_id: str | None, event: str, chan
     # заместитель на период получает уведомления замещаемого
     if user is not None and user.deputy_id and user.deputy_id != user_id:
         from datetime import date as _date
-        today = _date.today()
+        today = msk_today()
         if (user.deputy_from is None or user.deputy_from <= today) and (user.deputy_to is None or user.deputy_to >= today):
             dep = db.get(User, user.deputy_id)
             if dep is not None and dep.is_active:
@@ -172,7 +173,7 @@ def _task_notifications(session: Session, flush_context, instances) -> None:
 def check_overdue_tasks(db: Session, today: date | None = None) -> int:
     """Просроченные задачи: уведомление исполнителю (или всем с ролью задачи), КД и ЗГД — один раз на задачу."""
     from ..core.workflow import overdue, role_title
-    today = today or date.today()
+    today = today or msk_today()
     n = 0
     users = db.scalars(select(User).where(User.is_active.is_(True))).all()
     for t in db.scalars(select(Task).where(Task.done_at.is_(None), Task.overdue_notified.is_(False))).all():

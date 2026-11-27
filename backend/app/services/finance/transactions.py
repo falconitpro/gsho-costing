@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from ...models import FinanceAccount, FinanceAllocation, FinanceObligation, FinanceTransaction
 from ..deal_service import audit
 from .money import TOLERANCE, ZERO, dec, rate, s
+from ...core.clock import today as msk_today
 
 ACTIVE_ALLOC = ("provisional", "confirmed")
 
@@ -251,7 +252,7 @@ def allocate(db: Session, user, vis, tx_id: str, items: list[dict], status: str,
     now = _now()
     for i, o, a_tx, a_ob, fx, it in planned:
         al = FinanceAllocation(transaction_id=tx.id, obligation_id=o.id, amount_tx=a_tx, amount_obligation=a_ob, fx_rate=fx,
-                               fx_on=it.get("fx_on"), fx_source=(it.get("fx_source") or "")[:64], status=status, allocated_on=date.today(),
+                               fx_on=it.get("fx_on"), fx_source=(it.get("fx_source") or "")[:64], status=status, allocated_on=msk_today(),
                                idempotency_key=f"{key}:{i}", note=(it.get("note") or ""), created_by=user.id,
                                confirmed_by=user.id if status == "confirmed" else None, confirmed_at=now if status == "confirmed" else None)
         db.add(al)

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..core.roles import DEFAULT_MATRIX, EDIT, FIELD_GROUPS, LEVEL_TITLES, NONE, PROTECTED, ROLE_TITLES, Role, effective_perms
 from ..models import AccessRule, AccessUserOverride, User
+from ..core.clock import today as msk_today
 
 _CACHE: dict[str, Any] = {"at": 0.0, "rules": None}
 CACHE_TTL = 30.0
@@ -108,6 +109,6 @@ def acting_for(db, user) -> set[str]:
     from datetime import date
     from sqlalchemy import select
     from ..models import User
-    today = date.today()
+    today = msk_today()
     rows = db.scalars(select(User).where(User.deputy_id == user.id, User.is_active.is_(True))).all()
     return {u.id for u in rows if (u.deputy_from is None or u.deputy_from <= today) and (u.deputy_to is None or u.deputy_to >= today)}

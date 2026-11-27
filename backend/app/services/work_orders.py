@@ -29,6 +29,7 @@ from ..core.roles import EDIT, Role
 from ..models import User, ServiceRequest, ServiceWorkType, WorkOrder, WorkOrderChecklistItem, WorkOrderEvent
 from .change_events import record
 from .deal_service import audit
+from ..core.clock import today as msk_today
 
 STATUSES = {
     "draft": "Черновик", "assigned": "Назначен", "in_progress": "В работе", "on_hold": "Приостановлен",
@@ -79,7 +80,7 @@ def _now() -> datetime:
 
 
 def _number(db: Session, model, prefix: str) -> str:
-    p = f"{prefix}-{date.today().year}-"
+    p = f"{prefix}-{msk_today().year}-"
     last = db.scalars(select(model.number).where(model.number.like(f"{p}%"))).all()
     n = max([int(x.rsplit("-", 1)[1]) for x in last if x.rsplit("-", 1)[1].isdigit()] or [0]) + 1
     return f"{p}{n:04d}"

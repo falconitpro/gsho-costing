@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from ..calc.calendar import DEFAULT_CALENDAR as CAL
 from ..models import Deal, OfficeDoc, User
 from .office import KINDS, OPEN
+from ..core.clock import today as msk_today
 
 MSK = timezone(timedelta(hours=3))
 REPEAT_WD = 3
@@ -115,7 +116,7 @@ def _ack_reminders(db: Session, today: date) -> int:
 
 def control(db: Session, today: Optional[date] = None) -> dict:
     """Панель «на контроле»: по исполнителям — в работе, срок сегодня, просрочено; за 30 дней — закрыто и в срок."""
-    today = today or date.today()
+    today = today or msk_today()
     since = today - timedelta(days=30)
     rows: dict[str, dict] = {}
     names = {u.id: u.display_name for u in db.scalars(select(User)).all()}

@@ -9,6 +9,7 @@ from ..core.auth import CurrentUser
 from ..core.roles import Role, filter_payload
 from ..core.workflow import LOGISTICS_VISIBLE_FROM, DealStatus
 from ..models import Deal
+from ..core.clock import today as msk_today
 
 
 def payment_terms_set(deal: Deal) -> bool:
@@ -69,7 +70,7 @@ def observer_sees(scope: dict, deal: Deal) -> bool:
     """Область наблюдателя: пустая область — ничего не видно. Срез по клиентам, менеджерам, сделкам, фазе (sale | contract) и сроку доступа."""
     from datetime import date
     until = scope.get("until")
-    if until and str(until) < date.today().isoformat():
+    if until and str(until) < msk_today().isoformat():
         return False
     ok = False
     if scope.get("all"):

@@ -21,6 +21,7 @@ from ...calc.types import COST_ITEMS
 from ...models import FinanceObligation, FinanceRecognitionEvent, PlanFactEntry
 from ..deal_service import audit
 from .money import dec, rate as to_rate, s
+from ...core.clock import today as msk_today
 
 ITEM_CODES = {k for _, k, _ in COST_ITEMS}
 BASIS = {"primary_document": "первичный документ", "business_event": "хозяйственное событие", "legacy_business_event": "старый факт план/факта (без документа)"}
@@ -69,7 +70,7 @@ def create(db: Session, user, deal, body: dict, key: str) -> FinanceRecognitionE
             raise HTTPException(422, "Обязательство не относится к этой сделке")
     ev = FinanceRecognitionEvent(kind=kind, deal_id=deal.id, obligation_id=ob_id, cost_item_code=code, position_id=body.get("position_id") or None,
                                  amount=amount, currency=currency, fx_rate=r, fx_source=(body.get("fx_source") or "")[:64], fx_on=body.get("fx_on"), amount_rub=amount_rub,
-                                 recognized_on=body.get("recognized_on") or date.today(), basis_type=basis, document_type=(body.get("document_type") or "")[:64],
+                                 recognized_on=body.get("recognized_on") or msk_today(), basis_type=basis, document_type=(body.get("document_type") or "")[:64],
                                  document_number=(body.get("document_number") or "")[:64], document_date=body.get("document_date"),
                                  attachment_id=body.get("attachment_id") or None, source_type="manual", source_id=f"manual:{key}"[:64], idempotency_key=key,
                                  comment=body.get("comment") or "", created_by=user.id)

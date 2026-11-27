@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
+from ...core.clock import today as msk_today
 
 KINDS = {"obligations": "Платёжный календарь", "debt": "Дебиторка и кредиторка", "liquidity": "Ликвидность", "economy": "Экономика сделки", "reconciliation": "Сверка"}
 MAX_ROWS = 20_000
@@ -103,7 +104,7 @@ def build(db, user, vis, kind: str, params: dict) -> tuple[bytes, str, int, Opti
     """→ (файл, имя файла, число строк, deal_id для журнала)."""
     from . import debt, liquidity, obligations as obl, reconciliation
     b = Book()
-    today = params.get("as_of") or date.today()
+    today = params.get("as_of") or msk_today()
     deal_id = None
     if kind == "obligations":
         f = obl.ObligationFilter(as_of=today, direction=params.get("direction"), currency=params.get("currency"), legal_entity_id=params.get("legal_entity_id"),

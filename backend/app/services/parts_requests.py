@@ -14,6 +14,7 @@ from ..models import Factory, Part, PartCrossRef, PartRequest, PartRequestLine, 
 from . import settings_service
 from .markup_chain import ChainError, simulate
 from .parts_pricing import price_line, supplier_currency
+from ..core.clock import today as msk_today
 
 
 def norm_article(s: str) -> str:
@@ -22,7 +23,7 @@ def norm_article(s: str) -> str:
 
 
 def next_number(db: Session) -> str:
-    year = date.today().year
+    year = msk_today().year
     prefix = f"ЗЧ-{year}-"
     last = db.scalars(select(PartRequest.number).where(PartRequest.number.like(f"{prefix}%"))).all()
     n = max([int(x.rsplit("-", 1)[1]) for x in last if x.rsplit("-", 1)[1].isdigit()] or [0]) + 1
@@ -151,7 +152,7 @@ def supplier_currency_of(db: Session, supplier_id: Optional[str]) -> str:
 def price_lines(db: Session, req: PartRequest, fx: dict, rules: dict) -> None:
     bands = settings_service.get(db, "parts_margin_bands")
     tol = settings_service.get(db, "parts_cd_tolerance_pp")
-    today = date.today()
+    today = msk_today()
     for line in req.lines:
         if line.status in ("cancelled", "unavailable") or not line.part_id:
             continue
