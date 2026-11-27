@@ -8,7 +8,8 @@ import { askConfirm } from "./Dialogs";
 
 // Каталог запасных частей: поиск, карточка (утверждена 05.11.2026), проверка дублей, перенос из МойСклад.
 
-type Cross = { kind: string; number: string; supplier_id: string | null; manufacturer: string; comment: string };
+type Cross = { id?: string; kind: string; number: string; supplier_id: string | null; manufacturer: string; comment: string; status?: string; source?: string };
+const NEW_CROSS = ["machine_maker", "oem"];   // D-202: виды номеров только нового вида
 type Appl = { id?: string; equipment_model_id: string | null; other_manufacturer: string; other_model: string; assembly: string; model_title?: string;
   status?: string; status_title?: string; serial_from?: string; serial_to?: string; basis_kind?: string; basis?: string; verified_by?: string | null;
   verified_by_name?: string; verified_at?: string | null; execution_id?: string | null; execution_name?: string; assembly_id?: string | null };
@@ -260,10 +261,12 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
           <div className="grid cols-3">{txt("Производитель", "manufacturer")}{txt("Артикул производителя (OEM)", "oem_number")}</div>
           {cur.cross_refs.map((c, i) => (
             <div key={i} className="row" style={{ marginBottom: 4 }}>
-              <select value={c.kind} disabled={!edit} onChange={(e) => set({ cross_refs: cur.cross_refs.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)) })}>{Object.entries(meta?.cross_kinds || {}).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
+              <select value={c.kind} disabled={!edit} onChange={(e) => set({ cross_refs: cur.cross_refs.map((x, j) => (j === i ? { ...x, kind: e.target.value } : x)) })}>{Object.entries(meta?.cross_kinds || {}).filter(([k]) => nv || !NEW_CROSS.includes(k) || k === c.kind).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select>
               <input placeholder="номер" value={c.number} disabled={!edit} onChange={(e) => set({ cross_refs: cur.cross_refs.map((x, j) => (j === i ? { ...x, number: e.target.value } : x)) })} />
               {c.kind === "supplier" ? <select value={c.supplier_id || ""} disabled={!edit} onChange={(e) => set({ cross_refs: cur.cross_refs.map((x, j) => (j === i ? { ...x, supplier_id: e.target.value || null } : x)) })}><option value="">— поставщик —</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.short_name || s.name}</option>)}</select>
-                : <input placeholder="производитель аналога" value={c.manufacturer} disabled={!edit} onChange={(e) => set({ cross_refs: cur.cross_refs.map((x, j) => (j === i ? { ...x, manufacturer: e.target.value } : x)) })} />}
+                : <input placeholder={c.kind === "machine_maker" ? "завод машины" : c.kind === "oem" ? "производитель детали" : "производитель аналога"} value={c.manufacturer} disabled={!edit} onChange={(e) => set({ cross_refs: cur.cross_refs.map((x, j) => (j === i ? { ...x, manufacturer: e.target.value } : x)) })} />}
+              {nv && NEW_CROSS.includes(c.kind) && c.id && <span className={`badge ${{ confirmed: "ok", probable: "info", unverified: "warn", not_applicable: "bad" }[c.status || "unverified"] || ""}`}>
+                {{ confirmed: "подтверждено", probable: "вероятно", unverified: "не подтверждено", not_applicable: "не подходит", replaced: "заменена" }[c.status || "unverified"]}{c.source === "import" ? " · импорт" : c.source === "ai" ? " · ИИ" : ""}</span>}
               {edit && <button className="btn ghost" onClick={() => set({ cross_refs: cur.cross_refs.filter((_, j) => j !== i) })}>удалить</button>}
             </div>))}
           {edit && <button className="btn add" onClick={() => set({ cross_refs: [...cur.cross_refs, { kind: "supplier", number: "", supplier_id: null, manufacturer: "", comment: "" }] })}>Номер или аналог</button>}

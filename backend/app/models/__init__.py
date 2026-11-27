@@ -1850,6 +1850,14 @@ class PartCrossRef(Base):
     analog_part_id: Mapped[Optional[str]] = mapped_column(ForeignKey("parts.id"))   # аналог, если он есть в каталоге
     manufacturer: Mapped[str] = mapped_column(String(255), default="")
     comment: Mapped[str] = mapped_column(Text, default="")
+    # D-202: кроссировки «номер завода машины ↔ OEM» — статус проверки, основание, источник (ручной ввод, импорт, ИИ)
+    status: Mapped[str] = mapped_column(String(16), default="unverified")   # те же статусы, что у применимости
+    basis_kind: Mapped[str] = mapped_column(String(16), default="")
+    basis: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(16), default="manual")       # manual | import | ai
+    source_ref: Mapped[str] = mapped_column(String(255), default="")       # файл, документ, письмо
+    verified_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class PartApplicability(Base):

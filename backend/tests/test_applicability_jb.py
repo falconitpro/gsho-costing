@@ -192,3 +192,45 @@ def test_assemblies_jc(client):
     _ok(client.put(f"/api/parts/assemblies/{k['id']}", headers=H(CD), json={"name_ru": f"Ковш {t} (рабочее)", "name_en": "Bucket"}))
     c = _ok(client.get(f"/api/parts/catalog/{old['id']}", headers=H(CD)))
     assert any(x["assembly"] == f"Ковш {t} (рабочее)" for x in c["applicability"])
+
+
+def test_cross_refs_machine_oem_d202(client):
+    """D-202: кроссировки «номер завода машины ↔ OEM»: проверка не теряется при сохранении, очередь, импорт с конфликтом."""
+    import io
+
+    from openpyxl import Workbook
+    t = uuid.uuid4().hex[:5].upper()
+    p = _ok(client.post("/api/parts/catalog", headers=H(CD), json={"article": f"CX-{t}", "name_ru": "Фильтр", "purchase_price": 1, "purchase_currency": "RUB",
+                                                                   "cross_refs": [{"kind": "machine_maker", "number": f"600-{t}-01", "manufacturer": "Komatsu"}]}), 201)
+    c = p["cross_refs"][0]
+    assert c["status"] == "unverified" and c["source"] == "manual"
+    q = _ok(client.get("/api/parts/cross-refs", headers=H(MGR), params={"q": f"600 {t} 01"}))
+    assert [x["id"] for x in q["items"]] == [c["id"]] and q["can_edit"]
+    assert client.post(f"/api/parts/cross-refs/{c['id']}/verify", headers=H(SVC), json={"status": "confirmed"}).status_code == 422
+    _ok(client.post(f"/api/parts/cross-refs/{c['id']}/verify", headers=H(SVC), json={"status": "confirmed", "basis_kind": "manual", "basis": "каталог Komatsu"}))
+    # прежний вид сохраняет карточку без полей проверки — статус остаётся
+    card = _ok(client.put(f"/api/parts/catalog/{p['id']}", headers=H(CD), json={"article": f"CX-{t}", "name_ru": "Фильтр", "purchase_price": 1, "purchase_currency": "RUB",
+                                                                               "cross_refs": [{"kind": "machine_maker", "number": f"600{t}01", "manufacturer": "Komatsu"}]}))
+    assert card["cross_refs"][0]["status"] == "confirmed" and card["cross_refs"][0]["id"] == c["id"]
+    other = _ok(client.post("/api/parts/catalog", headers=H(CD), json={"article": f"CY-{t}", "name_ru": "Другая", "purchase_price": 1, "purchase_currency": "RUB"}), 201)
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Производитель машины", "Номер завода машины", "Производитель детали", "OEM номер", "Наименование"])
+    ws.append(["Komatsu", f"600-{t}-01", "Donaldson", f"P55-{t}", "Фильтр"])          # найдено → добавить OEM
+    ws.append(["Komatsu", f"600-{t}-01", "Donaldson", f"CY-{t}", "Фильтр"])          # номера на разных карточках → конфликт
+    ws.append(["Komatsu", f"777-{t}", "Fleetguard", f"LF-{t}", "Новый фильтр"])      # не найдено
+    buf = io.BytesIO()
+    wb.save(buf)
+    up = lambda **f: client.post("/api/parts/cross-refs/import", headers=H(CD), files={"file": ("cross.xlsx", buf.getvalue())},  # noqa: E731
+                                 data={k: str(v).lower() for k, v in f.items()})
+    dry = _ok(up())
+    assert dry["dry_run"] and dry["added"] == 1 and len(dry["conflicts"]) == 1 and len(dry["skipped"]) == 1 and dry["created"] == 0
+    assert all(x["kind"] != "oem" for x in _ok(client.get(f"/api/parts/catalog/{p['id']}", headers=H(CD)))["cross_refs"])   # пробный — без изменений
+    assert client.post("/api/parts/cross-refs/import", headers=H(SVC), files={"file": ("cross.xlsx", buf.getvalue())}).status_code == 403
+    done = _ok(up(dry_run=False, create=True))
+    assert done["added"] == 1 and done["created"] == 1
+    oem = next(x for x in _ok(client.get(f"/api/parts/catalog/{p['id']}", headers=H(CD)))["cross_refs"] if x["kind"] == "oem")
+    assert oem["number"] == f"P55-{t}" and oem["status"] == "unverified" and oem["source"] == "import" and oem["source_ref"] == "cross.xlsx"
+    found = _ok(client.get("/api/catalog/search", headers=H(MGR), params={"q": f"777{t}"}))["parts"]
+    assert found and found[0]["article"] == f"777-{t}"
+    assert other["id"]
