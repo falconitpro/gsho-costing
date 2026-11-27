@@ -148,17 +148,27 @@ jobs:
     needs: [backend, frontend, ui]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # D-204: несколько слияний подряд — отметки ставятся по очереди, а не одновременно (27.11 более старая версия перезаписала новую)
+    concurrency: { group: verified-pointer, cancel-in-progress: false }
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - name: продвинуть verified на ${{ github.sha }}
         run: |
-          git fetch -q origin verified || true
-          if git rev-parse -q --verify origin/verified >/dev/null && ! git merge-base --is-ancestor origin/verified "$GITHUB_SHA"; then
-            echo "verified ($(git rev-parse --short origin/verified)) не предок $GITHUB_SHA — более новая версия уже проверена, не откатываю"; exit 0
-          fi
-          git push origin "$GITHUB_SHA:refs/heads/verified" --force
-          echo "verified → $(git rev-parse --short "$GITHUB_SHA")"
+          for attempt in 1 2 3; do
+            # свежее состояние verified прямо перед решением, а не снимок с момента checkout
+            git fetch -q origin "+refs/heads/verified:refs/remotes/origin/verified" 2>/dev/null || true
+            old=$(git rev-parse -q --verify origin/verified || true)
+            if [ -n "$old" ] && ! git merge-base --is-ancestor "$old" "$GITHUB_SHA"; then
+              echo "verified (${old:0:7}) не предок $GITHUB_SHA — более новая версия уже проверена, не откатываю"; exit 0
+            fi
+            # атомарно: запись только если verified не сдвинули с момента проверки
+            if git push origin "$GITHUB_SHA:refs/heads/verified" --force-with-lease="refs/heads/verified:${old}"; then
+              echo "verified → $(git rev-parse --short "$GITHUB_SHA")"; exit 0
+            fi
+            echo "verified сдвинули параллельно — проверяю заново ($attempt)"; sleep 5
+          done
+          exit 1
 
   deploy:
     needs: [backend, frontend, ui]
