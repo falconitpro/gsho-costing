@@ -167,7 +167,12 @@ def test_sync_push_pull_and_append_only(client):  # noqa: F811
     _, wo = _order(client)
     wo = _assign(client, wo)
     other = _assign(client, _order(client)[1], who=SVC)                                    # наряд другого исполнителя
-    cur = _ok(client.get("/api/service/sync/pull", headers=H(ENG), params={"cursor": 0, "limit": 2000}))["cursor"]
+    cur = 0
+    while True:   # реестр за весь прогон тестов может быть длиннее одной страницы — дочитываем до конца
+        nxt = _ok(client.get("/api/service/sync/pull", headers=H(ENG), params={"cursor": cur, "limit": 2000}))["cursor"]
+        if nxt == cur:
+            break
+        cur = nxt
     e1, e2 = str(uuid.uuid4()), str(uuid.uuid4())
     res = _ok(client.post("/api/service/sync/push", headers=H(ENG), json={"events": [
         {"order_id": wo["id"], "id": e1, "kind": "start", "base_version": wo["version"], "offline": True, "device_id": "phone-1"},

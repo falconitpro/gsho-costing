@@ -19,7 +19,7 @@ CHROME = sys.argv[3] if len(sys.argv) > 3 else None
 ROLES = [("manager@example.com", "менеджер"), ("logist@example.com", "логист"), ("service@example.com", "сервис"),
          ("cd@example.com", "КД"), ("fd@example.com", "ФД"), ("evgeniy@dobrov.pro", "ЗГД"), ("admin@example.com", "администратор"),
          ("observer@example.com", "наблюдатель"), ("lawyer@example.com", "юрист"),
-         ("engineer@example.com", "инженер")]
+         ("engineer@example.com", "инженер"), ("payroll@example.com", "бухгалтер по зарплате")]
 MGR, LOG, CD = "manager@example.com", "logist@example.com", "cd@example.com"
 
 
@@ -58,7 +58,7 @@ def make_deal() -> str:
 
 fails: list[str] = []
 visited = 0
-NEW_ONLY = {"/service"}   # D-192: разделы, которые есть только в новом виде (решение владельца «всё — только в новом виде»)
+NEW_ONLY = {"/service", "/hr"}   # D-192: разделы, которые есть только в новом виде (решение владельца «всё — только в новом виде»)
 
 
 VIEWS = [v for v in os.environ.get("UI_VIEWS", "classic,new").split(",") if v]

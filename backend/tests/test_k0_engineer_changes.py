@@ -15,6 +15,7 @@ def test_matrix_matches_owner_table():
         "manager": (2, 2, 2, 1, 1), "logistician": (1, 1, 1, 0, 0), "service_head": (2, 2, 2, 2, 2), "cd": (2, 2, 2, 1, 1),
         "fd": (1, 1, 1, 1, 0), "gd": (2, 2, 2, 2, 2), "admin": (0, 1, 2, 0, 0), "observer": (0, 1, 0, 0, 0),
         "purchasing": (1, 1, 1, 0, 0), "lawyer": (1, 1, 0, 0, 0), "clerk": (1, 0, 0, 0, 0), "engineer": (1, 1, 1, 1, 1),
+        "payroll": (0, 0, 0, 0, 0),   # D-205: бухгалтер по зарплате — только «Персонал»
     }
     assert set(want) == {r.value for r in Role}
     for code, levels in want.items():
@@ -27,7 +28,7 @@ def test_matrix_matches_owner_table():
 def test_existing_roles_keep_their_old_rights():
     """Новые группы ничего не отнимают и не добавляют в прежних группах."""
     from app.core.roles import DEFAULT_MATRIX, Role
-    old_engineerless = {r for r in Role if r != Role.ENGINEER}
+    old_engineerless = {r for r in Role if r not in (Role.ENGINEER, Role.PAYROLL)}   # новые роли (D-181, D-205) — без файлов сделок
     for r in old_engineerless:
         assert DEFAULT_MATRIX[r].get("file_download") == 1
         assert DEFAULT_MATRIX[r].get("assistant_use") == 1

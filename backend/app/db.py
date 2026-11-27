@@ -38,9 +38,10 @@ def init_db() -> None:
     sync_enums()
     Base.metadata.create_all(engine)
     add_missing_columns()
-    from .services.change_events import ensure_guard, ensure_work_order_guard
+    from .services.change_events import ensure_guard, ensure_hr_events_guard, ensure_work_order_guard
     ensure_guard(engine)   # реестр событий — только добавление (D-181)
     ensure_work_order_guard(engine)   # события нарядов — только добавление (D-191)
+    ensure_hr_events_guard(engine)   # кадровые события — только добавление (D-205)
     backfill_contact_links()
     vat_22_once()
 
