@@ -141,3 +141,119 @@ def test_hr_events_append_only_and_audit_without_values(client):  # noqa: F811
         db.rollback()
         rows = db.scalars(select(AuditLog).where(AuditLog.entity_id == e["id"])).all()
         assert rows and all(secret not in str(r.before) + str(r.after) + r.comment for r in rows)
+
+
+PAYROLL = "payroll@example.com"
+
+
+def _person(client, t, ru=None):
+    ru = ru or _employers(client)[0]
+    dep, pos = _org(client, GD, ru, t)
+    return _ok(client.post("/api/hr/employees", headers=H(GD), json={"last_name": f"Лич{t}", "first_name": "Тест",
+                                                                      "hire": {"employer_id": ru, "start_date": D(-30), "department_id": dep["id"], "position_id": pos["id"]}}))
+
+
+def test_hr_payroll_role_and_default_scope(client):  # noqa: F811
+    """Решение владельца 28.11: ЗГД, ФД и бухгалтер по зарплате — доступ сразу, ко всем юрлицам, пока ЗГД не ограничит."""
+    t = uuid.uuid4().hex[:5]
+    e = _person(client, t)
+    me = _ok(client.get("/api/auth/me", headers=H(PAYROLL)))
+    assert {"hr_core", "hr_personal", "hr_payroll"} <= {k for k, v in me["perms"].items() if v == 2}
+    assert _ok(client.get(f"/api/hr/employees/{e['id']}", headers=H(PAYROLL)))["id"] == e["id"]
+    assert client.get("/api/deals", headers=H(PAYROLL)).json() in ([], {"items": []}) or client.get("/api/deals", headers=H(PAYROLL)).status_code in (200, 403)
+    assert client.get(f"/api/hr/employees/{e['id']}/personal", headers=H(PAYROLL)).status_code == 200
+    # ограничили список юрлиц — видит только их
+    users = _ok(client.get("/api/admin/users", headers=H(GD)))
+    pid = next(u["id"] for u in (users if isinstance(users, list) else users["items"]) if u["email"] == PAYROLL)
+    kg = _employers(client)[1]
+    _ok(client.put(f"/api/hr/scopes/{pid}", headers=H(GD), json={"employer_ids": [kg]}))
+    assert client.get(f"/api/hr/employees/{e['id']}", headers=H(PAYROLL)).status_code == 404
+    assert client.get(f"/api/hr/employees/{e['id']}/personal", headers=H(PAYROLL)).status_code == 404
+    _ok(client.put(f"/api/hr/scopes/{pid}", headers=H(GD), json={"employer_ids": []}))
+    assert client.get(f"/api/hr/employees/{e['id']}", headers=H(PAYROLL)).status_code == 200
+
+
+def test_hr_personal_encrypted_and_gated(client):  # noqa: F811
+    from sqlalchemy import select, text
+    from app.db import SessionLocal
+    from app.models import AuditLog
+    t = uuid.uuid4().hex[:5]
+    e = _person(client, t)
+    pas = f"4510 {t[:3]}987"
+    body = {"passport_series": "4510", "passport_number": f"{t[:3]}987", "passport_issued_by": "ОВД Тверского р-на", "snils": "112-233-445 95",
+            "reg_address": f"Москва, ул. Секретная, {t}", "children": [{"name": "Сын", "birth_date": "2015-03-01"}], "citizenship": "Россия"}
+    r = _ok(client.put(f"/api/hr/employees/{e['id']}/personal", headers=H(GD), json=body))
+    assert r["data"]["reg_address"].endswith(t) and "passport_number" in r["filled"]
+    assert client.put(f"/api/hr/employees/{e['id']}/personal", headers=H(GD), json={"unknown": 1}).status_code == 422
+    with SessionLocal() as db:
+        raw = db.execute(text("SELECT data_enc FROM hr_employee_personal WHERE employee_id = :i"), {"i": e["id"]}).scalar()
+        assert raw and t not in raw and "Секретная" not in raw
+        logs = db.scalars(select(AuditLog).where(AuditLog.entity_id == e["id"])).all()
+        assert all(t[:3] + "987" not in str(x.after) and "Секретная" not in str(x.after) for x in logs)
+        assert any(x.action == "personal_view" for x in logs) is False
+    _ok(client.get(f"/api/hr/employees/{e['id']}/personal", headers=H(GD)))
+    with SessionLocal() as db:
+        assert db.scalar(select(AuditLog.id).where(AuditLog.entity_id == e["id"], AuditLog.action == "personal_view"))
+    # без группы hr_personal (только кадры) — 403
+    users = _ok(client.get("/api/admin/users", headers=H(GD)))
+    cd = next(u for u in (users if isinstance(users, list) else users["items"]) if u["email"] == "cd@example.com")
+    client.post("/api/admin/access/overrides", headers=H(GD), json={"user_id": cd["id"], "group": "hr_core", "level": 1, "reason": "тест", "comment": "тест"})
+    assert client.get(f"/api/hr/employees/{e['id']}", headers=H("cd@example.com")).status_code in (200, 404)
+    assert client.get(f"/api/hr/employees/{e['id']}/personal", headers=H("cd@example.com")).status_code == 403
+    assert client.get(f"/api/hr/employees/{e['id']}/pay", headers=H("cd@example.com")).status_code == 403
+    assert pas
+
+
+def test_hr_pay_records_and_documents(client):  # noqa: F811
+    from sqlalchemy import select, text
+    from app.db import SessionLocal
+    from app.models import HrEmployeeDocument
+    t = uuid.uuid4().hex[:5]
+    e = _person(client, t)
+    m = e["employments"][0]["id"]
+    _ok(client.post(f"/api/hr/employments/{m}/pay", headers=H(PAYROLL), json={"kind": "salary", "amount": 150000, "effective_from": D(-30)}))
+    _ok(client.post(f"/api/hr/employments/{m}/pay", headers=H(PAYROLL), json={"kind": "allowance", "name": "Районный коэффициент", "percent": 80, "effective_from": D(-30)}))
+    r = _ok(client.post(f"/api/hr/employments/{m}/pay", headers=H(PAYROLL), json={"kind": "salary", "amount": 170000, "effective_from": D(-1)}))
+    assert r["current"][m]["salary"]["amount"] == 170000 and r["current"][m]["allowances"][0]["percent"] == 80
+    old = _ok(client.get(f"/api/hr/employees/{e['id']}/pay?on={D(-10)}", headers=H(GD)))
+    assert old["current"][m]["salary"]["amount"] == 150000
+    last = next(x for x in r["records"] if x["kind"] == "salary" and x["data"]["amount"] == 170000)
+    assert client.post(f"/api/hr/employments/{m}/pay", headers=H(PAYROLL), json={"kind": "cancel", "cancels_id": last["id"]}).status_code == 422
+    r = _ok(client.post(f"/api/hr/employments/{m}/pay", headers=H(PAYROLL), json={"kind": "cancel", "cancels_id": last["id"], "comment": "ошибка"}))
+    assert r["current"][m]["salary"]["amount"] == 150000
+    with SessionLocal() as db:
+        raws = db.execute(text("SELECT data_enc FROM hr_pay_records WHERE employment_id = :i"), {"i": m}).scalars().all()
+        assert raws and all("150000" not in x and "170000" not in x for x in raws)
+        with pytest.raises(Exception):
+            db.execute(text("DELETE FROM hr_pay_records WHERE employment_id = :i"), {"i": m})
+            db.flush()
+        db.rollback()
+    # сканы: шифруются в хранилище, отдаются расшифрованными, видны только с группой своего класса
+    scan = b"%PDF-1.4 passport " + t.encode()
+    r = client.post(f"/api/hr/employees/{e['id']}/documents", headers=H(GD), data={"kind": "passport", "number": "4510 123456"},
+                    files=[("files", ("p1.pdf", scan, "application/pdf")), ("files", ("p2.pdf", scan + b"2", "application/pdf"))])
+    assert r.status_code == 201, r.text
+    up = r.json()
+    assert len(up) == 2 and up[0]["title"].endswith("стр. 1")
+    assert client.post(f"/api/hr/employees/{e['id']}/documents", headers=H(GD), data={"kind": "order"},
+                       files=[("files", ("o.pdf", b"%PDF order", "application/pdf"))]).status_code == 201
+    got = client.get(f"/api/hr/documents/{up[0]['id']}/file", headers=H(GD))
+    assert got.status_code == 200 and got.content == scan
+    with SessionLocal() as db:
+        d = db.get(HrEmployeeDocument, up[0]["id"])
+        assert e["id"] in d.storage_path and "p1" not in d.storage_path and "Лич" not in d.storage_path
+    import os
+    from app.core.config import get_settings
+    root = getattr(get_settings(), "storage_local_root", "") or os.environ.get("STORAGE_LOCAL_ROOT", "")
+    if root and os.path.exists(os.path.join(root, d.storage_path)):
+        assert t.encode() not in open(os.path.join(root, d.storage_path), "rb").read()
+    users = _ok(client.get("/api/admin/users", headers=H(GD)))
+    cd = next(u for u in (users if isinstance(users, list) else users["items"]) if u["email"] == "cd@example.com")
+    client.post("/api/admin/access/overrides", headers=H(GD), json={"user_id": cd["id"], "group": "hr_core", "level": 1, "reason": "тест", "comment": "тест"})
+    _ok(client.put(f"/api/hr/scopes/{cd['id']}", headers=H(GD), json={"employer_ids": [_employers(client)[0]]}))
+    lst = _ok(client.get(f"/api/hr/employees/{e['id']}/documents", headers=H("cd@example.com")))
+    assert [x["kind"] for x in lst["items"]] == ["order"] and lst["hidden"] == 2
+    assert client.get(f"/api/hr/documents/{up[0]['id']}/file", headers=H("cd@example.com")).status_code == 403
+    assert client.post(f"/api/hr/employees/{e['id']}/documents", headers=H("cd@example.com"), data={"kind": "order"},
+                       files=[("files", ("o.pdf", b"%PDF", "application/pdf"))]).status_code == 403
+    _ok(client.patch(f"/api/hr/documents/{up[1]['id']}", headers=H(GD), json={"archived": True}))

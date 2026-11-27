@@ -3225,3 +3225,59 @@ class HrAccessScope(Base):
     employer_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id", ondelete="CASCADE"))
     granted_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class HrEmployeePersonal(Base):
+    """Личные данные сотрудника (паспорт, адреса, семья, образование…) — один зашифрованный JSON (services/hr_crypto).
+    В базе нет открытого текста; в журнал пишутся только названия изменённых полей."""
+    __tablename__ = "hr_employee_personal"
+    employee_id: Mapped[str] = mapped_column(ForeignKey("hr_employees.id"), primary_key=True)
+    data_enc: Mapped[str] = mapped_column(Text, default="")
+    kid: Mapped[str] = mapped_column(String(16), default="")
+    fields: Mapped[list] = mapped_column(JSONType, default=list)      # какие поля заполнены (без значений) — для подсказок «не хватает»
+    updated_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class HrPayRecord(Base):
+    """Оплата труда — только добавление (триггер): оклад / тариф, надбавка, банковские реквизиты. Сумма и реквизиты — в зашифрованном data_enc.
+    Ошибочная запись отменяется записью cancel (cancels_id)."""
+    __tablename__ = "hr_pay_records"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    employment_id: Mapped[str] = mapped_column(ForeignKey("hr_employments.id"), index=True)
+    employee_id: Mapped[str] = mapped_column(ForeignKey("hr_employees.id"), index=True)
+    employer_id: Mapped[str] = mapped_column(ForeignKey("legal_entities.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))                        # salary | allowance | bank | cancel
+    effective_from: Mapped[date] = mapped_column(Date)
+    effective_to: Mapped[Optional[date]] = mapped_column(Date)
+    data_enc: Mapped[str] = mapped_column(Text, default="")
+    kid: Mapped[str] = mapped_column(String(16), default="")
+    cancels_id: Mapped[Optional[str]] = mapped_column(ForeignKey("hr_pay_records.id"))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    recorded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class HrEmployeeDocument(Base):
+    """Скан документа сотрудника. Файл в хранилище зашифрован (hr_crypto.seal_file); класс данных (core / personal / payroll)
+    определяет, какая группа доступа нужна для просмотра. Не удаляется — снимается с актуальных (archived)."""
+    __tablename__ = "hr_employee_documents"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    employee_id: Mapped[str] = mapped_column(ForeignKey("hr_employees.id"), index=True)
+    employment_id: Mapped[Optional[str]] = mapped_column(ForeignKey("hr_employments.id"))
+    kind: Mapped[str] = mapped_column(String(24))
+    data_class: Mapped[str] = mapped_column(String(12))                  # core | personal | payroll
+    title: Mapped[str] = mapped_column(String(255), default="")
+    number: Mapped[str] = mapped_column(String(64), default="")
+    issued_on: Mapped[Optional[date]] = mapped_column(Date)
+    valid_until: Mapped[Optional[date]] = mapped_column(Date)
+    file_name: Mapped[str] = mapped_column(String(255))
+    mime: Mapped[str] = mapped_column(String(128), default="")
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    sha256: Mapped[str] = mapped_column(String(64), default="")          # хэш исходного файла (до шифрования)
+    storage_path: Mapped[str] = mapped_column(Text)
+    kid: Mapped[str] = mapped_column(String(16), default="")
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    uploaded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

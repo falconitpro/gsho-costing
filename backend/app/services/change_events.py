@@ -64,8 +64,14 @@ def ensure_work_order_guard(engine) -> None:
 HR_EVENTS_GUARD_SQL = """
 CREATE OR REPLACE FUNCTION hr_employee_events_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    RAISE EXCEPTION 'hr_employee_events: только добавление (ошибочное событие отменяется событием cancel)';
+    RAISE EXCEPTION USING MESSAGE = TG_TABLE_NAME || ': только добавление (ошибочная запись отменяется записью cancel)';
 END $$;
+DROP TRIGGER IF EXISTS hr_pay_records_no_update ON hr_pay_records;
+CREATE TRIGGER hr_pay_records_no_update BEFORE UPDATE OR DELETE ON hr_pay_records
+    FOR EACH ROW EXECUTE FUNCTION hr_employee_events_append_only();
+DROP TRIGGER IF EXISTS hr_pay_records_no_truncate ON hr_pay_records;
+CREATE TRIGGER hr_pay_records_no_truncate BEFORE TRUNCATE ON hr_pay_records
+    FOR EACH STATEMENT EXECUTE FUNCTION hr_employee_events_append_only();
 DROP TRIGGER IF EXISTS hr_employee_events_no_update ON hr_employee_events;
 CREATE TRIGGER hr_employee_events_no_update BEFORE UPDATE OR DELETE ON hr_employee_events
     FOR EACH ROW EXECUTE FUNCTION hr_employee_events_append_only();
@@ -81,8 +87,8 @@ def ensure_hr_events_guard(engine) -> None:
         return
     with engine.begin() as conn:
         conn.exec_driver_sql("SELECT pg_advisory_xact_lock(205205)")
-        done = conn.exec_driver_sql("SELECT count(*) FROM pg_trigger WHERE tgname IN ('hr_employee_events_no_update', 'hr_employee_events_no_truncate')").scalar()
-        if done != 2:
+        done = conn.exec_driver_sql("SELECT count(*) FROM pg_trigger WHERE tgname IN ('hr_employee_events_no_update', 'hr_employee_events_no_truncate', 'hr_pay_records_no_update', 'hr_pay_records_no_truncate')").scalar()
+        if done != 4:
             conn.exec_driver_sql(HR_EVENTS_GUARD_SQL)
 
 

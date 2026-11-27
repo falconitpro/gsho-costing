@@ -7,7 +7,7 @@ export const t = (dict: Dict, code: string | null | undefined, empty = "—") =>
 
 export const PRIORITY: Dict = { low: "низкий", normal: "обычный", medium: "обычный", high: "высокий", urgent: "срочный", critical: "срочный" };
 export const ROLE: Dict = { manager: "менеджер", logistician: "логист", service_head: "сервис", cd: "КД", fd: "ФД", gd: "ЗГД", admin: "администратор",
-  observer: "наблюдатель", purchasing: "закупки", lawyer: "юрист", clerk: "делопроизводитель", engineer: "инженер" };
+  observer: "наблюдатель", purchasing: "закупки", lawyer: "юрист", clerk: "делопроизводитель", engineer: "инженер", payroll: "бухгалтер по зарплате" };
 export const OUTCOME: Dict = { won: "выиграна", lost: "проиграна", cancelled: "отменена", kp_sent: "КП отправлено", open: "без результата" };
 export const STATUS: Dict = { ...STATUS_TITLES };
 export const BLOCK: Dict = { finance_question: "уточнение «Финансов»", waiting: "ожидание результата", manager: "менеджер", logistics: "логистика", service: "сервис", pricing: "цена и условия", gd: "ЗГД", visa: "виза", kp: "КП",

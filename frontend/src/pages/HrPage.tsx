@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, fmtDate } from "../api";
+import { api, fmtDate, getDevUser } from "../api";
 import { Crumbs, useQueryParam } from "../components/Levels";
 import { askPrompt } from "../components/Dialogs";
 import { Empty, ErrorState, Loading } from "../components/States";
@@ -50,7 +50,7 @@ export default function HrPage({ me }: { me: Me }) {
   return (
     <div className="hr-page">
       <Crumbs items={[{ label: "Рабочее место", to: "/" }, { label: "Персонал" }]} />
-      <div className="page-head"><h1>Персонал</h1><span className="muted">кадровое ядро · без паспортных и зарплатных данных</span></div>
+      <div className="page-head"><h1>Персонал</h1><span className="muted">личные данные и оплата труда хранятся зашифрованными; просмотры записываются в журнал</span></div>
       <div className="tabs" role="tablist">{tabs.map(([k, l]) => (
         <button key={k} role="tab" aria-selected={cur === k} className={cur === k ? "active" : ""} onClick={() => setTab(k === "people" ? null : k, { drop: ["e"] })}>{l}</button>))}</div>
       {employers.length === 0 && cur !== "access"
@@ -97,7 +97,7 @@ function People({ me, employers }: { me: Me; employers: Employer[] }) {
     api.get<Employee[]>(`/api/hr/employees?${p}`).then(setRows).catch((e) => setMsg((e as Error).message));
   };
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [q, status, emp]);
-  if (open) return <EmployeeCard id={open} me={me} employers={employers} onBack={() => { setOpen(null); load(); }} />;
+  if (open) return <EmployeeCard id={open} me={me} employers={employers} onBack={() => { setOpen(null, { drop: ["s"] }); load(); }} />;
   return (
     <div>
       {msg && <div className="alert info" role="status">{msg}</div>}
@@ -117,7 +117,7 @@ function People({ me, employers }: { me: Me; employers: Employer[] }) {
             const [st, tone] = STATUS[r.status] || [r.status, ""];
             return (
               <tr key={r.id} className="hr-row" onClick={() => setOpen(r.id)}>
-                <td className="pc-name"><button className="hr-name" onClick={(e) => { e.stopPropagation(); setOpen(r.id); }}>{r.full_name}</button><div className="pc-sub">{r.personnel_no}{r.user ? ` · вход: ${r.user}` : ""}</div></td>
+                <td className="pc-name"><button className="hr-name" onClick={(ev) => { ev.stopPropagation(); setOpen(r.id); }}>{r.full_name}</button><div className="pc-sub">{r.personnel_no}{r.user ? ` · вход: ${r.user}` : ""}</div></td>
                 <td data-label="Подразделение · должность">{c?.assignment.department || "—"}<div className="pc-sub">{c?.assignment.position} {rate(c?.assignment.rate)}</div></td>
                 <td data-label="Работодатель">{c?.employer}<div className="pc-sub">{EMP_KIND[c?.kind || "main"]}</div></td>
                 <td data-label="Состояние"><span className={`badge ${tone}`}>{st}</span>{c?.end_date && <div className="pc-sub">по {fmtDate(c.end_date)}</div>}</td>
@@ -180,7 +180,7 @@ function HireForm({ employers, onDone, employeeId }: { employers: Employer[]; on
         <label className="f">Отчество<input value={p.middle_name} onChange={(e) => setP({ ...p, middle_name: e.target.value })} /></label>
       </div>}
       <HireFields f={f} set={setF} employers={employers} />
-      <p className="muted">Паспорт, адрес и зарплата здесь не хранятся. Кадровый приказ регистрируется в Канцелярии, как сейчас.</p>
+      <p className="muted">Паспорт, адреса, оплату труда и сканы документов заполните в карточке сотрудника после приёма. Кадровый приказ регистрируется в Канцелярии, как сейчас.</p>
       <div className="row"><button className="btn primary" disabled={!hireOk(f) || (!employeeId && (!p.last_name.trim() || !p.first_name.trim()))} onClick={save}>Принять</button>
         <button className="btn ghost" onClick={() => onDone()}>отмена</button></div>
     </div>);
@@ -192,6 +192,7 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
   const [msg, setMsg] = useState("");
   const [act, setAct] = useState<{ m: Employment; kind: string } | null>(null);
   const [rehire, setRehire] = useState(false);
+  const [sec, setSec] = useQueryParam("s");
   const edit = can(me, "hr_core", 2);
   const load = () => api.get<Employee>(`/api/hr/employees/${id}${on ? `?on=${on}` : ""}`).then(setE).catch((x) => setMsg((x as Error).message));
   useEffect(() => { load(); }, [id, on]);
@@ -202,10 +203,22 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
     try { setE(await api.post<Employee>(`/api/hr/employments/${m.id}/events`, { kind: "cancel", cancels_id: ev.id, comment: why })); } catch (x) { setMsg((x as Error).message); }
   };
   const [st, tone] = STATUS[e.status] || [e.status, ""];
-  return (
-    <div className="hr-card">
+  const secs: [string, string][] = [["jobs", "Кадры"], ...(can(me, "hr_personal") ? [["personal", "Личные данные"] as [string, string]] : []),
+    ...(can(me, "hr_payroll") ? [["pay", "Оплата труда"] as [string, string]] : []), ["docs", "Документы и сканы"]];
+  const curSec = secs.some(([k]) => k === sec) ? sec! : "jobs";
+  const head = (
+    <>
       <div className="row"><button className="btn ghost" onClick={onBack}>← к списку</button></div>
       <div className="page-head"><h2>{e.full_name}</h2><span className={`badge ${tone}`}>{st}</span><span className="muted">{e.personnel_no}</span></div>
+      <div className="tabs hr-sec" role="tablist">{secs.map(([k, l]) => (
+        <button key={k} role="tab" aria-selected={curSec === k} className={curSec === k ? "active" : ""} onClick={() => setSec(k === "jobs" ? null : k)}>{l}</button>))}</div>
+    </>);
+  if (curSec === "personal") return <div className="hr-card">{head}<PersonalTab e={e} me={me} /></div>;
+  if (curSec === "pay") return <div className="hr-card">{head}<PayTab e={e} me={me} /></div>;
+  if (curSec === "docs") return <div className="hr-card">{head}<DocsTab e={e} /></div>;
+  return (
+    <div className="hr-card">
+      {head}
       {msg && <div className="alert info" role="status">{msg}</div>}
       <div className="row hr-filters">
         <label className="f">Состояние на дату<input type="date" value={on} onChange={(x) => setOn(x.target.value)} /></label>
@@ -354,7 +367,7 @@ function Org({ me, employers }: { me: Me; employers: Employer[] }) {
               <label className="f">Код<input value={p.code} onChange={(e) => setP({ ...p, code: e.target.value })} /></label>
               <label className="f">Категория<select value={p.category} onChange={(e) => setP({ ...p, category: e.target.value })}>
                 {Object.entries(CAT).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
-              <label className="f check"><input type="checkbox" checked={p.is_active} onChange={(e) => setP({ ...p, is_active: e.target.checked })} />действует</label>
+              <label className="hr-check"><input type="checkbox" checked={p.is_active} onChange={(e) => setP({ ...p, is_active: e.target.checked })} />действует</label>
             </div>
             <div className="row"><button className="btn primary" disabled={!p.name.trim()} onClick={saveP}>Сохранить</button><button className="btn ghost" onClick={() => setP(null)}>отмена</button></div>
           </div>}
@@ -493,5 +506,247 @@ function Access({ onChange }: { onChange: () => void }) {
               </tr>))}</tbody>
           </table>)}
       </section>
+    </div>);
+}
+
+/* ───────── личные данные (зашифрованы на сервере; каждый просмотр — в журнале) */
+
+type Personal = Record<string, string | null | { name: string; birth_date: string | null }[] | Record<string, string>[]>;
+const P_GROUPS: [string, [string, string, string?][]][] = [
+  ["Основное", [["birth_date", "Дата рождения", "date"], ["birth_place", "Место рождения"], ["gender", "Пол", "gender"], ["citizenship", "Гражданство"], ["marital_status", "Семейное положение"]]],
+  ["Паспорт", [["passport_series", "Серия"], ["passport_number", "Номер"], ["passport_issue_date", "Дата выдачи", "date"], ["passport_division_code", "Код подразделения"], ["passport_issued_by", "Кем выдан", "wide"]]],
+  ["Другие документы", [["snils", "СНИЛС"], ["inn", "ИНН"], ["foreign_passport_number", "Загранпаспорт, номер"], ["foreign_passport_valid_to", "Загранпаспорт действует до", "date"],
+    ["driver_license_number", "Водительское, номер"], ["driver_license_categories", "Категории"], ["driver_license_valid_to", "Водительское действует до", "date"]]],
+  ["Адреса и связь", [["reg_address", "Адрес регистрации", "wide"], ["fact_address", "Адрес проживания", "wide"], ["personal_phone", "Личный телефон"], ["personal_email", "Личная почта"]]],
+  ["Экстренный контакт", [["emergency_name", "ФИО"], ["emergency_relation", "Кем приходится"], ["emergency_phone", "Телефон"]]],
+  ["Воинский учёт", [["military_category", "Категория запаса"], ["military_rank", "Звание"], ["military_vus", "ВУС"], ["military_office", "Военкомат", "wide"]]],
+];
+
+function PersonalTab({ e, me }: { e: Employee; me: Me }) {
+  const [d, setD] = useState<{ data: Personal; filled: string[]; updated_by: string; updated_at: string | null; warnings: string[] } | null>(null);
+  const [f, setF] = useState<Personal | null>(null);
+  const [msg, setMsg] = useState("");
+  const edit = can(me, "hr_personal", 2);
+  useEffect(() => { api.get<NonNullable<typeof d>>(`/api/hr/employees/${e.id}/personal`).then((r) => { setD(r); }).catch((x) => setMsg((x as Error).message)); }, [e.id]);
+  if (!d) return msg ? <ErrorState hint={msg} /> : <Loading />;
+  const v = f || d.data;
+  const set = (k: string, val: unknown) => setF({ ...(f || d.data), [k]: val as string });
+  const save = async () => {
+    try { const r = await api.put<NonNullable<typeof d>>(`/api/hr/employees/${e.id}/personal`, f); setD(r); setF(null); setMsg("Сохранено"); }
+    catch (x) { setMsg((x as Error).message); }
+  };
+  const children = (v.children as { name: string; birth_date: string | null }[]) || [];
+  const edu = (v.education as Record<string, string>[]) || [];
+  const field = ([k, label, type]: [string, string, string?]) => (
+    <label key={k} className={`f${type === "wide" ? " hr-wide" : ""}`}>{label}
+      {type === "gender" ? <select value={String(v[k] || "")} disabled={!edit} onChange={(x) => set(k, x.target.value)}><option value="">—</option><option value="m">мужской</option><option value="f">женский</option></select>
+        : <input type={type === "date" ? "date" : "text"} value={String(v[k] || "")} disabled={!edit} onChange={(x) => set(k, x.target.value || (type === "date" ? null : ""))} />}
+    </label>);
+  return (
+    <div>
+      <p className="muted">Хранятся зашифрованными; каждый просмотр записывается в журнал. {d.updated_at ? `Изменено: ${d.updated_by}, ${fmtDate(d.updated_at)}.` : "Ещё не заполнено."}</p>
+      {msg && <div className="alert info" role="status">{msg}</div>}
+      {d.warnings.length > 0 && <div className="alert warn" role="alert">{d.warnings.join(" · ")}</div>}
+      {P_GROUPS.map(([title, fields]) => (
+        <section key={title} className="card hr-form"><h3>{title}</h3><div className="grid cols-3">{fields.map(field)}</div></section>))}
+      <section className="card hr-form"><h3>Дети</h3>
+        {children.map((c, i) => (
+          <div key={i} className="grid cols-3">
+            <label className="f">Имя<input value={c.name} disabled={!edit} onChange={(x) => set("children", children.map((y, j) => (j === i ? { ...y, name: x.target.value } : y)))} /></label>
+            <label className="f">Дата рождения<input type="date" value={c.birth_date || ""} disabled={!edit} onChange={(x) => set("children", children.map((y, j) => (j === i ? { ...y, birth_date: x.target.value || null } : y)))} /></label>
+            {edit && <div className="row"><button className="btn ghost" onClick={() => set("children", children.filter((_, j) => j !== i))}>убрать</button></div>}
+          </div>))}
+        {edit && <button className="btn add" onClick={() => set("children", [...children, { name: "", birth_date: null }])}>Ребёнок</button>}
+      </section>
+      <section className="card hr-form"><h3>Образование</h3>
+        {edu.map((c, i) => (
+          <div key={i} className="grid cols-3">
+            {([["level", "Уровень"], ["institution", "Учебное заведение"], ["year", "Год окончания"], ["specialty", "Специальность"], ["diploma", "Диплом №"]] as [string, string][]).map(([k, l]) => (
+              <label key={k} className="f">{l}<input value={c[k] || ""} disabled={!edit} onChange={(x) => set("education", edu.map((y, j) => (j === i ? { ...y, [k]: x.target.value } : y)))} /></label>))}
+            {edit && <div className="row"><button className="btn ghost" onClick={() => set("education", edu.filter((_, j) => j !== i))}>убрать</button></div>}
+          </div>))}
+        {edit && <button className="btn add" onClick={() => set("education", [...edu, { level: "", institution: "", year: "", specialty: "", diploma: "" }])}>Образование</button>}
+      </section>
+      <section className="card hr-form"><h3>Примечание</h3>
+        <textarea aria-label="Примечание" value={String(v.notes || "")} disabled={!edit} onChange={(x) => set("notes", x.target.value)} rows={3} /></section>
+      {edit && <div className="row hr-sticky"><button className="btn primary" disabled={!f} onClick={save}>Сохранить личные данные</button>
+        {f && <button className="btn ghost" onClick={() => setF(null)}>отменить изменения</button>}</div>}
+    </div>);
+}
+
+/* ───────── оплата труда (зашифрована; записи только добавляются) */
+
+type PayRec = { id: string; employment_id: string; kind: string; title: string; effective_from: string; effective_to: string | null; cancels_id: string | null;
+  cancelled: boolean; data: Record<string, string | number | null>; comment: string; recorded_by: string; recorded_at: string };
+type PayCur = { salary: Record<string, string | number> | null; allowances: Record<string, string | number | null>[]; bank: Record<string, string> | null };
+const PERIOD: Record<string, string> = { month: "в месяц", hour: "в час", day: "в день", shift: "за смену" };
+const money = (a: unknown, c: unknown) => `${Number(a || 0).toLocaleString("ru-RU")} ${c === "RUB" || !c ? "₽" : String(c)}`;
+const payWhat = (k: string, d: Record<string, unknown>) => k === "salary" ? `${money(d.amount, d.currency)} ${PERIOD[String(d.period)] || ""}`
+  : k === "allowance" ? `${d.name}: ${d.percent != null ? `${String(d.percent).replace(".", ",")} %` : money(d.amount, d.currency)}`
+    : k === "bank" ? [d.bank_name, d.bik ? `БИК ${d.bik}` : "", d.account ? `счёт ${d.account}` : "", d.card ? `карта ${d.card}` : ""].filter(Boolean).join(" · ") : "";
+
+function PayTab({ e, me }: { e: Employee; me: Me }) {
+  const [d, setD] = useState<{ current: Record<string, PayCur>; records: PayRec[] } | null>(null);
+  const [on, setOn] = useState("");
+  const [add, setAdd] = useState<{ m: string; kind: string } | null>(null);
+  const [msg, setMsg] = useState("");
+  const edit = can(me, "hr_payroll", 2);
+  const load = () => api.get<NonNullable<typeof d>>(`/api/hr/employees/${e.id}/pay${on ? `?on=${on}` : ""}`).then(setD).catch((x) => setMsg((x as Error).message));
+  useEffect(() => { load(); }, [e.id, on]);
+  if (!d) return msg ? <ErrorState hint={msg} /> : <Loading />;
+  const cancel = async (r: PayRec) => {
+    const why = await askPrompt(`Отменить «${r.title}» с ${fmtDate(r.effective_from)}? Запись останется в истории. Причина:`, "", { title: "Отмена записи", required: true });
+    if (!why) return;
+    try { setD(await api.post(`/api/hr/employments/${r.employment_id}/pay`, { kind: "cancel", cancels_id: r.id, comment: why })); } catch (x) { setMsg((x as Error).message); }
+  };
+  return (
+    <div>
+      <p className="muted">Суммы и реквизиты хранятся зашифрованными; просмотр записывается в журнал. Официальный расчёт зарплаты остаётся в ЗУП.</p>
+      {msg && <div className="alert warn" role="alert">{msg}</div>}
+      <div className="row hr-filters"><label className="f">На дату<input type="date" value={on} onChange={(x) => setOn(x.target.value)} /></label></div>
+      {e.employments.slice().reverse().map((m) => {
+        const c = d.current[m.id];
+        const recs = d.records.filter((r) => r.employment_id === m.id);
+        return (
+          <section key={m.id} className="card hr-emp">
+            <div className="row hr-emp-head"><b>{m.employer}</b><span className="muted">{EMP_KIND[m.kind]} · с {fmtDate(m.start_date)}{m.end_date ? ` по ${fmtDate(m.end_date)}` : ""}</span></div>
+            <div className="grid cols-3 hr-pay-now">
+              <div><div className="pc-sub">Оклад / тариф</div><b>{c?.salary ? payWhat("salary", c.salary) : "—"}</b></div>
+              <div><div className="pc-sub">Надбавки</div>{c?.allowances.length ? c.allowances.map((a, i) => <div key={i}>{payWhat("allowance", a)}</div>) : "—"}</div>
+              <div><div className="pc-sub">Банковские реквизиты</div>{c?.bank ? payWhat("bank", c.bank) : "—"}</div>
+            </div>
+            {edit && m.status !== "terminated" && !add && <div className="row">
+              <button className="btn ghost" onClick={() => setAdd({ m: m.id, kind: "salary" })}>Оклад / тариф</button>
+              <button className="btn ghost" onClick={() => setAdd({ m: m.id, kind: "allowance" })}>Надбавка</button>
+              <button className="btn ghost" onClick={() => setAdd({ m: m.id, kind: "bank" })}>Реквизиты</button></div>}
+            {add?.m === m.id && <PayForm m={m} kind={add.kind} onDone={(r) => { setAdd(null); if (r) setD(r); }} />}
+            {recs.length > 0 && <table className="pc-table nv-cards hr-events">
+              <thead><tr><th>Запись</th><th>Действует</th><th>Что</th><th>Внесено</th><th /></tr></thead>
+              <tbody>{recs.map((r) => (
+                <tr key={r.id} className={r.cancelled ? "hr-cancelled" : ""}>
+                  <td className="pc-name">{r.title}{r.cancelled && <span className="badge">отменено</span>}</td>
+                  <td data-label="Действует">с {fmtDate(r.effective_from)}{r.effective_to ? ` по ${fmtDate(r.effective_to)}` : ""}</td>
+                  <td data-label="Что">{r.kind === "cancel" ? (() => { const t = recs.find((x) => x.id === r.cancels_id); return t ? `отменяет «${t.title}» с ${fmtDate(t.effective_from)}` : ""; })() : payWhat(r.kind, r.data)}
+                    {r.comment && <div className="pc-sub">{r.comment}</div>}</td>
+                  <td data-label="Внесено">{r.recorded_by}<div className="pc-sub">{fmtDate(r.recorded_at)}</div></td>
+                  <td>{edit && !r.cancelled && r.kind !== "cancel" && <button className="btn ghost" onClick={() => cancel(r)}>отменить</button>}</td>
+                </tr>))}</tbody>
+            </table>}
+          </section>);
+      })}
+    </div>);
+}
+
+function PayForm({ m, kind, onDone }: { m: Employment; kind: string; onDone: (r?: { current: Record<string, PayCur>; records: PayRec[] }) => void }) {
+  const [f, setF] = useState({ effective_from: today() < m.start_date ? m.start_date : today(), effective_to: "", amount: "", currency: "RUB", period: "month", name: "", percent: "",
+    bank_name: "", bik: "", account: "", card: "", comment: "" });
+  const [msg, setMsg] = useState("");
+  const save = async () => {
+    const b: Record<string, unknown> = { kind, effective_from: f.effective_from, effective_to: f.effective_to || null, comment: f.comment };
+    if (kind === "salary") Object.assign(b, { amount: Number(f.amount), currency: f.currency, period: f.period });
+    if (kind === "allowance") Object.assign(b, { name: f.name, percent: f.percent ? Number(f.percent) : null, amount: f.amount ? Number(f.amount) : null, currency: f.currency });
+    if (kind === "bank") Object.assign(b, { bank_name: f.bank_name, bik: f.bik, account: f.account, card: f.card });
+    try { onDone(await api.post(`/api/hr/employments/${m.id}/pay`, b)); } catch (x) { setMsg((x as Error).message); }
+  };
+  const inp = (k: keyof typeof f, label: string, type = "text") => (
+    <label className="f">{label}<input type={type} value={f[k]} onChange={(x) => setF({ ...f, [k]: x.target.value })} /></label>);
+  return (
+    <div className="card hr-form">
+      <h3>{{ salary: "Оклад / тариф", allowance: "Надбавка", bank: "Банковские реквизиты" }[kind]}</h3>
+      {msg && <div className="alert warn" role="alert">{msg}</div>}
+      <div className="grid cols-3">
+        {inp("effective_from", "Действует с *", "date")}
+        {kind !== "bank" && inp("effective_to", "По (если временно)", "date")}
+        {kind === "salary" && <>{inp("amount", "Сумма *", "number")}
+          <label className="f">За<select value={f.period} onChange={(x) => setF({ ...f, period: x.target.value })}>{Object.entries(PERIOD).map(([k, l]) => <option key={k} value={k}>{l.replace(/^в |^за /, "")}</option>)}</select></label>
+          <label className="f">Валюта<select value={f.currency} onChange={(x) => setF({ ...f, currency: x.target.value })}><option>RUB</option><option>KGS</option><option>CNY</option><option>USD</option></select></label></>}
+        {kind === "allowance" && <>{inp("name", "Название *")}{inp("percent", "Процент", "number")}{inp("amount", "или сумма", "number")}</>}
+        {kind === "bank" && <>{inp("bank_name", "Банк")}{inp("bik", "БИК")}{inp("account", "Счёт")}{inp("card", "Карта (если выплата на карту)")}</>}
+        {inp("comment", "Основание / комментарий")}
+      </div>
+      <div className="row"><button className="btn primary" onClick={save}>Сохранить</button><button className="btn ghost" onClick={() => onDone()}>отмена</button></div>
+    </div>);
+}
+
+/* ───────── документы и сканы (файлы зашифрованы в хранилище) */
+
+type DocKind = { code: string; title: string; data_class: string; can_read: boolean; can_edit: boolean };
+type HDoc = { id: string; kind: string; kind_title: string; data_class: string; title: string; number: string; issued_on: string | null; valid_until: string | null;
+  file_name: string; size: number; archived: boolean; comment: string; uploaded_by: string; uploaded_at: string; expired: boolean };
+const CLASS_TITLE: Record<string, string> = { personal: "Личные документы", payroll: "Оплата труда", core: "Кадровые документы" };
+
+async function openBlob(url: string, name: string) {
+  const headers: Record<string, string> = {};
+  const dev = getDevUser();
+  if (dev) headers["X-Dev-User"] = dev;
+  const res = await fetch(url, { headers, credentials: "include" });
+  if (!res.ok) { const d = await res.json().catch(() => null); throw new Error(typeof d?.detail === "string" ? d.detail : `Ошибка ${res.status}`); }
+  const href = URL.createObjectURL(await res.blob());
+  const w = window.open(href, "_blank", "noopener");
+  if (!w) { const a = document.createElement("a"); a.href = href; a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
+  setTimeout(() => URL.revokeObjectURL(href), 60000);
+}
+
+function DocsTab({ e }: { e: Employee }) {
+  const [kinds, setKinds] = useState<DocKind[]>([]);
+  const [d, setD] = useState<{ items: HDoc[]; hidden: number } | null>(null);
+  const [all, setAll] = useState(false);
+  const [f, setF] = useState({ kind: "", number: "", issued_on: "", valid_until: "", comment: "" });
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const load = () => api.get<NonNullable<typeof d>>(`/api/hr/employees/${e.id}/documents`).then(setD).catch((x) => setMsg((x as Error).message));
+  useEffect(() => { load(); api.get<DocKind[]>("/api/hr/document-kinds").then(setKinds).catch(() => setKinds([])); }, [e.id]);
+  if (!d) return msg ? <ErrorState hint={msg} /> : <Loading />;
+  const editable = kinds.filter((k) => k.can_edit);
+  const upload = async () => {
+    const fd = new FormData();
+    files.forEach((x) => fd.append("files", x));
+    Object.entries(f).forEach(([k, v]) => v && fd.append(k, v));
+    setBusy(true);
+    try { await api.form(`/api/hr/employees/${e.id}/documents`, fd); setFiles([]); setF({ ...f, number: "", issued_on: "", valid_until: "", comment: "" }); setMsg("Загружено"); load(); }
+    catch (x) { setMsg((x as Error).message); } finally { setBusy(false); }
+  };
+  const archive = async (x: HDoc) => { try { await api.patch(`/api/hr/documents/${x.id}`, { archived: !x.archived }); load(); } catch (er) { setMsg((er as Error).message); } };
+  const items = d.items.filter((x) => all || !x.archived);
+  const groups = (["personal", "payroll", "core"] as const).map((c) => [c, items.filter((x) => x.data_class === c)] as const).filter(([, xs]) => xs.length);
+  const have = new Set(d.items.filter((x) => !x.archived).map((x) => x.kind));
+  const missing = ["passport", "snils", "inn", "labor_contract", "consent_pd"].filter((k) => !have.has(k) && kinds.some((x) => x.code === k && x.can_read));
+  return (
+    <div>
+      <p className="muted">Сканы проверяются антивирусом, хранятся зашифрованными и не удаляются — устаревший снимается с актуальных. Каждый просмотр записывается в журнал.</p>
+      {msg && <div className="alert info" role="status">{msg}</div>}
+      {missing.length > 0 && <div className="alert warn" role="status">Нет сканов: {missing.map((k) => kinds.find((x) => x.code === k)?.title).join(", ")}</div>}
+      {editable.length > 0 && <section className="card hr-form"><h3>Загрузить скан</h3>
+        <div className="grid cols-3">
+          <label className="f">Документ *<select value={f.kind} onChange={(x) => setF({ ...f, kind: x.target.value })}><option value="">— выберите —</option>
+            {(["personal", "payroll", "core"] as const).map((c) => editable.some((k) => k.data_class === c) && (
+              <optgroup key={c} label={CLASS_TITLE[c]}>{editable.filter((k) => k.data_class === c).map((k) => <option key={k.code} value={k.code}>{k.title}</option>)}</optgroup>))}</select></label>
+          <label className="f">Номер<input value={f.number} onChange={(x) => setF({ ...f, number: x.target.value })} /></label>
+          <label className="f">Дата выдачи<input type="date" value={f.issued_on} onChange={(x) => setF({ ...f, issued_on: x.target.value })} /></label>
+          <label className="f">Действует до<input type="date" value={f.valid_until} onChange={(x) => setF({ ...f, valid_until: x.target.value })} /></label>
+          <label className="f">Комментарий<input value={f.comment} onChange={(x) => setF({ ...f, comment: x.target.value })} /></label>
+          <label className="f">Файлы * (несколько страниц — несколько файлов)<input type="file" multiple accept="image/*,application/pdf,.doc,.docx" onChange={(x) => setFiles(Array.from(x.target.files || []))} /></label>
+        </div>
+        <div className="row"><button className="btn primary" disabled={!f.kind || !files.length || busy} onClick={upload}>{busy ? "Загружаю…" : `Загрузить${files.length > 1 ? ` (${files.length})` : ""}`}</button></div>
+      </section>}
+      <div className="row hr-filters"><label className="hr-check"><input type="checkbox" checked={all} onChange={(x) => setAll(x.target.checked)} />показать снятые с актуальных</label>
+        {d.hidden > 0 && <span className="muted">ещё {d.hidden} — в классах, к которым у вас нет доступа</span>}</div>
+      {groups.length === 0 ? <Empty title="Сканов пока нет" /> : groups.map(([c, xs]) => (
+        <section key={c} className="card hr-emp"><h3>{CLASS_TITLE[c]}</h3>
+          <table className="pc-table nv-cards hr-events">
+            <thead><tr><th>Документ</th><th>Номер</th><th>Срок</th><th>Загружено</th><th /></tr></thead>
+            <tbody>{xs.map((x) => (
+              <tr key={x.id} className={x.archived ? "hr-cancelled" : ""}>
+                <td className="pc-name"><button className="hr-name" onClick={() => openBlob(`/api/hr/documents/${x.id}/file`, x.file_name).catch((er) => setMsg((er as Error).message))}>{x.title}</button>
+                  <div className="pc-sub">{x.file_name} · {Math.max(1, Math.round(x.size / 1024))} КБ</div></td>
+                <td data-label="Номер">{x.number || "—"}{x.issued_on && <div className="pc-sub">выдан {fmtDate(x.issued_on)}</div>}</td>
+                <td data-label="Срок">{x.valid_until ? <>до {fmtDate(x.valid_until)}{x.expired && <span className="badge bad">истёк</span>}</> : "—"}</td>
+                <td data-label="Загружено">{x.uploaded_by}<div className="pc-sub">{fmtDate(x.uploaded_at)}</div></td>
+                <td><button className="btn ghost" onClick={() => api.download(`/api/hr/documents/${x.id}/file?download=1`, x.file_name).catch((er) => setMsg((er as Error).message))}>скачать</button>
+                  {kinds.find((k) => k.code === x.kind)?.can_edit && <button className="btn ghost" onClick={() => archive(x)}>{x.archived ? "вернуть" : "снять"}</button>}</td>
+              </tr>))}</tbody>
+          </table>
+        </section>))}
     </div>);
 }

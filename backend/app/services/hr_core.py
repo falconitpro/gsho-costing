@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser
-from ..core.roles import Role
+from ..core.roles import HR_ALL_EMPLOYERS, Role
 from ..models import HrAccessScope, HrEmployee, HrEmployeeEvent, HrEmployment
 
 KINDS = ("hire", "transfer", "rate", "terminate", "cancel")
@@ -24,10 +24,14 @@ EMPLOYMENT_KINDS = {"main": "основное место", "internal_part": "в�
 
 
 def allowed_employers(db: Session, user: CurrentUser) -> Optional[set[str]]:
-    """None — все работодатели (ЗГД); иначе — множество id из области пользователя (пусто — никого)."""
+    """None — все работодатели; иначе — множество id из области пользователя (пусто — никого).
+    ЗГД — всегда все. ФД и бухгалтер по зарплате — все, пока ЗГД не задаст им список юрлиц (решение владельца 28.11.2026)."""
     if Role.GD in user.roles:
         return None
-    return set(db.scalars(select(HrAccessScope.employer_id).where(HrAccessScope.user_id == user.id)).all())
+    rows = set(db.scalars(select(HrAccessScope.employer_id).where(HrAccessScope.user_id == user.id)).all())
+    if not rows and HR_ALL_EMPLOYERS & set(user.roles):
+        return None
+    return rows
 
 
 def in_scope(scope: Optional[set[str]], employer_id: str) -> bool:
