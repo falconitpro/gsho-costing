@@ -150,3 +150,45 @@ def test_part_history_jg(client):
     assert h[0]["changes"][0]["after"] == "Вероятно" and h[1]["user_name"]
     eng = _ok(client.get(f"/api/parts/catalog/{p['id']}/history", headers=H(ENG)))["items"]
     assert all(c["field"] not in ("sale_price", "sale_currency") for x in eng for c in x["changes"])
+
+
+def test_assemblies_jc(client):
+    """D-200 (J-c): справочник узлов, выбор в применимости, переименование, перенос старых текстов."""
+    from app.db import SessionLocal
+    from app.services import assemblies as asm
+    t = uuid.uuid4().hex[:5].upper()
+    with SessionLocal() as db:
+        asm.ensure_general(db)
+        db.commit()
+    gen = _ok(client.get("/api/parts/assemblies", headers=H(MGR)))
+    hyd = next(a for a in gen["items"] if a["name_ru"] == "Гидросистема")
+    assert hyd["scope"] == "general" and hyd["name_cn"] == "液压系统"
+    assert client.post("/api/parts/assemblies", headers=H(LOG), json={"name_ru": "X"}).status_code == 403
+    assert client.post("/api/parts/assemblies", headers=H(CD), json={"name_ru": "гидросистема "}).status_code == 409
+    # деталь с узлом из справочника: текст подставляется
+    p = _ok(client.post("/api/parts/catalog", headers=H(CD), json={"article": f"AS-{t}", "name_ru": "Деталь", "purchase_price": 1, "purchase_currency": "RUB",
+                                                                   "applicability": [{"other_manufacturer": "Sandvik", "other_model": f"LH-{t}", "assembly_id": hyd["id"]}]}), 201)
+    a = p["applicability"][0]
+    assert a["assembly_id"] == hyd["id"] and a["assembly"] == "Гидросистема"
+    # прежний вид: тот же текст — ссылка сохраняется; другой текст — ссылка снимается
+    base = {"article": f"AS-{t}", "name_ru": "Деталь", "purchase_price": 1, "purchase_currency": "RUB"}
+    c = _ok(client.put(f"/api/parts/catalog/{p['id']}", headers=H(CD), json={**base, "applicability": [{"other_manufacturer": "Sandvik", "other_model": f"LH-{t}", "assembly": "Гидросистема"}]}))
+    assert c["applicability"][0]["assembly_id"] == hyd["id"]
+    # перенос старых текстов: «двигатель» → общий узел, «Ковш спец» → новый общий узел
+    old = _ok(client.post("/api/parts/catalog", headers=H(CD), json={"article": f"AS-{t}-2", "name_ru": "Деталь 2", "purchase_price": 1, "purchase_currency": "RUB",
+                                                                     "applicability": [{"other_manufacturer": "Sandvik", "other_model": f"LH-{t}", "assembly": "двигатель"},
+                                                                                       {"other_manufacturer": "Sandvik", "other_model": f"LH-{t}-B", "assembly": f"Ковш {t}"}]}), 201)
+    with SessionLocal() as db:
+        dry = asm.migrate(db, apply=False)
+        db.rollback()
+        assert f"общий: Ковш {t}" in dry["created"] and asm.match(db, "гидравлика", None).name_ru == "Гидросистема"
+        asm.migrate(db, apply=True)
+        db.commit()
+    c = _ok(client.get(f"/api/parts/catalog/{old['id']}", headers=H(CD)))
+    ids = {x["assembly"]: x["assembly_id"] for x in c["applicability"]}
+    assert ids["двигатель"] == next(a["id"] for a in gen["items"] if a["name_ru"] == "Двигатель") and ids[f"Ковш {t}"]
+    # переименование узла меняет текст в связях
+    k = next(a for a in _ok(client.get("/api/parts/assemblies", headers=H(CD)))["items"] if a["name_ru"] == f"Ковш {t}")
+    _ok(client.put(f"/api/parts/assemblies/{k['id']}", headers=H(CD), json={"name_ru": f"Ковш {t} (рабочее)", "name_en": "Bucket"}))
+    c = _ok(client.get(f"/api/parts/catalog/{old['id']}", headers=H(CD)))
+    assert any(x["assembly"] == f"Ковш {t} (рабочее)" for x in c["applicability"])

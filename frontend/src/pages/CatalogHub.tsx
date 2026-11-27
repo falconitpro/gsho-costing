@@ -1,3 +1,4 @@
+import AssembliesBlock from "../components/AssembliesBlock";
 import ApplicabilityQueue from "../components/ApplicabilityQueue";
 import { Crumbs, EntryGrid } from "../components/Levels";
 import { useEffect, useState } from "react";
@@ -14,7 +15,7 @@ import { GroupSetupBlock } from "./PartsSetupPage";
 // Единый «Каталог» (решение владельца 08.11.2026): все справочники в одном разделе — оборудование ГШО, запчасти, комплекты ТО,
 // техника других производителей, склады, ТН ВЭД, компании группы и маршруты поставки. Выбранная вкладка — в адресе (?s=…).
 
-type Sec = "equipment" | "parts" | "applicability" | "kits" | "other" | "warehouses" | "hs" | "entities" | "routes";
+type Sec = "equipment" | "parts" | "applicability" | "assemblies" | "kits" | "other" | "warehouses" | "hs" | "entities" | "routes";
 type Found = { models: { id: string; title: string; machine_type: string; match?: string }[]; parts: { id: string; article: string; name_ru: string; manufacturer: string; match?: string; exact?: boolean }[];
   other: { id: string; title: string; machine_type: string }[]; machines?: { id: string; title: string; serial: string; client_name: string; client_id: string; exact?: boolean }[] };
 
@@ -33,6 +34,7 @@ export default function CatalogHub({ me }: { me: Me }) {
     ["applicability", "Проверка применимости", partsReader && nv],   // D-196: только новый вид
     ["kits", "Комплекты ТО", fleetReader],
     ["other", "Техника других производителей", true],
+    ["assemblies", "Узлы и агрегаты", partsReader && nv],   // D-200: только новый вид
     ["warehouses", "Склады", partsReader],
     ["hs", "ТН ВЭД", has("admin", "gd")],
     ["entities", "Компании группы", setupReader],
@@ -43,7 +45,7 @@ export default function CatalogHub({ me }: { me: Me }) {
   // «Новый вид»: /catalog без ?s= — обзор: поиск и входы в разделы; ссылка на объект (?model=, ?part=) открывает раздел сразу
   const overview = !asked && !qs.get("model") && !qs.get("part");
   const sec: Sec | "" = overview ? "" : visible.some(([k]) => k === asked) ? asked : "equipment";
-  const HINTS: Record<Sec, string> = { equipment: "модели и исполнения ГШО, характеристики, цены, документы", parts: "артикулы, OEM и кросс-номера, остатки, цены", applicability: "подтверждение связей «деталь — модель» с основанием", kits: "комплекты технического обслуживания по моделям",
+  const HINTS: Record<Sec, string> = { equipment: "модели и исполнения ГШО, характеристики, цены, документы", parts: "артикулы, OEM и кросс-номера, остатки, цены", applicability: "подтверждение связей «деталь — модель» с основанием", assemblies: "справочник узлов для применимости — на трёх языках", kits: "комплекты технического обслуживания по моделям",
     other: "техника других производителей для заявок на запчасти", warehouses: "склады компании", hs: "коды ТН ВЭД, ставки пошлин и НДС", entities: "компании группы для цепочек поставки", routes: "маршруты поставки и их параметры" };
   const go = (s: Sec, extra = "") => nav(`/catalog?s=${s}${extra}`);   // смена раздела — новая запись истории («Назад» возвращает прежний)
   const [q, setQ] = useState("");
@@ -120,6 +122,7 @@ export default function CatalogHub({ me }: { me: Me }) {
       {sec === "equipment" && <CatalogPage me={me} embedded openModelId={qs.get("model") || undefined} />}
       {sec === "parts" && <PartsCatalog me={me} openId={qs.get("part") || undefined} />}
       {sec === "applicability" && nv && <ApplicabilityQueue />}
+      {sec === "assemblies" && nv && <AssembliesBlock />}
       {sec === "kits" && <KitsBlock me={me} />}
       {sec === "other" && <OtherModelsBlock me={me} />}
       {sec === "warehouses" && <WarehousesBlock me={me} />}

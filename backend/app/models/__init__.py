@@ -1864,6 +1864,7 @@ class PartApplicability(Base):
     # J-b (D-196): статус проверки, уровень исполнения, диапазон серийных номеров, основание, кто и когда проверил.
     # Прежние записи — «не подтверждено» (решение владельца 7, D-180).
     execution_id: Mapped[Optional[str]] = mapped_column(ForeignKey("equipment_executions.id", ondelete="SET NULL"))
+    assembly_id: Mapped[Optional[str]] = mapped_column(ForeignKey("equipment_assemblies.id", ondelete="SET NULL"))   # J-c (D-200)
     status: Mapped[str] = mapped_column(String(16), default="unverified")   # confirmed | probable | unverified | not_applicable | replaced
     serial_from: Mapped[str] = mapped_column(String(64), default="")
     serial_to: Mapped[str] = mapped_column(String(64), default="")
@@ -3064,3 +3065,23 @@ class ServiceDocument(Base):
     legal_checked: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ───────────────────────── J-c (D-200): узлы и агрегаты ─────────────────────────
+
+class EquipmentAssembly(TimestampMixin, Base):
+    """Узел / агрегат машины (двигатель, гидросистема, трансмиссия…). model_id пусто — общий справочник для любой техники;
+    иначе — узел конкретной модели ГШО. parent_id — вложенность (агрегат → узел), первый шаг — плоский список.
+    Названия на трёх языках — для загрузки каталогов завода (J-i) и документов на китайском."""
+    __tablename__ = "equipment_assemblies"
+    __table_args__ = (UniqueConstraint("model_id", "name_ru", name="uq_equipment_assembly_name"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    model_id: Mapped[Optional[str]] = mapped_column(ForeignKey("equipment_models.id", ondelete="CASCADE"), index=True)
+    parent_id: Mapped[Optional[str]] = mapped_column(ForeignKey("equipment_assemblies.id", ondelete="SET NULL"))
+    code: Mapped[str] = mapped_column(String(32), default="")
+    name_ru: Mapped[str] = mapped_column(String(255))
+    name_en: Mapped[str] = mapped_column(String(255), default="")
+    name_cn: Mapped[str] = mapped_column(String(255), default="")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))

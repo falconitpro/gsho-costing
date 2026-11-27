@@ -74,6 +74,8 @@ def run() -> None:
         payment_schemes(db)
         seed_parts_setup(db)
         from app.services.service_refs import load_drafts
+        from app.services.assemblies import ensure_general
+        ensure_general(db)          # D-200: общий справочник узлов
         load_drafts(db)             # D-191: черновик справочников сервиса (dev и стенд; рабочий — scripts.service_refs_import)
         mark_supplies(db)           # раздел «Поставщики»: ГШО / запасные части — по фактическому использованию
         parts_manufacturer_paus(db)  # разово (05.11.2026): у всех запчастей каталога производитель PAUS, Германия
