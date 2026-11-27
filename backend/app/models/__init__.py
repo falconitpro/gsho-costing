@@ -2902,6 +2902,8 @@ class WorkOrder(TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, default="")
     version: Mapped[int] = mapped_column(Integer, default=0)
     diagnosis: Mapped[str] = mapped_column(Text, default="")                   # I-2: заключение диагностики (событие diagnosis)
+    billing: Mapped[str] = mapped_column(String(16), default="client")         # I-3: client | warranty | goodwill (событие billing)
+    warranty_claim_id: Mapped[Optional[str]] = mapped_column(ForeignKey("warranty_claims.id", ondelete="SET NULL"))
     signed_by_name: Mapped[str] = mapped_column(String(255), default="")      # подпись представителя клиента при закрытии
     signed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -2999,3 +3001,66 @@ class WorkOrderPhoto(Base):
     uploaded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     retain_until: Mapped[date] = mapped_column(Date)
+
+
+# ───────────────────────── I-3 (D-198): смета наряда с версиями и согласованием, документы-снимки ─────────────────────────
+
+class ServiceEstimate(TimestampMixin, Base):
+    """Смета наряда. Версии: черновик правится, отправленная и решённая — нет; новая версия делает прежнюю «заменённой».
+    Решение клиента (согласовал / отказал) записывает руководитель сервиса — с ФИО и основанием (письмо, подпись)."""
+    __tablename__ = "service_estimates"
+    __table_args__ = (UniqueConstraint("work_order_id", "version", name="uq_service_estimate_version"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    work_order_id: Mapped[str] = mapped_column(ForeignKey("work_orders.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(16), default="draft")          # draft | sent | approved | rejected | superseded
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    vat_pct: Mapped[float] = mapped_column(Float, default=22.0)
+    hour_rate: Mapped[Optional[float]] = mapped_column(Float)                  # ставка нормо-часа без НДС; пусто — не задана
+    note: Mapped[str] = mapped_column(Text, default="")
+    reason: Mapped[str] = mapped_column(Text, default="")                      # почему новая версия
+    total_net: Mapped[Optional[float]] = mapped_column(Float)                  # фиксируются при отправке
+    total_vat: Mapped[Optional[float]] = mapped_column(Float)
+    total: Mapped[Optional[float]] = mapped_column(Float)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    sent_channel: Mapped[str] = mapped_column(String(16), default="")         # email | messenger | paper | other
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    client_name: Mapped[str] = mapped_column(String(255), default="")         # кто у клиента согласовал / отказал
+    decision_basis: Mapped[str] = mapped_column(Text, default="")
+    decided_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))  # кто записал решение
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+
+
+class ServiceEstimateLine(Base):
+    """Строка сметы: работа (часы × ставка), запчасть из каталога или прочее. Пустая цена — «не задана», смету не отправить."""
+    __tablename__ = "service_estimate_lines"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    estimate_id: Mapped[str] = mapped_column(ForeignKey("service_estimates.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=1)
+    kind: Mapped[str] = mapped_column(String(8), default="other")              # work | part | other
+    part_id: Mapped[Optional[str]] = mapped_column(ForeignKey("parts.id", ondelete="SET NULL"))
+    work_id: Mapped[Optional[str]] = mapped_column(ForeignKey("work_order_works.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(String(500))
+    article: Mapped[str] = mapped_column(String(128), default="")
+    qty: Mapped[float] = mapped_column(Float, default=1.0)
+    unit: Mapped[str] = mapped_column(String(16), default="шт")
+    price: Mapped[Optional[float]] = mapped_column(Float)                      # без НДС, в валюте сметы
+    discount_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    note: Mapped[str] = mapped_column(Text, default="")
+
+
+class ServiceDocument(Base):
+    """Документ наряда — снимок на момент формирования: данные (snapshot) и файл. Не меняется; новый документ — новая запись.
+    legal_checked = false — шаблон юристом не проверен, в файле пометка «черновик»."""
+    __tablename__ = "service_documents"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    work_order_id: Mapped[str] = mapped_column(ForeignKey("work_orders.id"), index=True)
+    estimate_id: Mapped[Optional[str]] = mapped_column(ForeignKey("service_estimates.id", ondelete="SET NULL"))
+    kind: Mapped[str] = mapped_column(String(16))                               # defect_list | estimate | act
+    number: Mapped[str] = mapped_column(String(40), unique=True)
+    snapshot: Mapped[dict] = mapped_column(JSONType, default=dict)
+    storage_path: Mapped[str] = mapped_column(Text, default="")
+    filename: Mapped[str] = mapped_column(String(255), default="")
+    legal_checked: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

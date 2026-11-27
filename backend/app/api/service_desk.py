@@ -683,3 +683,189 @@ def order_parts(order_id: str, q: str = "", user: CurrentUser = Depends(_orders_
     from .parts_fleet import _model_title
     _man, model = _model_title(db, m)
     return {"machine": {"id": m.id, "serial": m.serial}, "items": parts_for_machine(db, m, model, q, limit=200)}
+
+
+# ─────────────── I-3 (D-198): смета, документы ───────────────
+
+from ..models import Part as _Part, ServiceDocument, ServiceEstimate, ServiceEstimateLine  # noqa: E402
+from ..services import service_estimates as se  # noqa: E402
+
+
+def _no_engineer(user: CurrentUser = Depends(_orders_reader)) -> CurrentUser:
+    if wos.actor_of(user).engineer_only:
+        raise HTTPException(403, "Смета с ценами инженеру не показывается")
+    return user
+
+
+def _est_payload(db: Session, est: ServiceEstimate) -> dict:
+    lines = se.lines_of(db, est)
+    d = serialize(est)
+    d["status_title"] = se.STATUSES.get(est.status, est.status)
+    d["lines"] = []
+    for x in lines:
+        row = {**serialize(x), "net": se.line_net(x)}
+        if x.part_id and (p := db.get(_Part, x.part_id)) is not None:
+            row["catalog_price"], row["catalog_currency"] = p.sale_price, p.sale_currency
+        d["lines"].append(row)
+    d["totals"] = se.totals(est, lines)
+    names = _names(db, [est.decided_by, est.created_by])
+    d["decided_by_name"], d["created_by_name"] = names.get(est.decided_by or "", ""), names.get(est.created_by or "", "")
+    return d
+
+
+@router.get("/orders/{order_id}/estimates")
+def estimates(order_id: str, user: CurrentUser = Depends(_no_engineer), db: Session = Depends(get_db)):
+    wo = _get_order(db, user, order_id)
+    rows = db.scalars(select(ServiceEstimate).where(ServiceEstimate.work_order_id == wo.id).order_by(ServiceEstimate.version.desc())).all()
+    return {"items": [_est_payload(db, e) for e in rows], "statuses": se.STATUSES, "channels": se.CHANNELS, "kinds": se.KINDS,
+            "can_edit": wos.actor_of(user).is_head}
+
+
+class NewEstimateIn(BaseModel):
+    reason: str = ""
+
+
+def _est_err(fn):
+    try:
+        return fn()
+    except se.EstimateError as e:
+        raise HTTPException(422, str(e))
+
+
+@router.post("/orders/{order_id}/estimates", status_code=201)
+def estimate_new(order_id: str, body: NewEstimateIn, user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
+    wo = _get_order(db, user, order_id)
+    est = _est_err(lambda: se.create_version(db, wo, user.id, body.reason))
+    audit(db, user.id, None, "service_estimate", est.id, "create", after={"order": wo.number, "version": est.version, "reason": est.reason})
+    db.commit()
+    return _est_payload(db, est)
+
+
+class EstLineIn(BaseModel):
+    kind: str = "other"
+    part_id: Optional[str] = None
+    work_id: Optional[str] = None
+    title: str = ""
+    article: str = ""
+    qty: float = 1
+    unit: str = ""
+    price: Optional[float] = None
+    discount_pct: float = 0
+    note: str = ""
+
+
+class EstimateIn(BaseModel):
+    currency: str = Field(default="RUB", min_length=3, max_length=3)
+    vat_pct: float = Field(default=22, ge=0, le=100)
+    hour_rate: Optional[float] = Field(default=None, ge=0)
+    note: str = ""
+    lines: list[EstLineIn] = Field(default_factory=list, max_length=500)
+
+
+def _est_or_404(db: Session, user: CurrentUser, eid: str) -> ServiceEstimate:
+    est = db.get(ServiceEstimate, eid)
+    if est is None:
+        raise HTTPException(404, "Смета не найдена")
+    _get_order(db, user, est.work_order_id)
+    return est
+
+
+@router.put("/estimates/{eid}")
+def estimate_save(eid: str, body: EstimateIn, user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
+    est = _est_or_404(db, user, eid)
+    if est.status != "draft":
+        raise HTTPException(422, "Править можно только черновик сметы")
+    est.currency, est.vat_pct, est.hour_rate, est.note = body.currency.upper(), body.vat_pct, body.hour_rate, body.note
+    _est_err(lambda: se.set_lines(db, est, [x.model_dump() for x in body.lines]))
+    db.commit()
+    return _est_payload(db, est)
+
+
+@router.post("/estimates/{eid}/fill-works")
+def estimate_fill(eid: str, user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
+    """Добавить в черновик работы наряда, которых в смете ещё нет (часы — факт или норматив, цена — ставка нормо-часа)."""
+    est = _est_or_404(db, user, eid)
+    if est.status != "draft":
+        raise HTTPException(422, "Править можно только черновик сметы")
+    cur = se.lines_of(db, est)
+    have = {x.work_id for x in cur if x.work_id}
+    wo = db.get(WorkOrder, est.work_order_id)
+    rows = [{k: getattr(x, k) for k in ("kind", "part_id", "work_id", "title", "article", "qty", "unit", "price", "discount_pct", "note")} for x in cur]
+    rows += [r for r in se.lines_from_order(db, wo, est.hour_rate) if r["work_id"] not in have]
+    _est_err(lambda: se.set_lines(db, est, rows))
+    db.commit()
+    return _est_payload(db, est)
+
+
+class SendIn(BaseModel):
+    channel: str
+
+
+@router.post("/estimates/{eid}/send")
+def estimate_send(eid: str, body: SendIn, user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
+    est = _est_or_404(db, user, eid)
+    doc = _est_err(lambda: se.send(db, est, user.id, body.channel))
+    audit(db, user.id, None, "service_estimate", est.id, "send", after={"total": est.total, "currency": est.currency, "document": doc.number})
+    db.commit()
+    return _est_payload(db, est)
+
+
+class DecideIn(BaseModel):
+    decision: str
+    client_name: str = ""
+    basis: str = ""
+
+
+@router.post("/estimates/{eid}/decide")
+def estimate_decide(eid: str, body: DecideIn, user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
+    est = _est_or_404(db, user, eid)
+    _est_err(lambda: se.decide(db, est, user.id, body.decision, body.client_name, body.basis))
+    audit(db, user.id, None, "service_estimate", est.id, body.decision, after={"client_name": est.client_name, "basis": est.decision_basis})
+    db.commit()
+    return _est_payload(db, est)
+
+
+def _doc_payload(d: ServiceDocument, names: dict[str, str]) -> dict:
+    return {"id": d.id, "kind": d.kind, "kind_title": se.DOC_KINDS.get(d.kind, d.kind), "number": d.number, "filename": d.filename,
+            "created_at": d.created_at.isoformat() if d.created_at else None, "created_by_name": names.get(d.created_by or "", ""),
+            "legal_checked": d.legal_checked, "url": f"/api/service/documents/{d.id}/file"}
+
+
+@router.get("/orders/{order_id}/documents")
+def documents(order_id: str, user: CurrentUser = Depends(_orders_reader), db: Session = Depends(get_db)):
+    wo = _get_order(db, user, order_id)
+    st = select(ServiceDocument).where(ServiceDocument.work_order_id == wo.id)
+    if wos.actor_of(user).engineer_only:
+        st = st.where(ServiceDocument.kind != "estimate")           # смету с ценами инженер не видит
+    rows = db.scalars(st.order_by(ServiceDocument.created_at.desc())).all()
+    names = _names(db, [d.created_by for d in rows])
+    return {"items": [_doc_payload(d, names) for d in rows], "kinds": se.DOC_KINDS, "can_make": wos.actor_of(user).is_head}
+
+
+class DocIn(BaseModel):
+    kind: str
+
+
+@router.post("/orders/{order_id}/documents", status_code=201)
+def document_make(order_id: str, body: DocIn, user: CurrentUser = Depends(_head), db: Session = Depends(get_db)):
+    wo = _get_order(db, user, order_id)
+    if body.kind == "estimate":
+        raise HTTPException(422, "Документ сметы формируется при отправке сметы клиенту")
+    d = _est_err(lambda: se.make_document(db, wo, body.kind, user.id))
+    audit(db, user.id, None, "service_document", d.id, "create", after={"number": d.number, "kind": d.kind, "order": wo.number})
+    db.commit()
+    return _doc_payload(d, {user.id: user.display_name})
+
+
+@router.get("/documents/{doc_id}/file")
+def document_file(doc_id: str, user: CurrentUser = Depends(_orders_reader), db: Session = Depends(get_db)):
+    d = db.get(ServiceDocument, doc_id)
+    if d is None:
+        raise HTTPException(404, "Документ не найден")
+    _get_order(db, user, d.work_order_id)
+    if d.kind == "estimate" and wos.actor_of(user).engineer_only:
+        raise HTTPException(404, "Документ не найден")
+    fd, path = tempfile.mkstemp(suffix=".docx")
+    os.close(fd)
+    adapters.storage().download(d.storage_path, path)
+    return file_response(path, d.filename, inline=False, background=BackgroundTask(os.unlink, path))

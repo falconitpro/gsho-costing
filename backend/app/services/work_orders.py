@@ -52,12 +52,12 @@ TRANSITIONS: dict[str, tuple[set[str], str]] = {
     "cancel": ({"draft", "assigned", "in_progress", "on_hold"}, "cancelled"),
 }
 STATUS_KINDS = set(TRANSITIONS) | {"assign"}
-HEAD_ONLY = {"assign", "plan", "cancel", "resolve"}
-KINDS = STATUS_KINDS | {"plan", "note", "checklist", "resolve", "work_add", "work_update", "diagnosis", "photo"}
+HEAD_ONLY = {"assign", "plan", "cancel", "resolve", "billing"}
+KINDS = STATUS_KINDS | {"plan", "note", "checklist", "resolve", "work_add", "work_update", "diagnosis", "photo", "billing"}
 KIND_TITLES = {"create": "Создан", "assign": "Назначен инженер", "plan": "Сроки", "start": "Начат", "hold": "Приостановлен",
                "resume": "Возобновлён", "ready": "Готов к закрытию", "reopen": "Возвращён в работу", "close": "Закрыт",
                "cancel": "Отменён", "note": "Заметка", "checklist": "Чек-лист", "resolve": "Решение по конфликту",
-               "work_add": "Добавлена работа", "work_update": "Работа", "diagnosis": "Диагностика", "photo": "Фото"}
+               "work_add": "Добавлена работа", "work_update": "Работа", "diagnosis": "Диагностика", "photo": "Фото", "billing": "Вид оплаты"}
 
 
 class Forbidden(Exception):
@@ -135,6 +135,10 @@ def _stale_conflict(db: Session, wo: WorkOrder, kind: str, payload: dict, base: 
                 if any(k in e.payload and e.payload[k] != payload[k] for k in keys):
                     return "Эту работу уже изменили иначе"
         return ""
+    if kind == "billing":
+        if any(e.kind == "billing" for e in later):
+            return "Вид оплаты уже изменили"
+        return ""
     if kind == "diagnosis":
         if any(e.kind == "diagnosis" for e in later):
             return "Заключение диагностики уже изменили"
@@ -185,6 +189,8 @@ def _apply(db: Session, wo: WorkOrder, actor: Actor, kind: str, payload: dict, o
         return "rejected", f"Наряд уже {STATUSES[wo.status].lower()}"
     if kind in ("work_add", "work_update", "diagnosis"):
         return _apply_work(db, wo, actor, kind, payload)
+    if kind == "billing":
+        return _apply_billing(db, wo, payload)
     if kind == "assign":
         eng = str(payload.get("engineer_id") or "")
         if not eng:
@@ -239,6 +245,28 @@ def _apply(db: Session, wo: WorkOrder, actor: Actor, kind: str, payload: dict, o
     if kind == "cancel" and not str(payload.get("reason") or "").strip():
         return "rejected", "Укажите причину отмены"
     wo.status = dst
+    return "applied", ""
+
+
+BILLING = {"client": "За счёт клиента", "warranty": "Гарантия", "goodwill": "За счёт компании"}
+
+
+def _apply_billing(db: Session, wo: WorkOrder, payload: dict) -> tuple[str, str]:
+    """Вид оплаты наряда; для гарантии — связь с гарантийной претензией (если есть) и предупреждение о сроке гарантии машины."""
+    from ..core.clock import today as msk_today
+    from ..models import ClientMachine, WarrantyClaim
+    b = str(payload.get("billing") or "")
+    if b not in BILLING:
+        return "rejected", "Вид оплаты — из списка"
+    claim = str(payload.get("warranty_claim_id") or "") or None
+    if claim and db.get(WarrantyClaim, claim) is None:
+        return "rejected", "Нет такой гарантийной претензии"
+    wo.billing, wo.warranty_claim_id = b, (claim if b == "warranty" else None)
+    m = db.get(ClientMachine, wo.machine_id) if wo.machine_id else None
+    if b == "warranty" and m is not None and m.warranty_until is not None and m.warranty_until < msk_today():
+        return "applied", f"Гарантия машины закончилась {m.warranty_until.strftime('%d.%m.%Y')}"
+    if b == "warranty" and (m is None or m.warranty_until is None):
+        return "applied", "Срок гарантии машины не указан — проверьте"
     return "applied", ""
 
 
@@ -357,6 +385,8 @@ def actions(wo: WorkOrder, actor: Actor) -> list[str]:
             out += ["work_add", "work_update", "diagnosis"]
     if actor.is_head:
         out.append("resolve")
+        if wo.status not in FINAL:
+            out.append("billing")
     return out
 
 
