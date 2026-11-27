@@ -59,7 +59,27 @@ const EMPTY: Part = { article: "", name_ru: "", unit: "шт", part_group: "", st
   min_price: null, min_price_currency: "EUR", photos: [], spec_no: "", addendum_no: "", cross_refs: [], applicability: [], client_prices: [], stock: [] };
 const n = (v: string) => (v === "" ? null : Number(v.replace(",", ".")));
 const SECTIONS: [string, string][] = [["pc-main", "Основное"], ["pc-nums", "Номера и аналоги"], ["pc-appl", "Применимость"], ["pc-buy", "Закупка"], ["pc-log", "Логистика"],
-  ["pc-stock", "Склад"], ["pc-price", "Цены"], ["pc-files", "Фото и документы"]];
+  ["pc-stock", "Склад"], ["pc-price", "Цены"], ["pc-files", "Фото и документы"], ["pc-hist", "История"]];
+
+type HistItem = { id: number; at: string; user_name: string; action: string; title: string; changes: { field: string; title: string; before: unknown; after: unknown }[] };
+const showVal = (v: unknown): string => (v == null || v === "" ? "—" : Array.isArray(v) ? (v.length ? v.join("; ") : "—") : typeof v === "object" ? Object.entries(v as Record<string, unknown>).map(([k, x]) => `${k}: ${x}`).join("; ") || "—" : String(v));
+
+/** D-199 (J-g): история карточки детали — кто, когда и что изменил (только чтение, только новый вид). */
+function PartHistory({ id }: { id: string }) {
+  const [items, setItems] = useState<HistItem[] | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setItems(null); setOpen(false); }, [id]);
+  useEffect(() => { if (open) api.get<{ items: HistItem[] }>(`/api/parts/catalog/${id}/history`).then((r) => setItems(r.items)).catch(() => setItems([])); }, [open, id]);
+  if (!open) return <button className="btn ghost" onClick={() => setOpen(true)}>Показать историю изменений</button>;
+  if (!items) return <p className="muted">Загрузка…</p>;
+  if (!items.length) return <p className="muted">Изменений пока нет.</p>;
+  return (
+    <ul className="pc-hist">{items.map((h) => (
+      <li key={h.id}><div><b>{h.title}</b> <span className="pc-sub">{new Date(h.at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })} · {h.user_name || "—"}</span></div>
+        {h.changes.length > 0 && <table className="pc-hist-t"><tbody>{h.changes.map((c, i) => (
+          <tr key={i}><th scope="row">{c.title}</th>{h.action === "create" ? <td colSpan={2}>{showVal(c.after)}</td> : <><td className="was">{showVal(c.before)}</td><td>{showVal(c.after)}</td></>}</tr>))}</tbody></table>}
+      </li>))}</ul>);
+}
 
 /** Новый вид: главное о запчасти одной строкой — наличие по всем складам (остаток, резерв, доступно, в пути — как отдаёт сервер),
  *  ниже минимума, цена, срок поставки. Ничего не пересчитывает, кроме сумм по складам. */
@@ -298,6 +318,8 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
             <label className="f">Фото (ссылки, через запятую)<input value={cur.photos.join(", ")} disabled={!edit} onChange={(e) => set({ photos: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })} /></label>
             {txt("Спецификация, №", "spec_no")}{txt("Доп. соглашение, №", "addendum_no")}
           </div>
+
+          {nv && cur.id && <><h3 id="pc-hist">История</h3><PartHistory id={cur.id} /></>}
 
           <div className={"row pc-footrow" + (nv ? " pc-foot" : "")}>
             {nv && edit && <span className={"pc-dirty" + (JSON.stringify(cur) !== snap ? " on" : "")}>{!cur.id ? "новая карточка — не сохранена" : JSON.stringify(cur) !== snap ? "есть несохранённые изменения" : "изменений нет"}</span>}

@@ -127,3 +127,26 @@ def test_machine_parts_status_and_serial_range(client):
                     json={"id": str(uuid.uuid4()), "kind": "assign", "base_version": wo["version"], "payload": {"engineer_id": eng}}))
     op = _ok(client.get(f"/api/service/orders/{wo['id']}/parts", headers=H(ENG)))
     assert [x["article"] for x in op["items"]] == arts and "sale_price" not in op["items"][0]
+
+
+def test_part_history_jg(client):
+    """D-199 (J-g): история карточки — поля «было / стало», применимость, права на цены, сохранение без изменений не пишется."""
+    t = uuid.uuid4().hex[:5].upper()
+    p = _part(client, t, "H", f"LH-{t}")
+    card = _ok(client.get(f"/api/parts/catalog/{p['id']}", headers=H(CD)))
+    keep = ("article", "name_ru", "unit", "purchase_price", "purchase_currency", "sale_price", "sale_currency")
+    body = {k: card.get(k) for k in keep}
+    body["applicability"] = [{k: a[k] for k in ("id", "other_manufacturer", "other_model", "assembly")} for a in card["applicability"]]
+    _ok(client.put(f"/api/parts/catalog/{p['id']}", headers=H(CD), json=body))                       # без изменений
+    body.update({"name_ru": "Деталь H новая", "sale_price": 999, "sale_currency": "RUB", "cross_refs": [{"kind": "supplier", "number": f"S-{t}"}]})
+    _ok(client.put(f"/api/parts/catalog/{p['id']}", headers=H(CD), json=body))
+    _ok(client.post(f"/api/parts/applicability/{card['applicability'][0]['id']}/verify", headers=H(CD),
+                    json={"status": "probable", "basis_kind": "analog", "basis": "как у LH410"}))
+    h = _ok(client.get(f"/api/parts/catalog/{p['id']}/history", headers=H(CD)))["items"]
+    assert [x["title"] for x in h] == ["Проверка применимости", "Изменения", "Карточка создана"]
+    ch = {c["field"]: c for c in h[1]["changes"]}
+    assert ch["name_ru"]["before"] == "Деталь H" and ch["name_ru"]["after"] == "Деталь H новая"
+    assert ch["sale_price"]["after"] == 999 and ch["cross_refs"]["after"] == [f"артикул поставщика: S-{t}"] and "article" not in ch
+    assert h[0]["changes"][0]["after"] == "Вероятно" and h[1]["user_name"]
+    eng = _ok(client.get(f"/api/parts/catalog/{p['id']}/history", headers=H(ENG)))["items"]
+    assert all(c["field"] not in ("sale_price", "sale_currency") for x in eng for c in x["changes"])
