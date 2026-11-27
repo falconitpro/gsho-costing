@@ -423,10 +423,15 @@ def create_part(body: PartIn, force: bool = False, db: Session = Depends(get_db)
 def update_part(pid: str, body: PartIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
     _validate(body, db)
     p = _part_or_404(db, pid)
-    before = {"article": p.article, "name_ru": p.name_ru, "status": p.status}
+    before = _snapshot(db, p)
     _apply(db, p, body, user)
+    db.flush()
+    db.refresh(p)
     _mark_supplier(db, p.supplier_id, "parts")
-    audit(db, user.id, None, "part", p.id, "update", before, {"article": p.article, "name_ru": p.name_ru, "status": p.status})
+    after = _snapshot(db, p)
+    changed = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
+    audit(db, user.id, None, "part", p.id, "update", {k: before.get(k) for k in changed} | {"article": before.get("article")},
+          {k: after.get(k) for k in changed} | {"article": after.get("article")})
     db.commit()
     db.refresh(p)
     return _card(db, p, user)
@@ -618,3 +623,93 @@ def applicability_verify(aid: str, body: VerifyIn, db: Session = Depends(get_db)
     db.commit()
     p = db.get(Part, a.part_id)
     return _app_row(db, a, p, {user.id: user.display_name})
+
+
+
+# ------------------------------------------------------------------ J-g (D-199): история карточки детали
+
+_SNAP_FIELDS = ("article", "name_ru", "unit", "part_group", "status", "description", "manufacturer", "oem_number", "supplier_id", "route_id",
+                "purchase_price", "purchase_currency", "purchase_on", "lead_days", "hs_code", "origin_country", "moq", "multiple", "weight_kg",
+                "length_mm", "width_mm", "height_mm", "volume_m3", "sale_price", "sale_currency", "min_price", "min_price_currency",
+                "spec_no", "addendum_no")
+FIELD_TITLES = {
+    "article": "Артикул", "name_ru": "Наименование", "unit": "Единица", "part_group": "Группа", "status": "Статус", "description": "Описание",
+    "manufacturer": "Производитель", "oem_number": "OEM", "supplier_id": "Поставщик", "route_id": "Маршрут", "purchase_price": "Закупочная цена",
+    "purchase_currency": "Валюта закупки", "purchase_on": "Дата закупочной цены", "lead_days": "Срок поставки, дн", "hs_code": "Код ТН ВЭД",
+    "origin_country": "Страна происхождения", "moq": "Минимальная партия", "multiple": "Кратность", "weight_kg": "Вес, кг", "length_mm": "Длина, мм",
+    "width_mm": "Ширина, мм", "height_mm": "Высота, мм", "volume_m3": "Объём, м³", "sale_price": "Цена продажи", "sale_currency": "Валюта продажи",
+    "min_price": "Минимальная цена", "min_price_currency": "Валюта мин. цены", "spec_no": "Спецификация", "addendum_no": "Дополнение",
+    "names": "Наименования на других языках", "cross_refs": "Номера и аналоги", "applicability": "Применимость", "client_prices": "Договорные цены",
+    "min_stock": "Минимальные остатки", "photos": "Фото", "name": "Наименование",
+}
+_PURCHASE = {"purchase_price", "purchase_currency", "purchase_on"}
+_SALE = set(_ENGINEER_HIDDEN) | {"client_prices"}
+
+
+def _snapshot(db: Session, p: Part) -> dict:
+    """Карточка детали в сравнимом виде — для журнала изменений (что было / стало по полям)."""
+    d = {k: (getattr(p, k).isoformat() if isinstance(getattr(p, k), date) else getattr(p, k)) for k in _SNAP_FIELDS}
+    d["names"] = {k: v for k, v in sorted((p.names or {}).items()) if v}
+    d["cross_refs"] = sorted(f"{CROSS_KINDS.get(c.kind, c.kind)}: {c.number}" + (f" ({c.manufacturer})" if c.manufacturer else "") for c in p.cross_refs)
+    apps = []
+    for a in p.applicability:
+        if a.equipment_model_id:
+            m = db.get(EquipmentModel, a.equipment_model_id)
+            title = m.model if m else "модель каталога"
+        else:
+            title = f"{a.other_manufacturer} {a.other_model}".strip()
+        apps.append(f"{title}{' / ' + a.assembly if a.assembly else ''} [{app_svc.STATUSES.get(a.status, a.status)}]")
+    d["applicability"] = sorted(apps)
+    names = {c.id: c.name for c in db.scalars(select(Client)).all()} if p.prices else {}
+    d["client_prices"] = sorted(f"{names.get(x.client_id, x.client_name)}: {x.price:g} {x.currency}" for x in p.prices)
+    whs = {w.id: w.name for w in db.scalars(select(Warehouse)).all()} if p.stock else {}
+    d["min_stock"] = sorted(f"{whs.get(x.warehouse_id, '?')}: {x.min_qty:g}" for x in p.stock if x.min_qty is not None)
+    d["photos"] = len(p.photos or [])
+    return d
+
+
+@router.get("/catalog/{pid}/history")
+def part_history(pid: str, limit: int = 100, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """История карточки детали (только чтение): кто, когда и что изменил — по полям «было / стало», включая проверку
+    применимости. Цены — с теми же правами, что в карточке (закупка — кто видит цены завода; продажа — не инженеру)."""
+    from ..models import AuditLog
+    p = _part_or_404(db, pid)
+    app_ids = [a.id for a in p.applicability]
+    st = select(AuditLog).where(((AuditLog.entity == "part") & (AuditLog.entity_id == pid)) |
+                                ((AuditLog.entity == "part_applicability") & (AuditLog.entity_id.in_(app_ids or ["-"]))))
+    rows = db.scalars(st.order_by(AuditLog.at.desc(), AuditLog.id.desc()).limit(max(1, min(limit, 500)))).all()
+    hide = set()
+    if not user.can("factory_price_history"):
+        hide |= _PURCHASE
+    if _engineer_only(user):
+        hide |= _SALE
+    uids = {r.user_id for r in rows if r.user_id}
+    who = {u.id: u.display_name for u in db.scalars(select(User).where(User.id.in_(uids))).all()} if uids else {}
+    out = []
+    for r in rows:
+        b, a = r.before or {}, r.after or {}
+        changes = []
+        if r.entity == "part_applicability":
+            title = "Проверка применимости"
+            for k in ("status", "basis_kind", "basis", "serial_from", "serial_to"):
+                if b.get(k) != a.get(k):
+                    fmt = (lambda v: app_svc.STATUSES.get(v, v)) if k == "status" else (lambda v: app_svc.BASIS_KINDS.get(v, v) if k == "basis_kind" else v)
+                    changes.append({"field": k, "title": {"status": "Статус", "basis_kind": "Основание", "basis": "Основание (текст)",
+                                                          "serial_from": "Зав. № с", "serial_to": "Зав. № по"}[k], "before": fmt(b.get(k)), "after": fmt(a.get(k))})
+        else:
+            title = {"create": "Карточка создана", "update": "Изменения", "photo_remove": "Удалено фото"}.get(r.action, r.action)
+            keys = [k for k in (list(a) if r.action == "create" else sorted(set(a) | set(b), key=lambda k: list(FIELD_TITLES).index(k) if k in FIELD_TITLES else 999))]
+            for k in keys:
+                if k in hide or k in ("forced",) or (r.action == "update" and k == "article" and b.get(k) == a.get(k)):
+                    continue
+                if r.action == "create":
+                    if k in ("article", "name"):
+                        changes.append({"field": k, "title": FIELD_TITLES.get(k, k), "before": None, "after": a.get(k)})
+                    continue
+                if b.get(k) != a.get(k):
+                    changes.append({"field": k, "title": FIELD_TITLES.get(k, k), "before": b.get(k), "after": a.get(k)})
+        if r.action == "update" and not changes and r.entity == "part":
+            continue                                    # сохранили без изменений
+        out.append({"id": r.id, "at": r.at.isoformat() if r.at else None, "user_name": who.get(r.user_id or "", ""), "action": r.action,
+                    "title": title, "changes": changes})
+    return {"items": out}
