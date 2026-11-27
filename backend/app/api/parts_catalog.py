@@ -687,6 +687,8 @@ FIELD_TITLES = {
     "min_price": "Минимальная цена", "min_price_currency": "Валюта мин. цены", "spec_no": "Спецификация", "addendum_no": "Дополнение",
     "names": "Наименования на других языках", "cross_refs": "Номера и аналоги", "applicability": "Применимость", "client_prices": "Договорные цены",
     "min_stock": "Минимальные остатки", "photos": "Фото", "name": "Наименование",
+    "kind": "Вид документа", "language": "Язык", "revision": "Ревизия", "file": "Файл", "replaced": "Заменён", "number": "Номер",
+    "basis_kind": "Основание", "basis": "Основание (текст)",
 }
 _PURCHASE = {"purchase_price", "purchase_currency", "purchase_on"}
 _SALE = set(_ENGINEER_HIDDEN) | {"client_prices"}
@@ -743,7 +745,8 @@ def part_history(pid: str, limit: int = 100, db: Session = Depends(get_db), user
                     changes.append({"field": k, "title": {"status": "Статус", "basis_kind": "Основание", "basis": "Основание (текст)",
                                                           "serial_from": "Зав. № с", "serial_to": "Зав. № по"}[k], "before": fmt(b.get(k)), "after": fmt(a.get(k))})
         else:
-            title = {"create": "Карточка создана", "update": "Изменения", "photo_remove": "Удалено фото"}.get(r.action, r.action)
+            title = {"create": "Карточка создана", "update": "Изменения", "photo_remove": "Удалено фото", "document_upload": "Загружен документ",
+                     "document_archive": "Документ снят с актуальных", "cross_verify": "Проверка номера"}.get(r.action, r.action)
             keys = [k for k in (list(a) if r.action == "create" else sorted(set(a) | set(b), key=lambda k: list(FIELD_TITLES).index(k) if k in FIELD_TITLES else 999))]
             for k in keys:
                 if k in hide or k in ("forced",) or (r.action == "update" and k == "article" and b.get(k) == a.get(k)):
@@ -921,3 +924,100 @@ def cross_refs_import(file: UploadFile = File(...), dry_run: bool = Form(True), 
               {"file": name, **{k: rep[k] for k in ("rows", "exists", "added", "created")}, "conflicts": len(rep["conflicts"])})
         db.commit()
     return {**rep, "dry_run": dry_run}
+
+
+# ------------------------------------------------------------------ J-f (D-203): документы детали
+
+PART_DOC_KINDS = {"drawing": "Чертёж", "certificate": "Сертификат / декларация", "instruction": "Инструкция", "catalog_page": "Лист каталога завода",
+                  "spec": "Технические характеристики", "photo": "Фото / схема", "other": "Прочее"}
+PART_DOC_LANGS = {"ru": "русский", "en": "английский", "zh": "китайский", "de": "немецкий", "other": "другой"}
+
+
+def _pdoc_payload(d, names: dict[str, str]) -> dict:
+    from ..core.clock import today as msk_today
+    x = serialize(d)
+    x.pop("storage_path", None)
+    x.update(kind_title=PART_DOC_KINDS.get(d.kind, d.kind), language_title=PART_DOC_LANGS.get(d.language, d.language),
+             uploaded_by_name=names.get(d.uploaded_by or "", ""), url=f"/api/parts/documents/{d.id}",
+             expired=bool(d.valid_until and d.valid_until < msk_today()))
+    return x
+
+
+@router.get("/catalog/{pid}/documents")
+def part_documents(pid: str, all: bool = False, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Документы детали: актуальные ревизии (all=1 — и прежние)."""
+    from ..models import PartDocument
+    _part_or_404(db, pid)
+    st = select(PartDocument).where(PartDocument.part_id == pid)
+    if not all:
+        st = st.where(PartDocument.active.is_(True))
+    rows = db.scalars(st.order_by(PartDocument.kind, PartDocument.language, PartDocument.uploaded_at.desc())).all()
+    uids = {d.uploaded_by for d in rows if d.uploaded_by}
+    names = {u.id: u.display_name for u in db.scalars(select(User).where(User.id.in_(uids))).all()} if uids else {}
+    return {"items": [_pdoc_payload(d, names) for d in rows], "kinds": PART_DOC_KINDS, "languages": PART_DOC_LANGS, "can_edit": user.has(*EDIT_ROLES)}
+
+
+@router.post("/catalog/{pid}/documents", status_code=201)
+def part_document_upload(pid: str, file: UploadFile = File(...), kind: str = Form("drawing"), language: str = Form("ru"), revision: str = Form(""),
+                         title: str = Form(""), valid_until: Optional[date] = Form(None), comment: str = Form(""),
+                         db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    """Загрузить документ. Тот же вид и язык уже есть — новый становится актуальной ревизией, прежний сохраняется."""
+    import hashlib
+
+    from .. import adapters
+    from ..core.files import read_limited, safe_filename
+    from ..models import PartDocument
+    p = _part_or_404(db, pid)
+    if kind not in PART_DOC_KINDS or language not in PART_DOC_LANGS:
+        raise HTTPException(422, "Вид документа и язык — из списка")
+    data = read_limited(file)
+    name = safe_filename(file.filename, "document")
+    fd, path = tempfile.mkstemp(suffix=os.path.splitext(name)[1])
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        stored = adapters.storage().upload(path, f"Каталог/Запчасти/{p.article.replace('/', '-')}", "07_fact",
+                                           f"{kind}-{language}{('-' + revision.strip()) if revision.strip() else ''} {name}")
+    finally:
+        os.unlink(path)
+    prev = db.scalars(select(PartDocument).where(PartDocument.part_id == p.id, PartDocument.kind == kind, PartDocument.language == language,
+                                                 PartDocument.active.is_(True)).order_by(PartDocument.uploaded_at.desc())).first()
+    d = PartDocument(part_id=p.id, kind=kind, language=language, revision=revision.strip()[:64], title=(title.strip() or PART_DOC_KINDS[kind])[:255],
+                     file_name=name, storage_path=stored.path, size=len(data), sha256=hashlib.sha256(data).hexdigest(),
+                     supersedes_id=prev.id if prev else None, valid_until=valid_until, comment=comment, uploaded_by=user.id)
+    if prev is not None:
+        prev.active = False
+    db.add(d)
+    db.flush()
+    audit(db, user.id, None, "part", p.id, "document_upload", {"replaced": prev.file_name} if prev else None,
+          {"kind": kind, "language": language, "revision": d.revision, "file": name})
+    db.commit()
+    return _pdoc_payload(d, {user.id: user.display_name})
+
+
+@router.get("/documents/{doc_id}")
+def part_document_file(doc_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    from starlette.background import BackgroundTask
+
+    from .. import adapters
+    from ..models import PartDocument
+    d = db.get(PartDocument, doc_id)
+    if d is None:
+        raise HTTPException(404, "Документ не найден")
+    fd, path = tempfile.mkstemp(suffix=os.path.splitext(d.file_name)[1])
+    os.close(fd)
+    adapters.storage().download(d.storage_path, path)
+    return file_response(path, d.file_name, background=BackgroundTask(os.unlink, path))
+
+
+@router.post("/documents/{doc_id}/archive")
+def part_document_archive(doc_id: str, db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    """Снять документ с актуальных (файл сохраняется, виден в «прежних»)."""
+    from ..models import PartDocument
+    d = db.get(PartDocument, doc_id)
+    if d is None:
+        raise HTTPException(404, "Документ не найден")
+    d.active = False
+    audit(db, user.id, None, "part", d.part_id, "document_archive", {"file": d.file_name, "kind": d.kind}, None)
+    db.commit()
+    return {"ok": True}

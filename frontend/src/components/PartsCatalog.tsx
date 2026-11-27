@@ -84,7 +84,45 @@ const EMPTY: Part = { article: "", name_ru: "", unit: "шт", part_group: "", st
   min_price: null, min_price_currency: "EUR", photos: [], spec_no: "", addendum_no: "", cross_refs: [], applicability: [], client_prices: [], stock: [] };
 const n = (v: string) => (v === "" ? null : Number(v.replace(",", ".")));
 const SECTIONS: [string, string][] = [["pc-main", "Основное"], ["pc-nums", "Номера и аналоги"], ["pc-appl", "Применимость"], ["pc-buy", "Закупка"], ["pc-log", "Логистика"],
-  ["pc-stock", "Склад"], ["pc-price", "Цены"], ["pc-files", "Фото и документы"], ["pc-hist", "История"]];
+  ["pc-stock", "Склад"], ["pc-price", "Цены"], ["pc-files", "Фото и документы"], ["pc-docs", "Документы детали"], ["pc-hist", "История"]];
+
+type PDoc = { id: string; kind: string; kind_title: string; language: string; language_title: string; revision: string; title: string; file_name: string;
+  active: boolean; valid_until: string | null; expired: boolean; uploaded_at: string; uploaded_by_name: string; url: string };
+
+/** D-203 (J-f): документы детали — вид, язык, ревизия; новая ревизия того же вида и языка заменяет прежнюю (она сохраняется). */
+function PartDocs({ id }: { id: string }) {
+  const [d, setD] = useState<{ items: PDoc[]; kinds: Record<string, string>; languages: Record<string, string>; can_edit: boolean } | null>(null);
+  const [all, setAll] = useState(false);
+  const [f, setF] = useState({ kind: "drawing", language: "ru", revision: "", valid_until: "" });
+  const [msg, setMsg] = useState("");
+  const load = () => api.get<NonNullable<typeof d>>(`/api/parts/catalog/${id}/documents${all ? "?all=true" : ""}`).then(setD).catch(() => setD(null));
+  useEffect(() => { load(); }, [id, all]);   // eslint-disable-line react-hooks/exhaustive-deps
+  if (!d) return null;
+  const upload = async (file: File) => {
+    try { await api.upload(`/api/parts/catalog/${id}/documents`, file, { kind: f.kind, language: f.language, revision: f.revision, ...(f.kind === "certificate" && f.valid_until ? { valid_until: f.valid_until } : {}) }); setMsg(`Загружено: ${file.name}`); setF({ ...f, revision: "" }); load(); }
+    catch (e) { setMsg((e as Error).message); }
+  };
+  return (
+    <div className="pc-docs">
+      {msg && <div className="alert info" role="status">{msg}</div>}
+      {d.items.length === 0 ? <p className="muted">Документов нет.</p> : <ul>{d.items.map((x) => (
+        <li key={x.id} className={x.active ? "" : "arch"}>
+          <button type="button" className="btn ghost sv-mini" onClick={() => api.download(x.url, x.file_name).catch((e) => setMsg((e as Error).message))}>{x.kind_title}</button>
+          <span> {x.language_title}{x.revision ? ` · ред. ${x.revision}` : ""}{!x.active ? " · прежняя" : ""}</span>
+          {x.valid_until && <span className={x.expired ? "sv-req" : "pc-sub"}> · до {new Date(x.valid_until).toLocaleDateString("ru-RU")}{x.expired ? " (истёк)" : ""}</span>}
+          <div className="pc-sub">{x.file_name} · {x.uploaded_by_name} · {new Date(x.uploaded_at).toLocaleDateString("ru-RU")}</div>
+          {d.can_edit && x.active && <button type="button" className="btn ghost sv-mini" onClick={async () => { await api.post(`/api/parts/documents/${x.id}/archive`, {}); load(); }}>снять</button>}
+        </li>))}</ul>}
+      <label className="row pc-sub"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> показать прежние ревизии</label>
+      {d.can_edit && <div className="grid cols-3 pc-docs-add">
+        <label className="f">Вид<select value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>{Object.entries(d.kinds).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+        <label className="f">Язык<select value={f.language} onChange={(e) => setF({ ...f, language: e.target.value })}>{Object.entries(d.languages).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+        <label className="f">Ревизия<input value={f.revision} onChange={(e) => setF({ ...f, revision: e.target.value })} placeholder="A, 02, 2026-11…" /></label>
+        {f.kind === "certificate" && <label className="f">Действует до<input type="date" value={f.valid_until} onChange={(e) => setF({ ...f, valid_until: e.target.value })} /></label>}
+        <label className="btn sv-photo-btn">Загрузить документ<input type="file" onChange={(e) => { const x = e.target.files?.[0]; e.target.value = ""; if (x) upload(x); }} /></label>
+      </div>}
+    </div>);
+}
 
 type HistItem = { id: number; at: string; user_name: string; action: string; title: string; changes: { field: string; title: string; before: unknown; after: unknown }[] };
 const showVal = (v: unknown): string => (v == null || v === "" ? "—" : Array.isArray(v) ? (v.length ? v.join("; ") : "—") : typeof v === "object" ? Object.entries(v as Record<string, unknown>).map(([k, x]) => `${k}: ${x}`).join("; ") || "—" : String(v));
@@ -347,6 +385,7 @@ export default function PartsCatalog({ me, openId }: { me: Me; openId?: string }
             {txt("Спецификация, №", "spec_no")}{txt("Доп. соглашение, №", "addendum_no")}
           </div>
 
+          {nv && cur.id && <><h3 id="pc-docs">Документы детали</h3><PartDocs id={cur.id} /></>}
           {nv && cur.id && <><h3 id="pc-hist">История</h3><PartHistory id={cur.id} /></>}
 
           <div className={"row pc-footrow" + (nv ? " pc-foot" : "")}>
