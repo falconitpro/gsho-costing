@@ -670,3 +670,16 @@ def plan(start: Optional[date] = None, days: int = Query(14, ge=1, le=62), user:
             "engineers": [{"id": u.id, "name": u.display_name, "orders": [o for o in planned if o["engineer_id"] == u.id]} for u in engs],
             "unassigned": [o for o in planned if not o["engineer_id"]],
             "unplanned": [brief(o) for o in rows if not o.planned_start]}
+
+
+@router.get("/orders/{order_id}/parts")
+def order_parts(order_id: str, q: str = "", user: CurrentUser = Depends(_orders_reader), db: Session = Depends(get_db)):
+    """J-b (D-196): запчасти для машины наряда — по применимости, со статусом проверки, без цен (видно исполнителю)."""
+    wo = _get_order(db, user, order_id)
+    m = db.get(ClientMachine, wo.machine_id) if wo.machine_id else None
+    if m is None:
+        return {"machine": None, "items": []}
+    from ..services.applicability import parts_for_machine
+    from .parts_fleet import _model_title
+    _man, model = _model_title(db, m)
+    return {"machine": {"id": m.id, "serial": m.serial}, "items": parts_for_machine(db, m, model, q, limit=200)}

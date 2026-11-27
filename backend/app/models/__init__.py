@@ -1861,6 +1861,16 @@ class PartApplicability(Base):
     other_manufacturer: Mapped[str] = mapped_column(String(255), default="")
     other_model: Mapped[str] = mapped_column(String(255), default="")
     assembly: Mapped[str] = mapped_column(String(255), default="")      # узел / агрегат
+    # J-b (D-196): статус проверки, уровень исполнения, диапазон серийных номеров, основание, кто и когда проверил.
+    # Прежние записи — «не подтверждено» (решение владельца 7, D-180).
+    execution_id: Mapped[Optional[str]] = mapped_column(ForeignKey("equipment_executions.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(16), default="unverified")   # confirmed | probable | unverified | not_applicable | replaced
+    serial_from: Mapped[str] = mapped_column(String(64), default="")
+    serial_to: Mapped[str] = mapped_column(String(64), default="")
+    basis_kind: Mapped[str] = mapped_column(String(16), default="")         # manual | supplier | service | analog | comment
+    basis: Mapped[str] = mapped_column(Text, default="")
+    verified_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class PartClientPrice(Base):
