@@ -2322,7 +2322,8 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
 .pc-asm { min-width: 180px; } span.pc-asm { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .asm-tools { gap: 10px; align-items: end; flex-wrap: wrap; margin-bottom: 8px; } .asm-tools .f { min-width: 260px; }
 /* D-201 (J-e): комплекты ТО */
-.kit-works { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 12px; }
+.kit-sub { font-size: 11px; color: var(--muted); }
+.kit-works { grid-column: span 2; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 12px; }
 .kit-works legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
 .sv-kits ul { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
 .sv-kits li { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }

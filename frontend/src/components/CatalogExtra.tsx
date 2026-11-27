@@ -68,7 +68,7 @@ export function KitsBlock({ me }: { me: Me }) {
             {nv && <>
               <label className="f"><span>Зав. № машин с</span><input value={form.serial_from} placeholder="пусто — без ограничения" onChange={(e) => setForm({ ...form, serial_from: e.target.value })} /></label>
               <label className="f"><span>по</span><input value={form.serial_to} placeholder="пусто — без ограничения" onChange={(e) => setForm({ ...form, serial_to: e.target.value })} /></label>
-              {wtypes.length > 0 && <fieldset className="f kit-works" style={{ gridColumn: "span 2" }}><legend>Работы из справочника сервиса</legend>
+              {wtypes.length > 0 && <fieldset className="f kit-works"><legend>Работы из справочника сервиса</legend>
                 {wtypes.map((w) => <label key={w.id} className="row"><input type="checkbox" checked={form.works.includes(w.id)}
                   onChange={(e) => setForm({ ...form, works: e.target.checked ? [...form.works, w.id] : form.works.filter((x) => x !== w.id) })} /> {w.code} · {w.name}{w.norm_hours != null ? ` · ${w.norm_hours} ч` : ""}</label>)}</fieldset>}
             </>}
@@ -82,8 +82,8 @@ export function KitsBlock({ me }: { me: Me }) {
           {shown.length === 0 && <tr><td colSpan={5} className="muted">Комплектов нет. Их можно завести здесь или взять из ЗИП на ТО сделки (Парк машин → карточка машины).</td></tr>}
           {shown.map((k) => (
             <tr key={k.id} style={{ opacity: k.active ? 1 : 0.5 }}>
-              <td>{k.model_title || "—"}{nv && (k.serial_from || k.serial_to) && <div className="muted" style={{ fontSize: 11 }}>зав. № {k.serial_from || "…"} — {k.serial_to || "…"}</div>}</td><td><b>{k.name}</b>{k.source === "deal_zip" && <div className="muted" style={{ fontSize: 11 }}>из ЗИП сделки</div>}
-                {nv && (k.works || []).map((w) => <div key={w.work_type_id} className="muted" style={{ fontSize: 11 }}>работа: {w.title}{w.norm_hours != null ? ` · ${w.norm_hours} ч` : ""}</div>)}</td><td className="num">{k.interval_hours}</td>
+              <td>{k.model_title || "—"}{nv && (k.serial_from || k.serial_to) && <div className="kit-sub">зав. № {k.serial_from || "…"} — {k.serial_to || "…"}</div>}</td><td><b>{k.name}</b>{k.source === "deal_zip" && <div className="muted" style={{ fontSize: 11 }}>из ЗИП сделки</div>}
+                {nv && (k.works || []).map((w) => <div key={w.work_type_id} className="kit-sub">работа: {w.title}{w.norm_hours != null ? ` · ${w.norm_hours} ч` : ""}</div>)}</td><td className="num">{k.interval_hours}</td>
               <td style={{ fontSize: 12 }}>{k.lines.map((l, i) => <div key={i} style={{ color: l.part_id ? undefined : "var(--bad)" }}>{l.article} × {l.qty}{l.name ? ` — ${l.name}` : l.part_id ? "" : " (нет карточки)"}</div>)}</td>
               <td>{edit && <button className="btn ghost" style={{ padding: "0 8px" }} onClick={() => setForm({ id: k.id, model: k.equipment_model_id || k.other_model_id || "", name: k.name, interval_hours: String(k.interval_hours), active: k.active, text: k.lines.map((l) => `${l.article}\t${l.qty}`).join("\n"),
                 works: (k.works || []).map((w) => w.work_type_id), serial_from: k.serial_from || "", serial_to: k.serial_to || "" })}>изменить</button>}</td>
