@@ -26,7 +26,8 @@ from .common import serialize
 
 router = APIRouter(prefix="/api/parts", tags=["parts-catalog"])
 
-CROSS_KINDS = {"supplier": "артикул поставщика", "analog_full": "аналог — полная замена", "analog_rework": "аналог — с доработкой"}
+CROSS_KINDS = {"supplier": "артикул поставщика", "analog_full": "аналог — полная замена", "analog_rework": "аналог — с доработкой",
+               "machine_maker": "номер завода машины", "oem": "OEM — номер производителя детали"}   # D-202
 PART_STATUS = {"active": "активна", "archive": "архив"}
 EDIT_ROLES = (Role.MANAGER, Role.CD, Role.GD, Role.PURCHASING, Role.ADMIN)   # карточки заводит менеджер (ТЗ, раздел 12)
 IMPORT_ROLES = (Role.CD, Role.GD, Role.ADMIN)
@@ -246,12 +247,17 @@ def card(pid: str, db: Session = Depends(get_db), user: CurrentUser = Depends(ge
 
 
 class CrossIn(BaseModel):
+    id: Optional[str] = None                  # D-202: существующий номер — по id (иначе по виду и номеру)
     kind: str
     number: str = Field(min_length=1)
     supplier_id: Optional[str] = None
     analog_part_id: Optional[str] = None
     manufacturer: str = ""
     comment: str = ""
+    # D-202: не переданы (прежний вид, импорт) — у существующего номера не меняются
+    status: str = "unverified"
+    basis_kind: str = ""
+    basis: str = ""
 
 
 class ApplicabilityIn(BaseModel):
@@ -362,6 +368,35 @@ def _check_app(db: Session, a: ApplicabilityIn) -> None:
             raise HTTPException(422, "Исполнение — той же модели, что в применимости")
 
 
+def _merge_cross(p: Part, rows: list[CrossIn], user: CurrentUser) -> None:
+    """D-202: номера сохраняются без потери проверки — по id, иначе по виду и номеру без пробелов и дефисов."""
+    from ..services.catalog_search import norm
+    old = {c.id: c for c in p.cross_refs}
+    by_key = {(c.kind, norm(c.number)): c for c in p.cross_refs}
+    out = []
+    for r in rows:
+        if r.kind not in CROSS_KINDS:
+            raise HTTPException(422, "Вид номера — из списка")
+        cur = old.get(r.id or "") or by_key.get((r.kind, norm(r.number)))
+        if cur is None or cur in out:
+            cur = PartCrossRef(status="unverified", source="manual")
+        for k in ("kind", "number", "supplier_id", "analog_part_id", "manufacturer", "comment"):
+            v = getattr(r, k)
+            setattr(cur, k, v.strip() if isinstance(v, str) else v)
+        before = (cur.status, cur.basis_kind, cur.basis)
+        for k in ("status", "basis_kind", "basis"):
+            if k in r.model_fields_set:
+                setattr(cur, k, getattr(r, k).strip())
+        if r.status not in app_svc.STATUSES:
+            raise HTTPException(422, "Статус номера — из списка")
+        if "status" in r.model_fields_set and cur.status in app_svc.NEED_BASIS and not (cur.basis or cur.basis_kind):
+            raise HTTPException(422, f"Для статуса «{app_svc.STATUSES[cur.status]}» у номера {cur.number} укажите основание")
+        if (cur.status, cur.basis_kind, cur.basis) != before and cur.status != "unverified":
+            cur.verified_by, cur.verified_at = user.id, datetime.now(timezone.utc)
+        out.append(cur)
+    p.cross_refs = out
+
+
 def _merge_applicability(db: Session, p: Part, rows: list[ApplicabilityIn], user: CurrentUser) -> None:
     """Сохранить применимость, не теряя проверку: связь ищется по id, иначе по модели и узлу. Поля проверки, которых
     нет в запросе (прежний вид, импорт), остаются как были; изменение статуса или основания записывает, кто и когда."""
@@ -401,7 +436,7 @@ def _apply(db: Session, p: Part, body: PartIn, user: CurrentUser) -> None:
         data["volume_m3"] = round(data["length_mm"] * data["width_mm"] * data["height_mm"] / 1e9, 6)
     for k, v in data.items():
         setattr(p, k, v.strip() if isinstance(v, str) and k in ("article", "name_ru", "oem_number", "manufacturer") else v)
-    p.cross_refs = [PartCrossRef(**c.model_dump()) for c in body.cross_refs]
+    _merge_cross(p, body.cross_refs, user)
     _merge_applicability(db, p, body.applicability, user)
     names = {c.id: c.name for c in db.scalars(select(Client)).all()}
     p.prices = [PartClientPrice(**{**c.model_dump(), "client_name": names.get(c.client_id, c.client_name)}) for c in body.client_prices]
@@ -798,3 +833,91 @@ def assembly_update(aid: str, body: AssemblyIn, db: Session = Depends(get_db), u
     audit(db, user.id, None, "equipment_assembly", a.id, "update", before, serialize(a))
     db.commit()
     return _asm_payload(a, {})
+
+
+
+# ------------------------------------------------------------------ D-202: кроссировки «номер завода машины ↔ OEM»
+
+def _cross_row(db: Session, c: PartCrossRef, p: Part, names: dict[str, str]) -> dict:
+    return {**serialize(c), "kind_title": CROSS_KINDS.get(c.kind, c.kind), "status_title": app_svc.STATUSES.get(c.status, c.status),
+            "part_article": p.article, "part_name": p.name_ru, "verified_by_name": names.get(c.verified_by or "", ""),
+            "other_numbers": [f"{CROSS_KINDS.get(x.kind, x.kind)}: {x.number}" for x in p.cross_refs if x.id != c.id][:8]}
+
+
+@router.get("/cross-refs")
+def cross_refs_queue(status: str = "unverified", kind: str = "", q: str = "", limit: int = 100, offset: int = 0,
+                     db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Очередь проверки номеров: по статусу и виду (по умолчанию — номера завода машины и OEM)."""
+    limit = max(1, min(limit, 500))
+    kinds = [kind] if kind else ["machine_maker", "oem"]
+    base = select(PartCrossRef, Part).join(Part, Part.id == PartCrossRef.part_id).where(Part.status == "active", PartCrossRef.kind.in_(kinds))
+    if q.strip():
+        from ..services.catalog_search import norm, norm_sql
+        like, n = f"%{q.strip()}%", norm(q)
+        base = base.where(or_(Part.article.ilike(like), Part.name_ru.ilike(like), norm_sql(PartCrossRef.number).like(f"%{n}%" if n else like)))
+    counts = {k: 0 for k in app_svc.STATUSES}
+    sq = base.subquery()
+    for st, n_ in db.execute(select(sq.c.status, func.count()).group_by(sq.c.status)).all():
+        counts[st] = n_
+    if status:
+        base = base.where(PartCrossRef.status == status)
+    rows = db.execute(base.order_by(Part.article, PartCrossRef.number).offset(offset).limit(limit)).all()
+    ids = {c.verified_by for c, _ in rows if c.verified_by}
+    names = {u.id: u.display_name for u in db.scalars(select(User).where(User.id.in_(ids))).all()} if ids else {}
+    return {"items": [_cross_row(db, c, p, names) for c, p in rows], "counts": counts, "statuses": app_svc.STATUSES, "kinds": CROSS_KINDS,
+            "basis_kinds": app_svc.BASIS_KINDS, "need_basis": sorted(app_svc.NEED_BASIS), "can_edit": user.has(*VERIFY_ROLES),
+            "can_import": user.has(*EDIT_ROLES)}
+
+
+class CrossVerifyIn(BaseModel):
+    status: str
+    basis_kind: str = ""
+    basis: str = Field(default="", max_length=5000)
+
+
+@router.post("/cross-refs/{cid}/verify")
+def cross_ref_verify(cid: str, body: CrossVerifyIn, db: Session = Depends(get_db), user: CurrentUser = Depends(_verifier)):
+    c = db.get(PartCrossRef, cid)
+    if c is None:
+        raise HTTPException(404, "Номер не найден")
+    if body.status not in app_svc.STATUSES or (body.basis_kind and body.basis_kind not in app_svc.BASIS_KINDS):
+        raise HTTPException(422, "Статус и основание — из списка")
+    if body.status in app_svc.NEED_BASIS and not (body.basis.strip() or body.basis_kind):
+        raise HTTPException(422, f"Для статуса «{app_svc.STATUSES[body.status]}» укажите основание")
+    before = {"status": c.status, "basis_kind": c.basis_kind, "basis": c.basis}
+    c.status, c.basis_kind, c.basis = body.status, body.basis_kind, body.basis.strip()
+    c.verified_by, c.verified_at = user.id, datetime.now(timezone.utc)
+    audit(db, user.id, None, "part", c.part_id, "cross_verify", {"number": c.number, **before},
+          {"number": c.number, "status": c.status, "basis_kind": c.basis_kind, "basis": c.basis})
+    db.commit()
+    return _cross_row(db, c, db.get(Part, c.part_id), {user.id: user.display_name})
+
+
+@router.post("/cross-refs/import")
+def cross_refs_import(file: UploadFile = File(...), dry_run: bool = Form(True), create: bool = Form(False),
+                      db: Session = Depends(get_db), user: CurrentUser = Depends(_editor)):
+    """Таблица кроссировок (Excel): «Номер завода машины», «OEM номер» и по желанию производители и наименование.
+    Пробный прогон по умолчанию: что совпало, что добавится, где конфликт. Новые номера — «не подтверждено»."""
+    from ..core.files import check_size, safe_filename
+    from ..services import cross_refs as cx
+    check_size(file)
+    name = safe_filename(file.filename, "cross.xlsx")
+    if not name.lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(415, "Нужен файл Excel (.xlsx)")
+    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(file.file.read())
+        rows, err = cx.parse(read_rows(path))
+    finally:
+        os.unlink(path)
+    if err:
+        raise HTTPException(422, err)
+    rep = cx.apply_rows(db, rows, user.id, name, create, dry_run)
+    if dry_run:
+        db.rollback()
+    else:
+        audit(db, user.id, None, "part_import", "cross-refs", "import", None,
+              {"file": name, **{k: rep[k] for k in ("rows", "exists", "added", "created")}, "conflicts": len(rep["conflicts"])})
+        db.commit()
+    return {**rep, "dry_run": dry_run}
