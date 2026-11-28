@@ -152,6 +152,7 @@ def _jobs(first: bool) -> list[tuple[str, Callable[[], None]]]:
     from .services.notification_kinds import close_done_task_notices
     from .services.assignments import check as check_assignments
     from .services.office_watch import check as check_office
+    from .services.hr_watch import check as check_hr
     from .services.signals import refresh as refresh_signals
     from .services.parts_sla import check as check_parts_sla
     from .services.visa_watch import escalate_fd
@@ -163,6 +164,7 @@ def _jobs(first: bool) -> list[tuple[str, Callable[[], None]]]:
         ("notification cleanup", _commit_if(close_done_task_notices)),
         ("office due watch", _commit_if(check_office)),              # D-133, D-140: сроки писем, ознакомление
         ("assignments due watch", _commit_if(check_assignments)),    # D-155: сроки поручений ЗГД
+        ("hr watch", _commit_if(check_hr)),                          # D-207: уволен — вход не отключён; сроки допусков
         ("signals refresh", _commit_if(refresh_signals)),            # D-155: история сигналов «Требует вмешательства»
         ("fd visa escalation", _commit_if(escalate_fd)),             # D-112
         ("draft watch", _commit_if(check_drafts)),                   # черновики без движения

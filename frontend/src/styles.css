@@ -2358,3 +2358,7 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
 .hr-pay-now { margin: 8px 0 10px; gap: 12px; }
 @media (max-width: 720px) { .hr-wide { grid-column: auto; } }
 .hr-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.hr-off { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.hr-sum { align-items: start; margin-bottom: 12px; }
+.hr-kpi { gap: 10px; margin: 6px 0 8px; }
+.hr-kpi b { font-size: 18px; }

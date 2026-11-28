@@ -535,7 +535,14 @@ def _employee_out(db: Session, e: HrEmployee, emps: list[HrEmployment], on: date
         for it in items:
             it.pop("events")
     cur = next((it for it in items if it["status"] == "active" and it["kind"] == "main"), None) or next((it for it in items if it["status"] == "active"), None)
-    return {"id": e.id, "personnel_no": e.personnel_no, "last_name": e.last_name, "first_name": e.first_name, "middle_name": e.middle_name,
+    login = db.get(User, e.user_id) if e.user_id else None
+    on_today = today()
+    every = db.scalars(select(HrEmployment).where(HrEmployment.employee_id == e.id)).all()   # все трудовые отношения, не только видимые
+    gone = bool(every) and all(m.end_date is not None and m.end_date < on_today for m in every)
+    return {"user_active": bool(login and login.is_active),
+            # D-207: уволен отовсюду, а вход в CRM ещё действует
+            "offboard_needed": bool(login and login.is_active and gone),
+            "id": e.id, "personnel_no": e.personnel_no, "last_name": e.last_name, "first_name": e.first_name, "middle_name": e.middle_name,
             "full_name": hc.full_name(e), "user_id": e.user_id, "user": names["user"].get(e.user_id, "") if e.user_id else "",
             "status": cur["status"] if cur else ("planned" if any(it["status"] == "planned" for it in items) else "terminated"),
             "current": cur, "employments": items}
@@ -676,6 +683,9 @@ def employment_event(employment_id: str, body: EventIn, user: CurrentUser = Depe
             raise HTTPException(409, "После даты увольнения есть переводы — сначала отмените их")
         _add_event(db, user, m, "terminate", eff, {"reason": body.reason.strip()}, comment=body.comment)
         m.end_date = eff
+        db.flush()
+        # D-207: последний рабочий день уже прошёл — вход в CRM блокируется сразу (иначе — фоновым заданием после этого дня)
+        hc.block_if_gone(db, db.get(HrEmployee, m.employee_id), today(), user.id)
         db.commit()
         return employee(m.employee_id, None, user, db)
     _valid_dates(eff, body.effective_to)

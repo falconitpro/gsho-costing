@@ -155,3 +155,34 @@ def reactivate(db: Session, actor: CurrentUser, user_id: str, request: Optional[
     _notify_admins(db, actor.id, f"Доступ сотрудника «{user.display_name}» снова включён — проверьте его роли и права")
     db.commit()
     return {"ok": True, "user_id": user.id, "display_name": user.display_name}
+
+
+def offboard_terminated(db: Session, user_id: str, by_id: Optional[str], employee_name: str, end_date: date) -> Optional[dict]:
+    """D-207 (решение владельца 28.11.2026): доступ в CRM блокируется сразу после увольнения — после последнего рабочего дня.
+    Те же шаги, что у offboard() (сессии, замещения, временные права, задачи, обращения), без подтверждения ФИО:
+    основание — кадровое событие «увольнение». Автором отключения записывается тот, кто внёс увольнение.
+    Не блокирует последнего администратора безопасности — тогда None, и администраторам уходит напоминание."""
+    from .deal_service import audit
+    user = db.execute(select(User).where(User.id == user_id).with_for_update()).scalar_one_or_none()
+    if user is None or not user.is_active:
+        return None
+    if not security_admin_ids(db, exclude=user.id):
+        return None
+    before = preview(db, user)
+    counts = {
+        "sessions_revoked": _revoke_sessions(db, user, by_id),
+        "delegations_ended": _end_delegations(db, user),
+        "overrides_ended": _end_overrides(db, user),
+        "tasks_flagged": _flag_tasks(db, user),
+        "finance_questions_open": before["finance_questions_open"],
+        "support_tickets_unassigned": _unassign_support(db, user),
+    }
+    user.is_active, user.offboarded_at, user.offboarded_by = False, _now(), by_id
+    reason = f"Увольнение: последний рабочий день {end_date:%d.%m.%Y} («Персонал»)"
+    audit(db, by_id, None, "user", user.id, "offboard", {"is_active": True}, {"is_active": False, "auto": "hr_termination", **counts}, reason)
+    sev.record(db, "offboard", "offboard", actor_id=by_id, subject_id=user.id, entity_type="user", entity_id=user.id,
+               meta={"auto": "hr_termination", **counts})
+    _notify_admins(db, "", f"Доступ «{user.display_name}» ({employee_name}) отключён автоматически: уволен(а), последний рабочий день "
+                           f"{end_date:%d.%m.%Y}. Сессий завершено {counts['sessions_revoked']}, задач к передаче {counts['tasks_flagged']}",
+                   exclude=user.id)
+    return {"user_id": user.id, "counts": counts}
