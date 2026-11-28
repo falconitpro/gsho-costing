@@ -1254,12 +1254,16 @@ a.lv-stat:hover { background: var(--accent-soft); }
   padding: 14px 10px 12px; background: var(--nv-side); color: var(--nv-side-text); z-index: 30; scrollbar-width: thin; }
 .app-brand { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 2px 8px; color: var(--nv-side-text); text-decoration: none; }
 .app-nav { display: flex; flex-direction: column; gap: 2px; }
-.app-nav a, .app-side-btn { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 8px 10px; border-radius: 8px; border: 0; background: none;
+.app-nav a, .app-side-btn, .app-nav-more { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 8px 10px; border-radius: 8px; border: 0; background: none;
   color: var(--nv-side-text); text-decoration: none; font: inherit; font-size: 14px; line-height: 1.2; cursor: pointer; text-align: left; width: 100%; }
-.app-nav a:hover, .app-side-btn:hover { background: var(--nv-side-hover); }
+.app-nav a:hover, .app-side-btn:hover, .app-nav-more:hover { background: var(--nv-side-hover); }
+.app-nav-more { color: var(--nv-side-muted); }
+.app-nav-more.active { color: var(--nv-side-text); font-weight: 700; }
+.app-nav-more:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.app-nav-rest { display: flex; flex-direction: column; gap: 2px; padding-left: 8px; border-left: 1px solid var(--nv-side-line); margin-left: 10px; }
 .app-nav a.active { background: var(--nv-brand-strong); color: #fff; font-weight: 700; }
 .app-nav a:focus-visible, .app-side-btn:focus-visible, .app-brand:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
-.app-nav svg, .app-side-btn svg { flex: none; width: 20px; height: 20px; }
+.app-nav svg, .app-side-btn svg, .app-nav-more svg { flex: none; width: 20px; height: 20px; }
 .app-nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .app-count { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--nv-brand-strong); color: #fff; font-size: 11px; font-weight: 700;
   display: inline-flex; align-items: center; justify-content: center; }

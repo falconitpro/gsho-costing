@@ -3,7 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import { api } from "../api";
 import type { Me } from "../types";
 import { setNewUi } from "../uiMode";
-import { isActive, navItems } from "./RoleNav";
+import { isActive, navItems, type NavItem } from "./RoleNav";
 
 /** D-159 «Новый вид»: боковая панель — ВСЕ разделы роли (те же права, что у верхнего меню, источник один — navItems),
  *  иконки, счётчики «Мои задачи» и «Поручения» (мне, открытые), сворачивание до иконок, возврат к прежнему виду. */
@@ -13,6 +13,8 @@ const P: Record<string, string> = {   // контурные иконки 24×24,
   deals: "M3 8h18v11H3zM8.5 8V5.5h7V8M3 13h18",
   tasks: "M4 4h16v16H4zM8 12l3 3 5-6",
   service: "M14.5 6.5a4 4 0 0 0-5.3 5.3L4 17v3h3l5.2-5.2a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.3-.7-.7-2.3z",
+  clients: "M3 21V7l9-4 9 4v14M9 21v-6h6v6M8 10h.01M12 10h.01M16 10h.01",
+  more: "M6 12h.01M12 12h.01M18 12h.01",
   hr: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20c.6-3.6 3.2-6 6.5-6s5.9 2.4 6.5 6M16 4.3a3.5 3.5 0 0 1 0 6.4M18 14.4c2 .8 3.2 2.8 3.5 5.6",
   assignments: "M7 4h10v3H7zM5 6h2m10 0h2v15H5V6M8.5 12h7M8.5 16h5",
   board: "M4 4h4.5v16H4zM10 4h4.5v11H10zM16 4h4v7h-4z",
@@ -42,8 +44,20 @@ export function useSection(me: Me): string {
 }
 
 export default function SideNav({ me, collapsed, onCollapse, onNavigate }: { me: Me; collapsed: boolean; onCollapse: (v: boolean) => void; onNavigate: () => void }) {
-  const { items } = navItems(me);
+  const { items, primary } = navItems(me);
   const loc = useLocation();
+  // D-212: главные разделы роли — сразу, остальные — в «Ещё» (раскрыто, если открыт раздел оттуда или сотрудник оставил раскрытым)
+  const main = items.filter((i) => primary.has(i.key));
+  const rest = items.filter((i) => !primary.has(i.key));
+  const inRest = rest.some((i) => isActive(i, loc.pathname));
+  const [moreOpen, setMoreOpen] = useState(() => { try { return localStorage.getItem("gsho.navMore") === "1"; } catch { return false; } });
+  const toggleMore = () => { const v = !moreOpen; setMoreOpen(v); try { localStorage.setItem("gsho.navMore", v ? "1" : "0"); } catch { /* — */ } };
+  const link = (i: NavItem) => (
+    <NavLink key={i.key} to={i.to} end={i.end} title={collapsed ? i.label : undefined}>
+      <Icon k={i.key} />
+      <span className="app-nav-label">{i.label}</span>
+      {count[i.key] ? <span className="app-count" aria-label={`${count[i.key]} открыто`}>{count[i.key] > 99 ? "99+" : count[i.key]}</span> : null}
+    </NavLink>);
   const [count, setCount] = useState<Record<string, number>>({});
   useEffect(() => { onNavigate(); }, [loc.pathname, loc.search]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {      // счётчики: открытые «Мои задачи» и поручения «мне» — те же списки, что на страницах
@@ -57,18 +71,19 @@ export default function SideNav({ me, collapsed, onCollapse, onNavigate }: { me:
   return (
     <>
       <nav className="app-nav" aria-label="Разделы">
-        {items.map((i) => (
-          <NavLink key={i.key} to={i.to} end={i.end} title={collapsed ? i.label : undefined}>
-            <Icon k={i.key} />
-            <span className="app-nav-label">{i.label}</span>
-            {count[i.key] ? <span className="app-count" aria-label={`${count[i.key]} открыто`}>{count[i.key] > 99 ? "99+" : count[i.key]}</span> : null}
-          </NavLink>))}
+        {main.map(link)}
+        {rest.length > 0 && <>
+          <button type="button" className={`app-nav-more${inRest && !moreOpen ? " active" : ""}`} aria-expanded={moreOpen || inRest} onClick={toggleMore}
+            title={collapsed ? "Ещё разделы" : undefined}>
+            <Icon k="more" /><span className="app-nav-label">Ещё{!(moreOpen || inRest) ? ` (${rest.length})` : ""}</span></button>
+          {(moreOpen || inRest) && <div className="app-nav-rest">{rest.map(link)}</div>}
+        </>}
       </nav>
       <div className="app-side-foot">
         <button type="button" className="app-side-btn app-collapse" onClick={() => onCollapse(!collapsed)} aria-pressed={collapsed} title={collapsed ? "Развернуть панель" : "Свернуть панель"}>
           <Icon k={collapsed ? "expand" : "collapse"} /><span className="app-nav-label">Свернуть панель</span></button>
         <button type="button" className="app-side-btn" onClick={() => setNewUi(false)} title="Вернуть прежний вид">
-          <Icon k="back" /><span className="app-nav-label">Прежний вид</span></button>
+          <Icon k="back" /><span className="app-nav-label">Прежний вид (временно)</span></button>
       </div>
     </>);
 }
