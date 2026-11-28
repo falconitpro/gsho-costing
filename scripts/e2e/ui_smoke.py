@@ -91,7 +91,7 @@ async def check_role(browser, user, title, mode, did):
 
     await visit("рабочее место", "/")
     # меню роли — где бы оно ни было: в шапке (прежний вид) или в боковой панели («Новый вид», D-159); «Ещё» раскрываем
-    more = pg.locator("header.top .nav-more > button, .app-sidebar .nav-more > button")
+    more = pg.locator("header.top .nav-more > button, .app-sidebar .nav-more > button, .app-sidebar button.app-nav-more[aria-expanded=false]")
     if await more.count():
         await more.first.click()
         await pg.wait_for_timeout(150)
