@@ -39,6 +39,13 @@ def _files_dir(did: str) -> str:
     return d
 
 
+def _viewers(db: Session, ids: list[str]) -> list[str]:
+    ids = list(dict.fromkeys(i for i in ids or [] if i))
+    if ids and len(db.scalars(select(User.id).where(User.id.in_(ids))).all()) != len(ids):
+        raise HTTPException(422, "Сотрудник для просмотра не найден")
+    return ids
+
+
 def _need_any(user: CurrentUser) -> None:
     if not (user.can("office") or user.can("office_hr")):
         # исполнитель документа видит его по ссылке (/api/office/docs/{id}), журналы — нет
@@ -55,6 +62,7 @@ def _get(db: Session, did: str, user: CurrentUser) -> OfficeDoc:
 class DocIn(BaseModel):
     entity_id: str
     kind: str
+    viewer_ids: list[str] = Field(default_factory=list, max_length=100)   # D-209: кто ещё видит
     category: str = ""
     subject: str = Field("", max_length=512)
     summary: str = ""
@@ -86,6 +94,7 @@ class DocIn(BaseModel):
 
 
 class DocPatch(BaseModel):
+    viewer_ids: Optional[list[str]] = None   # D-209: кто ещё видит
     subject: Optional[str] = None
     summary: Optional[str] = None
     body: Optional[str] = None
@@ -286,7 +295,7 @@ def create_doc(body: DocIn, db: Session = Depends(get_db), user: CurrentUser = D
                     note=body.note, urgent=body.urgent, confidential=body.confidential, pages=body.pages, attachments_count=body.attachments_count,
                     address=body.address or (parent.address if parent else ""), tracking=body.tracking.strip(),
                     needs_reply=body.needs_reply if body.needs_reply is not None else (body.letter_type in ("request", "claim", "complaint", "gov", "")),
-                    status="draft", created_by=user.id, files=[], history=[], comments=[])
+                    status="draft", created_by=user.id, files=[], history=[], comments=[], viewer_ids=_viewers(db, body.viewer_ids))
     db.add(doc)
     db.flush()
     svc.hist(doc, user.id, "created")
@@ -324,6 +333,11 @@ def patch_doc(did: str, body: DocPatch, db: Session = Depends(get_db), user: Cur
         raise HTTPException(422, "Источник поступления — обязательный реквизит входящего")
     if "tracking" in data:
         data["tracking"] = (data["tracking"] or "").strip()
+    if "viewer_ids" in data:
+        data["viewer_ids"] = _viewers(db, data["viewer_ids"] or [])
+        if doc.pay_restricted:
+            from ..services.hr_orders_access import pay_viewers_ok
+            pay_viewers_ok(db, data["viewer_ids"])
     for k, v in data.items():
         setattr(doc, k, v)
     svc.hist(doc, user.id, "edited", ", ".join(sorted(data)))
@@ -416,6 +430,22 @@ def action(did: str, body: ActionIn, db: Session = Depends(get_db), user: Curren
     return svc.serialize(db, doc, user, full=True)
 
 
+def _assign_planned_acks(db: Session, doc: OfficeDoc, by: str) -> None:
+    """D-209: кого ознакомить, выбрали при формировании — назначается при подписании."""
+    if doc.kind not in ACKABLE or not doc.planned_acks:
+        return
+    have = {a["user_id"] for a in doc.acks or []}
+    now = datetime.now(timezone.utc).isoformat()
+    active = {u.id for u in db.scalars(select(User).where(User.id.in_(doc.planned_acks), User.is_active.is_(True)))}
+    new = [{"user_id": i, "by": by, "at": now, "acked_at": None, "reminded": []} for i in doc.planned_acks if i in active and i not in have]
+    doc.acks = [*(doc.acks or []), *new]
+    deal = db.get(Deal, doc.deal_ids[0]) if doc.deal_ids else None
+    for a in new:
+        notify(db, deal, a["user_id"], "office_ack", None, f"Канцелярия: ознакомьтесь — {doc.number} «{doc.subject}»")
+    if new:
+        svc.hist(doc, by, "acks_assigned", f"+{len(new)} (выбраны при формировании)")
+
+
 @router.post("/docs/{did}/sign")
 def sign(did: str, body: SignIn, db: Session = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     """Подпись и номер: исходящее, приказ, распоряжение, служебная записка, внутренний документ.
@@ -444,6 +474,7 @@ def sign(did: str, body: SignIn, db: Session = Depends(get_db), user: CurrentUse
     svc.allocate_number(db, doc, on)
     doc.signer_id, doc.signed_on, doc.sign_method, doc.status = s.id, on, body.method, "signed"
     svc.hist(doc, user.id, "signed", f"{doc.number}: {s.full_name}, {svc.SIGN_METHODS[body.method]}")
+    _assign_planned_acks(db, doc, user.id)
     db.commit()
     return svc.serialize(db, doc, user, full=True)
 

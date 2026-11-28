@@ -2364,3 +2364,7 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
 .hr-kpi b { font-size: 18px; }
 .hr-order { font-weight: 600; }
 .hr-warn { color: var(--danger, #b42318); }
+.people-pick { display: flex; flex-direction: column; gap: 4px; }
+.pp-chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 26px; align-items: center; }
+.pp-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; background: var(--chip, #eef0f3); font-size: 13px; }
+.pp-chip button { border: 0; background: none; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; color: var(--muted); }

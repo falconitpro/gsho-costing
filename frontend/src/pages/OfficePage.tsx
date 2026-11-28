@@ -1,3 +1,4 @@
+import PeoplePick from "../components/PeoplePick";
 import { useEffect, useRef, useState } from "react";
 import { api, fmtDate } from "../api";
 import { Crumbs, useQueryParam } from "../components/Levels";
@@ -30,6 +31,7 @@ type Doc = {
   co_executor_ids: string[]; deal_ids: string[]; deal_section: string; reply_to_id: string | null; signer_id: string | null; signer: string;
   signed_on: string | null; sign_method: string; sent_on: string | null; effective_on: string | null; closed_on: string | null; close_note: string;
   files: { id: string; name: string; size: number; kind: string; at: string }[]; can_edit: boolean; is_executor: boolean;
+  pay_restricted?: boolean; viewer_ids?: string[]; planned_acks?: string[];
   urgent: boolean; confidential: boolean; needs_reply: boolean; has_scan: boolean; pages: number | null; attachments_count: number | null;
   address: string; tracking: string; delivered_on: string | null; note: string; comments_count: number;
   reviewer_id: string | null; reviewer: string; is_reviewer: boolean; approval: Approval | null;
@@ -234,11 +236,13 @@ function DocCard({ id, meta, me, onClose, onChanged, onOpen }: { id: string; met
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => { api.get<Doc>(`/api/office/docs/${id}`).then((x) => { setD(x); setExec(x.executor_id || ""); setDue(x.due_on || ""); setSendCh(x.channel || "");
     if (window.matchMedia?.("(max-width: 760px)").matches) setTimeout(() => cardRef.current?.scrollIntoView({ block: "start" }), 50); }); }, [id]);   // телефон: сразу к карточке
+  const [err, setErr] = useState("");
   if (!d) return null;
   const upd = (x: Doc) => { setD(x); onChanged(); };
   const act = (action: string, note = "", extra: Record<string, unknown> = {}) => api.post<Doc>(`/api/office/docs/${d.id}/action`, { action, note, ...extra }).then(upd);
   const signers = meta.signers.filter((s) => s.entity_id === d.entity_id && s.valid_today);
-  const ed = meta.can_edit || (d.kind === "order" && d.category === "hr" && meta.can_hr);
+  // D-209: приказ с оплатой труда ведут по праву «Персонал: оплата труда» — решает сервер (can_edit)
+  const ed = d.pay_restricted ? d.can_edit : (meta.can_edit || (d.kind === "order" && d.category === "hr" && meta.can_hr));
   const isIn = d.kind === "in";
   const needRoute = !isIn && routesFor(meta, d).some((r) => r.required);
   const canSign = (d.status === "approved" || (d.status === "draft" && !needRoute)) && (ed || d.can_edit) && !isIn;
@@ -262,6 +266,13 @@ function DocCard({ id, meta, me, onClose, onChanged, onOpen }: { id: string; met
       {myAck && <Acks d={d} meta={meta} ed={ed} onDone={upd} />}
       <div className="office-grid">
         <div><span className="muted">Юр. лицо</span> {d.entity_prefix} · {d.entity}</div>
+        {err && <div className="alert warn" role="alert">{err}</div>}
+        {d.pay_restricted && <div><span className="badge warn">оплата труда</span> <span className="muted">видят только ЗГД, ФД и бухгалтер по зарплате; работник — свой приказ при ознакомлении</span></div>}
+        {(ed || d.can_edit) && !["signed", "sent", "in_force", "closed", "cancelled"].includes(d.status) ? (
+          <PeoplePick label="Кто ещё видит" people={meta.users} value={d.viewer_ids || []}
+            onChange={(v) => api.patch<Doc>(`/api/office/docs/${d.id}`, { viewer_ids: v }).then(upd).catch((x) => setErr((x as Error).message))} />
+        ) : (d.viewer_ids || []).length > 0 && <div><span className="muted">Кто ещё видит</span> {(d.viewer_ids || []).map((i) => meta.users.find((u) => u.id === i)?.name || i).join(", ")}</div>}
+        {(d.planned_acks || []).length > 0 && !["signed", "in_force", "closed"].includes(d.status) && <div><span className="muted">Ознакомить после подписания</span> {(d.planned_acks || []).map((i) => meta.users.find((u) => u.id === i)?.name || i).join(", ")}</div>}
         {d.reg_date && <div><span className="muted">Дата</span> {fmtDate(d.reg_date)}</div>}
         <div className="span2"><span className="muted">Тема</span> <b>{d.subject}</b></div>
         {d.counterparty && <div><span className="muted">{isIn ? "Отправитель" : "Адресат"}</span> {d.counterparty}{d.contact ? ` · ${d.contact}` : ""}</div>}
@@ -328,6 +339,9 @@ function DocCard({ id, meta, me, onClose, onChanged, onOpen }: { id: string; met
           <button className="btn ghost" onClick={async () => { const n = await askPrompt("Почему возвращаете? Например: «не мой вопрос — прошу передать юристу» или «прошу продлить срок до 05.12: ждём завод»"); if (n) api.post<Doc>(`/api/office/docs/${d.id}/return`, { reason: n }).then(upd); }}>Вернуть / продлить срок</button>)}
         {(d.is_executor || ed) && ["registered", "assigned", "in_work"].includes(d.status) && (
           <button className="btn ghost" onClick={async () => { const n = await askPrompt(d.needs_reply ? "Как исполнено? Например: «ответ не требуется: …» или «ответ дан по телефону»" : "Отметка об исполнении (можно пусто — «к сведению»)"); if (n !== null) act("close", n); }}>Закрыть без письма</button>)}
+        {d.kind === "order" && d.category === "hr" && ed && ["draft", "approved"].includes(d.status) && !d.number && (
+          <button className="btn ghost" title="Номер до подписи — чтобы распечатать приказ полностью заполненным; при подписании номер не меняется"
+            onClick={() => api.post<Doc>(`/api/hr/orders/${d.id}/number`, {}).then(upd)}>Присвоить номер для печати</button>)}
         {canSign && (
           <span className="row">
             <select value={signer} onChange={(e) => setSigner(e.target.value)}><option value="">подписант…</option>

@@ -51,7 +51,7 @@ def test_office_incoming_outgoing_flow(client):
     assert client.post("/api/office/signers", headers=H(CLERK), json={"entity_id": ru["id"], "full_name": "Добров Е."}).status_code == 403
     m = _ok(client.post("/api/office/signers", headers=H(GD), json={"entity_id": ru["id"], "full_name": "Добров Евгений", "position": "ЗГД",
                                                                     "basis": "Доверенность № 5 от 01.01.2026", "methods": ["manual", "facsimile"]}), 201)
-    s = m["signers"][0]
+    s = next(x for x in m["signers"] if x["full_name"] == "Добров Евгений" and x["entity_id"] == ru["id"])   # другие тесты тоже заводят подписантов
     assert client.post(f"/api/office/docs/{ans['id']}/sign", headers=H(CLERK), json={"signer_id": s["id"], "method": "facsimile"}).status_code == 409
     sg = _ok(client.post(f"/api/office/docs/{ans['id']}/sign", headers=H(CLERK), json={"signer_id": s["id"], "method": "manual"}))
     assert sg["number"] == f"РФ-ИСХ-{y}-0001" and sg["status"] == "signed"

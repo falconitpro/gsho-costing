@@ -528,5 +528,26 @@ def summary(on: Optional[date] = None, employer_id: Optional[str] = None, user: 
         u = db.get(User, e.user_id)
         if mine and u and u.is_active and all(m.end_date is not None and m.end_date < d for m in every):
             off.append({"employee_id": e.id, "employee": hc.full_name(e), "user": u.display_name, "end_date": max(m.end_date for m in every)})
-    return {"on": d, "employers": employers, "gaps": gaps, "gaps_scope": sorted(readable), "offboard": off,
+    # кадровые приказы из «Персонала», которые ещё в работе (D-209)
+    from ..models import HrEmployeeEvent, HrEventOrder, OfficeDoc
+    from ..services import office as office_svc
+    pending = []
+    emp_ids = {m.employee_id for m in all_emps}
+    for link in db.scalars(select(HrEventOrder)):
+        doc = db.get(OfficeDoc, link.office_doc_id)
+        ev = db.get(HrEmployeeEvent, link.event_id)
+        if doc is None or ev is None or ev.employee_id not in emp_ids or doc.status in ("cancelled", "closed"):
+            continue
+        scan = office_svc.has_scan(doc)
+        if doc.status in ("draft", "approval", "approved"):
+            stage = "ждёт подписи" if doc.number else "ждёт номера"
+        elif not scan:
+            stage = "подписан, нет скана"
+        else:
+            continue
+        e = db.get(HrEmployee, ev.employee_id)
+        pending.append({"office_doc_id": doc.id, "subject": doc.subject, "number": doc.number, "stage": stage, "employee_id": e.id,
+                        "employee": hc.full_name(e), "effective_on": doc.effective_on, "url": f"/office?doc={doc.id}"})
+    pending.sort(key=lambda x: (x["effective_on"] or d))
+    return {"on": d, "employers": employers, "gaps": gaps, "gaps_scope": sorted(readable), "offboard": off, "orders": pending,
             "total": {"people": len(ids), "employers": len(employers)}}

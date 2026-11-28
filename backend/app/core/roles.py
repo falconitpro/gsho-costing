@@ -171,6 +171,7 @@ DEFAULT_MATRIX[Role.GD]["assistant_admin"] = EDIT
 for _r in (Role.GD, Role.FD, Role.PAYROLL):
     for _g in ("hr_core", "hr_personal", "hr_payroll"):
         DEFAULT_MATRIX.setdefault(_r, {})[_g] = EDIT
+DEFAULT_MATRIX[Role.PAYROLL]["office_hr"] = READ   # D-209: Канцелярия — кадровые приказы (приказы с оплатой труда ведёт по праву hr_payroll)
 DEFAULT_MATRIX[Role.PAYROLL]["file_download"] = NONE   # файлы сделок бухгалтеру по зарплате не нужны (сканы «Персонала» — по своим группам)
 HR_ALL_EMPLOYERS = {Role.GD, Role.FD, Role.PAYROLL}   # без записей в области — видят всех работодателей
 # Приёмка на склад (D-150, решение владельца 22.11.2026): менеджер и логист; закупки, КД и ЗГД — как раньше

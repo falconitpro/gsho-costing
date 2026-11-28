@@ -37,7 +37,7 @@ const PRIMARY: Record<string, string[]> = {
   observer: ["work", "deals", "board"],
   clerk: ["work", "office", "tasks"],
   engineer: ["work", "service", "tasks", "catalog"],   // D-181: сделок и юр. блока инженер не видит
-  payroll: ["work", "hr", "tasks"],   // D-205: бухгалтер по зарплате — «Персонал»
+  payroll: ["work", "hr", "office", "tasks"],   // D-205: бухгалтер по зарплате — «Персонал»
 };
 
 /** Разделы роли: все доступные и «главные» (D-097). Один источник для верхнего меню и боковой панели «Нового вида» (D-159). */

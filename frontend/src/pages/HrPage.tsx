@@ -5,6 +5,7 @@ import { Crumbs, useQueryParam } from "../components/Levels";
 import { askPrompt } from "../components/Dialogs";
 import { Empty, ErrorState, Loading } from "../components/States";
 import OffboardDialog from "../components/OffboardDialog";
+import PeoplePick from "../components/PeoplePick";
 import { can, type Me } from "../types";
 import { setNewUi, useNewUiFlag } from "../uiMode";
 
@@ -204,10 +205,8 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
   const loadOrders = () => api.get<Record<string, HrOrder>>(`/api/hr/employees/${id}/orders`).then(setOrders).catch(() => setOrders({}));
   useEffect(() => { load(); }, [id, on]);
   useEffect(() => { loadOrders(); }, [id]);
-  const makeOrder = async (ev: Ev) => {
-    try { const o = await api.post<HrOrder>(`/api/hr/events/${ev.id}/order`, {}); setOrders({ ...orders, [ev.id]: o }); setMsg("Черновик приказа создан в Канцелярии — делопроизводитель зарегистрирует его и даст на подпись"); }
-    catch (x) { setMsg((x as Error).message); }
-  };
+  const [ordFor, setOrdFor] = useState<Ev | null>(null);
+  const makeOrder = (ev: Ev) => setOrdFor(ev);
   if (!e) return msg ? <ErrorState hint={msg} /> : <Loading />;
   const cancel = async (m: Employment, ev: Ev) => {
     const why = await askPrompt(`Отменить «${EV_TITLE[ev.kind]}» с ${fmtDate(ev.effective_from)}? Событие останется в истории с отметкой. Причина:`, "", { title: "Отмена кадрового события", required: true });
@@ -256,6 +255,9 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
               <button className="btn ghost" onClick={() => setAct({ m, kind: "rate" })}>Ставка</button>
               <button className="btn ghost" onClick={() => setAct({ m, kind: "terminate" })}>Увольнение</button></div>}
             {act?.m.id === m.id && <EventForm m={m} kind={act.kind} onDone={(r) => { setAct(null); if (r) setE(r); }} />}
+            {ordFor && (m.events || []).some((x) => x.id === ordFor.id) && <OrderForm ev={ordFor} onDone={(o) => {
+              setOrdFor(null);
+              if (o) { setOrders({ ...orders, [ordFor.id]: o }); setMsg("Приказ сформирован в Канцелярии полностью — делопроизводитель присвоит номер, распечатает и даст на подпись"); } }} />}
             <table className="pc-table nv-cards hr-events">
               <thead><tr><th>Событие</th><th>Действует</th><th>Что</th><th>Внесено</th><th>Приказ</th><th /></tr></thead>
               <tbody>{(m.events || []).map((ev) => (
@@ -900,7 +902,7 @@ function AdmOverview({ me }: { me: Me }) {
 
 type SumEmp = { employer_id: string; employer: string; people: number; rate: number; fte_plan: number; fte_busy: number; vacant_slots: number; over_slots: number;
   hired_month: number; left_month: number; hired_prev: number; left_prev: number; departments: { name: string; people: number }[] };
-type Sum = { on: string; employers: SumEmp[]; gaps: { employee_id: string; employee: string; personnel_no: string; docs: string[]; personal: string[] }[];
+type Sum = { on: string; employers: SumEmp[]; orders: { office_doc_id: string; subject: string; number: string; stage: string; employee: string; effective_on: string | null; url: string }[]; gaps: { employee_id: string; employee: string; personnel_no: string; docs: string[]; personal: string[] }[];
   gaps_scope: string[]; offboard: { employee_id: string; employee: string; user: string; end_date: string }[]; total: { people: number } };
 const num = (v: number) => String(Math.round(v * 100) / 100).replace(".", ",");
 
@@ -929,6 +931,16 @@ function Summary() {
           </div>
           {r.departments.length > 0 && <ul className="hr-tree">{r.departments.map((x) => <li key={x.name}><span>{x.name}</span><span className="muted">{x.people}</span></li>)}</ul>}
         </section>))}</div>
+      {d.orders.length > 0 && <section className="card">
+        <h3>Кадровые приказы в работе</h3>
+        <table className="pc-table nv-cards hr-table">
+          <thead><tr><th>Приказ</th><th>Сотрудник</th><th>Вступает в силу</th><th>Состояние</th></tr></thead>
+          <tbody>{d.orders.map((o) => (
+            <tr key={o.office_doc_id}><td className="pc-name"><a href={o.url} className="hr-order">{o.number || "без номера"}</a><div className="pc-sub">{o.subject}</div></td>
+              <td data-label="Сотрудник">{o.employee}</td><td data-label="Вступает в силу">{o.effective_on ? fmtDate(o.effective_on) : "—"}</td>
+              <td data-label="Состояние"><span className="badge warn">{o.stage}</span></td></tr>))}</tbody>
+        </table>
+      </section>}
       <section className="card">
         <h3>Чего не хватает до ввода реальных данных</h3>
         <p className="muted">Сканы: паспорт, СНИЛС, ИНН, трудовой договор, согласие на обработку ПДн. Личные данные: дата рождения, паспорт, СНИЛС, ИНН, адрес регистрации.
@@ -944,5 +956,77 @@ function Summary() {
               </tr>))}</tbody>
           </table>)}
       </section>
+    </div>);
+}
+
+/* ───────── форма приказа (D-209): всё заполняется сразу, от руки — только подписи */
+
+type OrderTpl = { kind: string; prefill: Record<string, string>; signers: { id: string; title: string }[]; tk_bases: Record<string, string>;
+  pay_restricted: boolean; people: { id: string; name: string; pay: boolean }[]; routes: { id: string; name: string }[]; employee_user_id: string | null };
+
+function OrderForm({ ev, onDone }: { ev: Ev; onDone: (o?: HrOrder) => void }) {
+  const [tpl, setTpl] = useState<OrderTpl | null>(null);
+  const [f, setF] = useState<Record<string, string>>({});
+  const [viewers, setViewers] = useState<string[]>([]);
+  const [approvers, setApprovers] = useState<string[]>([]);
+  const [acks, setAcks] = useState<string[]>([]);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    api.get<OrderTpl>(`/api/hr/events/${ev.id}/order-template`).then((t) => {
+      setTpl(t);
+      setAcks(t.employee_user_id ? [t.employee_user_id] : []);
+      setF({ contract_number: "", contract_date: "", addendum_number: "", addendum_date: "", probation_months: "0", conditions: "постоянно", tk_basis: "77-1-3",
+        tk_basis_text: "", basis_doc: "", signer_id: t.signers[0]?.id || "", ...t.prefill });
+    }).catch((x) => setMsg((x as Error).message));
+  }, [ev.id]);
+  if (!tpl) return msg ? <div className="alert warn" role="alert">{msg}</div> : <Loading />;
+  const save = async () => {
+    const b: Record<string, unknown> = { signer_id: f.signer_id || null, contract_number: f.contract_number, contract_date: f.contract_date || null,
+      viewer_ids: viewers, approver_ids: approvers, route_id: f.route_id || null, ack_ids: acks };
+    if (tpl.kind === "hire") Object.assign(b, { probation_months: Number(f.probation_months || 0), conditions: f.conditions });
+    if (tpl.kind === "transfer" || tpl.kind === "rate") Object.assign(b, { addendum_number: f.addendum_number, addendum_date: f.addendum_date || null });
+    if (tpl.kind === "terminate") Object.assign(b, { tk_basis: f.tk_basis === "other" ? "" : f.tk_basis, tk_basis_text: f.tk_basis === "other" ? f.tk_basis_text : "", basis_doc: f.basis_doc });
+    try { onDone(await api.post<HrOrder>(`/api/hr/events/${ev.id}/order`, b)); } catch (x) { setMsg((x as Error).message); }
+  };
+  const inp = (k: string, label: string, type = "text") => <label className="f">{label}<input type={type} value={f[k] || ""} onChange={(x) => setF({ ...f, [k]: x.target.value })} /></label>;
+  const allowed = tpl.people.filter((p) => !tpl.pay_restricted || p.pay).map((p) => ({ id: p.id, name: p.name }));
+  const ackPeople = tpl.people.filter((p) => !tpl.pay_restricted || p.pay || p.id === tpl.employee_user_id)
+    .map((p) => ({ id: p.id, name: p.name, note: p.id === tpl.employee_user_id ? "работник" : "" }));
+  return (
+    <div className="card hr-form">
+      <h3>Приказ: {EV_TITLE[ev.kind]?.toLowerCase()} с {fmtDate(ev.effective_from)}</h3>
+      <p className="muted">Приказ заполняется полностью: подразделение, должность, ставка, оклад и надбавки на дату события — из «Персонала», остальное — здесь. От руки — только подписи.</p>
+      {msg && <div className="alert warn" role="alert">{msg}</div>}
+      <div className="grid cols-3">
+        <label className="f">Подписывает<select value={f.signer_id || ""} onChange={(x) => setF({ ...f, signer_id: x.target.value })}>
+          <option value="">— руководитель организации —</option>{tpl.signers.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}</select></label>
+        {inp("contract_number", `Трудовой договор №${tpl.kind === "hire" || tpl.kind === "terminate" ? " *" : ""}`)}
+        {inp("contract_date", "от (дата)", "date")}
+        {tpl.kind === "hire" && <>
+          <label className="f">Испытание<select value={f.probation_months} onChange={(x) => setF({ ...f, probation_months: x.target.value })}>
+            <option value="0">без испытания</option>{[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} мес.</option>)}</select></label>
+          <label className="f hr-wide">Условия приёма, характер работы<input value={f.conditions} onChange={(x) => setF({ ...f, conditions: x.target.value })} /></label></>}
+        {(tpl.kind === "transfer" || tpl.kind === "rate") && <>{inp("addendum_number", "Доп. соглашение № *")}{inp("addendum_date", "от (дата) *", "date")}</>}
+        {tpl.kind === "terminate" && <>
+          <label className="f hr-wide">Основание увольнения *<select value={f.tk_basis} onChange={(x) => setF({ ...f, tk_basis: x.target.value })}>
+            {Object.entries(tpl.tk_bases).map(([k, l]) => <option key={k} value={k}>{l}</option>)}<option value="other">другое — указать текстом</option></select></label>
+          {f.tk_basis === "other" && <label className="f hr-wide">Основание текстом *<input value={f.tk_basis_text} onChange={(x) => setF({ ...f, tk_basis_text: x.target.value })} /></label>}
+          <label className="f hr-wide">Документ-основание *<input value={f.basis_doc} placeholder="заявление работника от 20.11.2026" onChange={(x) => setF({ ...f, basis_doc: x.target.value })} /></label></>}
+      </div>
+      <h3>Кто видит, согласование, ознакомление</h3>
+      {tpl.pay_restricted
+        ? <p className="muted">В приказе оплата труда — его видят, согласуют и подписывают только ЗГД, ФД и бухгалтер по зарплате. Работник видит свой приказ, когда его назначат на ознакомление.</p>
+        : <p className="muted">Приказ без оплаты труда — видят делопроизводители по личному составу и выбранные сотрудники.</p>}
+      <div className="grid cols-3">
+        <PeoplePick label="Кто ещё видит" people={allowed} value={viewers} onChange={setViewers} />
+        <div>
+          <PeoplePick label="Согласуют по очереди" people={allowed} value={approvers} onChange={setApprovers} ordered hint="пусто — без согласования" />
+          {tpl.routes.length > 0 && <label className="f">или типовая схема<select value={f.route_id || ""} onChange={(x) => setF({ ...f, route_id: x.target.value })}>
+            <option value="">—</option>{tpl.routes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>}
+        </div>
+        <PeoplePick label="Ознакомить после подписания" people={ackPeople} value={acks} onChange={setAcks}
+          hint={tpl.employee_user_id ? "работник добавлен сам; без входа в CRM — ознакомление на бумаге" : "у работника нет входа в CRM — ознакомление на бумаге"} />
+      </div>
+      <div className="row"><button className="btn primary" onClick={save}>Сформировать приказ</button><button className="btn ghost" onClick={() => onDone()}>отмена</button></div>
     </div>);
 }
