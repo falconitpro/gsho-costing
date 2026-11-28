@@ -683,6 +683,9 @@ def employment_event(employment_id: str, body: EventIn, user: CurrentUser = Depe
             raise HTTPException(409, "После даты увольнения есть переводы — сначала отмените их")
         _add_event(db, user, m, "terminate", eff, {"reason": body.reason.strip()}, comment=body.comment)
         m.end_date = eff
+        db.flush()
+        # D-207: последний рабочий день уже прошёл — вход в CRM блокируется сразу (иначе — фоновым заданием после этого дня)
+        hc.block_if_gone(db, db.get(HrEmployee, m.employee_id), today(), user.id)
         db.commit()
         return employee(m.employee_id, None, user, db)
     _valid_dates(eff, body.effective_to)

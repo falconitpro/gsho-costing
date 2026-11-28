@@ -214,7 +214,7 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
       <div className="row"><button className="btn ghost" onClick={onBack}>← к списку</button></div>
       <div className="page-head"><h2>{e.full_name}</h2><span className={`badge ${tone}`}>{st}</span><span className="muted">{e.personnel_no}</span></div>
       {e.offboard_needed && <div className="alert warn hr-off" role="alert">
-        <span>Сотрудник уволен, а вход в CRM ({e.user}) ещё действует.</span>
+        <span>Сотрудник уволен, а вход в CRM ({e.user}) ещё действует: автоматически отключить не удалось (например, это последний администратор безопасности).</span>
         {can(me, "security_admin", 2) ? <button className="btn primary" onClick={() => setOff(true)}>Отключить доступ</button>
           : <span className="muted">Отключает администратор безопасности — ему уже отправлено уведомление.</span>}</div>}
       {off && e.user_id && <OffboardDialog user={{ id: e.user_id, display_name: e.user }} mode="offboard" onClose={() => setOff(false)} onDone={load} />}
@@ -232,7 +232,7 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
       <div className="row hr-filters">
         <label className="f">Состояние на дату<input type="date" value={on} onChange={(x) => setOn(x.target.value)} /></label>
         {on && <button className="btn ghost" onClick={() => setOn("")}>сегодня</button>}
-        <span className="muted">Учётная запись CRM: {e.user || "не связана"}</span>
+        <span className="muted">Учётная запись CRM: {e.user ? `${e.user}${e.user_active ? "" : " — вход отключён"}` : "не связана"}</span>
         {edit && <UserLink e={e} onSaved={setE} />}
       </div>
       {e.employments.slice().reverse().map((m) => {
@@ -312,7 +312,7 @@ function EventForm({ m, kind, onDone }: { m: Employment; kind: string; onDone: (
         {kind === "terminate" && <label className="f">Основание<input value={f.reason} placeholder="по собственному желанию" onChange={(e) => setF({ ...f, reason: e.target.value })} /></label>}
         <label className="f">Комментарий<input value={f.comment} placeholder="приказ № …" onChange={(e) => setF({ ...f, comment: e.target.value })} /></label>
       </div>
-      {kind === "terminate" && <p className="muted">Вход в CRM не отключается сам: после последнего рабочего дня в карточке появится кнопка «Отключить доступ», администратору безопасности придёт напоминание.</p>}
+      {kind === "terminate" && <p className="muted">Вход в CRM блокируется автоматически сразу после последнего рабочего дня (если дата уже прошла — сразу при сохранении). Вернуть доступ может только администратор безопасности.</p>}
       <div className="row"><button className="btn primary" disabled={!ok} onClick={save}>Сохранить</button><button className="btn ghost" onClick={() => onDone()}>отмена</button></div>
     </div>);
 }

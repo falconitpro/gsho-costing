@@ -1,9 +1,8 @@
 """D-207: «Персонал» — напоминания (фоновое задание, раз в час, в рабочие дни после 9:00 МСК).
 
-1. Уволен, а вход в CRM не отключён: у сотрудника нет действующих и будущих трудовых отношений, связанная учётная запись
-   активна → уведомление администраторам безопасности (они отключают доступ) и кадровикам из области юрлица.
-   Само отключение — только человеком, через общую операцию offboarding (подтверждение, повторный вход).
-   Когда доступ отключён, уведомления становятся прочитанными.
+1. Уволен — вход в CRM блокируется сразу после последнего рабочего дня (решение владельца 28.11.2026): каждый час, в любой день,
+   общими шагами отключения (сессии, замещения, временные права, задачи). Если заблокировать нельзя (последний администратор
+   безопасности) — уведомление администраторам безопасности и кадровикам; после отключения уведомления становятся прочитанными.
 2. Допуски, обучение, инструктажи и медосмотры (D-206): за 30 дней до конца срока и в день окончания — кадровикам
    из области юрлица и самому сотруднику (если у него есть вход в CRM). Продлили — новый срок, новые напоминания.
 
@@ -59,15 +58,26 @@ def _send(db: Session, user_ids: set[str], event: str, text: str, link: str) -> 
     return n
 
 
+def block_gone(db: Session, today) -> int:
+    """D-207 (решение владельца 28.11): уволен отовсюду, последний рабочий день прошёл — вход в CRM блокируется."""
+    from .hr_core import block_if_gone, terminated_by
+    n = 0
+    for e in db.scalars(select(HrEmployee).where(HrEmployee.user_id.is_not(None))):
+        u = db.get(User, e.user_id)
+        if u is not None and u.is_active and block_if_gone(db, e, today, terminated_by(db, e.id)):
+            n += 1
+    return n
+
+
 def check(db: Session, now: Optional[datetime] = None) -> int:
     from .engineer_permits import best_by_code, owned
     from .hr_core import full_name
     from .offboarding import security_admin_ids
     now = (now or datetime.now(timezone.utc)).astimezone(MSK)
     today = now.date()
+    sent = block_gone(db, today)   # блокировка — в любой день и час: сразу после последнего рабочего дня
     if not CAL.is_workday(today) or now.hour < 9:
-        return 0
-    sent = 0
+        return sent
     editors = _editors(db)
     emps: dict[str, list[HrEmployment]] = {}
     for m in db.scalars(select(HrEmployment)):

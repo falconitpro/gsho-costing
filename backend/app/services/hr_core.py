@@ -99,3 +99,24 @@ def next_personnel_no(db: Session) -> str:
 
 def full_name(e: HrEmployee) -> str:
     return " ".join(x for x in (e.last_name, e.first_name, e.middle_name) if x)
+
+
+def block_if_gone(db: Session, employee: HrEmployee, on: date, by_id: Optional[str]) -> Optional[dict]:
+    """D-207: уволен отовсюду (последний рабочий день прошёл) и есть вход в CRM — доступ блокируется сразу.
+    by_id — кто внёс увольнение (автор отключения в журнале)."""
+    from .offboarding import offboard_terminated
+    if not employee.user_id:
+        return None
+    every = db.scalars(select(HrEmployment).where(HrEmployment.employee_id == employee.id)).all()
+    if not every or any(m.end_date is None or m.end_date >= on for m in every):
+        return None
+    last = max(m.end_date for m in every)
+    return offboard_terminated(db, employee.user_id, by_id, full_name(employee), last)
+
+
+def terminated_by(db: Session, employee_id: str) -> Optional[str]:
+    """Кто внёс действующее (неотменённое) увольнение — последнее по дате."""
+    evs = list(db.scalars(select(HrEmployeeEvent).where(HrEmployeeEvent.employee_id == employee_id)))
+    dead = cancelled_ids(evs)
+    t = [e for e in evs if e.kind == "terminate" and e.id not in dead]
+    return max(t, key=lambda e: (e.effective_from, e.recorded_at)).recorded_by if t else None

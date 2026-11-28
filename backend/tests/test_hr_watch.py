@@ -1,6 +1,6 @@
 """D-207: «Персонал» — уволен, а вход не отключён; напоминания о сроках допусков. Каждое — один раз."""
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -46,29 +46,48 @@ def test_hr_watch_offboarding_and_permits(client):  # noqa: F811
         assert hr_watch.check(db, now.replace(hour=7)) == 0   # до 9:00 — тишина
     # продлили — старые напоминания не повторяются, новый срок дальше 30 дней — новых нет
     _ok(client.put(f"/api/hr/employees/{e['id']}/admissions", headers=H(GD), json={"permit_code": "OT", "issued_on": D(0), "valid_until": (day + timedelta(days=200)).isoformat()}))
-    # увольнение вчерашним днём — карточка и напоминание «вход не отключён»
+    # увольнение вчерашним днём — вход блокируется сразу при сохранении (решение владельца 28.11)
     r = _ok(client.post(f"/api/hr/employments/{m}/events", headers=H(GD), json={"kind": "terminate", "effective_from": D(-1)}))
-    assert r["offboard_needed"] is True and r["user_active"] is True
+    assert r["offboard_needed"] is False and r["user_active"] is False
+    me = _ok(client.get("/api/auth/me", headers=H(GD)))["id"]
     with SessionLocal() as db:
-        hr_watch.check(db, now)
-        db.commit()
-        off = db.scalars(select(NotificationLog).where(NotificationLog.event == "hr_offboard", NotificationLog.link == f"/hr?e={e['id']}")).all()
-        assert off and all(x.read_at is None for x in off if x.channel == "app")
-        gd_id = _ok(client.get("/api/auth/me", headers=H(GD)))["id"]
-        assert gd_id in {x.user_id for x in off}
-    # доступ отключили — уведомления закрываются, карточка больше не просит
-    with SessionLocal() as db:
-        from app.models import User
+        from app.models import AuditLog, User
         u = db.get(User, uid)
-        u.is_active = False
-        db.commit()
-        hr_watch.check(db, now)
-        db.commit()
-        off = db.scalars(select(NotificationLog).where(NotificationLog.event == "hr_offboard", NotificationLog.link == f"/hr?e={e['id']}",
-                                                       NotificationLog.channel == "app")).all()
-        assert off and all(x.read_at is not None for x in off)
-    assert _ok(client.get(f"/api/hr/employees/{e['id']}", headers=H(GD)))["offboard_needed"] is False
+        assert u.is_active is False and u.offboarded_by == me and u.offboarded_at is not None
+        assert db.scalar(select(AuditLog.id).where(AuditLog.entity_id == uid, AuditLog.action == "offboard"))
+        assert db.scalars(select(NotificationLog).where(NotificationLog.event == "security", NotificationLog.text.contains("отключён автоматически"))).first()
 
+
+def test_hr_block_after_last_day_by_job(client):  # noqa: F811
+    """Увольнение «сегодня» — работает до конца дня; задание блокирует вход на следующий день."""
+    from app.db import SessionLocal
+    from app.models import User
+    from app.services import hr_watch
+    t = uuid.uuid4().hex[:5]
+    ru, _ = _employers(client)
+    dep, pos = _org(client, GD, ru, t)
+    uid = _ok(client.post("/api/admin/users", headers=H(GD), json={"email": f"last{t}@example.com", "display_name": f"Последний {t}", "roles": ["engineer"]}), 201)["id"]
+    e = _ok(client.post("/api/hr/employees", headers=H(GD), json={"last_name": f"Последний{t}", "first_name": "День", "user_id": uid,
+                                                                   "hire": {"employer_id": ru, "start_date": D(-20), "department_id": dep["id"], "position_id": pos["id"]}}))
+    # второе место работы ещё действует — блокировать нельзя
+    ru2 = _employers(client)[1]
+    dep2, pos2 = _org(client, GD, ru2, t + "b")
+    r = _ok(client.post(f"/api/hr/employees/{e['id']}/employments", headers=H(GD),
+                        json={"employer_id": ru2, "kind": "external_part", "start_date": D(-10), "department_id": dep2["id"], "position_id": pos2["id"]}))
+    m1 = next(x["id"] for x in r["employments"] if x["employer_id"] == ru)
+    m2 = next(x["id"] for x in r["employments"] if x["employer_id"] == ru2)
+    _ok(client.post(f"/api/hr/employments/{m1}/events", headers=H(GD), json={"kind": "terminate", "effective_from": D(-2)}))
+    with SessionLocal() as db:
+        assert db.get(User, uid).is_active is True
+    r = _ok(client.post(f"/api/hr/employments/{m2}/events", headers=H(GD), json={"kind": "terminate", "effective_from": D(0)}))
+    assert r["user_active"] is True   # сегодня ещё последний рабочий день
+    with SessionLocal() as db:
+        hr_watch.block_gone(db, date.fromisoformat(D(0)))
+        db.commit()
+        assert db.get(User, uid).is_active is True
+        assert hr_watch.block_gone(db, date.fromisoformat(D(1))) == 1
+        db.commit()
+        assert db.get(User, uid).is_active is False
 
 def test_hr_summary(client):  # noqa: F811
     t = uuid.uuid4().hex[:5]
