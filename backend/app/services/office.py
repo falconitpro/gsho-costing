@@ -92,6 +92,8 @@ def hist(doc: OfficeDoc, user_id: Optional[str], action: str, note: str = "") ->
 
 
 def is_editor(user: CurrentUser, doc: Optional[OfficeDoc] = None) -> bool:
+    if doc is not None and doc.pay_restricted:   # D-209: приказ с оплатой труда ведут ЗГД, ФД, бухгалтер по зарплате
+        return user.can("hr_payroll", 2)
     if doc is not None and doc.kind == "order" and doc.category == "hr":
         return user.can("office_hr", 2)
     return user.can("office", 2)
@@ -114,6 +116,10 @@ def acked_by(doc: OfficeDoc, user_id: str) -> Optional[dict]:
 
 def can_see(user: CurrentUser, doc: OfficeDoc) -> bool:
     if acked_by(doc, user.id) is not None and doc.status in ("signed", "in_force", "closed"):   # D-140: кого ознакомить — видит документ
+        return True
+    if doc.pay_restricted:   # D-209: оплата труда, премии и другие денежные кадровые документы — только с доступом к оплате труда
+        return user.can("hr_payroll")
+    if user.id in (doc.viewer_ids or []):   # D-209: выбран при формировании «кто ещё видит»
         return True
     if doc.confidential and not (user.can("office", 2) or user.id in (doc.executor_id, doc.created_by) or user.id in (doc.co_executor_ids or [])
                                  or in_route(doc, user)):
@@ -173,6 +179,7 @@ def serialize(db: Session, doc: OfficeDoc, user: CurrentUser, users: Optional[di
         "sender_date": doc.sender_date.isoformat() if doc.sender_date else None, "due_on": doc.due_on.isoformat() if doc.due_on else None,
         "overdue": bool(doc.due_on and doc.due_on < today and doc.status in OPEN),
         "urgent": doc.urgent, "confidential": doc.confidential, "needs_reply": doc.needs_reply, "has_scan": has_scan(doc),
+        "pay_restricted": doc.pay_restricted, "viewer_ids": doc.viewer_ids or [], "planned_acks": doc.planned_acks or [],
         "pages": doc.pages, "attachments_count": doc.attachments_count, "address": doc.address, "tracking": doc.tracking,
         "delivered_on": doc.delivered_on.isoformat() if doc.delivered_on else None, "note": doc.note,
         "comments_count": len(doc.comments or []),

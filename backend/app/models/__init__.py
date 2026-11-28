@@ -2713,6 +2713,11 @@ class OfficeDoc(TimestampMixin, Base):
     resolutions: Mapped[list[dict]] = mapped_column(JSONType, default=list)   # [{id, by, at, kind: execute | info | file, text, executor_id, co, due_on}]
     alerts: Mapped[dict] = mapped_column(JSONType, default=dict)            # D-133: отправленные напоминания о сроке {ключ: дата} — без повторов
     acks: Mapped[list[dict]] = mapped_column(JSONType, default=list)        # D-140: лист ознакомления [{user_id, by, at, acked_at, reminded}]
+    # D-209: кто ещё видит документ (выбор при формировании); приказ с оплатой труда — только у кого доступ к оплате труда «Персонала»;
+    # кого ознакомить после подписания (назначается автоматически при подписании)
+    viewer_ids: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    pay_restricted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    planned_acks: Mapped[list[str]] = mapped_column(JSONType, default=list)
 
 
 class OfficeRoute(TimestampMixin, Base):
@@ -3296,5 +3301,7 @@ class HrEventOrder(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     event_id: Mapped[str] = mapped_column(ForeignKey("hr_employee_events.id"), index=True)
     office_doc_id: Mapped[str] = mapped_column(ForeignKey("office_docs.id"), index=True)
+    # D-209: реквизиты приказа, которых нет в событии (договор, испытание, основание увольнения, подписант…)
+    details: Mapped[dict] = mapped_column(JSONType, default=dict)
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
