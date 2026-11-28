@@ -2362,3 +2362,5 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
 .hr-sum { align-items: start; margin-bottom: 12px; }
 .hr-kpi { gap: 10px; margin: 6px 0 8px; }
 .hr-kpi b { font-size: 18px; }
+.hr-order { font-weight: 600; }
+.hr-warn { color: var(--danger, #b42318); }

@@ -3287,3 +3287,14 @@ class HrEmployeeDocument(Base):
     comment: Mapped[str] = mapped_column(Text, default="")
     uploaded_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class HrEventOrder(Base):
+    """D-208 (L2 упрощённо): приказ Канцелярии, сформированный по кадровому событию. Кадровое событие не меняется (только добавление) —
+    связь хранится здесь. Одно событие — один действующий приказ (отменённый приказ можно сформировать заново)."""
+    __tablename__ = "hr_event_orders"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    event_id: Mapped[str] = mapped_column(ForeignKey("hr_employee_events.id"), index=True)
+    office_doc_id: Mapped[str] = mapped_column(ForeignKey("office_docs.id"), index=True)
+    created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
