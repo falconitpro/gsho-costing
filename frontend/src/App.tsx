@@ -34,6 +34,7 @@ import SupplyPage from "./pages/PartsSetupPage";
 import OfficePage from "./pages/OfficePage";
 import ServicePage from "./pages/ServicePage";
 import HrPage from "./pages/HrPage";
+import ContactsMigrationPage from "./pages/ContactsMigrationPage";
 import AssignmentsPage from "./pages/AssignmentsPage";
 import DirectionPage from "./pages/DirectionPage";
 import SideNav, { useSection } from "./components/SideNav";
@@ -187,6 +188,7 @@ export default function App() {
             <Route path="/office" element={<OfficePage me={me} />} />
             <Route path="/service" element={<ServicePage me={me} />} />
             <Route path="/hr" element={<HrPage me={me} />} />
+            <Route path="/contacts-migration" element={<ContactsMigrationPage me={me} />} />
             <Route path="/assignments" element={<AssignmentsPage me={me} />} />
             <Route path="/directions/:key" element={<DirectionPage me={me} />} />
             <Route path="/parts/setup" element={<Navigate to="/supply" replace />} />

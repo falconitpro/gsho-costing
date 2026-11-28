@@ -3,7 +3,8 @@ import { Fragment, useEffect, useState } from "react";
 import { lbl, OUTCOME } from "../labels";
 import { UndoButton, useUndoHistory } from "../undo";
 import { api, ApiError, fmtDate, fmtPct, fmtCur, fmtRub } from "../api";
-import { STATUS_TITLES } from "../types";
+import { can, STATUS_TITLES } from "../types";
+import { Link } from "react-router-dom";
 import { toneOf } from "../colors";
 import LegalProfileBlock from "../components/LegalProfileBlock";
 import PartsFleet from "../components/PartsFleet";
@@ -131,6 +132,7 @@ export default function ClientsPage({ me, embedded = false }: { me: Me; embedded
     <div className="grid cl-layout" style={{ gridTemplateColumns: card ? "minmax(0, 2fr) minmax(0, 3fr)" : "1fr" }}>
       <div>
         {!embedded && <h1>Клиенты</h1>}
+        {can(me, "client_contacts", 2) && <div className="row"><Link className="btn ghost" to="/contacts-migration">Сверка переноса контактов</Link></div>}
         {(() => {
           const fin = clients.some((c) => c.stats?.sum_won_rub != null);
           const st = (c: Client): Stats => c.stats || { deals: 0, open: 0, won: 0, lost: 0, last_on: null, last_number: "", last_status: "", manager: "", sum_won_rub: null };

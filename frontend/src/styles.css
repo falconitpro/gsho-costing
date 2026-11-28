@@ -2368,3 +2368,9 @@ a.so-kpi:hover { border-color: var(--nv-line-strong); }
 .pp-chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 26px; align-items: center; }
 .pp-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; background: var(--chip, #eef0f3); font-size: 13px; }
 .pp-chip button { border: 0; background: none; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; color: var(--muted); }
+/* D-211: сверка переноса контактов */
+.cmr-head { gap: 10px; align-items: center; flex-wrap: wrap; }
+.cmr-list { margin: 4px 0; padding-left: 18px; }
+.cmr-list li { margin: 2px 0; }
+.cmr-pair { border-top: 1px solid var(--line); padding: 10px 0; }
+.cmr-check { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
