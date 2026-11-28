@@ -588,14 +588,18 @@ def permits_list(user_id: str = "", user: CurrentUser = Depends(_orders_reader),
     act = wos.actor_of(user)
     if not act.is_head:
         user_id = user.id
-    st = select(EngineerPermit)
-    if user_id:
-        st = st.where(EngineerPermit.user_id == user_id)
-    rows = db.scalars(st).all()
+    from ..models import HrEmployee
+    # D-206: допуски, заведённые в «Персонале» сотруднику со входом в CRM, — тоже его (владелец — учётная запись карточки)
+    emp_user = dict(db.execute(select(HrEmployee.id, HrEmployee.user_id).where(HrEmployee.user_id.is_not(None))).all())
+    rows = []
+    for r in db.scalars(select(EngineerPermit)).all():
+        owner = r.user_id or emp_user.get(r.employee_id)
+        if owner and (not user_id or owner == user_id):
+            rows.append((owner, r))
     names = {p.code: p.name for p in db.scalars(select(ServicePermit)).all()}
-    un = _names(db, [r.user_id for r in rows])
+    un = _names(db, [o for o, _ in rows])
     today = msk_today()
-    return {"items": sorted([{**_permit_payload(r, names, today), "user_name": un.get(r.user_id, "")} for r in rows],
+    return {"items": sorted([{**_permit_payload(r, names, today), "user_id": o, "user_name": un.get(o, "")} for o, r in rows],
                             key=lambda x: (x["user_name"], x["permit_code"])), "can_edit": act.is_head}
 
 
@@ -625,10 +629,13 @@ def permit_save(body: PermitIn, user: CurrentUser = Depends(_head), db: Session 
         valid = date(y, m, min(body.issued_on.day, calendar.monthrange(y, m)[1]))
     if body.issued_on and valid and valid < body.issued_on:
         raise HTTPException(422, "Срок действия раньше даты выдачи")
-    p = db.scalar(select(EngineerPermit).where(EngineerPermit.user_id == body.user_id, EngineerPermit.permit_code == body.permit_code))
+    from ..services.engineer_permits import best_by_code, owned
+    p = best_by_code([x for x in owned(db, user_id=body.user_id) if x.permit_code == body.permit_code]).get(body.permit_code)   # D-206: и заведённый в «Персонале»
     before = serialize(p) if p else None
     if p is None:
-        p = EngineerPermit(user_id=body.user_id, permit_code=body.permit_code, created_by=user.id)
+        from ..models import HrEmployee
+        emp = db.scalar(select(HrEmployee.id).where(HrEmployee.user_id == body.user_id))
+        p = EngineerPermit(user_id=body.user_id, employee_id=emp, permit_code=body.permit_code, created_by=user.id)
         db.add(p)
     p.number, p.issued_on, p.valid_until, p.comment = body.number.strip(), body.issued_on, valid, body.comment
     db.flush()

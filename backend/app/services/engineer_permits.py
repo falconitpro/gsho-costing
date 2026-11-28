@@ -32,7 +32,7 @@ def check(db: Session, user_id: Optional[str], codes: list[str], on: date) -> li
     """Чего не хватает: [{code, name, problem: missing | expired, valid_until}] — пусто, если всё есть."""
     if not user_id or not codes:
         return []
-    have = {p.permit_code: p for p in db.scalars(select(EngineerPermit).where(EngineerPermit.user_id == user_id)).all()}
+    have = best_by_code(owned(db, user_id=user_id))
     names = {p.code: p.name for p in db.scalars(select(ServicePermit).where(ServicePermit.code.in_(codes))).all()}
     out = []
     for c in codes:
@@ -41,8 +41,39 @@ def check(db: Session, user_id: Optional[str], codes: list[str], on: date) -> li
             out.append({"code": c, "name": names.get(c, c), "problem": "missing", "valid_until": None})
         elif p.valid_until is not None and p.valid_until < on:
             out.append({"code": c, "name": names.get(c, c), "problem": "expired", "valid_until": p.valid_until.isoformat()})
+        elif p.result == "unfit":   # D-206: медосмотр «не годен» — итог без диагноза
+            out.append({"code": c, "name": names.get(c, c), "problem": "unfit", "valid_until": p.valid_until.isoformat() if p.valid_until else None})
+    return out
+
+
+def owned(db: Session, user_id: Optional[str] = None, employee_id: Optional[str] = None) -> list[EngineerPermit]:
+    """D-206: допуски человека — по учётной записи CRM и по карточке «Персонала» (они связаны через hr_employees.user_id)."""
+    from ..models import HrEmployee
+    uids, eids = set(), set()
+    if user_id:
+        uids.add(user_id)
+        eids |= set(db.scalars(select(HrEmployee.id).where(HrEmployee.user_id == user_id)).all())
+    if employee_id:
+        eids.add(employee_id)
+        u = db.scalar(select(HrEmployee.user_id).where(HrEmployee.id == employee_id))
+        if u:
+            uids.add(u)
+    if not uids and not eids:
+        return []
+    return list(db.scalars(select(EngineerPermit).where(EngineerPermit.user_id.in_(uids) | EngineerPermit.employee_id.in_(eids))).all())
+
+
+def best_by_code(rows: list[EngineerPermit]) -> dict[str, EngineerPermit]:
+    """Если допуск заведён и в сервисе, и в «Персонале» — берётся действующий дольше (бессрочный — лучше всех)."""
+    out: dict[str, EngineerPermit] = {}
+    far = date(9999, 12, 31)
+    for p in rows:
+        cur = out.get(p.permit_code)
+        if cur is None or (p.valid_until or far, p.updated_at or 0) > (cur.valid_until or far, cur.updated_at or 0):
+            out[p.permit_code] = p
     return out
 
 
 def describe(gaps: list[dict]) -> str:
-    return "; ".join(f"{g['code']} — {'нет' if g['problem'] == 'missing' else 'истёк ' + g['valid_until']}" for g in gaps)
+    return "; ".join(f"{g['code']} — " + ("нет" if g["problem"] == "missing" else "не годен по медосмотру" if g["problem"] == "unfit" else "истёк " + g["valid_until"])
+                     for g in gaps)
