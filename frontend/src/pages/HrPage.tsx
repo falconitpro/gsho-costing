@@ -27,6 +27,8 @@ type Employee = { id: string; personnel_no: string; last_name: string; first_nam
 
 const STATUS: Record<string, [string, string]> = { active: ["работает", "ok"], planned: ["выходит", "info"], terminated: ["уволен", ""] };
 const EV_TITLE: Record<string, string> = { hire: "Приём", transfer: "Перевод", rate: "Ставка", terminate: "Увольнение", cancel: "Отмена события" };
+type HrOrder = { event_id: string; office_doc_id: string; number: string; status: string; status_title: string; has_scan: boolean; signed_on: string | null; url: string };
+const ORDER_KINDS = ["hire", "transfer", "rate", "terminate"];
 const EMP_KIND: Record<string, string> = { main: "основное место", internal_part: "внутреннее совместительство", external_part: "внешнее совместительство" };
 const CAT: Record<string, string> = { manager: "руководитель", specialist: "специалист", worker: "рабочий", other: "другое" };
 const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Moscow" });
@@ -196,9 +198,16 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
   const [rehire, setRehire] = useState(false);
   const [sec, setSec] = useQueryParam("s");
   const [off, setOff] = useState(false);
+  const [orders, setOrders] = useState<Record<string, HrOrder>>({});
   const edit = can(me, "hr_core", 2);
   const load = () => api.get<Employee>(`/api/hr/employees/${id}${on ? `?on=${on}` : ""}`).then(setE).catch((x) => setMsg((x as Error).message));
+  const loadOrders = () => api.get<Record<string, HrOrder>>(`/api/hr/employees/${id}/orders`).then(setOrders).catch(() => setOrders({}));
   useEffect(() => { load(); }, [id, on]);
+  useEffect(() => { loadOrders(); }, [id]);
+  const makeOrder = async (ev: Ev) => {
+    try { const o = await api.post<HrOrder>(`/api/hr/events/${ev.id}/order`, {}); setOrders({ ...orders, [ev.id]: o }); setMsg("Черновик приказа создан в Канцелярии — делопроизводитель зарегистрирует его и даст на подпись"); }
+    catch (x) { setMsg((x as Error).message); }
+  };
   if (!e) return msg ? <ErrorState hint={msg} /> : <Loading />;
   const cancel = async (m: Employment, ev: Ev) => {
     const why = await askPrompt(`Отменить «${EV_TITLE[ev.kind]}» с ${fmtDate(ev.effective_from)}? Событие останется в истории с отметкой. Причина:`, "", { title: "Отмена кадрового события", required: true });
@@ -248,7 +257,7 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
               <button className="btn ghost" onClick={() => setAct({ m, kind: "terminate" })}>Увольнение</button></div>}
             {act?.m.id === m.id && <EventForm m={m} kind={act.kind} onDone={(r) => { setAct(null); if (r) setE(r); }} />}
             <table className="pc-table nv-cards hr-events">
-              <thead><tr><th>Событие</th><th>Действует</th><th>Что</th><th>Внесено</th><th /></tr></thead>
+              <thead><tr><th>Событие</th><th>Действует</th><th>Что</th><th>Внесено</th><th>Приказ</th><th /></tr></thead>
               <tbody>{(m.events || []).map((ev) => (
                 <tr key={ev.id} className={ev.cancelled ? "hr-cancelled" : ""}>
                   <td className="pc-name">{EV_TITLE[ev.kind] || ev.kind}{ev.cancelled && <span className="badge">отменено</span>}</td>
@@ -257,6 +266,11 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
                     return t ? <span>отменяет «{EV_TITLE[t.kind]}» с {fmtDate(t.effective_from)}</span> : null; })()}{[ev.data.department, ev.data.position, ev.data.rate != null ? rate(ev.data.rate) : "", String(ev.data.reason || "")].filter(Boolean).join(" · ")}
                     {ev.comment && <div className="pc-sub">{ev.comment}</div>}</td>
                   <td data-label="Внесено">{ev.recorded_by}<div className="pc-sub">{fmtDate(ev.recorded_at)}</div></td>
+                  <td data-label="Приказ">{orders[ev.id] ? <a href={orders[ev.id].url} className="hr-order">{orders[ev.id].number || "черновик"}
+                    <span className="pc-sub">{orders[ev.id].number ? ` · ${orders[ev.id].status_title}` : ""}{orders[ev.id].has_scan ? " · скан есть" : ""}</span></a>
+                    : ev.kind === "cancel" ? null : ev.cancelled ? null
+                      : edit && ORDER_KINDS.includes(ev.kind) ? <button className="btn ghost" onClick={() => makeOrder(ev)}>сформировать</button> : "—"}
+                    {ev.cancelled && orders[ev.id] && <div className="pc-sub hr-warn">событие отменено — отмените приказ в Канцелярии</div>}</td>
                   <td>{edit && !ev.cancelled && !["hire", "cancel"].includes(ev.kind) && <button className="btn ghost" onClick={() => cancel(m, ev)}>отменить</button>}</td>
                 </tr>))}</tbody>
             </table>
