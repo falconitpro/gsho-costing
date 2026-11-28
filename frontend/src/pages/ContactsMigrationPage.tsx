@@ -21,7 +21,7 @@ type Review = {
 };
 const OUT: Record<string, [string, string]> = { created: ["создан", "ok"], matched: ["сопоставлен", "ok"], ambiguous: ["вручную", "warn"], pending: ["не перенесён", "warn"] };
 const ch = (x: { email: string; phone: string; mobile: string }) => [x.email, x.phone, x.mobile].filter(Boolean).join(" · ") || "—";
-const clientLink = (id: string) => `/legal?tab=counterparties&type=clients&client=${id}`;
+const clientLink = (id: string) => `/clients?client=${id}`;
 
 export default function ContactsMigrationPage({ me }: { me: Me }) {
   const [d, setD] = useState<Review | null>(null);
@@ -41,7 +41,7 @@ export default function ContactsMigrationPage({ me }: { me: Me }) {
   };
   return (
     <div className="cmr">
-      <Crumbs items={[{ label: "Клиенты", to: "/legal?tab=counterparties&type=clients" }, { label: "Сверка переноса контактов" }]} />
+      <Crumbs items={[{ label: "Клиенты", to: "/clients" }, { label: "Сверка переноса контактов" }]} />
       <div className="page-head"><h1>Сверка переноса контактов</h1>
         {d.accepted ? <span className="badge ok">принято {fmtDate(d.accepted.at)} — {d.accepted.by_name}</span> : <span className="badge warn">не принято</span>}</div>
       <p className="muted">Перенос в единый справочник выполнен на рабочем сервере 27.11. Здесь — проверка результата: данные не меняются, кроме отметки о приёмке.

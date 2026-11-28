@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 
-/** D-159: переключатель «Новый вид» (мастер-ТЗ UX/UI A–H). Хранится в браузере сотрудника; по умолчанию — прежний вид.
+/** D-159: переключатель «Новый вид» (мастер-ТЗ UX/UI A–H). Хранится в браузере сотрудника.
+ *  D-212: по умолчанию — новый вид; прежний — только если сотрудник сам выбрал его кнопкой «Прежний вид» (временно, до его отключения).
  *  Все изменения нового вида включаются классом body.ui-new и разметкой оболочки — прежний вид не меняется. */
 const KEY = "gsho.newUi";
 const EVT = "gsho:ui-mode";
 
 export function isNewUi(): boolean {
-  try { return localStorage.getItem(KEY) === "1"; } catch { return false; }
+  try { return localStorage.getItem(KEY) !== "0"; } catch { return true; }
 }
 
 export function setNewUi(on: boolean): void {

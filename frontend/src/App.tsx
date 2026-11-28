@@ -34,6 +34,7 @@ import SupplyPage from "./pages/PartsSetupPage";
 import OfficePage from "./pages/OfficePage";
 import ServicePage from "./pages/ServicePage";
 import HrPage from "./pages/HrPage";
+import ClientsPage from "./pages/ClientsPage";
 import ContactsMigrationPage from "./pages/ContactsMigrationPage";
 import AssignmentsPage from "./pages/AssignmentsPage";
 import DirectionPage from "./pages/DirectionPage";
@@ -174,7 +175,7 @@ export default function App() {
             <Route path="/finance" element={<FinancePage me={me} />} />
             <Route path="/counterparties" element={<CounterpartiesRedirect />} />
             <Route path="/legal" element={<LegalPage me={me} />} />
-            <Route path="/clients" element={<CounterpartiesRedirect type="clients" />} />
+            <Route path="/clients" element={<ClientsPage me={me} />} />
 
             <Route path="/team" element={<Navigate to="/settings?s=team" replace />} />
             <Route path="/settings" element={<SettingsHub me={me} />} />

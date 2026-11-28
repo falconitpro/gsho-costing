@@ -11,6 +11,7 @@ type Item = NavItem;
 const ITEMS: Item[] = [
   { key: "work", to: "/", label: "Рабочее место", end: true },
   { key: "deals", to: "/deals", label: "Сделки" },
+  { key: "clients", to: "/clients", label: "Клиенты" },   // D-212: первым уровнем, а не внутри «Юридический блок → Контрагенты»
   { key: "tasks", to: "/tasks", label: "Мои задачи" },
   { key: "assignments", to: "/assignments", label: "Поручения" },
   { key: "board", to: "/board", label: "Доска" },
@@ -24,15 +25,16 @@ const ITEMS: Item[] = [
   { key: "supply", to: "/supply", label: "Снабжение и склад" },
   { key: "settings", to: "/settings", label: "Настройки" },
 ];
+// D-212: главные разделы роли (не больше 6–7); остальные доступные — в «Ещё» (в боковой панели — раскрывающийся список)
 const PRIMARY: Record<string, string[]> = {
-  manager: ["work", "deals", "tasks", "catalog"],
+  manager: ["work", "deals", "clients", "tasks", "catalog"],
   logistician: ["work", "deals", "tasks", "supply", "summary"],
-  service_head: ["work", "service", "deals", "tasks", "supply"],
+  service_head: ["work", "service", "clients", "deals", "tasks", "supply"],
   purchasing: ["work", "supply", "catalog", "tasks"],
-  cd: ["work", "deals", "tasks", "board", "summary"],
-  fd: ["work", "finance", "deals", "board", "tasks"],
-  gd: ["work", "deals", "board", "summary", "finance"],
-  lawyer: ["work", "legal", "deals", "tasks"],
+  cd: ["work", "deals", "clients", "tasks", "board", "summary"],
+  fd: ["work", "finance", "deals", "board", "tasks", "hr"],
+  gd: ["work", "deals", "clients", "board", "summary", "finance", "assignments"],
+  lawyer: ["work", "legal", "clients", "deals", "tasks"],
   admin: ["work", "settings", "deals"],
   observer: ["work", "deals", "board"],
   clerk: ["work", "office", "tasks"],
@@ -47,7 +49,7 @@ export function navItems(me: Me): { items: NavItem[]; primary: Set<string> } {
   const perm = (g: string) => (me.perms?.[g] ?? 0) >= 1;
   const onlyEngineer = codes.length > 0 && codes.every((c) => c === "engineer" || c === "payroll");   // D-205: и бухгалтер по зарплате — без сделок и юр. блока
   const allowed: Record<string, boolean> = {
-    work: true, deals: !onlyEngineer, tasks: true, assignments: true, legal: !onlyEngineer, catalog: !(codes.length > 0 && codes.every((c) => c === "payroll")), settings: true,
+    work: true, deals: !onlyEngineer, clients: !onlyEngineer, tasks: true, assignments: true, legal: !onlyEngineer, catalog: !(codes.length > 0 && codes.every((c) => c === "payroll")), settings: true,
     board: has("cd", "fd", "gd", "observer"),
     summary: has("cd", "fd", "gd", "logistician", "service_head", "purchasing", "manager"),
     finance: perm("finance_section"),
