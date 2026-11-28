@@ -222,7 +222,6 @@ function Decision({ dec, preview, vars, comps, gross, client }: { dec: Record<st
           change_rub: x0.change_rub / u, room_rub: x0.room_rub == null ? null : x0.room_rub / u };
         const bu = best != null ? best / u : null;   // цена конкурента — на то же количество
         const scale = Math.max(x.first.net_rub, x.price.net_rub, bu || 0) * 1.02, lo = Math.min(x.min_price_zero?.net_rub ?? x.price.net_rub, bu ?? Infinity, x.price.net_rub) * 0.97;
-        const pos = (rub: number) => `${Math.max(0, Math.min(100, (rub - lo) / (scale - lo) * 100))}%`;
         return (
           <div key={v.id} className="ng-dec-var">
             {vars.length > 1 && <b>{v.name}</b>}

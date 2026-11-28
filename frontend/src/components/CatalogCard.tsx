@@ -32,7 +32,6 @@ type Card = { id: string; model: string; trademark: string; trademark_saved?: st
   default_hours_per_month?: number | null; acceptance_checklist?: { group: string; item: string }[]; hs?: { code: string; description?: string; duty_pct?: number | null; vat_pct?: number | null; on?: string; deal?: string } | null; executions: Exec[]; with_prices: boolean; factory_prices?: FPrice[]; client_prices?: CPrice[]; analytics?: Analytics };
 
 const UNITS: Record<string, string> = { calendar_days: "кал. дн.", working_days: "раб. дн.", weeks: "нед.", date: "" };
-const OUTCOME: Record<string, string> = { won: "выиграна", lost: "проиграна" };
 const isImage = (n?: string) => /\.(png|jpe?g|gif|webp|bmp)$/i.test(n || "");
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${v > 0 ? "+" : ""}${String(v).replace(".", ",")} %`);
 

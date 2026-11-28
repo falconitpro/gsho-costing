@@ -12,8 +12,7 @@ const FEED_SECTION: Partial<Record<string, string>> = { main: "sale", positions:
   pricing: "pricing", documents: "legal", legal: "legal", execution: "execution", acceptance: "execution", planfact: "finance" };
 const FEED_TITLE: Record<string, string> = { sale: "Продажа", logistics: "Логистика", service: "Сервис", pricing: "Расчёт и утверждение",
   legal: "Договор и юр.", execution: "Исполнение", finance: "Финансы" };
-import { lbl } from "../labels";
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, ApiError, fmtDate, fmtRub, designation } from "../api";
 import { DELIVERY_START, PRODUCTION_START, STATUS_TITLES, TERM_UNITS, can, type Deal, type Me, type Position } from "../types";
 import ApprovalScreen from "./ApprovalScreen";

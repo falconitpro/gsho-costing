@@ -3305,3 +3305,12 @@ class HrEventOrder(Base):
     details: Mapped[dict] = mapped_column(JSONType, default=dict)
     created_by: Mapped[Optional[str]] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NumberCounter(Base):
+    """D-210: счётчики сквозных номеров (обращения СО, наряды НР, табельные П) — атомарно, без гонки «наибольший + 1».
+    year = 0 для номеров без года."""
+    __tablename__ = "number_counters"
+    key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    year: Mapped[int] = mapped_column(Integer, primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, default=0)

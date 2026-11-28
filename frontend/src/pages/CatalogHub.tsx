@@ -2,7 +2,7 @@ import AssembliesBlock from "../components/AssembliesBlock";
 import ApplicabilityQueue from "../components/ApplicabilityQueue";
 import { Crumbs, EntryGrid } from "../components/Levels";
 import { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { Me } from "../types";
 import { useNewUiFlag } from "../uiMode";

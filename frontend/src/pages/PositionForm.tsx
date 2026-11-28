@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
-import { api, ApiError, designation, fmtDate, fmtRub, ru } from "../api";
+import { api, ApiError, designation, fmtDate, fmtRub } from "../api";
 import { DELIVERY_START, PRODUCTION_START, TERM_UNITS, type Position } from "../types";
 import { collectFields, cmpCode, type RfqFieldData } from "../components/Questionnaire";
 import { UndoButton, useUndoHistory } from "../undo";
@@ -30,10 +30,6 @@ let xSeq = 0;
 const newKey = () => `x${++xSeq}`;
 
 /** Коды опросника → поля позиции (как в импорте RFQ). */
-const CORE: Record<string, string> = {
-  "0.7": "factory", "1.1": "machine_type", "1.2": "model", "13.1": "currency", "13.2": "basis", "13.3": "delivery_point", "13.4": "qty",
-  "13.5": "unit_price", "13.8": "zip_price", "14.1": "production_days", "14.2": "delivery_days", "14.4": "warranty_months", "14.5": "warranty_hours",
-};
 const CURRENCIES = ["CNY", "USD", "EUR", "RUB"];
 
 /** Ручной ввод позиции по всем полям опросника RFQ (не все обязательные) или правка импортированной. */
@@ -291,7 +287,6 @@ export default function PositionForm({ dealId, position, initial, onDone, onCanc
 
   if (!schema) return <div className="card muted">Загрузка полей опросника…</div>;
 
-  const OWN = OWN_CODES;
   const mark = (k: string) => rq.create.includes(k) ? <span className="pf-req" title="обязательно при сохранении"> *</span>
     : rq.calc.includes(k) ? <span className="pf-calc" title="нужно перед отправкой на расчёт">для расчёта</span> : null;
   const fp = (k: string) => ({ mark: mark(k), missing: rq.create.includes(k) && !filled[k] });

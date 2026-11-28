@@ -498,7 +498,7 @@ const COST_GROUPS: [string, string[]][] = [
   ["Финансы, сервис и гарантия", ["finance", "service", "warranty_reserve"]],
   ["Накладные, доукомплектование, комиссии", ["overhead", "local_completion", "external_commission", "manager_commission", "cd_commission"]],
 ];
-function CostBreakdown({ base, units, baseCcy, threshold, dealCur = "RUB", dealRate = 1, cards = true }: { base: ScenarioResult; units: number; baseCcy: string; threshold?: number; dealCur?: string; dealRate?: number; cards?: boolean }) {
+function CostBreakdown({ base, units, baseCcy: _baseCcy, threshold, dealCur = "RUB", dealRate = 1, cards = true }: { base: ScenarioResult; units: number; baseCcy: string; threshold?: number; dealCur?: string; dealRate?: number; cards?: boolean }) {
   // D-090: все расходы — и в валюте контракта (валюте сделки) по курсу цены / ЦБ
   const fc = dealCur !== "RUB" && dealRate > 0, cv = (rub: number) => fmtRub(rub / (dealRate || 1));
   const [showZero, setShowZero] = useState(false);
