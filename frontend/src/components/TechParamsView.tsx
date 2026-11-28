@@ -1,7 +1,7 @@
 import type { TechParamRow } from "../types";
 import SpecTable, { type SpecSection } from "./SpecTable";
 
-const CJK = /[　-〿㐀-鿿＀-￯]/;
+const CJK = /[　-〿㐀-鿿＀-￯]/;   // eslint-disable-line no-irregular-whitespace -- в диапазоне намеренно идеографический пробел
 const ru = (t: unknown) => { const s = String(t ?? "").trim(); return CJK.test(s) ? s.split(/\s*[/|]\s*/).filter((x) => x && !CJK.test(x)).join(" / ") : s; };
 
 /** Таблица технических характеристик позиции только для просмотра (логист): всё, что ввёл менеджер, только по-русски. */

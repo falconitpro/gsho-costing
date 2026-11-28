@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Iterable, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.auth import CurrentUser
@@ -89,10 +89,11 @@ def overlaps(db: Session, employee_id: str, employer_id: str, start: date, kind:
 
 
 def next_personnel_no(db: Session) -> str:
-    n = db.scalar(select(func.count()).select_from(HrEmployee)) or 0
+    """D-210: табельный номер в CRM из счётчика (атомарно); первый раз продолжает уже выданные номера."""
+    from .numbering import next_seq
+    nums = [int(x[2:]) for x in db.scalars(select(HrEmployee.personnel_no).where(HrEmployee.personnel_no.like("П-%"))) if x[2:].isdigit()]
     while True:
-        n += 1
-        no = f"П-{n:04d}"
+        no = f"П-{next_seq(db, 'hr_personnel', 0, max(nums or [0]) + 1):04d}"
         if not db.scalar(select(HrEmployee.id).where(HrEmployee.personnel_no == no)):
             return no
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api } from "../../api";
 import type { Me } from "../../types";
 import SecurityModal from "../SecurityModal";
@@ -65,7 +65,6 @@ export default function ExecWorkplace({ me, onClassic }: { me: Me; onClassic: ()
   const [dirs, setDirs] = useState(false);
   const [hist, setHist] = useState<SigHist[] | null>(null);
   const [opened, setOpened] = useState<Record<string, boolean>>({});
-  const nav = useNavigate();
   const nv = useNewUiFlag();
   const load = () => api.get<Data>("/api/workplace/executive").then(setD).catch((e: Error) => setErr(String(e?.message || e)));
   useEffect(() => { load(); }, [me.id]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -344,7 +344,6 @@ function ClassicWorkplace({ me, onPult }: { me: Me; onPult?: () => void }) {
 
   // ---------------- уровень входов
   const on = (b: string) => visibleAll.includes(b);
-  const has = (...r: string[]) => me.roles.some((x) => r.includes(x.code));
   const perm = (g: string) => (me.perms?.[g] ?? 0) >= 1;
   const entries: Entry[] = [];
   const mainEntries: Entry[] = [];

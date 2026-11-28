@@ -1,7 +1,7 @@
 import TemplateEditor from "../components/TemplateEditor";
 import { useEffect, useState } from "react";
 import { lbl, CATALOG_STATUS, GLOSSARY_KIND } from "../labels";
-import { api, fmtDate, fmtRub, designation } from "../api";
+import { api, fmtDate, designation } from "../api";
 import { can, type Me } from "../types";
 import CatalogCard from "../components/CatalogCard";
 import CatalogAdd from "../components/CatalogAdd";

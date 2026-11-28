@@ -81,10 +81,13 @@ def _now() -> datetime:
 
 
 def _number(db: Session, model, prefix: str) -> str:
-    p = f"{prefix}-{msk_today().year}-"
+    """D-210: номер из счётчика (атомарно); первый раз счётчик продолжает уже выданные номера года."""
+    from .numbering import next_seq
+    year = msk_today().year
+    p = f"{prefix}-{year}-"
     last = db.scalars(select(model.number).where(model.number.like(f"{p}%"))).all()
-    n = max([int(x.rsplit("-", 1)[1]) for x in last if x.rsplit("-", 1)[1].isdigit()] or [0]) + 1
-    return f"{p}{n:04d}"
+    start = max([int(x.rsplit("-", 1)[1]) for x in last if x.rsplit("-", 1)[1].isdigit()] or [0]) + 1
+    return f"{p}{next_seq(db, model.__tablename__, year, start):04d}"
 
 
 def request_number(db: Session) -> str:
