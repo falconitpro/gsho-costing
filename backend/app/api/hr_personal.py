@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -440,3 +440,93 @@ def document_update(doc_id: str, body: DocPatch, user: CurrentUser = Depends(get
     audit(db, user.id, None, "hr_employee", d.employee_id, "document_update", after={"kind": d.kind, "fields": sorted(data)})
     db.commit()
     return _doc_out(d, _user_names(db))
+
+
+# ───────────── сводка: численность, штат, движение, чего не хватает (D-207)
+
+REQUIRED_DOCS = ("passport", "snils", "inn", "labor_contract", "consent_pd")
+REQUIRED_PD = {"birth_date": "дата рождения", "passport_number": "паспорт", "snils": "СНИЛС", "inn": "ИНН", "reg_address": "адрес регистрации"}
+
+
+@router.get("/summary")
+def summary(on: Optional[date] = None, employer_id: Optional[str] = None, user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Сводка по работодателям из области пользователя. Пробелы в документах и личных данных — только по классам, к которым есть доступ;
+    по личным данным видно лишь, заполнено ли поле (значения не расшифровываются)."""
+    from ..models import HrDepartment, HrEmployee, HrStaffSlot, LegalEntity
+    from .hr import _occupancy
+    _need(user, "hr_core")
+    d = on or today()
+    scope = hc.allowed_employers(db, user)
+    month0 = d.replace(day=1)
+    prev0 = (month0 - timedelta(days=1)).replace(day=1)
+    all_emps = [m for m in db.scalars(select(HrEmployment)) if hc.in_scope(scope, m.employer_id) and (not employer_id or m.employer_id == employer_id)]
+    active = [m for m in all_emps if hc.status_on(m, d) == "active"]
+    evs = hc.events_of(db, [m.id for m in active])
+    depts = {x.id: x for x in db.scalars(select(HrDepartment))}
+    ents = {x.id: x.name for x in db.scalars(select(LegalEntity))}
+    slots = [s for s in db.scalars(select(HrStaffSlot)) if hc.in_scope(scope, s.employer_id) and (not employer_id or s.employer_id == employer_id)
+             and s.valid_from <= d and (s.valid_to is None or s.valid_to >= d)]
+    busy = _occupancy(db, scope, d)
+    by_emp: dict[str, dict] = {}
+    for eid in sorted({m.employer_id for m in all_emps} | {s.employer_id for s in slots}, key=lambda x: ents.get(x, "")):
+        by_emp[eid] = {"employer_id": eid, "employer": ents.get(eid, ""), "people": 0, "rate": 0.0, "fte_plan": 0.0, "fte_busy": 0.0,
+                       "vacant_slots": 0, "over_slots": 0, "hired_month": 0, "left_month": 0, "hired_prev": 0, "left_prev": 0, "departments": {}}
+    people_seen: dict[str, set[str]] = {}
+    for m in active:
+        row = by_emp[m.employer_id]
+        people_seen.setdefault(m.employer_id, set()).add(m.employee_id)
+        a = hc.assignment_on(evs[m.id], d)
+        row["rate"] += float(a.get("rate") or 1)
+        dn = depts[a["department_id"]].name if a.get("department_id") in depts else "—"
+        row["departments"][dn] = row["departments"].get(dn, 0) + 1
+    for eid, ppl in people_seen.items():
+        by_emp[eid]["people"] = len(ppl)
+    for s in slots:
+        row = by_emp[s.employer_id]
+        b = busy.get(s.id, 0)
+        row["fte_plan"] += float(s.fte)
+        row["fte_busy"] += b
+        row["vacant_slots"] += b < float(s.fte)
+        row["over_slots"] += b > float(s.fte)
+    for m in all_emps:
+        row = by_emp[m.employer_id]
+        if month0 <= m.start_date <= d:
+            row["hired_month"] += 1
+        elif prev0 <= m.start_date < month0:
+            row["hired_prev"] += 1
+        if m.end_date and month0 <= m.end_date <= d:
+            row["left_month"] += 1
+        elif m.end_date and prev0 <= m.end_date < month0:
+            row["left_prev"] += 1
+    employers = []
+    for row in by_emp.values():
+        row["rate"], row["fte_plan"], row["fte_busy"] = round(row["rate"], 2), round(row["fte_plan"], 2), round(row["fte_busy"], 2)
+        row["departments"] = sorted(({"name": k, "people": v} for k, v in row["departments"].items()), key=lambda x: -x["people"])
+        employers.append(row)
+
+    # чего не хватает — по работающим сотрудникам
+    ids = sorted({m.employee_id for m in active})
+    people = {e.id: e for e in db.scalars(select(HrEmployee).where(HrEmployee.id.in_(ids)))} if ids else {}
+    readable = {c for c, g in CLASS_GROUP.items() if user.can(g, READ)}
+    have_docs: dict[str, set[str]] = {}
+    if ids:
+        for doc in db.scalars(select(HrEmployeeDocument).where(HrEmployeeDocument.employee_id.in_(ids), HrEmployeeDocument.archived.is_(False))):
+            have_docs.setdefault(doc.employee_id, set()).add(doc.kind)
+    pd_rows = {r.employee_id: set(r.fields or []) for r in db.scalars(select(HrEmployeePersonal).where(HrEmployeePersonal.employee_id.in_(ids)))} if ids else {}
+    gaps = []
+    for eid in ids:
+        e = people[eid]
+        docs = [DOC_KINDS[k][0] for k in REQUIRED_DOCS if DOC_KINDS[k][1] in readable and k not in have_docs.get(eid, set())]
+        pd = [t for k, t in REQUIRED_PD.items() if "personal" in readable and k not in pd_rows.get(eid, set())]
+        if docs or pd:
+            gaps.append({"employee_id": eid, "employee": hc.full_name(e), "personnel_no": e.personnel_no, "docs": docs, "personal": pd})
+    gaps.sort(key=lambda x: x["employee"])
+    off = []
+    for e in db.scalars(select(HrEmployee).where(HrEmployee.user_id.is_not(None))):
+        mine = [m for m in all_emps if m.employee_id == e.id]
+        every = db.scalars(select(HrEmployment).where(HrEmployment.employee_id == e.id)).all()
+        u = db.get(User, e.user_id)
+        if mine and u and u.is_active and all(m.end_date is not None and m.end_date < d for m in every):
+            off.append({"employee_id": e.id, "employee": hc.full_name(e), "user": u.display_name, "end_date": max(m.end_date for m in every)})
+    return {"on": d, "employers": employers, "gaps": gaps, "gaps_scope": sorted(readable), "offboard": off,
+            "total": {"people": len(ids), "employers": len(employers)}}

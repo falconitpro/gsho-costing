@@ -4,6 +4,7 @@ import { api, fmtDate, getDevUser } from "../api";
 import { Crumbs, useQueryParam } from "../components/Levels";
 import { askPrompt } from "../components/Dialogs";
 import { Empty, ErrorState, Loading } from "../components/States";
+import OffboardDialog from "../components/OffboardDialog";
 import { can, type Me } from "../types";
 import { setNewUi, useNewUiFlag } from "../uiMode";
 
@@ -22,7 +23,7 @@ type Ev = { id: string; kind: string; effective_from: string; effective_to: stri
 type Employment = { id: string; employer_id: string; employer: string; kind: string; start_date: string; end_date: string | null; external_id: string;
   status: string; assignment: Asg; events?: Ev[] };
 type Employee = { id: string; personnel_no: string; last_name: string; first_name: string; middle_name: string; full_name: string; user_id: string | null;
-  user: string; status: string; current: Employment | null; employments: Employment[] };
+  user: string; status: string; current: Employment | null; employments: Employment[]; user_active: boolean; offboard_needed: boolean };
 
 const STATUS: Record<string, [string, string]> = { active: ["работает", "ok"], planned: ["выходит", "info"], terminated: ["уволен", ""] };
 const EV_TITLE: Record<string, string> = { hire: "Приём", transfer: "Перевод", rate: "Ставка", terminate: "Увольнение", cancel: "Отмена события" };
@@ -46,7 +47,7 @@ export default function HrPage({ me }: { me: Me }) {
         action={<button className="btn" onClick={() => setNewUi(true)}>Включить новый вид</button>} /></div>);
   if (!can(me, "hr_core")) return <div><h1>Персонал</h1><Empty title="Нет доступа к разделу «Персонал»" hint="Доступ выдаёт ЗГД: группа «Персонал» в «Уровнях доступа» и юрлица во вкладке «Доступ»." /></div>;
   if (!employers) return err ? <ErrorState hint={err} /> : <Loading />;
-  const tabs: [string, string][] = [["people", "Сотрудники"], ["org", "Оргструктура"], ["slots", "Штатное расписание"], ["adm", "Допуски"], ...(isAdmin ? [["access", "Доступ"] as [string, string]] : [])];
+  const tabs: [string, string][] = [["people", "Сотрудники"], ["summary", "Сводка"], ["org", "Оргструктура"], ["slots", "Штатное расписание"], ["adm", "Допуски"], ...(isAdmin ? [["access", "Доступ"] as [string, string]] : [])];
   const cur = tabs.some(([k]) => k === tab) ? tab! : "people";
   return (
     <div className="hr-page">
@@ -57,7 +58,7 @@ export default function HrPage({ me }: { me: Me }) {
       {employers.length === 0 && cur !== "access"
         ? <Empty title="Нет работодателей в вашей области" hint={isAdmin ? "Отметьте компании группы работодателями во вкладке «Доступ»." : "Попросите ЗГД добавить юрлица в вашу область доступа."} />
         : cur === "people" ? <People me={me} employers={employers} /> : cur === "org" ? <Org me={me} employers={employers} />
-          : cur === "slots" ? <Slots me={me} employers={employers} /> : cur === "adm" ? <AdmOverview me={me} /> : <Access onChange={loadEmployers} />}
+          : cur === "slots" ? <Slots me={me} employers={employers} /> : cur === "summary" ? <Summary /> : cur === "adm" ? <AdmOverview me={me} /> : <Access onChange={loadEmployers} />}
     </div>);
 }
 
@@ -121,7 +122,7 @@ function People({ me, employers }: { me: Me; employers: Employer[] }) {
                 <td className="pc-name"><button className="hr-name" onClick={(ev) => { ev.stopPropagation(); setOpen(r.id); }}>{r.full_name}</button><div className="pc-sub">{r.personnel_no}{r.user ? ` · вход: ${r.user}` : ""}</div></td>
                 <td data-label="Подразделение · должность">{c?.assignment.department || "—"}<div className="pc-sub">{c?.assignment.position} {rate(c?.assignment.rate)}</div></td>
                 <td data-label="Работодатель">{c?.employer}<div className="pc-sub">{EMP_KIND[c?.kind || "main"]}</div></td>
-                <td data-label="Состояние"><span className={`badge ${tone}`}>{st}</span>{c?.end_date && <div className="pc-sub">по {fmtDate(c.end_date)}</div>}</td>
+                <td data-label="Состояние"><span className={`badge ${tone}`}>{st}</span>{r.offboard_needed && <span className="badge bad">вход не отключён</span>}{c?.end_date && <div className="pc-sub">по {fmtDate(c.end_date)}</div>}</td>
               </tr>);
           })}</tbody>
         </table>)}
@@ -194,6 +195,7 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
   const [act, setAct] = useState<{ m: Employment; kind: string } | null>(null);
   const [rehire, setRehire] = useState(false);
   const [sec, setSec] = useQueryParam("s");
+  const [off, setOff] = useState(false);
   const edit = can(me, "hr_core", 2);
   const load = () => api.get<Employee>(`/api/hr/employees/${id}${on ? `?on=${on}` : ""}`).then(setE).catch((x) => setMsg((x as Error).message));
   useEffect(() => { load(); }, [id, on]);
@@ -211,6 +213,11 @@ function EmployeeCard({ id, me, employers, onBack }: { id: string; me: Me; emplo
     <>
       <div className="row"><button className="btn ghost" onClick={onBack}>← к списку</button></div>
       <div className="page-head"><h2>{e.full_name}</h2><span className={`badge ${tone}`}>{st}</span><span className="muted">{e.personnel_no}</span></div>
+      {e.offboard_needed && <div className="alert warn hr-off" role="alert">
+        <span>Сотрудник уволен, а вход в CRM ({e.user}) ещё действует.</span>
+        {can(me, "security_admin", 2) ? <button className="btn primary" onClick={() => setOff(true)}>Отключить доступ</button>
+          : <span className="muted">Отключает администратор безопасности — ему уже отправлено уведомление.</span>}</div>}
+      {off && e.user_id && <OffboardDialog user={{ id: e.user_id, display_name: e.user }} mode="offboard" onClose={() => setOff(false)} onDone={load} />}
       <div className="tabs hr-sec" role="tablist">{secs.map(([k, l]) => (
         <button key={k} role="tab" aria-selected={curSec === k} className={curSec === k ? "active" : ""} onClick={() => setSec(k === "jobs" ? null : k)}>{l}</button>))}</div>
     </>);
@@ -305,7 +312,7 @@ function EventForm({ m, kind, onDone }: { m: Employment; kind: string; onDone: (
         {kind === "terminate" && <label className="f">Основание<input value={f.reason} placeholder="по собственному желанию" onChange={(e) => setF({ ...f, reason: e.target.value })} /></label>}
         <label className="f">Комментарий<input value={f.comment} placeholder="приказ № …" onChange={(e) => setF({ ...f, comment: e.target.value })} /></label>
       </div>
-      {kind === "terminate" && <p className="muted">Учётная запись CRM при увольнении не отключается автоматически — отключите её в «Безопасности сотрудников».</p>}
+      {kind === "terminate" && <p className="muted">Вход в CRM не отключается сам: после последнего рабочего дня в карточке появится кнопка «Отключить доступ», администратору безопасности придёт напоминание.</p>}
       <div className="row"><button className="btn primary" disabled={!ok} onClick={save}>Сохранить</button><button className="btn ghost" onClick={() => onDone()}>отмена</button></div>
     </div>);
 }
@@ -872,5 +879,56 @@ function AdmOverview({ me }: { me: Me }) {
           <li key={k.code}><span>{k.name}</span><span className="muted"> · {k.code} · {kinds.categories[k.category] || k.category} · {k.valid_months ? `${k.valid_months} мес.` : "бессрочно"}</span>
             {k.is_draft && <span className="badge">черновик</span>}</li>))}</ul>
       </section>}
+    </div>);
+}
+
+/* ───────── сводка (D-207): численность, штат, движение, чего не хватает */
+
+type SumEmp = { employer_id: string; employer: string; people: number; rate: number; fte_plan: number; fte_busy: number; vacant_slots: number; over_slots: number;
+  hired_month: number; left_month: number; hired_prev: number; left_prev: number; departments: { name: string; people: number }[] };
+type Sum = { on: string; employers: SumEmp[]; gaps: { employee_id: string; employee: string; personnel_no: string; docs: string[]; personal: string[] }[];
+  gaps_scope: string[]; offboard: { employee_id: string; employee: string; user: string; end_date: string }[]; total: { people: number } };
+const num = (v: number) => String(Math.round(v * 100) / 100).replace(".", ",");
+
+function Summary() {
+  const [d, setD] = useState<Sum | null>(null);
+  const [on, setOn] = useState("");
+  const [msg, setMsg] = useState("");
+  const nav = useNavigate();
+  useEffect(() => { api.get<Sum>(`/api/hr/summary${on ? `?on=${on}` : ""}`).then(setD).catch((x) => setMsg((x as Error).message)); }, [on]);
+  if (!d) return msg ? <ErrorState hint={msg} /> : <Loading />;
+  const open = (id: string, s = "") => nav(`/hr?e=${id}${s ? `&s=${s}` : ""}`);
+  return (
+    <div>
+      <div className="row hr-filters"><label className="f">На дату<input type="date" value={on} onChange={(x) => setOn(x.target.value)} /></label>
+        <span className="muted">работает сотрудников: {d.total.people}</span></div>
+      {d.offboard.length > 0 && <div className="alert warn" role="alert"><b>Уволены, вход в CRM не отключён:</b>{" "}
+        {d.offboard.map((o, i) => <span key={o.employee_id}>{i ? ", " : ""}<button className="hr-name" onClick={() => open(o.employee_id)}>{o.employee}</button> (уволен {fmtDate(o.end_date)})</span>)}</div>}
+      <div className="grid cols-2 hr-sum">{d.employers.map((r) => (
+        <section key={r.employer_id} className="card">
+          <h3>{r.employer}</h3>
+          <div className="grid cols-3 hr-kpi">
+            <div><div className="pc-sub">Работают</div><b>{r.people}</b><div className="pc-sub">{num(r.rate)} ст.</div></div>
+            <div><div className="pc-sub">Штат: занято / всего</div><b>{num(r.fte_busy)} / {num(r.fte_plan)}</b>
+              <div className="pc-sub">{r.vacant_slots ? `вакансий: ${r.vacant_slots}` : "без вакансий"}{r.over_slots ? ` · сверх штата: ${r.over_slots}` : ""}</div></div>
+            <div><div className="pc-sub">Приём / увольнение за месяц</div><b>+{r.hired_month} / −{r.left_month}</b><div className="pc-sub">прошлый: +{r.hired_prev} / −{r.left_prev}</div></div>
+          </div>
+          {r.departments.length > 0 && <ul className="hr-tree">{r.departments.map((x) => <li key={x.name}><span>{x.name}</span><span className="muted">{x.people}</span></li>)}</ul>}
+        </section>))}</div>
+      <section className="card">
+        <h3>Чего не хватает до ввода реальных данных</h3>
+        <p className="muted">Сканы: паспорт, СНИЛС, ИНН, трудовой договор, согласие на обработку ПДн. Личные данные: дата рождения, паспорт, СНИЛС, ИНН, адрес регистрации.
+          {!d.gaps_scope.includes("personal") && " Личные данные и их сканы вам не видны — нет доступа."}</p>
+        {d.gaps.length === 0 ? <Empty title="Всё заполнено" /> : (
+          <table className="pc-table nv-cards hr-table">
+            <thead><tr><th>Сотрудник</th><th>Нет сканов</th><th>Не заполнено</th></tr></thead>
+            <tbody>{d.gaps.map((g) => (
+              <tr key={g.employee_id} className="hr-row" onClick={() => open(g.employee_id, g.docs.length ? "docs" : "personal")}>
+                <td className="pc-name">{g.employee}<div className="pc-sub">{g.personnel_no}</div></td>
+                <td data-label="Нет сканов">{g.docs.join(", ") || "—"}</td>
+                <td data-label="Не заполнено">{g.personal.join(", ") || "—"}</td>
+              </tr>))}</tbody>
+          </table>)}
+      </section>
     </div>);
 }
